@@ -26,6 +26,12 @@ async function fresh() {
   return (await import('./useDeepLinks')).useDeepLinks()
 }
 
+/** A profile becomes ready: unlocked, then every replay hook runs. */
+async function unlock() {
+  mocks.unlocked.value = true
+  for (const cb of mocks.readyCallbacks) await cb()
+}
+
 beforeEach(() => {
   mocks.invoke.mockReset().mockResolvedValue(null)
   mocks.unlocked.value = false
@@ -40,26 +46,27 @@ describe('openPath', () => {
     mocks.unlocked.value = true
     await links.openPath('/interview-room/abc')
     expect(mocks.push).toHaveBeenCalledWith('/interview-room/abc')
-    expect(links.heldTarget()).toBeNull()
+    await unlock()
+    expect(mocks.push).toHaveBeenCalledOnce()
   })
 
   it('holds a path while locked and replays it on the next unlock', async () => {
     const links = await fresh()
     await links.openPath('/settings/organisations')
     expect(mocks.push).not.toHaveBeenCalled()
-    expect(links.heldTarget()).toEqual({ kind: 'route', path: '/settings/organisations' })
 
-    mocks.unlocked.value = true
-    for (const cb of mocks.readyCallbacks) await cb()
-    expect(mocks.push).toHaveBeenCalledWith('/settings/organisations')
-    expect(links.heldTarget()).toBeNull()
+    await unlock()
+    expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/settings/organisations')
+    await unlock()
+    expect(mocks.push).toHaveBeenCalledOnce()
   })
 
   it('keeps only the most recent held target', async () => {
     const links = await fresh()
     await links.openPath('/credentials/1')
     await links.openPath('/credentials/2')
-    expect(links.heldTarget()).toEqual({ kind: 'route', path: '/credentials/2' })
+    await unlock()
+    expect(mocks.push).toHaveBeenCalledExactlyOnceWith('/credentials/2')
   })
 
   it('refuses a path the router does not know', async () => {
@@ -73,10 +80,13 @@ describe('openPath', () => {
     const links = await fresh()
     mocks.unlocked.value = true
     await links.openPath('//evil.example/x')
+    await links.openPath('/\\evil.example/x')
+    await links.openPath('/\t/evil.example/x')
+    await links.openPath('javascript:alert(1)')
     await links.openPath('skills')
     await links.openPath('')
+    await unlock()
     expect(mocks.push).not.toHaveBeenCalled()
-    expect(links.heldTarget()).toBeNull()
   })
 })
 
@@ -84,17 +94,28 @@ describe('openLink', () => {
   it('routes a recognised deep link and ignores a foreign one', async () => {
     const links = await fresh()
     mocks.unlocked.value = true
-    await links.openLink('alexandria://notification/n-1')
-    expect(mocks.push).toHaveBeenCalledWith('/notifications?open=n-1')
+    await links.openLink('alexandria://classroom/c-1')
+    expect(mocks.push).toHaveBeenCalledWith('/classrooms/c-1')
     await links.openLink('https://example.com/notifications')
     expect(mocks.push).toHaveBeenCalledTimes(1)
   })
 })
 
 describe('recipient-bound notification taps', () => {
+  it('refuses a tap or a held open whose route could leave the app', async () => {
+    const links = await fresh()
+    mocks.unlocked.value = true
+    mocks.profile.value = 'A'
+    await links.openNotification({ id: 'bad', profile_id: 'A', network_id: 'network', recipient: null, route: '/\\evil.example' })
+    mocks.invoke.mockResolvedValueOnce({ id: 'held', profile_id: 'A', network_id: 'network', recipient: null, route: '/\\evil.example' })
+    await links.openNotification({ id: 'held', profile_id: 'A', network_id: 'network', recipient: null, route: '' })
+    expect(mocks.invoke).toHaveBeenCalledWith('notifications_pending_open')
+    expect(mocks.push).not.toHaveBeenCalled()
+  })
+
   it('holds A through B unlock, then routes A once despite event and drain delivery', async () => {
     const links = await fresh()
-    const tap = { id: 'tap-1', profileId: 'A', networkId: 'network', recipient: 'binding-A', route: '/settings/organisations' }
+    const tap = { id: 'tap-1', profile_id: 'A', network_id: 'network', recipient: 'binding-A', route: '/settings/organisations' }
     await links.openNotification(tap)
     mocks.profile.value = 'B'
     mocks.unlocked.value = true
@@ -125,7 +146,7 @@ it('does not navigate after a panel link resolves in an obsolete profile session
 
 it('resolves an opaque cold tap only after its matching profile unlocks', async () => {
   const links = await fresh()
-  const tap = { id: 'opaque-tap', profileId: 'A', networkId: 'network', recipient: null, route: '' }
+  const tap = { id: 'opaque-tap', profile_id: 'A', network_id: 'network', recipient: null, route: '' }
   await links.openNotification(tap)
   mocks.profile.value = 'B'
   mocks.unlocked.value = true
@@ -146,7 +167,7 @@ it('does not navigate a decrypted tap returned after the profile session changes
   mocks.profile.value = 'A'
   let finish!: (value: unknown) => void
   mocks.invoke.mockImplementation(() => new Promise(resolve => { finish = resolve }))
-  const tap = { id: 'opaque', profileId: 'A', networkId: 'network', recipient: null, route: '' }
+  const tap = { id: 'opaque', profile_id: 'A', network_id: 'network', recipient: null, route: '' }
   const opening = links.openNotification(tap)
   await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith('notifications_pending_open'))
   sessions.setProfileSessionToken('B')

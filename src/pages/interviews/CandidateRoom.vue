@@ -15,6 +15,7 @@ import { usePlatform } from '@/composables/usePlatform'
 import CallDevicePicker from '@/components/live/CallDevicePicker.vue'
 import { useInterviewCheck, type SentIntegrityReport } from '@/composables/useInterviewCheck'
 import { AppAlert, AppButton } from '@/components/ui'
+import { errorMessage } from '@/utils/errorMessage'
 
 const POLL_MS = 5000
 
@@ -73,7 +74,7 @@ async function check() {
       timer = null
     }
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause)
+    error.value = errorMessage(cause)
   }
 }
 
@@ -102,7 +103,7 @@ async function join() {
     ticket.value = null
     if (!timer) timer = window.setInterval(() => void check(), POLL_MS)
     if (runCheck) await interviewCheck.abandon()
-    error.value = cause instanceof Error ? cause.message : String(cause)
+    error.value = errorMessage(cause)
   } finally {
     joining.value = false
   }

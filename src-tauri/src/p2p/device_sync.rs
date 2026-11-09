@@ -64,15 +64,34 @@ pub enum SyncResponse {
     Error(String),
 }
 
+/// An answered sync request: the reply for the peer, and the keys of the
+/// settings rows the peer's payload changed here.
+#[derive(Debug)]
+pub struct HandledSync {
+    pub response: SyncResponse,
+    /// Empty unless the payload was applied. The caller reacts to these
+    /// once the handler's transaction has committed.
+    pub settings: Vec<String>,
+}
+
+impl From<SyncResponse> for HandledSync {
+    fn from(response: SyncResponse) -> Self {
+        Self {
+            response,
+            settings: Vec::new(),
+        }
+    }
+}
+
 /// Handle an inbound sync request from `peer_id` (the libp2p PeerId,
 /// authenticated by the transport). Applies the sender's payload and
 /// returns our own sealed payload on success.
-pub fn handle_sync_request(conn: &Connection, peer_id: &str, req: &SyncRequest) -> SyncResponse {
+pub fn handle_sync_request(conn: &Connection, peer_id: &str, req: &SyncRequest) -> HandledSync {
     // (4) Same-user guard.
     match sync::local_stake_address(conn) {
         Ok(Some(local)) if local == req.stake_address => {}
-        Ok(_) => return SyncResponse::Unauthorized,
-        Err(e) => return SyncResponse::Error(e),
+        Ok(_) => return SyncResponse::Unauthorized.into(),
+        Err(e) => return SyncResponse::Error(e).into(),
     }
 
     // (2) Must be a paired peer — only then do we hold a shared key.
@@ -83,31 +102,35 @@ pub fn handle_sync_request(conn: &Connection, peer_id: &str, req: &SyncRequest) 
         Ok(Some(k)) => k,
         Ok(None) => match complete_inbound_pairing(conn, peer_id, req) {
             Ok(Some(k)) => k,
-            Ok(None) => return SyncResponse::Unauthorized,
-            Err(e) => return SyncResponse::Error(e),
+            Ok(None) => return SyncResponse::Unauthorized.into(),
+            Err(e) => return SyncResponse::Error(e).into(),
         },
-        Err(e) => return SyncResponse::Error(e),
+        Err(e) => return SyncResponse::Error(e).into(),
     };
 
     // (3) Open the sender's payload; AEAD failure ⇒ wrong key / tamper.
     let incoming = match sync::open_payload(&key, &req.sealed) {
         Ok(p) => p,
-        Err(e) => return SyncResponse::Error(format!("open: {e}")),
+        Err(e) => return SyncResponse::Error(format!("open: {e}")).into(),
     };
 
-    let merged = match sync::apply_sync_payload(conn, &incoming) {
-        Ok((rows, settings)) => rows + settings,
-        Err(e) => return SyncResponse::Error(format!("apply: {e}")),
+    let applied = match sync::apply_sync_payload(conn, &incoming) {
+        Ok(applied) => applied,
+        Err(e) => return SyncResponse::Error(format!("apply: {e}")).into(),
     };
+    let merged = applied.merged();
 
     // Reply with our own state so the exchange is bidirectional.
     let outbound = match sync::build_sync_payload(conn) {
         Ok(p) => p,
-        Err(e) => return SyncResponse::Error(format!("build: {e}")),
+        Err(e) => return SyncResponse::Error(format!("build: {e}")).into(),
     };
     match sync::seal_payload(&key, &outbound) {
-        Ok(sealed) => SyncResponse::Ok { sealed, merged },
-        Err(e) => SyncResponse::Error(format!("seal: {e}")),
+        Ok(sealed) => HandledSync {
+            response: SyncResponse::Ok { sealed, merged },
+            settings: applied.settings,
+        },
+        Err(e) => SyncResponse::Error(format!("seal: {e}")).into(),
     }
 }
 
@@ -183,7 +206,7 @@ mod tests {
             pairing: None,
         };
         assert!(matches!(
-            handle_sync_request(db.conn(), "12D3KooWStranger", &req),
+            handle_sync_request(db.conn(), "12D3KooWStranger", &req).response,
             SyncResponse::Unauthorized
         ));
     }
@@ -202,7 +225,7 @@ mod tests {
             pairing: None,
         };
         assert!(matches!(
-            handle_sync_request(db.conn(), "12D3KooWPeer", &req),
+            handle_sync_request(db.conn(), "12D3KooWPeer", &req).response,
             SyncResponse::Unauthorized
         ));
     }
@@ -231,7 +254,7 @@ mod tests {
             sealed,
             pairing: None,
         };
-        let resp = handle_sync_request(db.conn(), "12D3KooWPeer", &req);
+        let resp = handle_sync_request(db.conn(), "12D3KooWPeer", &req).response;
         match resp {
             SyncResponse::Ok { sealed, .. } => {
                 // The reply must open under the same key.
@@ -241,6 +264,48 @@ mod tests {
             }
             other => panic!("expected Ok, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn the_settings_a_peer_changed_are_reported_for_the_caller_to_follow() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        seed_identity(db.conn(), "stake_test1uself");
+        let key = [6u8; 32];
+        pair_a_device(db.conn(), "12D3KooWPeer", "stake_test1uself", key);
+        let organisations = crate::settings::registry::keys::ORGANISATIONS_ENABLED.key;
+        let payload = sync::SyncPayload {
+            settings: vec![
+                sync::SettingsSyncRow {
+                    key: organisations.into(),
+                    value: "false".into(),
+                    updated_at: "2999-01-01T00:00:00Z".into(),
+                },
+                // Not a registered sync key: never applied, never reported.
+                sync::SettingsSyncRow {
+                    key: "theme".into(),
+                    value: "dark".into(),
+                    updated_at: "2999-01-01T00:00:00Z".into(),
+                },
+            ],
+            tables: vec![],
+        };
+        let req = SyncRequest {
+            device_id: "dev-remote".into(),
+            stake_address: "stake_test1uself".into(),
+            sealed: sync::seal_payload(&key, &payload).unwrap(),
+            pairing: None,
+        };
+        let handled = handle_sync_request(db.conn(), "12D3KooWPeer", &req);
+        assert!(matches!(
+            handled.response,
+            SyncResponse::Ok { merged: 1, .. }
+        ));
+        assert_eq!(handled.settings, [organisations]);
+
+        // The same row again is not newer, so nothing changed.
+        let again = handle_sync_request(db.conn(), "12D3KooWPeer", &req);
+        assert!(again.settings.is_empty());
     }
 
     #[test]
@@ -256,7 +321,7 @@ mod tests {
             pairing: None,
         };
         assert!(matches!(
-            handle_sync_request(db.conn(), "12D3KooWPeer", &req),
+            handle_sync_request(db.conn(), "12D3KooWPeer", &req).response,
             SyncResponse::Error(_)
         ));
     }
@@ -292,7 +357,7 @@ mod tests {
                 platform: "ios".into(),
             }),
         };
-        let resp = handle_sync_request(db.conn(), "12D3KooWAcceptor", &req);
+        let resp = handle_sync_request(db.conn(), "12D3KooWAcceptor", &req).response;
         assert!(matches!(resp, SyncResponse::Ok { .. }), "got {resp:?}");
 
         // The acceptor is now a stored paired device with the shared key.
@@ -309,7 +374,7 @@ mod tests {
         };
         // A *different* unpaired peer reusing the code now fails.
         assert!(matches!(
-            handle_sync_request(db.conn(), "12D3KooWReplay", &req2),
+            handle_sync_request(db.conn(), "12D3KooWReplay", &req2).response,
             SyncResponse::Unauthorized
         ));
     }

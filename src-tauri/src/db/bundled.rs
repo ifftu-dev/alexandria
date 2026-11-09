@@ -72,6 +72,9 @@ struct BootstrapSubjectField {
     name: String,
     description: Option<String>,
     icon_emoji: Option<String>,
+    /// Stable atlas colour and region. A new field takes the next unused
+    /// slot; existing slots never change.
+    atlas_slot: i64,
     created_at: Option<String>,
     updated_at: Option<String>,
 }
@@ -183,16 +186,17 @@ pub(crate) fn install_taxonomy(conn: &Connection) -> Result<i64, String> {
     for f in &payload.subject_fields {
         conn.execute(
             "INSERT INTO subject_fields
-             (id, name, description, icon_emoji, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, COALESCE(?5, datetime('now')), COALESCE(?6, datetime('now')))
+             (id, name, description, icon_emoji, atlas_slot, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, COALESCE(?6, datetime('now')), COALESCE(?7, datetime('now')))
              ON CONFLICT(id) DO UPDATE SET name = excluded.name,
                description = excluded.description, icon_emoji = excluded.icon_emoji,
-               updated_at = excluded.updated_at",
+               atlas_slot = excluded.atlas_slot, updated_at = excluded.updated_at",
             params![
                 f.id,
                 f.name,
                 f.description,
                 f.icon_emoji,
+                f.atlas_slot,
                 f.created_at,
                 f.updated_at
             ],
@@ -783,6 +787,50 @@ mod tests {
             .expect("read refreshed skill");
         assert_eq!(name, "Delegation");
         assert_eq!(updated, "2026-10-25 00:00:00");
+    }
+
+    #[test]
+    fn every_bundled_field_keeps_its_atlas_slot() {
+        let db = migrated();
+        install_bundled_data(db.conn()).expect("install bundled data");
+        let slots: Vec<(String, i64)> = db
+            .conn()
+            .prepare("SELECT id, atlas_slot FROM subject_fields ORDER BY atlas_slot")
+            .expect("prepare")
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("read slots");
+        // Pinned: the atlas colour and region of every field shipped so far.
+        let expected = [
+            ("sf_civics", 0),
+            ("sf_cs", 1),
+            ("sf_cyber", 2),
+            ("sf_data", 3),
+            ("sf_design", 4),
+            ("sf_leadership", 5),
+            ("sf_math", 6),
+            ("sf_web", 7),
+        ]
+        .map(|(id, slot)| (id.to_string(), slot));
+        assert_eq!(slots, expected);
+    }
+
+    #[test]
+    fn a_new_bundled_field_takes_the_next_unused_atlas_slot() {
+        let payload: BootstrapTaxonomyPayload =
+            serde_json::from_str(PUBLIC_TAXONOMY_JSON).expect("bundled taxonomy");
+        let mut slots: Vec<i64> = payload
+            .subject_fields
+            .iter()
+            .map(|f| f.atlas_slot)
+            .collect();
+        slots.sort_unstable();
+        // Slots are distinct and leave no gaps, so the next field takes len().
+        assert_eq!(
+            slots,
+            (0..payload.subject_fields.len() as i64).collect::<Vec<_>>()
+        );
     }
 
     #[test]

@@ -215,7 +215,8 @@ pub fn tutor_context(
     connection_id: &str,
 ) -> Result<TutorContext> {
     // Checks the learner takes or wrote the course, then the lesson rule.
-    let lesson = crate::access::visible_lesson(conn, Reader::Tutor, course_id, element_id)?;
+    let lesson = crate::access::visible_lesson(conn, Reader::Tutor, course_id, element_id)
+        .map_err(crate::access::run_error)?;
     let policy = tutor_policy(conn, course_id)?;
     if !policy.enabled {
         return Err(Error::Unavailable(

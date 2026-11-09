@@ -54,6 +54,10 @@
       "body": "Abre Alexandria para ver la actualización."
     }
   },
+  "channel": {
+    "name": "Actividad",
+    "description": "Entrevistas, ofertas, solicitudes y actividad de las clases"
+  },
   "settings": {
     "title": "Notificaciones",
     "description": "Insignias en la aplicación, avisos del sistema y notificaciones push en este dispositivo cuando la aplicación está cerrada.",
@@ -67,12 +71,23 @@
     "pushNoCloud": "No hay ningún servicio de Alexandria Cloud configurado para esta red, por lo que no es posible registrarse.",
     "pushCleanupPending": "La eliminación remota está pendiente. Aún pueden llegar avisos que ya estaban en cola.",
     "pushRegistrationPending": "El registro del dispositivo está pendiente de confirmación.",
-    "pushError": "El último intento ha fallado: {error}",
+    "pushPausedByOrganisations": "Las notificaciones push están en pausa porque «Recibir solicitudes de organizaciones» está desactivado. Tu preferencia de push se conserva y vuelve a aplicarse cuando reactives las organizaciones.",
+    "pushPausedOpenOrganisations": "Abrir los ajustes de organizaciones",
+    "pushErrors": {
+      "permission_denied": "Las notificaciones no están permitidas para Alexandria. Permítelas en los ajustes del dispositivo y vuelve a intentarlo.",
+      "token_unavailable": "Este dispositivo no ha podido obtener un token push. Comprueba que tenga conexión a la red y vuelve a intentarlo.",
+      "insecure_origin": "La dirección de Alexandria Cloud no es segura, así que este dispositivo no se registrará en ella.",
+      "cloud_unreachable": "No se ha podido conectar con Alexandria Cloud. Comprueba tu conexión; Alexandria lo volverá a intentar.",
+      "cloud_rejected": "Alexandria Cloud ha rechazado la solicitud. Alexandria lo volverá a intentar más tarde.",
+      "cloud_unacknowledged": "Alexandria Cloud no ha confirmado el cambio. Alexandria lo volverá a intentar.",
+      "invalid_response": "Alexandria Cloud ha enviado una respuesta que esta aplicación no entiende. Alexandria lo volverá a intentar."
+    },
     "register": "Registrar ahora",
     "unregister": "Anular registro",
     "working": "En curso…",
     "permission": "Solicitar permiso",
     "permissionGranted": "El sistema permite los avisos.",
-    "permissionDenied": "El sistema bloquea los avisos. Permite las notificaciones de Alexandria en los ajustes del dispositivo."
+    "permissionDenied": "El sistema bloquea los avisos. Permite las notificaciones de Alexandria en los ajustes del dispositivo.",
+    "permissionPromptUnavailable": "El sistema no pudo pedir permiso. Permite las notificaciones de Alexandria en los ajustes del dispositivo."
   }
 }

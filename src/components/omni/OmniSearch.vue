@@ -81,6 +81,19 @@ function flatIndexFor(groupType: string, itemId: string): number {
   return visibleItems.value.findIndex(v => v.type === groupType && v.id === itemId)
 }
 
+/**
+ * What the list shows: results grouped by type while there is a query, or the
+ * recents as one untitled section. Each row carries its place in the whole
+ * list, which keyboard selection and clicks share.
+ */
+const sections = computed(() => query.value.length > 0
+  ? groupedItems.value.map(group => ({
+    key: group.type,
+    label: group.label,
+    rows: group.items.map(item => ({ item, index: flatIndexFor(item.type, item.id) })),
+  }))
+  : [{ key: 'recent', label: '', rows: visibleItems.value.map((item, index) => ({ item, index })) }])
+
 async function scrollSelectedIntoView() {
   await nextTick()
   const container = listRef.value
@@ -103,27 +116,13 @@ watch(isOpen, async (val) => {
 
 <template>
   <Teleport to="body">
-    <Transition
-      enter-active-class="transition duration-150 ease-out"
-      enter-from-class="opacity-0"
-      enter-to-class="opacity-100"
-      leave-active-class="transition duration-100 ease-in"
-      leave-from-class="opacity-100"
-      leave-to-class="opacity-0"
-    >
+    <Transition name="motion-fade">
       <div
         v-if="isOpen"
         class="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm px-4 pt-[15vh]"
         @click.self="close"
       >
-        <Transition
-          enter-active-class="transition duration-150 ease-out"
-          enter-from-class="opacity-0 translate-y-[-8px]"
-          enter-to-class="opacity-100 translate-y-0"
-          leave-active-class="transition duration-100 ease-in"
-          leave-from-class="opacity-100 translate-y-0"
-          leave-to-class="opacity-0 translate-y-[-8px]"
-        >
+        <Transition name="motion-pop" appear>
           <div
             v-if="isOpen"
             class="card overflow-hidden w-full max-w-[40rem] shadow-lg"
@@ -182,33 +181,34 @@ watch(isOpen, async (val) => {
                 {{ $t('omni.recent') }}
               </p>
 
-              <!-- Grouped results (when query present) -->
-              <template v-if="query.length > 0">
-                <div v-for="group in groupedItems" :key="group.type" class="mb-1">
-                  <p class="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {{ group.label }}
-                  </p>
+              <!-- Grouped results with a query, or one untitled section of recents -->
+              <div v-for="section in sections" :key="section.key" :class="{ 'mb-1': section.label }">
+                <p v-if="section.label" class="px-4 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {{ section.label }}
+                </p>
+                <!-- A result's children take no pointer: WebKit drops :active when a press lands on a clipped (truncated) child. -->
+                <TransitionGroup name="motion-rise" appear>
                   <button
-                    v-for="item in group.items"
+                    v-for="{ item, index } in section.rows"
                     :key="item.id"
                     type="button"
-                    :data-omni-selected="flatIndexFor(item.type, item.id) === selectedIndex"
-                    class="w-full flex items-center gap-3 px-4 py-2 text-start transition-colors"
+                    :data-omni-selected="index === selectedIndex"
+                    class="pressable w-full flex items-center gap-3 px-4 py-2 text-start *:pointer-events-none"
                     :class="
-                      flatIndexFor(item.type, item.id) === selectedIndex
+                      index === selectedIndex
                         ? 'bg-primary/10 text-foreground'
                         : 'hover:bg-muted/40 text-foreground'
                     "
-                    @click="onClickItem(flatIndexFor(item.type, item.id))"
-                    @mousemove="selectedIndex = flatIndexFor(item.type, item.id)"
+                    @click="onClickItem(index)"
+                    @mousemove="selectedIndex = index"
                   >
                     <span v-if="item.icon" class="text-base flex-shrink-0">{{ item.icon }}</span>
-                    <span
-                      v-else
-                      class="w-4 h-4 flex-shrink-0 text-muted-foreground"
-                    >
-                      <!-- Domain icon -->
-                      <svg v-if="item.type === 'skill'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <span v-else class="w-4 h-4 flex-shrink-0 text-muted-foreground">
+                      <!-- Recent: a clock. Results: their domain icon. -->
+                      <svg v-if="!section.label" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <svg v-else-if="item.type === 'skill'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                       </svg>
                       <svg v-else-if="item.type === 'course' || item.type === 'catalog'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -228,42 +228,8 @@ watch(isOpen, async (val) => {
                       </span>
                     </span>
                   </button>
-                </div>
-              </template>
-
-              <!-- Ungrouped recents when query is empty -->
-              <template v-else>
-                <button
-                  v-for="(item, index) in visibleItems"
-                  :key="item.id"
-                  type="button"
-                  :data-omni-selected="index === selectedIndex"
-                  class="w-full flex items-center gap-3 px-4 py-2 text-start transition-colors"
-                  :class="
-                    index === selectedIndex
-                      ? 'bg-primary/10 text-foreground'
-                      : 'hover:bg-muted/40 text-foreground'
-                  "
-                  @click="onClickItem(index)"
-                  @mousemove="selectedIndex = index"
-                >
-                  <span v-if="item.icon" class="text-base flex-shrink-0">{{ item.icon }}</span>
-                  <span v-else class="w-4 h-4 text-muted-foreground flex-shrink-0">
-                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                  </span>
-                  <span class="flex-1 min-w-0">
-                    <span class="block text-sm truncate">{{ item.title }}</span>
-                    <span
-                      v-if="item.subtitle"
-                      class="block text-xs text-muted-foreground truncate"
-                    >
-                      {{ item.subtitle }}
-                    </span>
-                  </span>
-                </button>
-              </template>
+                </TransitionGroup>
+              </div>
             </div>
 
             <!-- Footer: keyboard hints -->

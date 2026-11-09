@@ -32,7 +32,10 @@ pub async fn get_derived_skill_state(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "aggregation.get_derived_skill_state",
-            move |db| get_derived_skill_state_impl(db.conn(), &Did(subject_did), &skill_id, &now),
+            move |db| {
+                get_derived_skill_state_impl(db.conn(), &Did(subject_did), &skill_id, &now)
+                    .map_err(|e| e.to_string())
+            },
         )
         .await
 }
@@ -48,7 +51,10 @@ pub async fn list_derived_states(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "aggregation.list_derived_states",
-            move |db| list_derived_states_impl(db.conn(), subject_did.as_deref()),
+            move |db| {
+                list_derived_states_impl(db.conn(), subject_did.as_deref())
+                    .map_err(|e| e.to_string())
+            },
         )
         .await
 }
@@ -62,7 +68,7 @@ pub async fn recompute_all(state: State<'_, AppState>) -> Result<u32, String> {
             DatabaseWorkload::Background,
             state.profile_lease(),
             "aggregation.recompute_all",
-            move |db| recompute_all_impl(db.conn(), &now),
+            move |db| recompute_all_impl(db.conn(), &now).map_err(|e| e.to_string()),
         )
         .await
 }

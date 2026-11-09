@@ -106,7 +106,7 @@ const progressPct = computed(() => {
     <div v-if="installing" class="mt-4">
       <div class="h-1.5 w-full rounded-full bg-muted/50 overflow-hidden">
         <div
-          class="h-full rounded-full bg-primary transition-all duration-300"
+          class="h-full rounded-full bg-primary transition-all duration-(--duration-slow)"
           :style="{ width: `${progressPct}%` }"
         />
       </div>

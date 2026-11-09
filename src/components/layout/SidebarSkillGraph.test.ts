@@ -12,7 +12,7 @@ let release: (() => void) | undefined
 beforeEach(() => { vi.resetModules(); ipc.mockReset() })
 afterEach(() => { wrapper?.unmount(); release?.(); vi.useRealTimers() })
 
-it('shows fields and current earned levels; refreshes on evidence and navigation without duplicate subscriptions', async () => {
+it('shows fields and current earned levels; refreshes on evidence, not on navigation, without duplicate subscriptions', async () => {
   const backend = atlasBackend()
   ipc.mockImplementation(backend.invoke)
   const { useProfiles } = await import('@/composables/useProfiles')
@@ -28,6 +28,9 @@ it('shows fields and current earned levels; refreshes on evidence and navigation
   expect(wrapper.text()).toContain('Computer Science')
   expect(wrapper.text()).toContain('Big-O Analysis')
   expect(wrapper.text()).toContain('2 Understand')
+  const earned = wrapper.get('button[aria-label="Big-O Analysis, earned, Bloom level 2 Understand"]')
+  expect(earned.findAll('[aria-hidden="true"]').map(item => item.text())).toContain('✓')
+  expect(earned.find('[aria-label="Earned"]').exists()).toBe(false)
   expect(wrapper.text()).toContain('Ready')
   expect(wrapper.text()).not.toContain('Locked')
   const before = backend.state.reads
@@ -39,12 +42,16 @@ it('shows fields and current earned levels; refreshes on evidence and navigation
   vi.useFakeTimers()
   await vi.advanceTimersByTimeAsync(1600)
   backend.state.earned = false
+  // Route changes elsewhere never refetch; the next credential event does.
   await router.push('/other')
+  await router.push('/again')
+  await flushPromises()
+  expect(backend.state.reads).toBe(before + 1)
+  expect(wrapper.text()).toContain('5 Evaluate')
+  announceCredentialsChanged()
   await flushPromises()
   expect(wrapper.text()).not.toContain('5 Evaluate')
-  const after = backend.state.reads
-  await router.push('/again')
-  expect(backend.state.reads).toBe(after)
+  expect(backend.state.reads).toBe(before + 2)
   await useProfiles().lockProfile()
   await flushPromises()
   expect(wrapper.text()).not.toContain('Big-O Analysis')

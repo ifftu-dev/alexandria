@@ -4,6 +4,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 
+use super::scope::ProfileSession;
+
 #[derive(Clone, Default)]
 pub(crate) struct ProfileOperations {
     gate: Arc<Mutex<Phase>>,
@@ -20,11 +22,14 @@ enum Phase {
 }
 
 impl ProfileOperations {
-    pub(crate) fn session(&self) -> Option<String> {
+    pub(crate) fn session(&self) -> Option<ProfileSession> {
         self.admission.session()
     }
 
-    pub(crate) fn admit(&self, session: &str) -> Result<super::scope::ProfileLease, String> {
+    pub(crate) fn admit(
+        &self,
+        session: &ProfileSession,
+    ) -> Result<super::scope::ProfileLease, String> {
         self.admission.admit(session)
     }
 

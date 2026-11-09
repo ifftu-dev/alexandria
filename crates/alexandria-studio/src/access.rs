@@ -1,15 +1,13 @@
-//! AI access: why an AI surface refuses, and which lesson text a model may
-//! see.
+//! AI access: why an AI surface denies access, and which lesson text a
+//! model may see.
 //!
 //! The age, guardian-approval and attempt rules are applied by the app's
 //! `ai_access` module, which owns the profile's identity, the guardian link
 //! and the integrity flags. This crate holds the typed reasons, so the two
 //! kinds of caller map them once each: chat, whose errors are the string
 //! codes the webview translates (the app's chat vocabulary renders them), and
-//! the lesson tutor and Studio runs, whose errors are [`Error`]
-//! (`From<Refused>`).
-
-use std::fmt;
+//! the lesson tutor and Studio runs, whose errors are [`Error`] ([`run_error`]).
+//! A denial is never a Studio error, and a Studio error is never a denial.
 
 use rusqlite::Connection;
 
@@ -17,95 +15,69 @@ use crate::learning::{self, LessonTarget};
 use crate::{store, Error};
 
 /// Why a learner may not use an AI surface, a connection, or a lesson now.
-#[derive(Debug)]
-pub enum Refused {
+/// Its display is the reason written for people, without a code.
+#[derive(Debug, thiserror::Error)]
+pub enum AccessDenied {
     /// Under 13: models on the device or the learner's own network only.
+    #[error("learners under 13 can use models on this device or their own network only")]
     TooYoungForRemote,
     /// 13 to 17, and the vendor's terms require users to be 18 or older.
+    #[error("{0} requires users to be 18 or older")]
     AdultsOnly(&'static str),
     /// 13 to 17, and no guardian has been asked about this endpoint.
+    #[error(
+        "remote models need a guardian's approval; use a model on this device or your own network"
+    )]
     GuardianRequired,
+    #[error("waiting for a guardian to approve this model")]
     GuardianPending,
+    #[error("a guardian did not approve this model")]
     GuardianDeclined,
     /// Asking for an approval needs a linked guardian.
+    #[error("link a guardian in Settings first")]
     NoGuardian,
     /// Only remote models need a guardian's approval.
+    #[error("only remote models need a guardian's approval")]
     NotRemote,
+    #[error("the chosen model connection is disabled")]
     ConnectionDisabled,
+    #[error("the chosen model connection does not answer text")]
     WrongCapability,
     /// An assessment attempt or interview check is in progress.
+    #[error("AI assistance is paused while an assessment is in progress")]
     AttemptInProgress,
+    /// No such lesson, or one in a course the reader may not read: whether
+    /// it exists is not said.
+    #[error("no published course or lesson with that identifier")]
     LessonNotFound,
     /// Not a text lesson: graded, interactive and video elements are never
     /// shown to a model.
+    #[error("only text lessons can be attached")]
     LessonWithheld,
     /// What could not be read.
+    #[error("{0} could not be read")]
     Storage(&'static str),
+    /// The Studio data the rule reads (lessons, the attempt gate) could not
+    /// be accessed.
+    #[error("studio data could not be accessed")]
+    Database(#[source] rusqlite::Error),
+    #[error("{0}")]
     Invalid(String),
-    /// Any other Studio error, unchanged.
-    Studio(Error),
 }
 
-impl Refused {
-    /// The reason, written for people, without a code. Chat renders it with
-    /// its code through the app's chat vocabulary (`ChatErrorCode::of_refused`).
-    pub fn reason(&self) -> String {
-        match self {
-            Refused::TooYoungForRemote => {
-                "learners under 13 can use models on this device or their own network only".into()
-            }
-            Refused::AdultsOnly(vendor) => format!("{vendor} requires users to be 18 or older"),
-            Refused::GuardianRequired => "remote models need a guardian's approval; use a model on this device or your own network".into(),
-            Refused::GuardianPending => "waiting for a guardian to approve this model".into(),
-            Refused::GuardianDeclined => "a guardian did not approve this model".into(),
-            Refused::NoGuardian => "link a guardian in Settings first".into(),
-            Refused::NotRemote => "only remote models need a guardian's approval".into(),
-            Refused::ConnectionDisabled => "the chosen model connection is disabled".into(),
-            Refused::WrongCapability => "the chosen model connection does not answer text".into(),
-            Refused::AttemptInProgress => {
-                "AI assistance is paused while an assessment is in progress".into()
-            }
-            Refused::LessonNotFound => "no published course or lesson with that identifier".into(),
-            Refused::LessonWithheld => "only text lessons can be attached".into(),
-            Refused::Storage(what) => format!("{what} could not be read"),
-            Refused::Invalid(message) => message.clone(),
-            Refused::Studio(error) => error.to_string(),
+/// How the tutor and Studio runs show a denial: an attempt keeps its own
+/// error, a lesson the tutor may not show is a permission error (whether it
+/// exists is not said), and every other denial is shown as its reason.
+pub fn run_error(denied: AccessDenied) -> Error {
+    match denied {
+        AccessDenied::AttemptInProgress => Error::AssessmentActive,
+        AccessDenied::LessonNotFound | AccessDenied::LessonWithheld => Error::Permission,
+        AccessDenied::ConnectionDisabled | AccessDenied::WrongCapability => {
+            Error::Unavailable("Choose an enabled text model".into())
         }
-    }
-}
-
-/// The reason without a code; see [`Refused::reason`].
-impl fmt::Display for Refused {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.reason())
-    }
-}
-
-impl std::error::Error for Refused {}
-
-/// The tutor and Studio runs: an attempt keeps its own error, a lesson the
-/// tutor may not show is a permission error (whether it exists is not
-/// said), and every other refusal is shown as its reason.
-impl From<Refused> for Error {
-    fn from(refused: Refused) -> Self {
-        match refused {
-            Refused::AttemptInProgress => Error::AssessmentActive,
-            Refused::LessonNotFound | Refused::LessonWithheld => Error::Permission,
-            Refused::ConnectionDisabled | Refused::WrongCapability => {
-                Error::Unavailable("Choose an enabled text model".into())
-            }
-            Refused::Studio(error) => error,
-            other => Error::Unavailable(other.reason()),
-        }
-    }
-}
-
-impl From<Error> for Refused {
-    fn from(error: Error) -> Self {
-        match error {
-            Error::AssessmentActive => Refused::AttemptInProgress,
-            other => Refused::Studio(other),
-        }
+        AccessDenied::Database(error) => Error::Storage(error),
+        AccessDenied::Invalid(message) => Error::Invalid(message),
+        other => Error::Unavailable(other.to_string()),
     }
 }
 
@@ -129,19 +101,21 @@ pub fn visible_lesson(
     reader: Reader,
     course_id: &str,
     element_id: &str,
-) -> Result<LessonTarget, Refused> {
+) -> Result<LessonTarget, AccessDenied> {
     let found = match reader {
         Reader::Chat => learning::lesson_target(conn, course_id, element_id),
         Reader::Tutor => store::can_use_tutor(conn, course_id)
             .and_then(|()| learning::course_lesson(conn, course_id, element_id)),
     };
-    let target = match found {
-        Ok(target) => target,
-        Err(Error::NotFound) => return Err(Refused::LessonNotFound),
-        Err(error) => return Err(error.into()),
-    };
+    let target = found.map_err(|error| match error {
+        Error::NotFound | Error::Permission => AccessDenied::LessonNotFound,
+        Error::Storage(error) => AccessDenied::Database(error),
+        Error::Invalid(message) => AccessDenied::Invalid(message),
+        // The lookups produce no other error.
+        other => AccessDenied::Invalid(other.to_string()),
+    })?;
     if learning::content_kind(&target.element_type) != "text" {
-        return Err(Refused::LessonWithheld);
+        return Err(AccessDenied::LessonWithheld);
     }
     Ok(target)
 }
@@ -153,18 +127,22 @@ mod tests {
     #[test]
     fn the_tutor_and_studio_runs_see_the_reason_without_its_code() {
         assert!(matches!(
-            Error::from(Refused::AttemptInProgress),
+            run_error(AccessDenied::AttemptInProgress),
             Error::AssessmentActive
         ));
-        match Error::from(Refused::AdultsOnly("Groq")) {
+        match run_error(AccessDenied::AdultsOnly("Groq")) {
             Error::Unavailable(message) => {
                 assert_eq!(message, "Groq requires users to be 18 or older")
             }
             other => panic!("{other:?}"),
         }
-        match Error::from(Refused::GuardianRequired) {
+        match run_error(AccessDenied::GuardianRequired) {
             Error::Unavailable(message) => assert!(message.starts_with("remote models need")),
             other => panic!("{other:?}"),
         }
+        assert!(matches!(
+            run_error(AccessDenied::Database(rusqlite::Error::InvalidQuery)),
+            Error::Storage(_)
+        ));
     }
 }

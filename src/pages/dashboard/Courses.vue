@@ -385,7 +385,7 @@ onMounted(async () => {
                   <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted/30">
                     <div
                       v-if="!progressLoading || isProgressReady(enrollment)"
-                      class="h-full rounded-full transition-all duration-500"
+                      class="h-full rounded-full transition-all duration-(--duration-emphasis)"
                       :class="enrollment.completed_at ? 'bg-green-400' : 'bg-primary'"
                       :style="{ width: `${progressPercentFor(enrollment)}%` }"
                     />

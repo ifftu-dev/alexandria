@@ -1,4 +1,5 @@
 import { computed, onUnmounted, ref } from 'vue'
+import { errorMessage } from '@/utils/errorMessage'
 
 interface SpeechRecognitionAlternativeLike {
   transcript: string
@@ -147,7 +148,7 @@ export function useLocalSpeechRecognition() {
       return true
     } catch (cause) {
       recognition.value = null
-      error.value = cause instanceof Error ? cause.message : String(cause)
+      error.value = errorMessage(cause)
       return false
     }
   }

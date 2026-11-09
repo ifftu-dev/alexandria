@@ -4,7 +4,8 @@
     "lockFailed": "清理未能完成。您的私人内容已隐藏。请重试以完成锁定，然后才能解锁个人资料。",
     "name": "Alexandria",
     "initializing": "正在初始化…",
-    "tagline": "我在，因为我们同在"
+    "tagline": "我在，因为我们同在",
+    "takingLonger": "所需时间比预期长"
   },
   "actions": {
     "save": "保存",

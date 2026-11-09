@@ -260,7 +260,7 @@ watch(() => [props.contentCid, props.contentInline, props.elementId], init)
       <!-- Progress bar -->
       <div class="h-1 bg-muted/30 rounded-full overflow-hidden">
         <div
-          class="h-full bg-primary transition-all duration-300"
+          class="h-full bg-primary transition-all duration-(--duration-slow)"
           :style="{ width: `${((currentIndex + 1) / totalQuestions) * 100}%` }"
         />
       </div>

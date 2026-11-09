@@ -121,8 +121,8 @@ onMounted(async () => {
   color: var(--app-muted-foreground);
   white-space: nowrap;
   transition:
-    background 0.15s,
-    color 0.15s;
+    background var(--duration-fast),
+    color var(--duration-fast);
 }
 .vis-toggle:disabled {
   opacity: 0.4;

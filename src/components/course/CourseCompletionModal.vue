@@ -10,7 +10,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useModalFocus } from '@/composables/useModalFocus'
-import { useMotion } from '@/composables/useMotion'
+import { motionDuration, useMotion } from '@/composables/useMotion'
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import { CREDENTIAL_KINDS, type CredentialClass } from '@/components/credential/credentialKind'
 
@@ -98,6 +98,10 @@ function rand(min: number, max: number) {
 
 function spawnConfetti() {
   if (reduced.value || document.hidden) return
+  // Each piece starts within one stagger step and lands inside the emphasis
+  // token, so the clear-up timer below never cuts a piece short.
+  const stagger = motionDuration('stagger')
+  const emphasis = motionDuration('emphasis')
   const n = 28
   const out: Piece[] = []
   for (let i = 0; i < n; i++) {
@@ -107,8 +111,8 @@ function spawnConfetti() {
       tx: `${Math.cos(angle) * dist}px`,
       ty: `${Math.sin(angle) * dist - rand(40, 140)}px`,
       rot: `${rand(-180, 180)}deg`,
-      delay: `${rand(0, 60)}ms`,
-      dur: `${rand(420, 580)}ms`,
+      delay: `${rand(0, stagger)}ms`,
+      dur: `${rand(0.65, 0.89) * emphasis}ms`,
       color: COLORS[i % COLORS.length] as string,
       left: `${rand(44, 56)}%`,
       size: `${rand(6, 11)}px`,
@@ -128,7 +132,8 @@ watch(isOpen, (open) => {
     endorsementImportJson.value = ''
     endorsementUiMessage.value = ''
     spawnConfetti()
-    confettiTimer = setTimeout(clearConfetti, 650)
+    // Every piece lands within the emphasis token (stagger + 0.89 × emphasis).
+    confettiTimer = setTimeout(clearConfetti, motionDuration('emphasis'))
     document.addEventListener('visibilitychange', clearConfetti)
   } else {
     clearConfetti()
@@ -294,7 +299,7 @@ function continueToDashboard() {
                 v-for="(it, i) in items"
                 :key="it.id"
                 class="mint-item"
-                :style="{ animationDelay: `${120 + i * 90}ms` }"
+                :style="{ '--mint-index': i }"
               >
                 <span class="mint-chip" :class="kindMeta(it.kind).dot">
                   <svg viewBox="0 0 24 24" class="h-3 w-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -305,7 +310,7 @@ function continueToDashboard() {
                 <span class="mint-item-kind">{{ $t(kindMeta(it.kind).label) }}</span>
                 <span class="mint-status" :class="{ done: it.status === 'minted' }">
                   <svg v-if="it.status === 'minted'" viewBox="0 0 24 24" class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7" /></svg>
-                  <span v-else class="spinner" />
+                  <span v-else data-progress aria-hidden="true" class="spinner" />
                 </span>
               </li>
             </ul>
@@ -471,13 +476,13 @@ function continueToDashboard() {
   max-width: 28rem;
   padding: 2rem 1.75rem 1.5rem;
   border-radius: 1.25rem;
-  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.2));
-  background: var(--app-card, #0b1220);
+  border: 1px solid var(--app-border);
+  background: var(--app-card);
   box-shadow: 0 20px 60px -15px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.02);
   text-align: center;
   max-height: calc(100vh - 2rem);
   overflow-y: auto;
-  animation: card-pop 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: card-pop var(--duration-emphasis) var(--ease-settle) both;
 }
 .celebrate-close {
   position: sticky;
@@ -490,16 +495,16 @@ function continueToDashboard() {
   height: 44px;
   margin: -1rem -0.75rem -1.75rem auto;
   border-radius: 0.75rem;
-  background: var(--app-card, #0b1220);
-  color: var(--app-muted-foreground, #94a3b8);
+  background: var(--app-card);
+  color: var(--app-muted-foreground);
 }
-.celebrate-close:hover { color: var(--app-foreground, #e2e8f0); }
-.celebrate-close:focus-visible { outline: 2px solid var(--app-primary, #818cf8); outline-offset: 2px; }
+.celebrate-close:hover { color: var(--app-foreground); }
+.celebrate-close:focus-visible { outline: 2px solid var(--app-primary); outline-offset: 2px; }
 
 .endorsement {
   margin-top: 1rem;
   padding: 0.8rem;
-  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.2));
+  border: 1px solid var(--app-border);
   border-radius: 0.75rem;
   background: rgba(148, 163, 184, 0.06);
 }
@@ -512,12 +517,12 @@ function continueToDashboard() {
 .endorsement-title {
   font-size: 0.82rem;
   font-weight: 700;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 .endorsement-note,
 .endorsement-label {
   font-size: 0.68rem;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 .endorsement-label {
   display: block;
@@ -527,12 +532,12 @@ function continueToDashboard() {
 }
 .endorsement-refresh,
 .endorsement-button {
-  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.25));
+  border: 1px solid var(--app-border);
   border-radius: 0.45rem;
   padding: 0.3rem 0.55rem;
   font-size: 0.68rem;
   font-weight: 600;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 .endorsement-button {
   width: 100%;
@@ -552,9 +557,9 @@ function continueToDashboard() {
   text-align: left;
 }
 .endorsement-warning,
-.endorsement-error { color: var(--app-error, #f87171); }
+.endorsement-error { color: var(--app-error); }
 .endorsement-message,
-.endorsement-status { color: var(--app-success, #34d399); }
+.endorsement-status { color: var(--app-success); }
 .endorsement-warning ul { margin: 0.25rem 0 0; padding-left: 1rem; }
 .endorsement-facts {
   margin-top: 0.65rem;
@@ -565,25 +570,25 @@ function continueToDashboard() {
 .endorsement-facts div { min-width: 0; }
 .endorsement-facts dt {
   font-size: 0.62rem;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 .endorsement-facts dd {
   overflow-wrap: anywhere;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.65rem;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 .endorsement-json {
   display: block;
   width: 100%;
   resize: vertical;
-  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.25));
+  border: 1px solid var(--app-border);
   border-radius: 0.45rem;
-  background: var(--app-background, #020617);
+  background: var(--app-background);
   padding: 0.45rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.62rem;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 
 /* Emblem */
@@ -603,14 +608,14 @@ function continueToDashboard() {
   color: #0b1220;
   background: linear-gradient(135deg, #fde68a 0%, #34d399 55%, #10b981 100%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
-  animation: emblem-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.05s both;
+  animation: emblem-pop var(--duration-emphasis) cubic-bezier(0.34, 1.56, 0.64, 1) var(--duration-stagger) both;
 }
 .emblem-ring {
   position: absolute;
   inset: 0;
   border-radius: 9999px;
   border: 2px solid rgba(52, 211, 153, 0.5);
-  animation: ring-pulse 650ms ease-out both;
+  animation: ring-pulse var(--duration-emphasis) ease-out both;
 }
 .emblem-glow {
   position: absolute;
@@ -618,7 +623,7 @@ function continueToDashboard() {
   border-radius: 9999px;
   background: radial-gradient(circle, rgba(52, 211, 153, 0.45), transparent 65%);
   filter: blur(6px);
-  animation: glow-breathe 650ms ease-in-out both;
+  animation: glow-breathe var(--duration-emphasis) ease-in-out both;
 }
 .emblem-shine {
   position: absolute;
@@ -636,7 +641,7 @@ function continueToDashboard() {
   height: 220%;
   background: linear-gradient(75deg, transparent, rgba(255, 255, 255, 0.85), transparent);
   transform: rotate(8deg);
-  animation: shine 500ms ease-out 100ms both;
+  animation: shine var(--duration-slow) ease-out calc(var(--duration-stagger) * 2) both;
 }
 
 .eyebrow {
@@ -646,20 +651,20 @@ function continueToDashboard() {
   font-weight: 700;
   color: #fbbf24;
   margin: 0;
-  animation: fade-up 0.5s ease 0.15s both;
+  animation: fade-up var(--duration-emphasis) ease calc(var(--duration-stagger) * 3) both;
 }
 .title {
   font-size: 1.5rem;
   font-weight: 800;
   margin: 0.15rem 0 0.1rem;
-  color: var(--app-foreground, #f8fafc);
-  animation: fade-up 0.5s ease 0.22s both;
+  color: var(--app-foreground);
+  animation: fade-up var(--duration-emphasis) ease calc(var(--duration-stagger) * 4) both;
 }
 .course-name {
   font-size: 0.95rem;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
   margin: 0;
-  animation: fade-up 0.5s ease 0.28s both;
+  animation: fade-up var(--duration-emphasis) ease calc(var(--duration-stagger) * 5) both;
 }
 
 .chips {
@@ -676,22 +681,22 @@ function continueToDashboard() {
   background: rgba(52, 211, 153, 0.12);
   border: 1px solid rgba(52, 211, 153, 0.3);
   color: #6ee7b7;
-  animation: chip-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation: chip-in var(--duration-slow) cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 .chip-more {
   background: rgba(148, 163, 184, 0.12);
   border-color: rgba(148, 163, 184, 0.3);
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 
 .mint {
   margin-top: 1.25rem;
   padding: 0.75rem 0.85rem;
   border-radius: 0.75rem;
-  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.18));
+  border: 1px solid var(--app-border);
   background: rgba(148, 163, 184, 0.06);
   text-align: left;
-  animation: fade-up 0.5s ease 0.4s both;
+  animation: fade-up var(--duration-emphasis) ease calc(var(--duration-stagger) * 7) both;
 }
 .mint-row {
   display: flex;
@@ -714,11 +719,11 @@ function continueToDashboard() {
   margin-bottom: 0.3rem;
   font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 .mint-meter span:first-child {
   font-weight: 700;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 .mint-bar {
   height: 6px;
@@ -731,18 +736,7 @@ function continueToDashboard() {
   height: 100%;
   border-radius: 9999px;
   background: linear-gradient(90deg, #34d399, #10b981);
-  transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.mint-bar-fill.anchoring {
-  background-image: linear-gradient(
-    115deg,
-    #34d399 0%, #34d399 40%, #6ee7b7 50%, #34d399 60%, #34d399 100%
-  );
-  background-size: 200% 100%;
-  animation: bar-shimmer 1.4s linear infinite;
-}
-@keyframes bar-shimmer {
-  to { background-position: -200% 0; }
+  transition: width var(--duration-slow) var(--ease-settle);
 }
 .mint-list {
   list-style: none;
@@ -756,7 +750,9 @@ function continueToDashboard() {
   display: flex;
   align-items: center;
   gap: 0.55rem;
-  animation: chip-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation: chip-in var(--duration-slow) cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  /* Each credential arrives one stagger step after the one above it. */
+  animation-delay: calc(var(--duration-stagger) * (var(--mint-index, 0) + 2));
 }
 .mint-chip {
   flex: none;
@@ -773,7 +769,7 @@ function continueToDashboard() {
   min-width: 0;
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -781,7 +777,7 @@ function continueToDashboard() {
 .mint-item-kind {
   flex: none;
   font-size: 0.65rem;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 .mint-status {
   flex: none;
@@ -791,7 +787,7 @@ function continueToDashboard() {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
   background: rgba(148, 163, 184, 0.15);
 }
 .mint-status.done {
@@ -801,11 +797,11 @@ function continueToDashboard() {
 .mint-label {
   font-size: 0.82rem;
   font-weight: 600;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 .mint-note {
   font-size: 0.72rem;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 .mint-tx {
   display: inline-block;
@@ -832,7 +828,7 @@ function continueToDashboard() {
   padding: 0.55rem 0.6rem;
   border-radius: 0.55rem;
   background: rgba(148, 163, 184, 0.08);
-  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.18));
+  border: 1px solid var(--app-border);
 }
 .unmet-head {
   display: flex;
@@ -843,7 +839,7 @@ function continueToDashboard() {
 .unmet-title {
   font-size: 0.8rem;
   font-weight: 600;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -861,18 +857,18 @@ function continueToDashboard() {
 }
 .unmet-badge.is-none {
   background: rgba(148, 163, 184, 0.18);
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 .unmet-scores {
   display: flex;
   justify-content: space-between;
   margin-top: 0.3rem;
   font-size: 0.68rem;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
   font-variant-numeric: tabular-nums;
 }
 .unmet-scores strong {
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 .unmet-bar {
   position: relative;
@@ -899,14 +895,14 @@ function continueToDashboard() {
   margin: 0.7rem 0 0.25rem;
   font-size: 0.72rem;
   font-weight: 600;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
 }
 .unmet-why {
   margin: 0;
   padding-left: 1rem;
   font-size: 0.7rem;
   line-height: 1.45;
-  color: var(--app-muted-foreground, #94a3b8);
+  color: var(--app-muted-foreground);
 }
 .unmet-cta {
   margin: 0.55rem 0 0;
@@ -919,7 +915,7 @@ function continueToDashboard() {
   display: flex;
   gap: 0.5rem;
   margin-top: 1.25rem;
-  animation: fade-up 200ms ease both;
+  animation: fade-up var(--duration-base) ease both;
 }
 .btn {
   flex: 1;
@@ -927,11 +923,11 @@ function continueToDashboard() {
   font-weight: 600;
   padding: 0.55rem 0.75rem;
   border-radius: 0.6rem;
-  border: 1px solid var(--app-border, rgba(148, 163, 184, 0.25));
+  border: 1px solid var(--app-border);
   background: transparent;
-  color: var(--app-foreground, #e2e8f0);
+  color: var(--app-foreground);
   cursor: pointer;
-  transition: background-color 120ms ease, transform 80ms ease;
+  transition: background-color var(--duration-fast) ease, transform var(--duration-fast) ease;
 }
 .btn:hover {
   background: rgba(148, 163, 184, 0.1);
@@ -1011,8 +1007,8 @@ function continueToDashboard() {
 }
 
 /* Modal transition */
-.celebrate-enter-active { transition: opacity 0.25s ease; }
-.celebrate-leave-active { transition: opacity 0.2s ease; }
+.celebrate-enter-active { transition: opacity var(--duration-base) ease; }
+.celebrate-leave-active { transition: opacity var(--duration-base) ease; }
 .celebrate-enter-from,
 .celebrate-leave-to { opacity: 0; }
 
@@ -1028,9 +1024,7 @@ function continueToDashboard() {
   .chip,
   .mint,
   .actions,
-  .confetti-piece,
-  .spinner,
-  .mint-bar-fill.anchoring {
+  .confetti-piece {
     animation: none !important;
   }
   .confetti { display: none; }

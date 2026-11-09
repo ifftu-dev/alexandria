@@ -331,10 +331,10 @@ function formatDate(iso: string) {
     <!-- Create Room Modal -->
     <Teleport to="body">
       <Transition
-        enter-active-class="transition-all duration-200"
+        enter-active-class="transition-all duration-(--duration-base)"
         enter-from-class="opacity-0"
         enter-to-class="opacity-100"
-        leave-active-class="transition-all duration-150"
+        leave-active-class="transition-all duration-(--duration-fast)"
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
@@ -518,10 +518,10 @@ function formatDate(iso: string) {
     <!-- Join Room Modal -->
     <Teleport to="body">
       <Transition
-        enter-active-class="transition-all duration-200"
+        enter-active-class="transition-all duration-(--duration-base)"
         enter-from-class="opacity-0"
         enter-to-class="opacity-100"
-        leave-active-class="transition-all duration-150"
+        leave-active-class="transition-all duration-(--duration-fast)"
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >
@@ -726,10 +726,10 @@ function formatDate(iso: string) {
     <!-- QR scanner modal -->
     <Teleport to="body">
       <Transition
-        enter-active-class="transition-all duration-200"
+        enter-active-class="transition-all duration-(--duration-base)"
         enter-from-class="opacity-0"
         enter-to-class="opacity-100"
-        leave-active-class="transition-all duration-150"
+        leave-active-class="transition-all duration-(--duration-fast)"
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
       >

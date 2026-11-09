@@ -97,14 +97,17 @@ ignore = [
     # zip 1.1.4, 4.6.1 and 8.6.0 — `ZipArchive::extract` and
     # `ZipStreamReader::extract` keep SUID/SGID bits (RUSTSEC-2026-0367),
     # create symlinks whose targets leave the destination (RUSTSEC-2026-0368),
-    # and apply permissions through those symlinks (RUSTSEC-2026-0369).
+    # apply permissions through those symlinks (RUSTSEC-2026-0369), and
+    # abort on oversized symlink-target allocation (RUSTSEC-2026-0429).
     #
-    # Ignored because the upgrade is blocked: the fix is zip >= 9.0.0, and no
-    # release of any of the three dependents accepts it yet — candle-core
-    # 0.11 wants ^8.6, tauri-plugin-updater 2.14 and the 3.0 alphas want ^4,
-    # and libsodium-sys-stable 1.24.3 wants ^8.6.
+    # Accepted based on the extraction boundaries below, not on panic
+    # handling: allocation failure aborts even with panic = "unwind".
+    # Checked 2026-11-03: candle-core 0.11.1 and tauri-plugin-updater 2.14.1
+    # support zip 9, but libsodium-sys-stable 1.24.3 still requires ^8.6.
+    # Keep the existing application dependencies for this patch release;
+    # dependency upgrades can narrow this exception in a separate change.
     #
-    # All three bugs live in `extract`, and nothing extracts an archive that
+    # All four bugs live in `extract`, and nothing extracts an archive that
     # an attacker can supply:
     #   - candle-core 0.8.4 (zip 1.1.4) reads PyTorch archives with `by_name`
     #     only and never calls `extract`.
@@ -116,13 +119,14 @@ ignore = [
     #     build script extracts the prebuilt MSVC libsodium on Windows builds
     #     only, after verifying the archive's minisign signature.
     #
-    # Revisit when any of the three releases against zip >= 9. Remove this
-    # acceptance immediately if our code calls `extract` itself, if the
+    # Revisit with dependency upgrades, especially libsodium accepting zip 9.
+    # Remove this acceptance immediately if our code calls `extract` itself, if the
     # updater stops verifying signatures before install, or if candle starts
     # extracting archives.
     "RUSTSEC-2026-0367",
     "RUSTSEC-2026-0368",
     "RUSTSEC-2026-0369",
+    "RUSTSEC-2026-0429",
 
     # crypto-bigint 0.5.5 — timing variability in operations meant to be
     # constant-time (RUSTSEC-2026-0387). The fix is >= 0.7.6, a semver-major

@@ -9,6 +9,10 @@
 // path segment is the action (the domain host is stripped). Anything that
 // doesn't match a known action returns null — callers must treat null as
 // "ignore this link", never navigate to a raw string.
+//
+// There is no public notification link. Banner and push taps reach the app
+// as `notifications:open` events with an in-app route, never through here, so
+// an outside page cannot open, mark read or follow an inbox row.
 
 /** Hosts we accept https app-links from. */
 const APP_LINK_HOSTS = new Set(['alexandria.ifftu.dev'])
@@ -25,6 +29,32 @@ export type DeepLinkTarget =
   /** A concrete in-app router path. The caller still validates it against the
    *  router's registered routes before navigating (defense in depth). */
   | { kind: 'route'; path: string }
+
+// Resolves relative paths in `isInAppPath`; never fetched or shown.
+const PATH_BASE = 'http://in-app.invalid'
+
+/**
+ * Is this a same-document absolute path: one leading slash, then nothing a
+ * URL parser could read as another origin? Rejects protocol-relative `//host`,
+ * backslashes (`/\host` is `//host` to a browser), control characters (parsers
+ * strip tabs and newlines, so `/\t/host` would become `//host`), and every
+ * scheme. A plain space is allowed (`/search?q=two words`): parsers encode it
+ * rather than strip it, so it cannot join slashes. The one check for every
+ * in-app route a link, notification or caller hands over; the router still has
+ * to know the path.
+ */
+export function isInAppPath(path: string | null | undefined): path is string {
+  if (!path || path[0] !== '/' || path[1] === '/') return false
+  for (let i = 0; i < path.length; i++) {
+    const code = path.charCodeAt(i)
+    if (code < 0x20 || code === 0x7f || code === 0x5c) return false
+  }
+  try {
+    return new URL(path, PATH_BASE).origin === PATH_BASE
+  } catch {
+    return false
+  }
+}
 
 /**
  * Parse a raw deep-link URL into a canonical {@link DeepLinkTarget}, or null
@@ -88,26 +118,12 @@ export function parseDeepLink(raw: string): DeepLinkTarget | null {
       }
       return { kind: 'governance-genesis-locator', locator: url.href }
     }
-    case 'notifications': {
-      // alexandria://notifications  →  the inbox
-      return segments.length === 0 ? { kind: 'route', path: '/notifications' } : null
-    }
-    case 'notification': {
-      // alexandria://notification/<id>  →  the inbox, opening that row (the
-      // page marks it read and follows its route). The id stays as the URL
-      // encoded it, for the same reason as `course`.
-      const id = segments[0]
-      return id && segments.length === 1
-        ? { kind: 'route', path: `/notifications?open=${id}` }
-        : null
-    }
     case 'open': {
       // alexandria://open?route=/any/in-app/path  (generic fallback)
       const route = url.searchParams.get('route')
-      // Must be a same-document absolute path. Reject protocol-relative
-      // (`//host`) and anything not starting with a single slash so this can
-      // never become an open redirect to an external origin.
-      if (!route || !route.startsWith('/') || route.startsWith('//')) return null
+      // Must be a same-document absolute path, so this can never become an
+      // open redirect to an external origin.
+      if (!isInAppPath(route)) return null
       return { kind: 'route', path: route }
     }
     default:

@@ -4,6 +4,7 @@ import { relaunch } from '@tauri-apps/plugin-process'
 import { useLocalApi } from "@/composables/useLocalApi"
 import { getVersion } from '@tauri-apps/api/app'
 import { isMobilePlatform, currentPlatform } from '@/composables/usePlatform'
+import { errorMessage as messageOf } from '@/utils/errorMessage'
 
 const { invoke } = useLocalApi()
 
@@ -139,7 +140,7 @@ async function checkForUpdate(opts: { silent?: boolean } = {}): Promise<void> {
     if (opts.silent) {
       phase.value = 'idle'
     } else {
-      errorMessage.value = e instanceof Error ? e.message : String(e)
+      errorMessage.value = messageOf(e)
       phase.value = 'error'
     }
   }
@@ -179,7 +180,7 @@ async function downloadAndInstall(): Promise<void> {
     await relaunch()
   } catch (e) {
     console.error('[update] install failed:', e)
-    errorMessage.value = e instanceof Error ? e.message : String(e)
+    errorMessage.value = messageOf(e)
     phase.value = 'error'
   }
 }

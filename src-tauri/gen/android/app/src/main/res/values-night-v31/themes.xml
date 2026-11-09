@@ -1,0 +1,9 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Android 12+ system splash: the web first-paint background and the
+         opening mark, which the web opening continues without a replay. -->
+    <style name="Theme.alexandria_node" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/launch_background</item>
+        <item name="android:windowSplashScreenBackground">@color/launch_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/launch_mark</item>
+    </style>
+</resources>

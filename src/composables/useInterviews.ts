@@ -13,6 +13,7 @@ import type {
   InterviewSession,
   InterviewTranscriptSegment,
 } from '@/types'
+import { errorMessage } from '@/utils/errorMessage'
 
 const interviews = ref<InterviewSession[]>([])
 const activeInterview = ref<InterviewBundle | null>(null)
@@ -28,7 +29,7 @@ export function useInterviews() {
     try {
       return await operation()
     } catch (cause) {
-      error.value = cause instanceof Error ? cause.message : String(cause)
+      error.value = errorMessage(cause)
       throw cause
     } finally {
       loading.value = false

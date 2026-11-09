@@ -8,6 +8,7 @@ import { assertNever } from '@/utils/exhaustive'
 import { useGoals } from '@/composables/useGoals'
 import { useLocalApi } from '@/composables/useLocalApi'
 import type { ChatArtifact, SkillInfo, SkillSuggestion } from '@/types'
+import { errorMessage } from '@/utils/errorMessage'
 
 /** Something the chat asked to save or change, under the answer it came
  * from. Nothing is written until the learner allows it; the app then does
@@ -158,7 +159,7 @@ const done = computed<{ text: string; to?: string; muted?: boolean }>(() => {
 
 function describe(e: unknown): { text: string; to?: string } {
   const code = chatErrorCode(e)
-  const raw = String(e instanceof Error ? e.message : e)
+  const raw = errorMessage(e)
   if (code === 'not_enrolled') return { text: t('chat.actions.errors.notEnrolled'), to: coursePage.value }
   if (code === 'needs_plugins' || code === 'open_course') return { text: t('chat.actions.errors.openCourse'), to: coursePage.value }
   if (code === 'not_found' || code === 'invalid_input') return { text: t('chat.actions.errors.stale') }

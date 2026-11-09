@@ -4,6 +4,7 @@
 // ============================================
 
 import type { ChatLocation, ConnectionLocation, ProposalKind, Protocol } from '@/generated/chat-vocab'
+import type { NotificationKind, NotificationSource, PushErrorCode } from '@/generated/notification-vocab'
 
 export type { ChatLocation }
 
@@ -642,6 +643,8 @@ export interface SubjectFieldInfo {
   name: string
   description: string | null
   icon_emoji: string | null
+  /** Stable atlas colour and region; null for a field the bundled taxonomy does not place. */
+  atlas_slot: number | null
   subject_count: number
   skill_count: number
   created_at: string | null
@@ -2311,8 +2314,12 @@ export interface ChatMessage { id: string; thread_id: string; position: number; 
 export interface ChatBinding { id: string; thread_id: string; kind: 'lesson' | 'goal'; course_id: string; element_id: string; label: string; created_at: string }
 export interface ChatPracticeAttempt { answer: string; correct: boolean; assisted: boolean; created_at: string }
 export interface ChatPracticeView { id: string; message_id: string; skill: string; kind: 'numeric' | 'multiple_choice' | 'short_text'; prompt: string; options: string[]; hints: string[]; hints_total: number; revealed: boolean; solved: boolean; solved_independently: boolean; answer: string | null; explanation: string | null; attempts: ChatPracticeAttempt[] }
-export interface ChatGuardianApproval { id: string; connection_id: string; connection_name: string; endpoint: string; model: string; status: 'pending' | 'approved' | 'declined'; requested_at: string; decided_at: string | null }
-export interface GuardianAiRequest { id: string; link_id: string; ward_name: string | null; connection_name: string; endpoint: string; model: string; status: 'pending' | 'approved' | 'declined'; received_at: string; decided_at: string | null; delivered: boolean }
+/** Mirrors `GuardianApproval` in `src-tauri/src/domain/guardian_ai.rs`. */
+export interface ChatGuardianApproval { id: string; connection_id: string; connection_name: string; endpoint: string; model: string; status: GuardianAiRequestStatus; requested_at: string; decided_at: string | null }
+/** Mirrors `GuardianAiRequestStatus` in `src-tauri/src/domain/guardian_ai.rs`. */
+export type GuardianAiRequestStatus = 'pending' | 'approved' | 'declined'
+/** Mirrors `GuardianAiRequest` in `src-tauri/src/domain/guardian_ai.rs`. */
+export interface GuardianAiRequest { id: string; link_id: string; ward_name: string | null; connection_name: string; endpoint: string; model: string; status: GuardianAiRequestStatus; received_at: string; decided_at: string | null; delivered: boolean }
 export interface ChatMemoryItem { id: string; kind: 'preference' | 'observation'; content: string; status: 'proposed' | 'approved'; active: boolean; thread_id: string | null; source_message_id: string | null; revision: number; created_at: string; updated_at: string }
 export interface ChatThreadDetail { thread: ChatThread; messages: ChatMessage[]; bindings: ChatBinding[]; practice: ChatPracticeView[]; memory_proposals: ChatMemoryItem[]; artifacts: ChatArtifact[]; active_run_id: string | null }
 /** The shape of each proposal body by kind. The kinds come from the backend; a kind without a shape here is a type error. */
@@ -2701,50 +2708,50 @@ export interface SeedResetPlan {
 }
 
 // ── Notifications ──────────────────────────────────────────────
+// Mirrors `src-tauri/src/domain/notification.rs`. The vocabularies are
+// generated from the same module into `@/generated/notification-vocab`.
 
-/** The kinds the backend records (`src-tauri/src/notifications`). */
-export type NotificationKind =
-  | 'interview_invited'
-  | 'interview_room_opened'
-  | 'offer_sent'
-  | 'access_requested'
-  | 'assessment_requested'
-  | 'classroom_call_started'
-  | 'classroom_join_requested'
-  | 'credential_issued'
-  | 'guardian_request'
-  | 'generic'
+export type {
+  NotificationKind,
+  NotificationPermissionOutcome,
+  NotificationSource,
+  PushErrorCode,
+} from '@/generated/notification-vocab'
 
 /** One row in the per-profile notifications inbox. */
 export interface AppNotification {
   id: string
-  kind: NotificationKind | string
+  kind: NotificationKind
   title: string
   body: string
   route: string | null
-  source: 'local' | 'push'
-  createdAt: string
-  readAt: string | null
+  source: NotificationSource
+  created_at: string
+  read_at: string | null
   payload: Record<string, unknown> | null
 }
 
 /** Whether this device is registered for push, and with which service. */
 export interface PushStatus {
   enabled: boolean
-  pendingCleanup: boolean
-  pendingRegistration: boolean
+  pending_cleanup: boolean
+  pending_registration: boolean
+  /** Push is on but organisations are off, so nothing is registered with Cloud. */
+  paused_by_organisations: boolean
   supported: boolean
   registered: boolean
   platform: string | null
-  cloudOrigin: string | null
-  lastError: string | null
+  cloud_origin: string | null
+  last_error_code: PushErrorCode | null
+  /** Untranslated failure text for diagnostics; never shown as the message. */
+  last_error_detail: string | null
 }
 
 /** Locally resolved tap; profile and origin are never taken from provider data. */
 export interface NotificationOpen {
-  networkId: string
+  network_id: string
   id: string
-  profileId: string
+  profile_id: string
   recipient: string | null
   route: string
 }

@@ -145,7 +145,10 @@ async fn signed_send(
 #[tauri::command]
 pub async fn holder_contestable_runs(state: State<'_, AppState>) -> Result<RunsResult, String> {
     let dirs = directories(&state).await?;
-    let (sk, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (sk, did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let client = crate::cloud::client()?;
 
     let mut items = Vec::new();
@@ -427,7 +430,10 @@ pub async fn holder_release_evidence(
     session_id: String,
 ) -> Result<Released, String> {
     https_only(&directory_url)?;
-    let (sk, _did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (sk, _did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
 
     let evidence_session_id = session_id.clone();
     let items = state
@@ -646,7 +652,10 @@ pub async fn holder_withdraw_evidence(
             },
         )
         .await?;
-    let (sk, _did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (sk, _did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     withdraw_one(&state, &sk, &session_id, &directory_url, &run_id).await
 }
 
@@ -747,7 +756,10 @@ pub async fn holder_retry_withdrawals(state: State<'_, AppState>) -> Result<usiz
         return Ok(0);
     }
 
-    let (sk, _did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (sk, _did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let mut remaining = 0usize;
     for (session_id, directory_url, run_id) in owed {
         if withdraw_one(&state, &sk, &session_id, &directory_url, &run_id)

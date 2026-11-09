@@ -95,7 +95,10 @@ pub async fn fetch_access_log(
     state: State<'_, AppState>,
 ) -> Result<PullResult<AccessEntry>, String> {
     let dirs = directories(&state).await?;
-    let (sk, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (sk, did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let client = crate::cloud::client()?;
 
     let mut items = Vec::new();
@@ -157,7 +160,10 @@ pub struct Grant {
 #[tauri::command]
 pub async fn fetch_visibility(state: State<'_, AppState>) -> Result<PullResult<Grant>, String> {
     let dirs = directories(&state).await?;
-    let (sk, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (sk, did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let client = crate::cloud::client()?;
 
     let mut items = Vec::new();
@@ -209,7 +215,10 @@ pub async fn set_visibility(
         return Err("a directory must be https".into());
     }
 
-    let (sk, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (sk, did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let now = crate::clock::now_rfc3339();
 
     // A record with no skills in it. The endpoint checks the signature and the
@@ -258,7 +267,10 @@ pub async fn publish_listing(state: State<'_, AppState>) -> Result<(), String> {
         .into_iter()
         .next()
         .ok_or("requests from organisations are switched off, or no Alexandria Cloud is set")?;
-    let (key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (key, did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let now = crate::clock::now_rfc3339();
     let now_unix = chrono::Utc::now().timestamp();
     let (sign_key, subject, at) = (key.clone(), did.as_str().to_string(), now.clone());

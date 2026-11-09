@@ -27,7 +27,10 @@ withDefaults(defineProps<Props>(), {
     :disabled="disabled || loading"
     :aria-busy="loading || undefined"
   >
-    <span v-if="loading" aria-hidden="true" class="spinner absolute" :style="{ width: '1em', height: '1em', borderWidth: '1.5px' }" />
-    <span class="inline-flex items-center justify-center gap-2" :class="{ 'opacity-0': loading }"><slot /></span>
+    <!-- The label stays in the accessibility tree while loading, so the button
+         keeps its name. With motion Off it also stays visible beside a still
+         spinner (main.css, data-progress). -->
+    <span v-if="loading" aria-hidden="true" data-progress class="spinner absolute" :style="{ width: '1em', height: '1em', borderWidth: '1.5px' }" />
+    <span class="btn-label inline-flex items-center justify-center gap-2"><slot /></span>
   </button>
 </template>

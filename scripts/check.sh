@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Local mirror of CI's "Lint & Test" + "Security Audit" jobs — run before
+# Local mirror of CI's "Lint & Test" + "Security Audit" jobs, plus the
+# release workflow regression tests from "Release Readiness" — run before
 # pushing to catch what CI would catch.
 #
 #   ./scripts/check.sh          # everything
@@ -54,6 +55,8 @@ step "vue-tsc type-check" npx vue-tsc -b --noEmit
 # That is exactly how one slipped through.
 step "frontend build" npm run build
 step "frontend tests (vitest)" npm test
+# From CI's "Release Readiness" job: the release and CI helper scripts' tests.
+step "release workflow regression tests" python3 -m unittest discover -s scripts -p 'test_*.py'
 
 if command -v cargo-audit >/dev/null 2>&1; then
   step "cargo audit" cargo audit --file Cargo.lock

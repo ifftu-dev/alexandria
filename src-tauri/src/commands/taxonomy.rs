@@ -24,6 +24,9 @@ pub struct SubjectFieldInfo {
     pub name: String,
     pub description: Option<String>,
     pub icon_emoji: Option<String>,
+    /// Stable atlas colour and region; `None` for a field the bundled
+    /// taxonomy does not place.
+    pub atlas_slot: Option<i64>,
     pub subject_count: i64,
     pub skill_count: i64,
     pub created_at: Option<String>,
@@ -94,41 +97,38 @@ pub async fn list_subject_fields(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "taxonomy.subject-fields.list",
-            move |db| {
-                let conn = db.conn();
+            move |db| subject_fields(db.conn()).map_err(|e| e.to_string()),
+        )
+        .await
+}
 
-    let mut stmt = conn
-        .prepare(
+/// Every subject field with its atlas slot and aggregate counts, by name.
+pub(crate) fn subject_fields(
+    conn: &rusqlite::Connection,
+) -> rusqlite::Result<Vec<SubjectFieldInfo>> {
+    let mut stmt = conn.prepare(
             "SELECT sf.id, sf.name, sf.description, sf.icon_emoji, sf.created_at,
                     (SELECT COUNT(*) FROM subjects s WHERE s.subject_field_id = sf.id) as subject_count,
                     (SELECT COUNT(*) FROM skills sk
                      JOIN subjects s ON sk.subject_id = s.id
-                     WHERE s.subject_field_id = sf.id) as skill_count
+                     WHERE s.subject_field_id = sf.id) as skill_count,
+                    sf.atlas_slot
              FROM subject_fields sf
              ORDER BY sf.name",
-        )
-        .map_err(|e| e.to_string())?;
-
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(SubjectFieldInfo {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                description: row.get(2)?,
-                icon_emoji: row.get(3)?,
-                created_at: row.get(4)?,
-                subject_count: row.get(5)?,
-                skill_count: row.get(6)?,
-            })
+        )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(SubjectFieldInfo {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            description: row.get(2)?,
+            icon_emoji: row.get(3)?,
+            created_at: row.get(4)?,
+            subject_count: row.get(5)?,
+            skill_count: row.get(6)?,
+            atlas_slot: row.get(7)?,
         })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-                Ok(rows)
-            },
-        )
-        .await
+    })?;
+    rows.collect()
 }
 
 /// List subjects, optionally filtered by subject_field_id.
@@ -592,4 +592,30 @@ pub struct ElementSkillTag {
     pub skill_name: String,
     pub bloom_level: String,
     pub weight: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+
+    #[test]
+    fn subject_fields_carry_their_bundled_atlas_slot() {
+        let db = Database::open_in_memory().expect("open database");
+        db.run_migrations().expect("run migrations");
+        crate::db::bundled::install_bundled_data(db.conn()).expect("install bundled data");
+        db.conn()
+            .execute(
+                "INSERT INTO subject_fields (id, name) VALUES ('sf_local', 'Local field')",
+                [],
+            )
+            .expect("insert unplaced field");
+
+        let fields = subject_fields(db.conn()).expect("list subject fields");
+        let slot = |id: &str| fields.iter().find(|f| f.id == id).map(|f| f.atlas_slot);
+
+        assert_eq!(slot("sf_cs"), Some(Some(1)));
+        assert_eq!(slot("sf_web"), Some(Some(7)));
+        assert_eq!(slot("sf_local"), Some(None));
+    }
 }

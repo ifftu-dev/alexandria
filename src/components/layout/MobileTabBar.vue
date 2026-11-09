@@ -52,8 +52,9 @@ function navigate(path: string) {
       <button
         v-for="tab in tabs"
         :key="tab.path"
-        class="flex flex-1 flex-col items-center justify-center gap-0.5 pt-2 pb-1 transition-colors"
+        class="tab-item pressable selection-indicator flex flex-1 flex-col items-center justify-center gap-0.5 pt-2 pb-1"
         :class="isActive(tab.path) ? 'text-primary' : 'text-muted-foreground'"
+        :aria-current="isActive(tab.path) ? 'page' : undefined"
         @click="navigate(tab.path)"
       >
         <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" :stroke-width="isActive(tab.path) ? 2.25 : 1.75">
@@ -64,3 +65,15 @@ function navigate(path: string) {
     </nav>
   </div>
 </template>
+
+<style scoped>
+/* The shared selection indicator, shaped as a pill behind the icon. */
+.tab-item::before {
+  inset: 0.25rem auto auto 50%;
+  width: 3.5rem;
+  height: 1.75rem;
+  translate: -50% 0;
+  border-radius: 9999px;
+  --selection-background: color-mix(in srgb, var(--app-primary) 12%, transparent);
+}
+</style>

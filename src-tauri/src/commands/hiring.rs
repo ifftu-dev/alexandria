@@ -304,7 +304,10 @@ async fn signed_get<T: serde::de::DeserializeOwned>(
     dir: &Directory,
     path: &str,
 ) -> Result<Vec<T>, String> {
-    let (key, _) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (key, _) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let timestamp = chrono::Utc::now().timestamp();
     let nonce = uuid::Uuid::new_v4().to_string();
     let proof = super::holder_pull::proof(&key, "GET", path, timestamp, &nonce);
@@ -323,7 +326,11 @@ async fn signed_get<T: serde::de::DeserializeOwned>(
 pub async fn hiring_interviews(
     state: State<'_, AppState>,
 ) -> Result<PullResult<DirectoryInterview>, String> {
-    let (_, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let did = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .did()
+        .clone();
     let path = format!("/api/interviews/for/{}", did.as_str());
     let dirs = super::holder_pull::directories(&state).await?;
     let mut items = Vec::new();
@@ -367,7 +374,11 @@ pub async fn hiring_interviews(
 pub async fn hiring_offers(
     state: State<'_, AppState>,
 ) -> Result<PullResult<DirectoryOffer>, String> {
-    let (_, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let did = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .did()
+        .clone();
     let path = format!("/api/offers/for/{}", did.as_str());
     let dirs = super::holder_pull::directories(&state).await?;
     let mut items = Vec::new();
@@ -430,7 +441,10 @@ pub async fn hiring_interview_respond(
     org_trust::check_item(&state, &invite, org_proof.as_ref())
         .await
         .require()?;
-    let (key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (key, did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let signed = sign_interview_response(
         invite,
         &decision,
@@ -491,7 +505,10 @@ pub async fn hiring_offer_respond(
     org_trust::check_item(&state, &offer, org_proof.as_ref())
         .await
         .require()?;
-    let (key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (key, did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let signed = sign_offer_response(
         offer,
         &decision,
@@ -538,6 +555,28 @@ pub async fn hiring_offer_respond(
     Ok(receipt)
 }
 
+/// The Cloud origin to ask for an interview's room: the one that sent the
+/// newest notification for that room, else this profile's configured Cloud.
+fn interview_room_origin(
+    conn: &rusqlite::Connection,
+    interview_id: &str,
+) -> Result<String, String> {
+    use rusqlite::OptionalExtension;
+    let sent_by: Option<String> = conn
+        .query_row(
+            "SELECT json_extract(payload_json, '$.cloud_origin') FROM notifications \
+             WHERE route=?1 AND json_extract(payload_json, '$.cloud_origin') IS NOT NULL \
+             ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            [crate::notifications::interview_room_route(interview_id)],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    sent_by
+        .or_else(|| crate::cloud::origin(conn))
+        .ok_or_else(|| "configure a Cloud service before joining".to_string())
+}
+
 /// The room for an accepted interview held in Alexandria, once the panel has
 /// opened it. Asked with the learner's own proof, so only the candidate the
 /// interview is for can learn the ticket.
@@ -551,25 +590,25 @@ pub async fn hiring_interview_room(
     // from this profile's authenticated discovery before falling back to its
     // configured service. The directory guard below still authorizes contact.
     let address = if directory_url.is_empty() {
-        let route = format!("/interview-room/{interview_id}");
-        state.db_executor.execute(
-            DatabaseWorkload::Learner, state.profile_lease(), "interview.room.origin",
-            move |db| {
-                use rusqlite::OptionalExtension;
-                let original: Option<String> = db.conn().query_row(
-                    "SELECT json_extract(payload_json, '$.cloudOrigin') FROM notifications WHERE route=?1 AND json_extract(payload_json, '$.cloudOrigin') IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1",
-                    [route], |row| row.get(0),
-                ).optional().map_err(|e| e.to_string())?;
-                original.or_else(|| crate::cloud::origin(db.conn()))
-                    .ok_or_else(|| "configure a Cloud service before joining".to_string())
-            },
-        ).await?
+        let id = interview_id.clone();
+        state
+            .db_executor
+            .execute(
+                DatabaseWorkload::Learner,
+                state.profile_lease(),
+                "interview.room.origin",
+                move |db| interview_room_origin(db.conn(), &id),
+            )
+            .await?
     } else {
         directory_url
     };
     let dir = directory(&state, &address).await?;
     let id = uuid::Uuid::parse_str(&interview_id).map_err(|e| e.to_string())?;
-    let (key, _) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (key, _) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let path = format!("/api/interviews/{id}/room");
     let timestamp = chrono::Utc::now().timestamp();
     let nonce = uuid::Uuid::new_v4().to_string();
@@ -898,7 +937,10 @@ pub async fn hiring_interview_integrity_send(
         return Ok(sent);
     }
     let dir = directory(&state, &directory_url).await?;
-    let (key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (key, did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let report = build_integrity_report(invite, &run, chrono::Utc::now().timestamp())?;
     let signed = sign_integrity_report(report, &key, did.as_str())?;
     if !state.profile_lease().is_current() {
@@ -1366,5 +1408,32 @@ mod tests {
         assert!(sent_integrity_reports(db.conn(), "other")
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn interview_room_uses_the_origin_that_sent_the_notification() {
+        use crate::notifications::{self, NewNotification, NotificationKind};
+        use crate::settings::{registry::keys, SettingsStore};
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let id = "22222222-2222-4222-8222-222222222222";
+        SettingsStore::set(
+            db.conn(),
+            keys::CLOUD_ORIGIN,
+            "https://b.example".to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            interview_room_origin(db.conn(), id).unwrap(),
+            "https://b.example"
+        );
+        let opened = NewNotification::new(NotificationKind::InterviewRoomOpened, "t", "b")
+            .route(notifications::interview_room_route(id))
+            .payload(serde_json::json!({ "cloud_origin": "https://a.example" }));
+        notifications::record(db.conn(), &opened, "2026-11-04T00:00:00Z").unwrap();
+        assert_eq!(
+            interview_room_origin(db.conn(), id).unwrap(),
+            "https://a.example"
+        );
     }
 }

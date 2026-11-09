@@ -16,6 +16,8 @@ import AddProfileTile from '@/components/profile/AddProfileTile.vue'
 import ProfileAvatar from '@/components/profile/ProfileAvatar.vue'
 import ProfileTile from '@/components/profile/ProfileTile.vue'
 import { AppButton, AppInput } from '@/components/ui'
+import { useSlowNotice } from '@/composables/useSlowNotice'
+import { errorMessage } from '@/utils/errorMessage'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -38,7 +40,9 @@ const selectedHasCredential = ref(false)
 const biometricLoading = ref(false)
 const biometricEnabled = computed(() => biometricAvailable.value && selectedHasCredential.value)
 
-// The backend does not publish unlock progress. Never infer stages from elapsed time.
+// The backend does not publish unlock progress. Never infer stages from elapsed time;
+// a slow unlock only adds "still unlocking" beside the one honest stage.
+const slowUnlock = useSlowNotice(() => unlocking.value)
 function startUnlockStages() {
   unlockStatus.value = t('onboarding.profileSelect.stageDecrypting')
 }
@@ -143,7 +147,7 @@ async function onUnlock() {
     passwordInput.value?.blur()
     if (!useDeepLinks().hasUnlockDestination()) await router.replace('/home')
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = errorMessage(e)
     password.value = ''
     await nextTick()
     requestAnimationFrame(() => passwordInput.value?.focus())
@@ -170,7 +174,7 @@ async function unlockWithBiometric(auto = false) {
     // missing keychain entitlement). Stay silent on auto; explain on a
     // deliberate tap.
     if (!auto) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = errorMessage(e)
       if (/itemnotfound|not found/i.test(msg)) {
         error.value = t('onboarding.profileSelect.biometricNotSetup')
       } else if (/-34018/.test(msg)) {
@@ -280,10 +284,10 @@ function onKeydown(event: KeyboardEvent) {
               :disabled="unlocking"
             />
             <Transition
-              enter-active-class="transition duration-150 ease-out"
+              enter-active-class="transition duration-(--duration-fast) ease-out"
               enter-from-class="opacity-0 -translate-y-1"
               enter-to-class="opacity-100 translate-y-0"
-              leave-active-class="transition duration-100 ease-in"
+              leave-active-class="transition duration-(--duration-fast) ease-in"
               leave-from-class="opacity-100"
               leave-to-class="opacity-0"
             >
@@ -291,10 +295,13 @@ function onKeydown(event: KeyboardEvent) {
                 v-if="unlocking && unlockStatus"
                 class="flex items-center gap-2 text-xs text-muted-foreground"
               >
-                <span class="inline-block h-3 w-3 rounded-full border-2 border-current border-e-transparent animate-spin" />
+                <span data-progress aria-hidden="true" class="inline-block h-3 w-3 rounded-full border-2 border-current border-e-transparent animate-spin" />
                 <span>{{ unlockStatus }}</span>
               </div>
             </Transition>
+            <p v-if="unlocking && slowUnlock" class="text-xs text-muted-foreground">
+              {{ $t('onboarding.profileSelect.stillUnlocking') }}
+            </p>
             <div class="flex items-center gap-2">
               <AppButton
                 type="button"

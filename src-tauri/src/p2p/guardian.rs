@@ -23,6 +23,7 @@
 use rusqlite::{Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
+use crate::domain::guardian_ai::GuardianDecision;
 use crate::domain::vc::{verify_credential_db, VerifiableCredential, VerificationPolicy};
 
 /// Tables mirrored to the guardian. Deliberately independent of the
@@ -90,30 +91,11 @@ pub enum GuardianRequest {
         link_id: String,
         sealed_marker: Vec<u8>,
     },
-    /// Child → guardian: sealed [`ApprovalRequestPayload`], asking the
+    /// Child → guardian: sealed [`crate::ai_access::ApprovalRequest`], asking the
     /// guardian to approve a remote model connection.
     ApprovalRequest { link_id: String, sealed: Vec<u8> },
-    /// Guardian → child: sealed [`ApprovalDecisionPayload`].
+    /// Guardian → child: sealed [`GuardianDecision`].
     ApprovalDecision { link_id: String, sealed: Vec<u8> },
-}
-
-/// What a learner under 18 asks a guardian to approve: one model connection
-/// at one endpoint. Sent only inside the sealed link.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ApprovalRequestPayload {
-    pub request_id: String,
-    pub connection_name: String,
-    pub endpoint: String,
-    pub model: String,
-}
-
-/// The guardian's decision. The latest decision applies, so an approval can
-/// be withdrawn later.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ApprovalDecisionPayload {
-    pub request_id: String,
-    pub endpoint: String,
-    pub approved: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -486,7 +468,7 @@ fn handle_approval_request(conn: &Connection, link_id: &str, sealed: &[u8]) -> G
         Ok(None) => return GuardianResponse::Unauthorized,
         Err(e) => return GuardianResponse::Error(e),
     };
-    let request: ApprovalRequestPayload = match open(&key, sealed) {
+    let request: crate::ai_access::ApprovalRequest = match open(&key, sealed) {
         Ok(r) => r,
         Err(e) => return GuardianResponse::Error(format!("open approval request: {e}")),
     };
@@ -498,19 +480,8 @@ fn handle_approval_request(conn: &Connection, link_id: &str, sealed: &[u8]) -> G
         return GuardianResponse::Error("approval request out of bounds".into());
     }
     // Repeats are expected: the ward re-sends until it hears a decision.
-    match conn.execute(
-        "INSERT INTO guardian_ai_requests (id, link_id, connection_name, endpoint, model, status, received_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', datetime('now'))
-         ON CONFLICT(id, link_id) DO NOTHING",
-        rusqlite::params![
-            request.request_id,
-            link_id,
-            request.connection_name,
-            request.endpoint,
-            request.model
-        ],
-    ) {
-        Ok(_) => GuardianResponse::Acknowledged,
+    match crate::ai_access::record_ward_request(conn, link_id, &request) {
+        Ok(()) => GuardianResponse::Acknowledged,
         Err(e) => GuardianResponse::Error(e.to_string()),
     }
 }
@@ -523,7 +494,7 @@ fn handle_approval_decision(conn: &Connection, link_id: &str, sealed: &[u8]) -> 
         Ok(None) => return GuardianResponse::Unauthorized,
         Err(e) => return GuardianResponse::Error(e),
     };
-    let decision: ApprovalDecisionPayload = match open(&key, sealed) {
+    let decision: GuardianDecision = match open(&key, sealed) {
         Ok(d) => d,
         Err(e) => return GuardianResponse::Error(format!("open approval decision: {e}")),
     };
@@ -689,7 +660,8 @@ fn complete_guardian_link(
     let notification = crate::notifications::record_if_enabled(
         conn,
         &crate::notifications::for_guardian_linked(link_id, guardian_display_name),
-    )?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok((sealed, notification))
 }
 
@@ -1343,7 +1315,7 @@ mod tests {
         let guardian = test_db();
         let g = guardian.conn();
         seed_guardian_link(g, "link", "guardian", key);
-        let request = ApprovalRequestPayload {
+        let request = crate::ai_access::ApprovalRequest {
             request_id: "req".into(),
             connection_name: "Work OpenAI".into(),
             endpoint: "https://api.openai.com/v1".into(),
@@ -1363,12 +1335,11 @@ mod tests {
                 GuardianResponse::Acknowledged
             ));
         }
-        let count: i64 = g
-            .query_row("SELECT COUNT(*) FROM guardian_ai_requests", [], |r| {
-                r.get(0)
-            })
-            .unwrap();
-        assert_eq!(count, 1, "repeats are idempotent");
+        assert_eq!(
+            crate::ai_access::ward_requests(g).unwrap().len(),
+            1,
+            "repeats are idempotent"
+        );
         // A wrong key or the wrong side is refused.
         let forged = seal(&[9u8; 32], &request).unwrap();
         assert!(matches!(
@@ -1405,7 +1376,7 @@ mod tests {
         )
         .unwrap();
         let decide = |approved: bool, endpoint: &str| {
-            let d = ApprovalDecisionPayload {
+            let d = GuardianDecision {
                 request_id: "req".into(),
                 endpoint: endpoint.into(),
                 approved,

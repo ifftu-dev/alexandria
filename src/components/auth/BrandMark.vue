@@ -20,9 +20,9 @@ withDefaults(defineProps<{ opening?: boolean }>(), { opening: false })
 <style scoped>
 .brand-mark { display: block; width: 100%; height: 100%; overflow: visible; color: var(--app-primary); }
 .brand-mark__points { opacity: 0; }
-.brand-mark--opening .brand-mark__points { transform-origin: center; animation: mark-points 680ms var(--ease-settle) both; }
-.brand-mark--opening .brand-mark__outline { animation: mark-draw 680ms var(--ease-settle) both; }
-.brand-mark--opening .brand-mark__branches { transform-origin: center; animation: mark-branches 800ms var(--ease-settle) both; }
+.brand-mark--opening .brand-mark__points { transform-origin: center; animation: mark-points var(--duration-emphasis) var(--ease-settle) both; }
+.brand-mark--opening .brand-mark__outline { animation: mark-draw var(--duration-emphasis) var(--ease-settle) both; }
+.brand-mark--opening .brand-mark__branches { transform-origin: center; animation: mark-branches var(--duration-reveal) var(--ease-settle) both; }
 @keyframes mark-points {
   0% { opacity: 0; transform: scale(1.65) rotate(-12deg); }
   30%, 55% { opacity: 1; transform: scale(1); }

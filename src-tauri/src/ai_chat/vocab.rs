@@ -2,55 +2,18 @@
 //! stable string form that crosses the Tauri bridge.
 //!
 //! The webview never retypes these. `scripts/chat-vocab.json` is a snapshot
-//! of this module, checked by the `chat_vocab_snapshot_is_current` test
-//! below and rewritten by `npm run generate:chat-vocab`, which then has
+//! of this module, checked by the `chat_vocab_snapshot_is_current` test below
+//! and rewritten by `npm run generate:chat-vocab`, which then has
 //! `scripts/check-tauri-commands.mjs --write` render it into
 //! `src/generated/chat-vocab.ts`. Both guards run in CI, so adding a variant
-//! here without regenerating fails the build rather than drifting.
+//! without regenerating fails the build rather than drifting. The
+//! notification vocabularies have their own snapshot, owned by
+//! `notifications::vocabulary`.
 
 use alexandria_ai::{Location, Protocol};
 use serde::Serialize;
 
-/// A closed set of names with one stable string form each. The string is
-/// part of the variant, so a variant cannot exist without one; `ALL` lists
-/// every variant for the snapshot and the round-trip test.
-macro_rules! vocabulary {
-    (
-        $(#[$meta:meta])*
-        $name:ident {
-            $($(#[$variant_meta:meta])* $variant:ident => $text:literal),+ $(,)?
-        }
-    ) => {
-        $(#[$meta])*
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-        pub enum $name {
-            $($(#[$variant_meta])* $variant),+
-        }
-
-        impl $name {
-            pub const ALL: &'static [$name] = &[$($name::$variant),+];
-
-            pub const fn as_str(self) -> &'static str {
-                match self {
-                    $($name::$variant => $text),+
-                }
-            }
-
-            pub fn parse(text: &str) -> Option<Self> {
-                match text {
-                    $($text => Some($name::$variant),)+
-                    _ => None,
-                }
-            }
-        }
-
-        impl std::fmt::Display for $name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str(self.as_str())
-            }
-        }
-    };
-}
+use crate::vocabulary::vocabulary;
 
 vocabulary! {
     /// The code before the first colon of a chat or sign-in error, stored
@@ -176,25 +139,27 @@ pub fn refuse(code: ChatErrorCode, reason: impl std::fmt::Display) -> String {
 }
 
 /// A refusal from the AI access policy (`crate::ai_access`) as chat returns
-/// it: the typed reason's code from this vocabulary, then its reason. A
-/// Studio error the policy passed on reads as it always has.
-pub fn refused(refusal: alexandria_studio::access::Refused) -> String {
-    use alexandria_studio::access::Refused as R;
-    let code = match &refusal {
-        R::TooYoungForRemote => ChatErrorCode::Under13,
-        R::AdultsOnly(_) => ChatErrorCode::AdultsOnly,
-        R::GuardianRequired => ChatErrorCode::GuardianRequired,
-        R::GuardianPending => ChatErrorCode::GuardianPending,
-        R::GuardianDeclined => ChatErrorCode::GuardianDeclined,
-        R::NoGuardian => ChatErrorCode::NoGuardian,
-        R::NotRemote | R::LessonWithheld | R::Invalid(_) => ChatErrorCode::InvalidInput,
-        R::ConnectionDisabled | R::WrongCapability => ChatErrorCode::NoConnection,
-        R::AttemptInProgress => ChatErrorCode::AssessmentActive,
-        R::LessonNotFound => ChatErrorCode::NotFound,
-        R::Storage(_) => ChatErrorCode::StorageError,
-        R::Studio(error) => return error.to_string(),
-    };
-    refuse(code, refusal.reason())
+/// it: the typed reason's code from this vocabulary, then its reason.
+pub fn refused(denied: alexandria_studio::access::AccessDenied) -> String {
+    refuse(denial_code(&denied), denied)
+}
+
+/// The code chat shows for an access denial.
+pub fn denial_code(denied: &alexandria_studio::access::AccessDenied) -> ChatErrorCode {
+    use alexandria_studio::access::AccessDenied as D;
+    match denied {
+        D::TooYoungForRemote => ChatErrorCode::Under13,
+        D::AdultsOnly(_) => ChatErrorCode::AdultsOnly,
+        D::GuardianRequired => ChatErrorCode::GuardianRequired,
+        D::GuardianPending => ChatErrorCode::GuardianPending,
+        D::GuardianDeclined => ChatErrorCode::GuardianDeclined,
+        D::NoGuardian => ChatErrorCode::NoGuardian,
+        D::NotRemote | D::LessonWithheld | D::Invalid(_) => ChatErrorCode::InvalidInput,
+        D::ConnectionDisabled | D::WrongCapability => ChatErrorCode::NoConnection,
+        D::AttemptInProgress => ChatErrorCode::AssessmentActive,
+        D::LessonNotFound => ChatErrorCode::NotFound,
+        D::Storage(_) | D::Database(_) => ChatErrorCode::StorageError,
+    }
 }
 
 vocabulary! {
@@ -297,27 +262,29 @@ pub fn snapshot_json() -> String {
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     #[test]
     fn every_policy_refusal_reads_as_the_code_the_webview_translates() {
         use super::refused;
-        use alexandria_studio::access::Refused;
+        use alexandria_studio::access::AccessDenied;
         use alexandria_studio::Error;
-        let cases: [(Refused, &str); 13] = [
-            (Refused::TooYoungForRemote, "under_13: learners under 13 can use models on this device or their own network only"),
-            (Refused::AdultsOnly("OpenRouter"), "adults_only: OpenRouter requires users to be 18 or older"),
-            (Refused::GuardianRequired, "guardian_required: remote models need a guardian's approval; use a model on this device or your own network"),
-            (Refused::GuardianPending, "guardian_pending: waiting for a guardian to approve this model"),
-            (Refused::GuardianDeclined, "guardian_declined: a guardian did not approve this model"),
-            (Refused::NoGuardian, "no_guardian: link a guardian in Settings first"),
-            (Refused::NotRemote, "invalid_input: only remote models need a guardian's approval"),
-            (Refused::ConnectionDisabled, "no_connection: the chosen model connection is disabled"),
-            (Refused::AttemptInProgress, &Error::AssessmentActive.to_string()),
-            (Refused::LessonNotFound, &Error::NotFound.to_string()),
-            (Refused::LessonWithheld, "invalid_input: only text lessons can be attached"),
-            (Refused::Storage("profile"), "storage_error: profile could not be read"),
-            (Refused::Studio(Error::Conflict), &Error::Conflict.to_string()),
+        let cases: [(AccessDenied, &str); 15] = [
+            (AccessDenied::TooYoungForRemote, "under_13: learners under 13 can use models on this device or their own network only"),
+            (AccessDenied::AdultsOnly("OpenRouter"), "adults_only: OpenRouter requires users to be 18 or older"),
+            (AccessDenied::GuardianRequired, "guardian_required: remote models need a guardian's approval; use a model on this device or your own network"),
+            (AccessDenied::GuardianPending, "guardian_pending: waiting for a guardian to approve this model"),
+            (AccessDenied::GuardianDeclined, "guardian_declined: a guardian did not approve this model"),
+            (AccessDenied::NoGuardian, "no_guardian: link a guardian in Settings first"),
+            (AccessDenied::NotRemote, "invalid_input: only remote models need a guardian's approval"),
+            (AccessDenied::ConnectionDisabled, "no_connection: the chosen model connection is disabled"),
+            (AccessDenied::AttemptInProgress, &Error::AssessmentActive.to_string()),
+            (AccessDenied::LessonNotFound, &Error::NotFound.to_string()),
+            (AccessDenied::LessonWithheld, "invalid_input: only text lessons can be attached"),
+            (AccessDenied::Storage("profile"), "storage_error: profile could not be read"),
+            (AccessDenied::Database(rusqlite::Error::InvalidQuery), "storage_error: studio data could not be accessed"),
+            (AccessDenied::Invalid("invalid identifier".into()), "invalid_input: invalid identifier"),
+            (AccessDenied::WrongCapability, "no_connection: the chosen model connection does not answer text"),
         ];
         for (refusal, expected) in cases {
             assert_eq!(refused(refusal), expected);
@@ -326,23 +293,7 @@ mod tests {
 
     use super::*;
 
-    fn round_trips<T: Copy + PartialEq + std::fmt::Debug>(
-        all: &[T],
-        as_str: fn(T) -> &'static str,
-        parse: fn(&str) -> Option<T>,
-    ) {
-        let mut seen = HashSet::new();
-        for &item in all {
-            let text = as_str(item);
-            assert_eq!(parse(text), Some(item), "{text}");
-            assert!(seen.insert(text), "{text} is listed twice");
-            assert!(
-                text.bytes()
-                    .all(|b| b.is_ascii_lowercase() || b == b'_' || b.is_ascii_digit()),
-                "{text} is not a stable snake_case name"
-            );
-        }
-    }
+    use crate::vocabulary::assert_round_trips as round_trips;
 
     #[test]
     fn every_vocabulary_round_trips_through_its_string_form() {
@@ -666,39 +617,16 @@ mod tests {
         }
     }
 
-    fn snapshot_path() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../scripts/chat-vocab.json")
-    }
-
     /// The checked-in snapshot equals this module. With `UPDATE_CHAT_VOCAB=1`
     /// (set by `npm run generate:chat-vocab`) the snapshot is rewritten
     /// instead; otherwise a stale snapshot fails with the lines that differ.
     #[test]
     fn chat_vocab_snapshot_is_current() {
-        let expected = snapshot_json();
-        let path = snapshot_path();
-        if std::env::var_os("UPDATE_CHAT_VOCAB").is_some_and(|v| v == "1") {
-            std::fs::write(&path, &expected)
-                .unwrap_or_else(|e| panic!("could not write {}: {e}", path.display()));
-            return;
-        }
-        let actual = std::fs::read_to_string(&path).unwrap_or_default();
-        if actual == expected {
-            return;
-        }
-        let expected_lines: HashSet<&str> = expected.lines().collect();
-        let actual_lines: HashSet<&str> = actual.lines().collect();
-        let missing: Vec<&str> = expected
-            .lines()
-            .filter(|l| !actual_lines.contains(l))
-            .collect();
-        let extra: Vec<&str> = actual
-            .lines()
-            .filter(|l| !expected_lines.contains(l))
-            .collect();
-        panic!(
-            "{} is stale; run `npm run generate:chat-vocab` and commit the result.\n  missing from the snapshot: {missing:?}\n  no longer in the vocabulary: {extra:?}",
-            path.display()
+        crate::vocabulary::assert_snapshot_current(
+            "../scripts/chat-vocab.json",
+            &snapshot_json(),
+            "UPDATE_CHAT_VOCAB",
+            "npm run generate:chat-vocab",
         );
     }
 }

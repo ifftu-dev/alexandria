@@ -3,7 +3,9 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use super::{NewNotification, NotificationRow};
+use super::{
+    NewNotification, NotificationError, NotificationKind, NotificationRow, NotificationSource,
+};
 
 const DEFAULT_LIMIT: u32 = 100;
 
@@ -14,14 +16,13 @@ pub fn record(
     conn: &Connection,
     new: &NewNotification,
     now: &str,
-) -> Result<Option<NotificationRow>, String> {
-    crate::db::with_transaction(conn, || {
+) -> Result<Option<NotificationRow>, NotificationError> {
+    crate::db::with_typed_transaction(conn, || {
         if let Some(key) = &new.dedupe_key {
             conn.execute(
                 "INSERT OR IGNORE INTO notification_dedupe (dedupe_key, seen_at) VALUES (?1, ?2)",
                 params![key, now],
-            )
-            .map_err(|e| e.to_string())?;
+            )?;
             if conn.changes() == 0 {
                 return Ok(None);
             }
@@ -31,15 +32,14 @@ pub fn record(
             .payload
             .as_ref()
             .map(serde_json::to_string)
-            .transpose()
-            .map_err(|e| e.to_string())?;
+            .transpose()?;
         conn.execute(
             "INSERT INTO notifications \
              (id, kind, title, body, route, source, dedupe_key, payload_json, created_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 id,
-                new.kind,
+                new.kind.as_str(),
                 new.title,
                 new.body,
                 new.route,
@@ -48,15 +48,14 @@ pub fn record(
                 payload_json,
                 now,
             ],
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
         Ok(Some(NotificationRow {
             id,
-            kind: new.kind.clone(),
+            kind: new.kind,
             title: new.title.clone(),
             body: new.body.clone(),
             route: new.route.clone(),
-            source: new.source.as_str().to_string(),
+            source: new.source,
             created_at: now.to_string(),
             read_at: None,
             payload: new.payload.clone(),
@@ -69,7 +68,7 @@ pub fn list(
     conn: &Connection,
     limit: Option<u32>,
     unread_only: bool,
-) -> Result<Vec<NotificationRow>, String> {
+) -> Result<Vec<NotificationRow>, NotificationError> {
     let limit = limit.unwrap_or(DEFAULT_LIMIT).clamp(1, 1000);
     let sql = if unread_only {
         "SELECT id, kind, title, body, route, source, created_at, read_at, payload_json \
@@ -78,70 +77,69 @@ pub fn list(
         "SELECT id, kind, title, body, route, source, created_at, read_at, payload_json \
          FROM notifications ORDER BY created_at DESC, rowid DESC LIMIT ?1"
     };
-    let mut statement = conn.prepare(sql).map_err(|e| e.to_string())?;
-    let rows = statement
-        .query_map(params![limit], |row| {
-            let payload_json: Option<String> = row.get(8)?;
-            Ok(NotificationRow {
-                id: row.get(0)?,
-                kind: row.get(1)?,
-                title: row.get(2)?,
-                body: row.get(3)?,
-                route: row.get(4)?,
-                source: row.get(5)?,
-                created_at: row.get(6)?,
-                read_at: row.get(7)?,
-                payload: payload_json.and_then(|json| serde_json::from_str(&json).ok()),
-            })
+    let mut statement = conn.prepare(sql)?;
+    let rows = statement.query_map(params![limit], |row| {
+        let payload_json: Option<String> = row.get(8)?;
+        let kind: String = row.get(1)?;
+        let source: String = row.get(5)?;
+        Ok(NotificationRow {
+            id: row.get(0)?,
+            kind: NotificationKind::stored(&kind),
+            title: row.get(2)?,
+            body: row.get(3)?,
+            route: row.get(4)?,
+            // Only this app writes the source; anything else reads as local.
+            source: NotificationSource::parse(&source).unwrap_or(NotificationSource::Local),
+            created_at: row.get(6)?,
+            read_at: row.get(7)?,
+            payload: payload_json.and_then(|json| serde_json::from_str(&json).ok()),
         })
-        .map_err(|e| e.to_string())?;
+    })?;
     rows.collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())
+        .map_err(NotificationError::from)
 }
 
-pub fn unread_count(conn: &Connection) -> Result<u32, String> {
+pub fn unread_count(conn: &Connection) -> Result<u32, NotificationError> {
     conn.query_row(
         "SELECT COUNT(*) FROM notifications WHERE read_at IS NULL",
         [],
         |row| row.get::<_, i64>(0),
     )
     .map(|count| u32::try_from(count).unwrap_or(u32::MAX))
-    .map_err(|e| e.to_string())
+    .map_err(NotificationError::from)
 }
 
 /// Mark the given notifications read. Already-read rows keep their first
 /// `read_at`. Returns how many changed.
-pub fn mark_read(conn: &Connection, ids: &[String], now: &str) -> Result<usize, String> {
+pub fn mark_read(conn: &Connection, ids: &[String], now: &str) -> Result<usize, NotificationError> {
     let mut changed = 0;
     for id in ids {
-        changed += conn
-            .execute(
-                "UPDATE notifications SET read_at = ?2 WHERE id = ?1 AND read_at IS NULL",
-                params![id, now],
-            )
-            .map_err(|e| e.to_string())?;
+        changed += conn.execute(
+            "UPDATE notifications SET read_at = ?2 WHERE id = ?1 AND read_at IS NULL",
+            params![id, now],
+        )?;
     }
     Ok(changed)
 }
 
-pub fn mark_all_read(conn: &Connection, now: &str) -> Result<usize, String> {
+pub fn mark_all_read(conn: &Connection, now: &str) -> Result<usize, NotificationError> {
     conn.execute(
         "UPDATE notifications SET read_at = ?1 WHERE read_at IS NULL",
         params![now],
     )
-    .map_err(|e| e.to_string())
+    .map_err(NotificationError::from)
 }
 
 /// Delete every notification. The dedupe keys stay: what was already
 /// reported stays reported.
-pub fn clear(conn: &Connection) -> Result<usize, String> {
+pub fn clear(conn: &Connection) -> Result<usize, NotificationError> {
     conn.execute("DELETE FROM notifications", [])
-        .map_err(|e| e.to_string())
+        .map_err(NotificationError::from)
 }
 
 /// Whether a dedupe key has been claimed, for producers that want to skip
 /// work (a network round trip, say) rather than record and be ignored.
-pub fn seen(conn: &Connection, dedupe_key: &str) -> Result<bool, String> {
+pub fn seen(conn: &Connection, dedupe_key: &str) -> Result<bool, NotificationError> {
     conn.query_row(
         "SELECT 1 FROM notification_dedupe WHERE dedupe_key = ?1",
         params![dedupe_key],
@@ -149,14 +147,13 @@ pub fn seen(conn: &Connection, dedupe_key: &str) -> Result<bool, String> {
     )
     .optional()
     .map(|found| found.is_some())
-    .map_err(|e| e.to_string())
+    .map_err(NotificationError::from)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::notifications::{kind, Source};
 
     fn db() -> Database {
         let db = Database::open_in_memory().expect("in-memory database");
@@ -166,7 +163,7 @@ mod tests {
 
     fn sample() -> NewNotification {
         NewNotification::new(
-            kind::OFFER_SENT,
+            NotificationKind::OfferSent,
             "New offer",
             "An organisation sent you an offer.",
         )
@@ -176,13 +173,27 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_write_is_a_database_error() {
+        let db = db();
+        db.conn().execute_batch("DROP TABLE notifications").unwrap();
+        assert!(matches!(
+            record(db.conn(), &sample(), "t1"),
+            Err(super::super::NotificationError::Database(_))
+        ));
+        assert!(matches!(
+            unread_count(db.conn()),
+            Err(super::super::NotificationError::Database(_))
+        ));
+    }
+
+    #[test]
     fn records_lists_and_counts() {
         let db = db();
         let row = record(db.conn(), &sample(), "2026-10-20T10:00:00Z")
             .unwrap()
             .expect("recorded");
-        assert_eq!(row.kind, kind::OFFER_SENT);
-        assert_eq!(row.source, Source::Local.as_str());
+        assert_eq!(row.kind, NotificationKind::OfferSent);
+        assert_eq!(row.source, NotificationSource::Local);
         assert_eq!(row.payload, Some(serde_json::json!({ "id": "abc" })));
 
         let listed = list(db.conn(), None, false).unwrap();
@@ -230,6 +241,22 @@ mod tests {
         // Newest first, and the first row keeps `r1`.
         assert_eq!(all[0].id, second.id);
         assert_eq!(all[1].read_at.as_deref(), Some("r1"));
+    }
+
+    #[test]
+    fn a_stored_kind_this_build_does_not_know_lists_as_generic() {
+        let db = db();
+        // Written by a newer build: the row stays readable, as the generic kind.
+        db.conn()
+            .execute(
+                "INSERT INTO notifications (id, kind, title, body, source, created_at) \
+                 VALUES ('n1', 'future_kind', 't', 'b', 'local', 't1')",
+                [],
+            )
+            .unwrap();
+        let listed = list(db.conn(), None, false).unwrap();
+        assert_eq!(listed[0].kind, NotificationKind::Generic);
+        assert_eq!(listed[0].source, NotificationSource::Local);
     }
 
     #[test]

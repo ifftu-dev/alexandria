@@ -11,15 +11,20 @@
 //! - [`store`]: read stored credentials; decode untrusted payloads.
 //! - [`bundle`]: survivability bundles and offline verification.
 //! - [`auto`]: self-issued credentials for observed completion mints.
+//!
+//! Every function here returns [`CredentialError`]; commands convert it to
+//! a string at their boundary.
 
 pub mod auto;
 pub mod bundle;
+mod error;
 pub mod issue;
 pub mod issuer;
 pub mod lifecycle;
 pub mod status_list;
 pub mod store;
 
+pub use error::{CredentialError, PolicyViolation, StatusChange, SupersessionRequires};
 pub use issue::{issue, IssuancePolicy, IssueCredentialRequest};
 pub use issuer::Issuer;
 

@@ -127,7 +127,7 @@ const networkIconClass = computed(() => {
   color: var(--app-primary);
   text-decoration: none;
   font-weight: 500;
-  transition: opacity 0.15s;
+  transition: opacity var(--duration-fast);
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }

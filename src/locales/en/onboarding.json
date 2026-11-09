@@ -165,7 +165,8 @@
     "biometricNotSetup": "Biometric unlock isn't set up yet. Unlock once with your password to enable it.",
     "biometricUnavailable": "Biometric unlock is unavailable in this build (entitlement -34018). Use a signed build.",
     "biometricFailed": "Biometric unlock failed: {error}",
-    "biometricMismatch": "Biometric password didn't match this profile. Enter your password."
+    "biometricMismatch": "Biometric password didn't match this profile. Enter your password.",
+    "stillUnlocking": "Still unlocking. Some devices take a little longer."
   },
   "guardianGate": {
     "heading": "A guardian needs to activate your account",

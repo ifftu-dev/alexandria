@@ -20,7 +20,24 @@ use crate::clock::now_rfc3339;
 use crate::crypto::did::Did;
 use crate::db::scoring_inputs::{scoring_input_fingerprint, verified_skill_inputs};
 use crate::domain::vc::{CredentialType, VerifiableCredential};
-use crate::network_profile::embedded_preprod;
+use crate::network_profile::{embedded_preprod, NetworkProfileError};
+
+/// Why derived skill state could not be read or refreshed.
+#[derive(Debug, thiserror::Error)]
+pub enum AggregationError {
+    #[error(transparent)]
+    Database(#[from] rusqlite::Error),
+    /// A cached state could not be encoded or decoded.
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    /// The verified scoring inputs (`db::scoring_inputs`) could not be read.
+    #[error("{0}")]
+    Inputs(String),
+    /// The embedded network profile, whose network the inputs must verify
+    /// on, is invalid.
+    #[error(transparent)]
+    NetworkProfile(&'static NetworkProfileError),
+}
 
 /// Read a cached `DerivedSkillState` for `(subject, skill)` if one
 /// exists for the current calculation version, else recompute live
@@ -30,8 +47,8 @@ pub fn get_derived_skill_state_impl(
     subject_did: &Did,
     skill_id: &str,
     now: &str,
-) -> Result<Option<DerivedSkillState>, String> {
-    crate::db::with_transaction(conn, || {
+) -> Result<Option<DerivedSkillState>, AggregationError> {
+    crate::db::with_typed_transaction(conn, || {
         get_derived_skill_state_in_transaction(conn, subject_did, skill_id, now)
     })
 }
@@ -41,10 +58,10 @@ fn get_derived_skill_state_in_transaction(
     subject_did: &Did,
     skill_id: &str,
     now: &str,
-) -> Result<Option<DerivedSkillState>, String> {
+) -> Result<Option<DerivedSkillState>, AggregationError> {
     let cfg = AggregationConfig::default();
-    let fingerprint =
-        scoring_input_fingerprint(conn, subject_did.as_str(), skill_id, &cfg.version)?;
+    let fingerprint = scoring_input_fingerprint(conn, subject_did.as_str(), skill_id, &cfg.version)
+        .map_err(AggregationError::Inputs)?;
 
     // A cached state is served only while its inputs are unchanged.
     if let Some(state) = read_cached(conn, subject_did, skill_id, &cfg.version, &fingerprint)? {
@@ -63,14 +80,13 @@ fn refresh_pair(
     now: &str,
     cfg: &AggregationConfig,
     fingerprint: &str,
-) -> Result<Option<DerivedSkillState>, String> {
+) -> Result<Option<DerivedSkillState>, AggregationError> {
     let (evidence, dominant_provenance) = load_evidence_for(conn, subject, skill_id, now, cfg)?;
     if evidence.is_empty() {
         conn.execute(
             "DELETE FROM derived_skill_states WHERE subject_did = ?1 AND skill_id = ?2",
             params![subject.as_str(), skill_id],
-        )
-        .map_err(|e| e.to_string())?;
+        )?;
         return Ok(None);
     }
     let state = aggregate_skill_state(subject, skill_id, &evidence, now, cfg);
@@ -84,20 +100,17 @@ pub(crate) fn revalidate_cached_states(
     conn: &Connection,
     subject: Option<&str>,
     now: &str,
-) -> Result<(), String> {
+) -> Result<(), AggregationError> {
     let cfg = AggregationConfig::default();
     conn.execute(
         "DELETE FROM derived_skill_states \
          WHERE calculation_version != ?1 AND (?2 IS NULL OR subject_did = ?2)",
         params![cfg.version, subject],
-    )
-    .map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(
-            "SELECT subject_did, skill_id, input_fingerprint FROM derived_skill_states \
+    )?;
+    let mut stmt = conn.prepare(
+        "SELECT subject_did, skill_id, input_fingerprint FROM derived_skill_states \
              WHERE ?1 IS NULL OR subject_did = ?1 ORDER BY subject_did, skill_id",
-        )
-        .map_err(|e| e.to_string())?;
+    )?;
     let cached = stmt
         .query_map([subject], |row| {
             Ok((
@@ -105,14 +118,13 @@ pub(crate) fn revalidate_cached_states(
                 row.get::<_, String>(1)?,
                 row.get::<_, Option<String>>(2)?,
             ))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     drop(stmt);
     for (subject, skill, stored) in cached {
         let did = Did(subject);
-        let fingerprint = scoring_input_fingerprint(conn, did.as_str(), &skill, &cfg.version)?;
+        let fingerprint = scoring_input_fingerprint(conn, did.as_str(), &skill, &cfg.version)
+            .map_err(AggregationError::Inputs)?;
         if stored.as_deref() != Some(fingerprint.as_str()) {
             refresh_pair(conn, &did, &skill, now, &cfg, &fingerprint)?;
         }
@@ -126,8 +138,8 @@ pub(crate) fn revalidate_cached_states(
 pub fn list_derived_states_impl(
     conn: &Connection,
     subject_did: Option<&str>,
-) -> Result<Vec<DerivedSkillState>, String> {
-    crate::db::with_transaction(conn, || {
+) -> Result<Vec<DerivedSkillState>, AggregationError> {
+    crate::db::with_typed_transaction(conn, || {
         let now = now_rfc3339();
         revalidate_cached_states(conn, subject_did, &now)?;
         let mut sql = String::from("SELECT state_json FROM derived_skill_states");
@@ -138,16 +150,14 @@ pub fn list_derived_states_impl(
         }
         sql.push_str(" ORDER BY subject_did, skill_id");
 
-        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(rusqlite::params_from_iter(args.iter()), |r| {
-                r.get::<_, String>(0)
-            })
-            .map_err(|e| e.to_string())?;
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(args.iter()), |r| {
+            r.get::<_, String>(0)
+        })?;
         let mut out = Vec::new();
         for r in rows {
-            let json = r.map_err(|e| e.to_string())?;
-            out.push(serde_json::from_str(&json).map_err(|e| e.to_string())?);
+            let json = r?;
+            out.push(serde_json::from_str(&json)?);
         }
         Ok(out)
     })
@@ -156,38 +166,34 @@ pub fn list_derived_states_impl(
 /// Recompute every (subject, skill) pair present in the credentials
 /// table and refresh the `derived_skill_states` cache. Returns the
 /// number of (subject, skill) pairs processed.
-pub fn recompute_all_impl(conn: &Connection, now: &str) -> Result<u32, String> {
-    crate::db::with_transaction(conn, || recompute_all_in_transaction(conn, now))
+pub fn recompute_all_impl(conn: &Connection, now: &str) -> Result<u32, AggregationError> {
+    crate::db::with_typed_transaction(conn, || recompute_all_in_transaction(conn, now))
 }
 
-fn recompute_all_in_transaction(conn: &Connection, now: &str) -> Result<u32, String> {
+fn recompute_all_in_transaction(conn: &Connection, now: &str) -> Result<u32, AggregationError> {
     let cfg = AggregationConfig::default();
     conn.execute(
         "DELETE FROM derived_skill_states WHERE calculation_version != ?1",
         params![cfg.version],
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
     // Cached pairs are included so a pair whose inputs all disappeared is
     // removed rather than left with its old score.
-    let mut stmt = conn
-        .prepare(
-            "SELECT subject_did, skill_id FROM credentials \
+    let mut stmt = conn.prepare(
+        "SELECT subject_did, skill_id FROM credentials \
              WHERE skill_id IS NOT NULL AND revoked = 0 \
              UNION SELECT subject_did, skill_id FROM derived_skill_states \
              ORDER BY 1, 2",
-        )
-        .map_err(|e| e.to_string())?;
+    )?;
     let pairs: Vec<(String, String)> = stmt
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<Result<Vec<_>, _>>()?;
     drop(stmt);
 
     let mut count = 0u32;
     for (subject, skill) in pairs {
         let did = Did(subject);
-        let fingerprint = scoring_input_fingerprint(conn, did.as_str(), &skill, &cfg.version)?;
+        let fingerprint = scoring_input_fingerprint(conn, did.as_str(), &skill, &cfg.version)
+            .map_err(AggregationError::Inputs)?;
         if refresh_pair(conn, &did, &skill, now, &cfg, &fingerprint)?.is_some() {
             count += 1;
         }
@@ -210,9 +216,9 @@ fn load_evidence_for(
     skill_id: &str,
     verification_time: &str,
     config: &AggregationConfig,
-) -> Result<(Vec<AggregationInput>, Option<String>), String> {
+) -> Result<(Vec<AggregationInput>, Option<String>), AggregationError> {
     let network_id = &embedded_preprod()
-        .map_err(|error| error.to_string())?
+        .map_err(AggregationError::NetworkProfile)?
         .network_id;
     let inputs = verified_skill_inputs(
         conn,
@@ -220,7 +226,8 @@ fn load_evidence_for(
         skill_id,
         verification_time,
         network_id,
-    )?;
+    )
+    .map_err(AggregationError::Inputs)?;
     let dominant_provenance = inputs
         .iter()
         .filter_map(|input| input.claim.provenance.as_ref())
@@ -271,7 +278,7 @@ fn read_cached(
     skill_id: &str,
     version: &str,
     fingerprint: &str,
-) -> Result<Option<DerivedSkillState>, String> {
+) -> Result<Option<DerivedSkillState>, AggregationError> {
     let row: Option<String> = conn
         .query_row(
             "SELECT state_json FROM derived_skill_states \
@@ -280,10 +287,9 @@ fn read_cached(
             params![subject.as_str(), skill_id, version, fingerprint],
             |r| r.get(0),
         )
-        .optional()
-        .map_err(|e| e.to_string())?;
+        .optional()?;
     match row {
-        Some(s) => Ok(Some(serde_json::from_str(&s).map_err(|e| e.to_string())?)),
+        Some(s) => Ok(Some(serde_json::from_str(&s)?)),
         None => Ok(None),
     }
 }
@@ -293,8 +299,8 @@ fn upsert_cached(
     state: &DerivedSkillState,
     fingerprint: &str,
     dominant_provenance: Option<String>,
-) -> Result<(), String> {
-    let json = serde_json::to_string(state).map_err(|e| e.to_string())?;
+) -> Result<(), AggregationError> {
+    let json = serde_json::to_string(state)?;
     conn.execute(
         "INSERT INTO derived_skill_states \
          (subject_did, skill_id, calculation_version, raw_score, confidence, \
@@ -330,8 +336,7 @@ fn upsert_cached(
             dominant_provenance,
             fingerprint,
         ],
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
 
     snapshot_history(conn, state)?;
     Ok(())
@@ -342,7 +347,7 @@ fn upsert_cached(
 /// One row per (subject, skill, day): `INSERT ... ON CONFLICT DO UPDATE` so a
 /// second recompute on the same day overwrites that day's snapshot rather
 /// than duplicating it, keeping the history one point per day.
-fn snapshot_history(conn: &Connection, state: &DerivedSkillState) -> Result<(), String> {
+fn snapshot_history(conn: &Connection, state: &DerivedSkillState) -> Result<(), AggregationError> {
     conn.execute(
         "INSERT INTO derived_skill_state_history \
          (subject_did, skill_id, snapshot_date, raw_score, confidence, trust_score, \
@@ -365,8 +370,7 @@ fn snapshot_history(conn: &Connection, state: &DerivedSkillState) -> Result<(), 
             state.level,
             state.evidence_mass,
         ],
-    )
-    .map_err(|e| e.to_string())?;
+    )?;
     Ok(())
 }
 
@@ -546,6 +550,22 @@ mod tests {
         let (db, _subject, _skill) = setup_with("skill_list_test", 0.9);
         let empty = list_derived_states_impl(db.conn(), None).unwrap();
         assert!(empty.is_empty(), "list must not auto-compute");
+    }
+
+    #[test]
+    fn an_unreadable_cached_state_is_a_decoding_error() {
+        let (db, subject, skill) = setup_with("skill_corrupt_test", 0.9);
+        get_derived_skill_state_impl(db.conn(), &subject, &skill, &now_rfc3339()).unwrap();
+        db.conn()
+            .execute(
+                "UPDATE derived_skill_states SET state_json = 'not json'",
+                [],
+            )
+            .unwrap();
+        assert!(matches!(
+            list_derived_states_impl(db.conn(), None),
+            Err(AggregationError::Json(_))
+        ));
     }
 
     #[test]

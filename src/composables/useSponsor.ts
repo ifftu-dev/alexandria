@@ -1,5 +1,6 @@
 import { ref } from 'vue'
 import { useLocalApi } from './useLocalApi'
+import { announceCredentialsChanged } from './credentialEvents'
 import type {
   CreateRoleAssessmentRequest,
   Organization,
@@ -7,6 +8,7 @@ import type {
   RoleAttemptSummary,
   VerifiableCredential,
 } from '@/types'
+import { errorMessage } from '@/utils/errorMessage'
 
 /**
  * Frontend wrapper for the enterprise sponsor / role-assessment IPC
@@ -28,7 +30,7 @@ export function useSponsor() {
     try {
       return await fn()
     } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
+      error.value = errorMessage(e)
       return null
     } finally {
       loading.value = false
@@ -91,13 +93,15 @@ export function useSponsor() {
     subject: string,
     integritySessionId: string,
   ) {
-    return run(() =>
-      invoke<VerifiableCredential>('issue_role_credential', {
+    return run(async () => {
+      const vc = await invoke<VerifiableCredential>('issue_role_credential', {
         roleAssessmentId,
         subject,
         integritySessionId,
-      }),
-    )
+      })
+      announceCredentialsChanged()
+      return vc
+    })
   }
 
   return {

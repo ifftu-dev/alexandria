@@ -224,7 +224,7 @@ function isEdgeHighlighted(e: LayoutEdge): boolean {
             :stroke-width="isEdgeHighlighted(e) ? 2 : 1"
             :opacity="isEdgeHighlighted(e) ? 0.8 : 0.25"
             :marker-end="isEdgeHighlighted(e) ? 'url(#arrow-hl)' : 'url(#arrow)'"
-            class="transition-all duration-200"
+            class="transition-all duration-(--duration-base)"
           />
         </g>
 
@@ -246,7 +246,7 @@ function isEdgeHighlighted(e: LayoutEdge): boolean {
             rx="8"
             :fill="bloomFill(node.bloom)"
             :opacity="hoveredNode === node.id ? 1 : 0.85"
-            class="transition-opacity duration-150"
+            class="transition-opacity duration-(--duration-fast)"
           />
 
           <!-- Node label -->

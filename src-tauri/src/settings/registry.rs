@@ -179,6 +179,16 @@ pub mod keys {
         default: || "system".to_string(),
     };
 
+    pub const UI_MOTION: SettingKey<String> = SettingKey {
+        key: "ui.motion",
+        scope: Scope::Device,
+        category: "Appearance",
+        label: "Motion",
+        description: "System, reduced or off. System follows the operating system's \
+                      reduce-motion preference. A local copy applies before unlock.",
+        default: || "system".to_string(),
+    };
+
     pub const UI_SIDEBAR_COLLAPSED: SettingKey<bool> = SettingKey {
         key: "ui.sidebar_collapsed",
         scope: Scope::Sync,
@@ -276,7 +286,9 @@ pub mod keys {
 
     /// Device-scoped: a push token belongs to one installation, so whether
     /// this one registers for remote wake-ups is not something another
-    /// device should inherit through sync.
+    /// device should inherit through sync. Registration also needs
+    /// [`ORGANISATIONS_ENABLED`]; while that is off push is paused and this
+    /// preference is kept unchanged.
     pub const NOTIFICATIONS_PUSH_ENABLED: SettingKey<bool> = SettingKey {
         key: "notifications.push_enabled",
         scope: Scope::Device,
@@ -440,7 +452,8 @@ pub mod keys {
     /// offers. One switch rather than a list of servers: every organisation
     /// reaches a learner through the network's Cloud, and each one proves its
     /// name with a TXT record on its own domain, so there is nothing for the learner
-    /// to configure. Off means the app never contacts Cloud on its own.
+    /// to configure. Off means the app never contacts Cloud on its own, beyond
+    /// the signed request that removes this device's push registration.
     pub const ORGANISATIONS_ENABLED: SettingKey<bool> = SettingKey {
         key: "organisations.enabled",
         scope: Scope::Sync,
@@ -592,6 +605,7 @@ pub fn all_entries(
 
     vec![
         entry!(UI_THEME),
+        entry!(UI_MOTION),
         entry!(UI_ACTIVE_MODE),
         entry!(UI_SIDEBAR_COLLAPSED),
         entry!(UI_SIDEBAR_SECTIONS),
@@ -642,6 +656,7 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
         };
     }
     check!(UI_THEME);
+    check!(UI_MOTION);
     check!(UI_ACTIVE_MODE);
     check!(UI_SIDEBAR_COLLAPSED);
     check!(UI_SIDEBAR_SECTIONS);
@@ -757,6 +772,16 @@ mod tests {
         assert_eq!(notices.kind, "json");
         assert_eq!(notices.scope, Scope::Device);
         assert!(lookup_meta("ui.dismissed_locale_notices").is_some());
+    }
+
+    #[test]
+    fn motion_preference_is_a_device_setting() {
+        let overrides = std::collections::HashMap::new();
+        let entries = all_entries(&overrides);
+        let motion = entries.iter().find(|e| e.key == "ui.motion").unwrap();
+        assert_eq!(motion.current_value, "system");
+        assert_eq!(motion.scope, Scope::Device);
+        assert_eq!(lookup_meta("ui.motion"), Some((Scope::Device, "string")));
     }
 
     #[test]

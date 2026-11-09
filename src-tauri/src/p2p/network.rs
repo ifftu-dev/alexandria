@@ -2441,19 +2441,28 @@ async fn swarm_event_loop(
                                     Some(inbound_db) if inbound_requests.len() < MAX_INBOUND_REQUEST_JOBS => {
                                         let job_db = inbound_db.clone();
                                         let peer_id = peer.to_string();
+                                        let events = event_tx.clone();
                                         inbound_requests.spawn(async move {
-                                            let response = job_db
-                                                .run("p2p.device-sync", move |database| {
+                                            let handled = job_db
+                                                .run_in_session("p2p.device-sync", move |database| {
                                                     Ok(super::device_sync::handle_sync_request(
                                                         database.conn(),
                                                         &peer_id,
                                                         &request,
                                                     ))
                                                 })
-                                                .await
-                                                .unwrap_or_else(|error| {
-                                                    SyncResponse::Error(inbound::refusal_text(&error))
-                                                });
+                                                .await;
+                                            let response = match handled {
+                                                Ok((handled, session)) => {
+                                                    // Committed: settings that reach outside
+                                                    // the store follow, as after a local write.
+                                                    if !handled.settings.is_empty() {
+                                                        let _ = events.send(P2pEvent::SettingsSynced { session, keys: handled.settings }).await;
+                                                    }
+                                                    handled.response
+                                                }
+                                                Err(error) => SyncResponse::Error(inbound::refusal_text(&error)),
+                                            };
                                             InboundCompletion::DeviceSync(channel, response)
                                         });
                                     }
@@ -2515,8 +2524,8 @@ async fn swarm_event_loop(
                                         let peer_id = peer.to_string();
                                         let events = event_tx.clone();
                                         inbound_requests.spawn(async move {
-                                            let response = job_db
-                                                .run("p2p.guardian", move |database| {
+                                            let (response, session) = job_db
+                                                .run_in_session("p2p.guardian", move |database| {
                                                     Ok(super::guardian::handle_guardian_request(
                                                         database.conn(),
                                                         &peer_id,
@@ -2524,11 +2533,12 @@ async fn swarm_event_loop(
                                                     ))
                                                 })
                                                 .await
-                                                .unwrap_or_else(|error| {
-                                                    GuardianResponse::Error(inbound::refusal_text(&error))
-                                                });
-                                            if let GuardianResponse::Linked { notification, .. } = &response {
-                                                let _ = events.send(P2pEvent::GuardianLinked { notification: notification.clone() }).await;
+                                                .map_or_else(
+                                                    |error| (GuardianResponse::Error(inbound::refusal_text(&error)), None),
+                                                    |(response, session)| (response, Some(session)),
+                                                );
+                                            if let (GuardianResponse::Linked { notification, .. }, Some(session)) = (&response, session) {
+                                                let _ = events.send(P2pEvent::GuardianLinked { session, notification: notification.clone() }).await;
                                             }
                                             InboundCompletion::Guardian(channel, response)
                                         });

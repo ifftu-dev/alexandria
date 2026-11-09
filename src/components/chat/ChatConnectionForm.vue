@@ -214,7 +214,7 @@ async function save() {
 
     <div v-if="offersSignIn" class="grid gap-2.5">
       <template v-if="signIn.signingIn.value">
-        <p class="connect-status" role="status"><span class="connect-spin" aria-hidden="true" />{{ t('chat.signin.waiting') }}</p>
+        <p class="connect-status" role="status"><span class="connect-spin" data-progress aria-hidden="true" />{{ t('chat.signin.waiting') }}</p>
         <button type="button" class="connect-link" @click="signIn.cancel()">{{ t('chat.signin.cancel') }}</button>
       </template>
       <template v-else>
@@ -384,7 +384,6 @@ async function save() {
 .connect-status { display: flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: 2.875rem; margin: 0; border-radius: 999px; background: var(--app-muted); font-size: 0.84375rem; }
 .connect-spin { width: 0.75rem; height: 0.75rem; border-radius: 999px; border: 2px solid var(--app-border); border-top-color: var(--app-primary); animation: connect-spin 0.8s linear infinite; }
 @keyframes connect-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .connect-spin { animation: none; } }
 .connect-sep { display: flex; align-items: center; gap: 0.625rem; margin: 0.25rem 0 -0.25rem; font-size: 0.78125rem; color: var(--app-muted-foreground); }
 .connect-sep::before, .connect-sep::after { content: ""; height: 1px; flex: 1; background: var(--app-border); opacity: 0.6; }
 .connect-opt { display: flex; width: 100%; align-items: center; gap: 0.75rem; padding: 0.75rem 0.25rem; text-align: start; border-bottom: 1px solid color-mix(in srgb, var(--app-border) 60%, transparent); }
@@ -408,7 +407,7 @@ async function save() {
 .connect-seg button { flex: 1; min-height: 2.25rem; border-radius: 0.5625rem; font-size: 0.8125rem; color: var(--app-muted-foreground); }
 .connect-seg button.on { background: var(--app-card); color: var(--app-foreground); font-weight: 500; box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
 .connect-adv summary { cursor: pointer; font-size: 0.8125rem; color: var(--app-muted-foreground); list-style: none; display: inline-flex; align-items: center; gap: 0.25rem; }
-.connect-adv summary::before { content: "›"; display: inline-block; transition: transform 0.15s; }
+.connect-adv summary::before { content: "›"; display: inline-block; transition: transform var(--duration-fast); }
 .connect-adv[open] summary::before { transform: rotate(90deg); }
 .connect-adv summary::-webkit-details-marker { display: none; }
 </style>

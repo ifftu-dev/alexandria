@@ -113,6 +113,35 @@ test("stale generated chat vocabulary fails the guard", () => {
   assert.match(result.output, /Generated chat vocabulary is stale/);
 });
 
+test("stale generated notification vocabulary fails the guard", () => {
+  const result = runGuard({
+    "src/generated/notification-vocab.ts": source => source.replace('  "offer_sent",\n', ""),
+  });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.output, /Generated notification vocabulary is stale/);
+});
+
+test("a notification snapshot missing the notification kinds fails the guard", () => {
+  const result = runGuard({
+    "scripts/notification-vocab.json": source => {
+      const snapshot = JSON.parse(source);
+      delete snapshot.notification_kinds;
+      return JSON.stringify(snapshot);
+    },
+  });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.output, /notification-vocab\.json.*notification_kinds/);
+});
+
+test("a broken notification snapshot leaves the chat vocabulary checked", () => {
+  const result = runGuard({
+    "scripts/notification-vocab.json": () => "{}",
+    "src/generated/chat-vocab.ts": source => source.replace('  "rate_limited",\n', ""),
+  });
+  assert.equal(result.exitCode, 1);
+  assert.match(result.output, /Generated chat vocabulary is stale/);
+});
+
 test("a snapshot missing a vocabulary fails the guard", () => {
   const result = runGuard({
     "scripts/chat-vocab.json": source => {

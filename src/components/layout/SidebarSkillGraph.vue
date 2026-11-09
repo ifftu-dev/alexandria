@@ -1,19 +1,19 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { atlasFieldColor, createAtlasPresenter } from '@/components/skills/atlasPresentation'
 import { useSkillAtlas } from '@/composables/useSkillAtlas'
 import type { AtlasField, AtlasNode } from '@/utils/skillAtlas'
-import '@/assets/css/skill-atlas.css'
 
 const { t } = useI18n()
+const present = createAtlasPresenter(t)
 const atlas = useSkillAtlas()
 const { model, isLoading, error } = atlas
 onMounted(() => { void atlas.ensureLoaded() })
-function fieldName(field: AtlasField): string {
-  return field.id === null ? t('skills.atlas.unassigned') : field.name ?? t('skills.atlas.unknownField', { id: field.id })
-}
 function earned(field: AtlasField): readonly AtlasNode[] {
-  return model.value?.nodes.filter(node => node.fieldId === field.id && node.status === 'earned').slice(0, 2) ?? []
+  const index = model.value?.nodeById
+  if (!index) return []
+  return field.nodeIds.flatMap(id => { const node = index.get(id); return node?.status === 'earned' ? [node] : [] }).slice(0, 2)
 }
 function expand(field?: AtlasField, node?: AtlasNode): void {
   if (field) atlas.updateView('modal', { focusedFieldId: field.id, unassignedFocused: field.id === null,
@@ -23,17 +23,17 @@ function expand(field?: AtlasField, node?: AtlasNode): void {
 </script>
 
 <template>
-  <section class="sidebar-atlas skill-atlas-colors" :aria-label="t('skills.atlas.title')">
+  <section class="sidebar-atlas" :aria-label="t('skills.atlas.title')">
     <template v-if="model">
       <button class="expand" type="button" @click="expand()">{{ t('skills.graph.expandTitle') }} <span aria-hidden="true">↗</span></button>
       <p>{{ t('skills.atlas.fieldCounts', model.counts) }}</p>
       <div class="sidebar-fields">
-        <article v-for="(field, index) in model.fields" :key="field.id ?? 'unassigned'" :style="{ '--field': field.id === null ? 'var(--app-muted-foreground)' : `var(--atlas-field-${index % 8})` }">
-          <button class="field-name" type="button" @click="expand(field)">{{ fieldName(field) }}</button>
+        <article v-for="field in model.fields" :key="field.id ?? 'unassigned'" :style="{ '--field': atlasFieldColor(field) }">
+          <button class="field-name" type="button" @click="expand(field)">{{ present.fieldName(field) }}</button>
           <p>{{ t('skills.atlas.fieldCounts', field) }}</p>
-          <button v-for="node in earned(field)" :key="node.skill.id" class="earned-skill" type="button" @click="expand(field, node)">
+          <button v-for="node in earned(field)" :key="node.skill.id" class="earned-skill" type="button" :aria-label="present.accessibleName(node)" @click="expand(field, node)">
             <span dir="auto">{{ node.skill.name }}</span>
-            <span><span :aria-label="t('skills.atlas.earned')">✓</span> {{ node.earnedBloom ? `${node.earnedBloom.rank + 1} ${t(`common.bloom.${node.earnedBloom.name}`)}` : t('skills.atlas.levelUnavailable') }}</span>
+            <span><span aria-hidden="true">✓</span> {{ present.evidence(node) }}</span>
           </button>
           <p v-if="field.earned > 2">{{ t('skills.atlas.moreEarned', { count: field.earned - 2 }) }}</p>
         </article>

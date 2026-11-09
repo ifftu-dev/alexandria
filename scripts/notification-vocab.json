@@ -1,0 +1,33 @@
+{
+  "_comment": "Written by `npm run generate:notification-vocab` from src-tauri/src/domain/notification.rs, and read by scripts/check-tauri-commands.mjs --write. Do not edit by hand.",
+  "notification_kinds": [
+    "interview_invited",
+    "interview_room_opened",
+    "offer_sent",
+    "access_requested",
+    "assessment_requested",
+    "classroom_call_started",
+    "classroom_join_requested",
+    "credential_issued",
+    "guardian_request",
+    "generic"
+  ],
+  "notification_sources": [
+    "local",
+    "push"
+  ],
+  "notification_permission_outcomes": [
+    "granted",
+    "denied",
+    "prompt_unavailable"
+  ],
+  "push_error_codes": [
+    "permission_denied",
+    "token_unavailable",
+    "insecure_origin",
+    "cloud_unreachable",
+    "cloud_rejected",
+    "cloud_unacknowledged",
+    "invalid_response"
+  ]
+}

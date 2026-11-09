@@ -7,9 +7,9 @@
 //! for the moments nobody is looking at the app. Every producer — the
 //! background pass that asks Alexandria Cloud what is waiting, a classroom
 //! event arriving over gossip, a credential the pipeline just issued, a push
-//! the phone received — goes through [`deliver`], so there is exactly one
-//! place that decides whether to record, whether to interrupt, and what the
-//! webview hears.
+//! the phone received — goes through [`record_if_enabled`] and [`announce`],
+//! so there is exactly one place that decides whether to record, whether to
+//! interrupt, and what the webview hears.
 //!
 //! # Not repeating ourselves
 //!
@@ -39,44 +39,86 @@ pub mod opens;
 pub mod push;
 pub(crate) mod recipients;
 mod store;
+pub mod vocabulary;
 
 use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tauri_plugin_notification::NotificationExt;
 
+use crate::profile::scope::ProfileSession;
 use crate::settings::{registry::keys, SettingsStore};
 
 pub use store::{clear, list, mark_all_read, mark_read, record, unread_count};
 
-/// The kinds the app and Alexandria Cloud share. A kind is a string on the
-/// wire and in the database; these constants are the vocabulary.
-pub mod kind {
-    pub const INTERVIEW_INVITED: &str = "interview_invited";
-    pub const INTERVIEW_ROOM_OPENED: &str = "interview_room_opened";
-    pub const OFFER_SENT: &str = "offer_sent";
-    pub const ACCESS_REQUESTED: &str = "access_requested";
-    pub const ASSESSMENT_REQUESTED: &str = "assessment_requested";
-    pub const CLASSROOM_CALL_STARTED: &str = "classroom_call_started";
-    pub const CLASSROOM_JOIN_REQUESTED: &str = "classroom_join_requested";
-    pub const CREDENTIAL_ISSUED: &str = "credential_issued";
-    pub const GUARDIAN_REQUEST: &str = "guardian_request";
-    pub const GENERIC: &str = "generic";
-
-    /// Every kind the app knows, for validating what arrives from outside.
-    pub const ALL: &[&str] = &[
-        INTERVIEW_INVITED,
-        INTERVIEW_ROOM_OPENED,
-        OFFER_SENT,
-        ACCESS_REQUESTED,
-        ASSESSMENT_REQUESTED,
-        CLASSROOM_CALL_STARTED,
-        CLASSROOM_JOIN_REQUESTED,
-        CREDENTIAL_ISSUED,
-        GUARDIAN_REQUEST,
-        GENERIC,
-    ];
+/// Why a notification operation failed. Its display is the text the
+/// commands return.
+#[derive(Debug, thiserror::Error)]
+pub enum NotificationError {
+    #[error(transparent)]
+    Database(#[from] rusqlite::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    /// A file beside the profiles (open intents, recipient routing, the open
+    /// key) could not be read or written.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    /// A lock on one of those files was poisoned.
+    #[error("poisoned lock: another task failed inside")]
+    Poisoned,
+    /// The profile session the operation began under ended.
+    #[error("profile session changed")]
+    SessionChanged,
+    #[error("no profile is unlocked")]
+    NoProfile,
+    #[error("vault is locked — unlock first")]
+    VaultLocked,
+    /// The vault or the wallet it holds could not give the issuer key.
+    #[error("{0}")]
+    Vault(String),
+    /// A database executor job failed: the job's own error, or the executor
+    /// refusing it (a full lane, a session that ended before it started).
+    /// Jobs return strings, so this carries the job's text.
+    #[error("{0}")]
+    Executor(String),
+    /// The profile could not be admitted or held: profile admission, a lease
+    /// that is no longer current, or a profile id that does not parse.
+    #[error("{0}")]
+    Profile(String),
+    #[error(transparent)]
+    NetworkProfile(&'static crate::network_profile::NetworkProfileError),
+    #[error("push mutation version exhausted")]
+    VersionExhausted,
+    #[error("notification belongs to another profile")]
+    OtherProfile,
+    #[error("invalid notification envelope")]
+    InvalidEnvelope,
+    #[error("unsupported notification open format")]
+    UnsupportedOpenFormat,
+    #[error("notification key derivation failed")]
+    KeyDerivation,
+    #[error("invalid notification encryption key")]
+    InvalidKey,
+    /// Sealing or opening a held notification open failed.
+    #[error("{0}")]
+    Crypto(String),
+    /// The application state was not managed yet (or any more).
+    #[error("application state unavailable")]
+    AppStateUnavailable,
+    /// A Cloud discovery pass's task ended without an outcome.
+    #[error("discovery pass failed: {0}")]
+    DiscoveryTask(String),
 }
+
+impl<T> From<std::sync::PoisonError<T>> for NotificationError {
+    fn from(_: std::sync::PoisonError<T>) -> Self {
+        NotificationError::Poisoned
+    }
+}
+
+pub use crate::domain::notification::{
+    NotificationKind, NotificationOpen, NotificationPermissionOutcome, NotificationRow,
+    NotificationSource, PushErrorCode, PushStatus,
+};
 
 /// Emitted with a [`NotificationRow`] when one is recorded.
 pub const EVENT_NEW: &str = "notifications:new";
@@ -89,43 +131,10 @@ pub const EVENT_OPEN: &str = "notifications:open";
 /// names the same channel in its FCM payloads.
 pub const ANDROID_CHANNEL: &str = "alexandria_default";
 
-/// Where a notification came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Source {
-    /// Produced by this app from something it observed itself.
-    Local,
-    /// Produced from a remote push the platform delivered.
-    Push,
-}
-
-impl Source {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Local => "local",
-            Self::Push => "push",
-        }
-    }
-}
-
-/// A notification as the webview sees it.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct NotificationRow {
-    pub id: String,
-    pub kind: String,
-    pub title: String,
-    pub body: String,
-    pub route: Option<String>,
-    pub source: String,
-    pub created_at: String,
-    pub read_at: Option<String>,
-    pub payload: Option<serde_json::Value>,
-}
-
 /// A notification about to be recorded.
 #[derive(Debug, Clone)]
 pub struct NewNotification {
-    pub kind: String,
+    pub kind: NotificationKind,
     pub title: String,
     pub body: String,
     pub route: Option<String>,
@@ -133,19 +142,19 @@ pub struct NewNotification {
     /// same key is dropped.
     pub dedupe_key: Option<String>,
     pub payload: Option<serde_json::Value>,
-    pub source: Source,
+    pub source: NotificationSource,
 }
 
 impl NewNotification {
-    pub fn new(kind: &str, title: impl Into<String>, body: impl Into<String>) -> Self {
+    pub fn new(kind: NotificationKind, title: impl Into<String>, body: impl Into<String>) -> Self {
         Self {
-            kind: kind.to_string(),
+            kind,
             title: title.into(),
             body: body.into(),
             route: None,
             dedupe_key: None,
             payload: None,
-            source: Source::Local,
+            source: NotificationSource::Local,
         }
     }
 
@@ -165,25 +174,75 @@ impl NewNotification {
     }
 
     pub fn from_push(mut self) -> Self {
-        self.source = Source::Push;
+        self.source = NotificationSource::Push;
         self
     }
+}
+
+/// Where an interview-room notification leads. Inbox rows, pushes and Cloud
+/// discovery all name the room through this.
+pub fn interview_room_route(id: &str) -> String {
+    format!("/interview-room/{id}")
 }
 
 /// English generic copy and destination for a Cloud-originated kind.
 /// `None` for a kind Cloud does not send. Recording selects the profile locale
 /// from the shared webview catalogs; contract fixtures check Cloud agreement.
-pub fn cloud_copy(kind: &str, id: &str) -> Option<(&'static str, &'static str, String)> {
+pub fn cloud_copy(
+    kind: NotificationKind,
+    id: &str,
+) -> Option<(&'static str, &'static str, String)> {
+    use NotificationKind as K;
     let route = match kind {
-        kind::INTERVIEW_ROOM_OPENED => format!("/interview-room/{id}"),
-        kind::INTERVIEW_INVITED
-        | kind::OFFER_SENT
-        | kind::ACCESS_REQUESTED
-        | kind::ASSESSMENT_REQUESTED => "/settings/organisations".to_string(),
-        _ => return None,
+        K::InterviewRoomOpened => interview_room_route(id),
+        K::InterviewInvited | K::OfferSent | K::AccessRequested | K::AssessmentRequested => {
+            "/settings/organisations".to_string()
+        }
+        K::ClassroomCallStarted
+        | K::ClassroomJoinRequested
+        | K::CredentialIssued
+        | K::GuardianRequest
+        | K::Generic => return None,
     };
     let (title, body) = copy::localized("en", kind);
     Some((title, body, route))
+}
+
+/// Something Alexandria Cloud holds for the learner, as Cloud discovery
+/// lists it or a push names it. Both record it through
+/// [`CloudEvent::notification`], so the row reads the same whichever arrives
+/// first, and the shared event id lets only the first one be recorded.
+#[derive(Debug, Clone, Copy)]
+pub struct CloudEvent<'a> {
+    pub kind: NotificationKind,
+    pub id: &'a str,
+    pub event_id: &'a str,
+    pub cloud_origin: Option<&'a str>,
+    /// Discovery only: Cloud never puts a role into a push.
+    pub role_label: Option<&'a str>,
+}
+
+impl CloudEvent<'_> {
+    /// Cloud's generic copy, route and payload for this event. `None` for a
+    /// kind Cloud does not send.
+    pub fn notification(&self) -> Option<NewNotification> {
+        let (title, body, route) = cloud_copy(self.kind, self.id)?;
+        let mut payload = serde_json::Map::new();
+        payload.insert("id".into(), self.id.into());
+        payload.insert("event_id".into(), self.event_id.into());
+        if let Some(origin) = self.cloud_origin {
+            payload.insert("cloud_origin".into(), origin.into());
+        }
+        if let Some(role) = self.role_label {
+            payload.insert("role_label".into(), role.into());
+        }
+        Some(
+            NewNotification::new(self.kind, title, body)
+                .route(route)
+                .dedupe(self.event_id)
+                .payload(payload.into()),
+        )
+    }
 }
 
 /// The notification a committed classroom meta event warrants for this
@@ -205,15 +264,15 @@ pub fn for_classroom_meta(
             }
             Some(
                 NewNotification::new(
-                    kind::CLASSROOM_CALL_STARTED,
+                    NotificationKind::ClassroomCallStarted,
                     "A classroom call started",
                     "Somebody started a call in one of your classrooms.",
                 )
                 .route(format!("/classrooms/{}", event.classroom_id))
                 .dedupe(format!("classroom_call:{call_id}"))
                 .payload(serde_json::json!({
-                    "classroomId": event.classroom_id,
-                    "callId": call_id,
+                    "classroom_id": event.classroom_id,
+                    "call_id": call_id,
                 })),
             )
         }
@@ -222,7 +281,7 @@ pub fn for_classroom_meta(
             let display_name = data.get("display_name").and_then(serde_json::Value::as_str);
             Some(
                 NewNotification::new(
-                    kind::CLASSROOM_JOIN_REQUESTED,
+                    NotificationKind::ClassroomJoinRequested,
                     "Someone wants to join your classroom",
                     match display_name {
                         Some(name) => format!("{name} asked to join."),
@@ -235,8 +294,8 @@ pub fn for_classroom_meta(
                     event.classroom_id
                 ))
                 .payload(serde_json::json!({
-                    "classroomId": event.classroom_id,
-                    "requestId": request_id,
+                    "classroom_id": event.classroom_id,
+                    "request_id": request_id,
                 })),
             )
         }
@@ -247,7 +306,7 @@ pub fn for_classroom_meta(
 /// A credential the auto-issuance pipeline just signed.
 pub fn for_issued_credential(credential_id: &str) -> NewNotification {
     NewNotification::new(
-        kind::CREDENTIAL_ISSUED,
+        NotificationKind::CredentialIssued,
         "New credential",
         "A completion was verified on-chain and a credential was issued to you.",
     )
@@ -259,7 +318,7 @@ pub fn for_issued_credential(credential_id: &str) -> NewNotification {
 /// A guardian completed a link to this (ward) profile.
 pub fn for_guardian_linked(link_id: &str, guardian_display_name: Option<&str>) -> NewNotification {
     NewNotification::new(
-        kind::GUARDIAN_REQUEST,
+        NotificationKind::GuardianRequest,
         "A guardian linked to your account",
         match guardian_display_name {
             Some(name) => format!("{name} now has oversight of this account."),
@@ -268,7 +327,7 @@ pub fn for_guardian_linked(link_id: &str, guardian_display_name: Option<&str>) -
     )
     .route("/settings/guardian")
     .dedupe(format!("guardian_link:{link_id}"))
-    .payload(serde_json::json!({ "linkId": link_id }))
+    .payload(serde_json::json!({ "link_id": link_id }))
 }
 
 /// A recorded notification and the unread count after it.
@@ -285,13 +344,13 @@ pub struct Recorded {
 pub fn record_if_enabled(
     conn: &Connection,
     new: &NewNotification,
-) -> Result<Option<Recorded>, String> {
+) -> Result<Option<Recorded>, NotificationError> {
     if !SettingsStore::get(conn, keys::NOTIFICATIONS_ENABLED) {
         return Ok(None);
     }
     let now = crate::clock::now_rfc3339();
     let locale = SettingsStore::get(conn, keys::USER_LANGUAGE);
-    let (title, body) = copy::localized(&locale, &new.kind);
+    let (title, body) = copy::localized(&locale, new.kind);
     let localized = NewNotification {
         title: title.into(),
         body: body.into(),
@@ -304,48 +363,68 @@ pub fn record_if_enabled(
     Ok(Some(Recorded { row, unread }))
 }
 
+/// What goes out for one recorded notification: the session the webview
+/// checks and the profile the OS banner is tagged with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Announcement {
+    pub session: ProfileSession,
+    pub profile_id: crate::profile::ProfileId,
+}
+
+/// The announcement for a notification recorded under `session`, the
+/// session of the lease its producer ran with. `None` once that session is no
+/// longer current: a lock or profile switch came in between, and the row
+/// stays in its own profile's store unannounced. The profile is read while
+/// the session is held current, so a banner is never tagged with the profile
+/// that took over.
+pub fn announcement(state: &crate::AppState, session: &ProfileSession) -> Option<Announcement> {
+    let lease = state.profile_operations.admit(session).ok()?;
+    let profile_id = lease
+        .with_current(|| {
+            state
+                .active_id()
+                .ok_or_else(|| "no active profile".to_string())
+        })
+        .ok()?;
+    Some(Announcement {
+        session: session.clone(),
+        profile_id,
+    })
+}
+
 /// Tell the webview, and the OS when nobody is looking at the app.
-pub fn announce<R: Runtime>(app: &AppHandle<R>, recorded: &Recorded) {
-    let Some(session) = app
-        .try_state::<crate::AppState>()
-        .and_then(|s| s.profile_operations.session())
-    else {
+pub fn announce<R: Runtime>(app: &AppHandle<R>, session: &ProfileSession, recorded: &Recorded) {
+    let Some(state) = app.try_state::<crate::AppState>() else {
+        return;
+    };
+    let Some(announcement) = announcement(&state, session) else {
         return;
     };
     if let Err(error) = app.emit(
         EVENT_NEW,
-        serde_json::json!({ "session": session, "row": &recorded.row }),
+        serde_json::json!({ "session": announcement.session, "row": &recorded.row }),
     ) {
         log::debug!("notifications: emit failed: {error}");
     }
-    emit_changed(app, recorded.unread);
+    emit_unread(app, &announcement.session, recorded.unread);
     if should_interrupt(app, &recorded.row) {
-        os_banner(app, &recorded.row);
+        os_banner(app, &announcement, &recorded.row);
     }
 }
 
-/// Record and announce in one step, for producers that hold the connection
-/// outside an executor job.
-pub fn deliver<R: Runtime>(
-    app: &AppHandle<R>,
-    conn: &Connection,
-    new: &NewNotification,
-) -> Result<Option<Recorded>, String> {
-    let recorded = record_if_enabled(conn, new)?;
-    if let Some(recorded) = &recorded {
-        announce(app, recorded);
-    }
-    Ok(recorded)
-}
-
-/// Emit the unread count, after anything that changes it.
-pub fn emit_changed<R: Runtime>(app: &AppHandle<R>, unread: u32) {
-    let Some(session) = app
+/// Emit the unread count after anything that changes it, under `session`,
+/// the session of the lease that changed it. Dropped once that session is no
+/// longer current, so the next profile's badge is never overwritten.
+pub fn emit_changed<R: Runtime>(app: &AppHandle<R>, session: &ProfileSession, unread: u32) {
+    let current = app
         .try_state::<crate::AppState>()
-        .and_then(|s| s.profile_operations.session())
-    else {
-        return;
-    };
+        .is_some_and(|state| state.profile_operations.admit(session).is_ok());
+    if current {
+        emit_unread(app, session, unread);
+    }
+}
+
+fn emit_unread<R: Runtime>(app: &AppHandle<R>, session: &ProfileSession, unread: u32) {
     let _ = app.emit(
         EVENT_CHANGED,
         serde_json::json!({ "session": session, "unread": unread }),
@@ -353,7 +432,7 @@ pub fn emit_changed<R: Runtime>(app: &AppHandle<R>, unread: u32) {
 }
 
 /// Publish an already persisted and locally resolved tap.
-pub fn emit_open<R: Runtime>(app: &AppHandle<R>, intent: &opens::NotificationOpen) {
+pub fn emit_open<R: Runtime>(app: &AppHandle<R>, intent: &NotificationOpen) {
     let _ = app.emit(EVENT_OPEN, intent);
 }
 
@@ -364,7 +443,7 @@ pub fn emit_open<R: Runtime>(app: &AppHandle<R>, intent: &opens::NotificationOpe
 /// A push on iOS is the exception: iOS already showed the system banner
 /// before handing the payload over, so showing another would double it.
 fn should_interrupt<R: Runtime>(app: &AppHandle<R>, row: &NotificationRow) -> bool {
-    if cfg!(target_os = "ios") && row.source == Source::Push.as_str() {
+    if cfg!(target_os = "ios") && row.source == NotificationSource::Push {
         return false;
     }
     if cfg!(mobile) {
@@ -377,23 +456,20 @@ fn should_interrupt<R: Runtime>(app: &AppHandle<R>, row: &NotificationRow) -> bo
     !focused
 }
 
-fn os_banner<R: Runtime>(app: &AppHandle<R>, row: &NotificationRow) {
-    let Some(state) = app.try_state::<crate::AppState>() else {
-        return;
-    };
-    let Some(profile) = state.active_id() else {
+fn os_banner<R: Runtime>(app: &AppHandle<R>, announcement: &Announcement, row: &NotificationRow) {
+    // Absent only where no notification plugin is installed (test apps).
+    let Some(notification) = app.try_state::<tauri_plugin_notification::Notification<R>>() else {
         return;
     };
     let Ok(network) = recipients::network() else {
         return;
     };
-    let mut builder = app
-        .notification()
+    let mut builder = notification
         .builder()
         .title(&row.title)
         .body(&row.body)
         .extra("notificationId", &row.id)
-        .extra("profileId", profile.as_str())
+        .extra("profileId", announcement.profile_id.as_str())
         .extra("networkId", network);
     if let Some(route) = &row.route {
         // Keep the locally discovered/registered origin even if the learner
@@ -401,10 +477,10 @@ fn os_banner<R: Runtime>(app: &AppHandle<R>, row: &NotificationRow) {
         let origin = row
             .payload
             .as_ref()
-            .and_then(|p| p.get("cloudOrigin"))
+            .and_then(|p| p.get("cloud_origin"))
             .and_then(serde_json::Value::as_str);
         let destination = match origin {
-            Some(origin) if row.kind == kind::INTERVIEW_ROOM_OPENED => format!(
+            Some(origin) if row.kind == NotificationKind::InterviewRoomOpened => format!(
                 "{route}?cloud={}",
                 url::form_urlencoded::byte_serialize(origin.as_bytes()).collect::<String>()
             ),
@@ -421,18 +497,118 @@ fn os_banner<R: Runtime>(app: &AppHandle<R>, row: &NotificationRow) {
     }
 }
 
-/// Wire the OS side up once the plugins exist: the Android channel and the
-/// push plugin's events. Called from the app's setup hook.
-pub fn install<R: Runtime>(app: &AppHandle<R>) {
+/// The Android channel's name and description, as system notification
+/// settings show them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChannelText {
+    pub name: &'static str,
+    pub description: &'static str,
+}
+
+/// The channel text for a `user.language` preference. `system` (or nothing)
+/// follows the device language; an unsupported language reads in English.
+pub fn channel_text(preference: &str) -> ChannelText {
+    let preference = preference.trim();
+    let locale = if preference.is_empty() || preference == "system" {
+        tauri_plugin_os::locale().unwrap_or_default()
+    } else {
+        preference.to_string()
+    };
+    let (name, description) = copy::channel(&locale);
+    ChannelText { name, description }
+}
+
+/// Create the Android channel, or rename it in place: Android keeps a
+/// channel's importance and the learner's choices for it, and takes a new
+/// name and description for the same id. Elsewhere there is no channel.
+#[cfg_attr(not(target_os = "android"), allow(unused_variables))]
+fn apply_channel<R: Runtime>(app: &AppHandle<R>, text: ChannelText) {
     #[cfg(target_os = "android")]
     {
         use tauri_plugin_notification::{Channel, Importance};
-        let channel = Channel::builder(ANDROID_CHANNEL, "Alexandria")
-            .description("Interviews, offers, requests and classroom activity")
+        let channel = Channel::builder(ANDROID_CHANNEL, text.name)
+            .description(text.description)
             .importance(Importance::High)
             .build();
         if let Err(error) = app.notification().create_channel(channel) {
             log::warn!("notifications: could not create the Android channel: {error}");
+        }
+    }
+}
+
+/// Write the channel in the unlocked profile's language. Called when a
+/// profile unlocks and when its language changes.
+pub async fn refresh_channel<R: Runtime>(
+    app: &AppHandle<R>,
+    lease: crate::profile::scope::ProfileLease,
+) -> Result<ChannelText, NotificationError> {
+    let preference = app
+        .state::<crate::AppState>()
+        .db_executor
+        .execute(
+            crate::db::executor::DatabaseWorkload::Learner,
+            lease.clone(),
+            "notifications.channel",
+            |db| Ok(SettingsStore::get(db.conn(), keys::USER_LANGUAGE)),
+        )
+        .await
+        .map_err(NotificationError::Executor)?;
+    let text = channel_text(&preference);
+    if lease.is_current() {
+        apply_channel(app, text);
+    }
+    Ok(text)
+}
+
+/// Refresh the channel after a settings write that changes its language.
+/// `None` when the key does not affect it.
+pub async fn settings_changed<R: Runtime>(
+    app: &AppHandle<R>,
+    lease: crate::profile::scope::ProfileLease,
+    key: &str,
+) -> Result<Option<ChannelText>, NotificationError> {
+    if key != keys::USER_LANGUAGE.key {
+        return Ok(None);
+    }
+    refresh_channel(app, lease).await.map(Some)
+}
+
+/// Follow settings that changed, whether a write on this device or rows
+/// settings sync applied from another one: the Android channel follows the
+/// profile language, and push eligibility follows the organisations switch.
+/// A channel failure is logged and does not stop the push reconcile. Returns
+/// the push status when push was reconciled.
+pub async fn follow_settings<R: Runtime>(
+    app: &AppHandle<R>,
+    lease: crate::profile::scope::ProfileLease,
+    changed: &[String],
+) -> Result<Option<PushStatus>, NotificationError> {
+    let mut status = None;
+    for key in changed {
+        if let Err(e) = settings_changed(app, lease.clone(), key).await {
+            log::debug!("notification channel refresh after `{key}` changed failed: {e}");
+        }
+        if let Some(now) = push::settings_changed(app, lease.clone(), key).await? {
+            status = Some(now);
+        }
+    }
+    Ok(status)
+}
+
+/// Wire the OS side up once the plugins exist: the Android channel and the
+/// push plugin's events. Called from the app's setup hook.
+pub fn install<R: Runtime>(app: &AppHandle<R>) {
+    // No profile is unlocked yet. A channel left by an earlier run keeps the
+    // language of the profile that last wrote it; a first run gets the
+    // device language until a profile unlocks.
+    #[cfg(target_os = "android")]
+    {
+        let exists = app
+            .notification()
+            .list_channels()
+            .is_ok_and(|channels| channels.iter().any(|c| c.id() == ANDROID_CHANNEL));
+        if !exists {
+            apply_channel(app, channel_text("system"));
         }
     }
 
@@ -482,6 +658,274 @@ fn route_of_action(performed: &tauri_plugin_notification::ActionPerformed) -> Op
 mod tests {
     use super::*;
 
+    pub(super) type Heard = std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>>;
+
+    /// A test app over an unlocked "Learner" profile, and every
+    /// `notifications:new` / `notifications:changed` payload it emits.
+    pub(super) async fn listening_app(
+        directory: &std::path::Path,
+    ) -> (tauri::App<tauri::test::MockRuntime>, Heard) {
+        use tauri::Listener;
+        let state = push::boundary_tests::active(directory).await;
+        let state = std::sync::Arc::try_unwrap(state).unwrap_or_else(|_| panic!("unique state"));
+        let app = tauri::test::mock_builder()
+            .manage(state)
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap();
+        let heard = Heard::default();
+        for event in [EVENT_NEW, EVENT_CHANGED] {
+            let heard = heard.clone();
+            app.listen_any(event, move |event| {
+                let payload = serde_json::from_str(event.payload()).unwrap();
+                heard.lock().unwrap().push(payload);
+            });
+        }
+        (app, heard)
+    }
+
+    pub(super) async fn in_profile<T: Send + 'static, E: std::fmt::Display>(
+        state: &crate::AppState,
+        job: impl FnOnce(&crate::db::Database) -> Result<T, E> + Send + 'static,
+    ) -> T {
+        let lease = state
+            .profile_operations
+            .admit(&state.profile_operations.session().unwrap())
+            .unwrap();
+        state
+            .db_executor
+            .execute(
+                crate::db::executor::DatabaseWorkload::Background,
+                lease,
+                "test.notifications",
+                move |db| job(db).map_err(|e| e.to_string()),
+            )
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_profile_switch_before_announcing_drops_the_event_and_banner_and_keeps_the_row_home()
+    {
+        let directory = tempfile::tempdir().unwrap();
+        let (app, heard) = listening_app(directory.path()).await;
+        let state = app.state::<crate::AppState>();
+        let home = state.active_id().unwrap();
+        let session = state.profile_operations.session().unwrap();
+        let recorded = in_profile(&state, |db| {
+            record_if_enabled(db.conn(), &for_issued_credential("c1"))
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            announcement(&state, &session),
+            Some(Announcement {
+                session: session.clone(),
+                profile_id: home.clone(),
+            }),
+            "while the recording profile is current, banners are tagged with it"
+        );
+        announce(app.handle(), &session, &recorded);
+        assert_eq!(
+            std::mem::take(&mut *heard.lock().unwrap()),
+            vec![
+                serde_json::json!({ "session": session, "row": recorded.row }),
+                serde_json::json!({ "session": session, "unread": 1 }),
+            ]
+        );
+
+        push::boundary_tests::switch_to(&state, "B").await;
+        assert_ne!(state.active_id().unwrap(), home);
+        assert_eq!(
+            announcement(&state, &session),
+            None,
+            "no banner may be built for the profile that took over"
+        );
+        announce(app.handle(), &session, &recorded);
+        assert!(
+            heard.lock().unwrap().is_empty(),
+            "{:?}",
+            heard.lock().unwrap()
+        );
+        assert!(in_profile(&state, |db| list(db.conn(), None, false))
+            .await
+            .is_empty());
+
+        push::boundary_tests::switch_to(&state, "Learner").await;
+        assert_eq!(
+            in_profile(&state, |db| list(db.conn(), None, false)).await,
+            vec![recorded.row]
+        );
+    }
+
+    #[tokio::test]
+    async fn count_updates_carry_the_acting_session_and_never_the_next_profiles() {
+        let directory = tempfile::tempdir().unwrap();
+        let (app, heard) = listening_app(directory.path()).await;
+        let state = app.state::<crate::AppState>();
+        let acting = state.profile_operations.session().unwrap();
+        in_profile(&state, |db| {
+            record_if_enabled(db.conn(), &for_issued_credential("c1"))
+        })
+        .await
+        .unwrap();
+        let unread = in_profile(&state, |db| {
+            mark_all_read(db.conn(), "2026-11-04T00:00:00Z")?;
+            unread_count(db.conn())
+        })
+        .await;
+        emit_changed(app.handle(), &acting, unread);
+        assert_eq!(
+            std::mem::take(&mut *heard.lock().unwrap()),
+            vec![serde_json::json!({ "session": acting, "unread": 0 })]
+        );
+
+        // Cleared, then a switch lands before the count update goes out.
+        in_profile(&state, |db| clear(db.conn())).await;
+        push::boundary_tests::switch_to(&state, "B").await;
+        let next = state.profile_operations.session().unwrap();
+        emit_changed(app.handle(), &acting, 0);
+        let heard = heard.lock().unwrap();
+        assert!(
+            heard.iter().all(|event| event["session"] != next.as_str()),
+            "the next profile's badge must not be overwritten: {heard:?}"
+        );
+    }
+
+    #[test]
+    fn the_webview_receives_rows_with_snake_case_fields_and_typed_vocabulary() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let row = record_if_enabled(db.conn(), &for_issued_credential("c1"))
+            .unwrap()
+            .unwrap()
+            .row;
+        let wire = serde_json::to_value(&row).unwrap();
+        let mut keys: Vec<&str> = wire
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "body",
+                "created_at",
+                "id",
+                "kind",
+                "payload",
+                "read_at",
+                "route",
+                "source",
+                "title"
+            ]
+        );
+        assert_eq!(wire["kind"], "credential_issued");
+        assert_eq!(wire["source"], "local");
+        assert_eq!(wire["payload"], serde_json::json!({ "id": "c1" }));
+    }
+
+    #[test]
+    fn a_cloud_event_records_the_same_row_from_discovery_or_a_push() {
+        let id = "11111111-1111-4111-8111-111111111111";
+        let event_id = format!("interview_room_opened:{id}:22222222-2222-4222-8222-222222222222");
+        let event = CloudEvent {
+            kind: NotificationKind::InterviewRoomOpened,
+            id,
+            event_id: &event_id,
+            cloud_origin: Some("https://cloud.example"),
+            role_label: None,
+        };
+        let new = event.notification().unwrap();
+        assert_eq!(
+            new.route.as_deref(),
+            Some(interview_room_route(id).as_str())
+        );
+        assert_eq!(new.dedupe_key.as_deref(), Some(event_id.as_str()));
+        assert_eq!(
+            new.payload,
+            Some(serde_json::json!({
+                "id": id,
+                "event_id": event_id,
+                "cloud_origin": "https://cloud.example",
+            }))
+        );
+        let labelled = CloudEvent {
+            kind: NotificationKind::OfferSent,
+            cloud_origin: None,
+            role_label: Some("Analyst"),
+            ..event
+        };
+        assert_eq!(
+            labelled.notification().unwrap().payload,
+            Some(serde_json::json!({ "id": id, "event_id": event_id, "role_label": "Analyst" }))
+        );
+        let local = CloudEvent {
+            kind: NotificationKind::CredentialIssued,
+            ..event
+        };
+        assert!(local.notification().is_none(), "Cloud does not send it");
+    }
+
+    #[test]
+    fn the_android_channel_reads_in_the_chosen_language_and_falls_back_to_english() {
+        assert_eq!(
+            channel_text("es"),
+            ChannelText {
+                name: "Actividad",
+                description: "Entrevistas, ofertas, solicitudes y actividad de las clases",
+            }
+        );
+        assert_eq!(channel_text("zh-Hans").name, "动态");
+        assert_eq!(
+            channel_text("xx"),
+            ChannelText {
+                name: "Activity",
+                description: "Interviews, offers, requests and classroom activity",
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn changing_the_profile_language_refreshes_the_android_channel_text() {
+        let directory = tempfile::tempdir().unwrap();
+        let (app, _) = listening_app(directory.path()).await;
+        let state = app.state::<crate::AppState>();
+        let lease = || {
+            state
+                .profile_operations
+                .admit(&state.profile_operations.session().unwrap())
+                .unwrap()
+        };
+        in_profile(&state, |db| {
+            SettingsStore::set(db.conn(), keys::USER_LANGUAGE, "fr".to_string())
+                .map_err(|e| e.to_string())
+        })
+        .await;
+        assert_eq!(
+            settings_changed(app.handle(), lease(), keys::USER_LANGUAGE.key)
+                .await
+                .unwrap(),
+            Some(ChannelText {
+                name: "Activité",
+                description: "Entretiens, offres, demandes et activité des classes",
+            })
+        );
+        assert_eq!(
+            settings_changed(app.handle(), lease(), keys::UI_THEME.key)
+                .await
+                .unwrap(),
+            None,
+            "other settings leave the channel alone"
+        );
+        assert_eq!(
+            refresh_channel(app.handle(), lease()).await.unwrap().name,
+            "Activité",
+            "unlocking creates the channel in the profile's language"
+        );
+    }
+
     #[test]
     fn recording_uses_profile_language_for_generic_banner_copy() {
         let db = crate::db::Database::open_in_memory().unwrap();
@@ -523,7 +967,7 @@ mod tests {
             SettingsStore::set(db.conn(), keys::USER_LANGUAGE, locale.clone()).unwrap();
             for (kind, copy) in contract["locales"][expected].as_object().unwrap() {
                 let new = NewNotification::new(
-                    kind,
+                    NotificationKind::parse(kind).unwrap(),
                     "Private person",
                     "Private organisation did:key:secret",
                 )
@@ -540,23 +984,25 @@ mod tests {
     }
 
     #[test]
-    fn every_local_kind_records_generic_copy_and_unknown_kinds_fall_back_safely() {
+    fn every_local_kind_records_generic_copy() {
         let db = crate::db::Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
         SettingsStore::set(db.conn(), keys::USER_LANGUAGE, "fr".to_string()).unwrap();
         for (kind, expected) in [
             (
-                kind::CLASSROOM_CALL_STARTED,
+                NotificationKind::ClassroomCallStarted,
                 "Un appel de classe a commencé",
             ),
-            (kind::CLASSROOM_JOIN_REQUESTED, "Demande d’adhésion"),
-            (kind::CREDENTIAL_ISSUED, "Justificatif délivré"),
             (
-                kind::GUARDIAN_REQUEST,
+                NotificationKind::ClassroomJoinRequested,
+                "Demande d’adhésion",
+            ),
+            (NotificationKind::CredentialIssued, "Justificatif délivré"),
+            (
+                NotificationKind::GuardianRequest,
                 "Un responsable légal est lié à votre compte",
             ),
-            (kind::GENERIC, "Nouvelle activité"),
-            ("future_kind", "New activity"),
+            (NotificationKind::Generic, "Nouvelle activité"),
         ] {
             let row = record_if_enabled(
                 db.conn(),
@@ -592,14 +1038,14 @@ mod tests {
 
     #[test]
     fn cloud_copy_names_a_route_per_kind() {
-        let (title, _, route) = cloud_copy(kind::INTERVIEW_ROOM_OPENED, "abc").unwrap();
+        let (title, _, route) = cloud_copy(NotificationKind::InterviewRoomOpened, "abc").unwrap();
         assert_eq!(title, "Your interview room is open");
         assert_eq!(route, "/interview-room/abc");
         assert_eq!(
-            cloud_copy(kind::OFFER_SENT, "x").unwrap().2,
+            cloud_copy(NotificationKind::OfferSent, "x").unwrap().2,
             "/settings/organisations"
         );
-        assert!(cloud_copy(kind::CLASSROOM_CALL_STARTED, "x").is_none());
+        assert!(cloud_copy(NotificationKind::ClassroomCallStarted, "x").is_none());
     }
 
     #[test]
@@ -617,7 +1063,7 @@ mod tests {
             started_by: "stake_other".into(),
         });
         let n = for_classroom_meta(&call, Some("stake_me")).unwrap();
-        assert_eq!(n.kind, kind::CLASSROOM_CALL_STARTED);
+        assert_eq!(n.kind, NotificationKind::ClassroomCallStarted);
         assert_eq!(n.route.as_deref(), Some("/classrooms/c1"));
         assert_eq!(n.dedupe_key.as_deref(), Some("classroom_call:call-1"));
         // The learner who started the call is not told about it.

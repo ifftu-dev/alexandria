@@ -4,6 +4,7 @@
 
 use rusqlite::{params, Connection, OptionalExtension};
 
+use super::{CredentialError, StatusChange};
 use crate::crypto::did::Did;
 
 /// Flip the revocation bit in the issuer's status list and mark the
@@ -15,8 +16,8 @@ pub fn revoke(
     credential_id: &str,
     reason: &str,
     now: &str,
-) -> Result<(), String> {
-    let transaction = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+) -> Result<(), CredentialError> {
+    let transaction = conn.unchecked_transaction()?;
     let row: Option<(String, String, i64, String)> = transaction
         .query_row(
             "SELECT c.issuer_did, c.status_list_id, c.status_list_index, s.issuer_did \
@@ -33,8 +34,7 @@ pub fn revoke(
                 ))
             },
         )
-        .optional()
-        .map_err(|e| e.to_string())?
+        .optional()?
         .and_then(
             |(credential_issuer, list_id, index, list_issuer)| match (list_id, index) {
                 (Some(list_id), Some(index)) => {
@@ -45,9 +45,9 @@ pub fn revoke(
         );
 
     let (credential_issuer, list_id, index, list_issuer) =
-        row.ok_or_else(|| format!("credential {credential_id} not found or has no status list"))?;
+        row.ok_or_else(|| CredentialError::NotRevocable(credential_id.to_string()))?;
     if credential_issuer != issuer_did.as_str() || list_issuer != issuer_did.as_str() {
-        return Err("only the credential issuer may revoke it".to_string());
+        return Err(CredentialError::NotIssuer(StatusChange::Revoke));
     }
 
     // Read current bits, set the revocation bit, write back + bump version.
@@ -57,10 +57,10 @@ pub fn revoke(
             params![list_id],
             |r| r.get(0),
         )
-        .map_err(|e| format!("load status list: {e}"))?;
+        .map_err(CredentialError::step("load status list"))?;
     // Bitstring Status List: index 0 is the most significant bit of byte 0.
     alexandria_verify::vc::status::set_bit(&mut bits, index as usize, true)
-        .map_err(|e| e.to_string())?;
+        .map_err(CredentialError::StatusBit)?;
 
     transaction
         .execute(
@@ -69,7 +69,7 @@ pub fn revoke(
          WHERE list_id = ?1 AND issuer_did = ?4",
             params![list_id, bits, now, issuer_did.as_str()],
         )
-        .map_err(|e| format!("update status list: {e}"))?;
+        .map_err(CredentialError::step("update status list"))?;
 
     transaction
         .execute(
@@ -78,9 +78,9 @@ pub fn revoke(
          WHERE id = ?1 AND issuer_did = ?4",
             params![credential_id, now, reason, issuer_did.as_str()],
         )
-        .map_err(|e| format!("update credential: {e}"))?;
+        .map_err(CredentialError::step("update credential"))?;
 
-    transaction.commit().map_err(|e| e.to_string())?;
+    transaction.commit()?;
     Ok(())
 }
 
@@ -94,7 +94,7 @@ pub fn suspend(
     until: Option<&str>,
     reason: Option<&str>,
     now: &str,
-) -> Result<(), String> {
+) -> Result<(), CredentialError> {
     let updated = conn
         .execute(
             "UPDATE credentials \
@@ -103,17 +103,19 @@ pub fn suspend(
              WHERE id = ?1 AND issuer_did = ?5",
             params![credential_id, now, until, reason, issuer_did.as_str()],
         )
-        .map_err(|e| format!("suspend credential: {e}"))?;
+        .map_err(CredentialError::step("suspend credential"))?;
     if updated == 0 {
-        return Err(format!(
-            "credential {credential_id} not found or caller is not its issuer"
-        ));
+        return Err(unchanged(conn, credential_id, StatusChange::Suspend));
     }
     Ok(())
 }
 
 /// §11.3 reinstatement — clear the suspension flag. Idempotent.
-pub fn reinstate(conn: &Connection, issuer_did: &Did, credential_id: &str) -> Result<(), String> {
+pub fn reinstate(
+    conn: &Connection,
+    issuer_did: &Did,
+    credential_id: &str,
+) -> Result<(), CredentialError> {
     let updated = conn
         .execute(
             "UPDATE credentials \
@@ -122,20 +124,33 @@ pub fn reinstate(conn: &Connection, issuer_did: &Did, credential_id: &str) -> Re
          WHERE id = ?1 AND issuer_did = ?2",
             params![credential_id, issuer_did.as_str()],
         )
-        .map_err(|e| format!("reinstate credential: {e}"))?;
+        .map_err(CredentialError::step("reinstate credential"))?;
     if updated == 0 {
-        return Err(format!(
-            "credential {credential_id} not found or caller is not its issuer"
-        ));
+        return Err(unchanged(conn, credential_id, StatusChange::Reinstate));
     }
     Ok(())
+}
+
+/// Why an issuer-bound update touched no row: the credential is not here,
+/// or it is another issuer's.
+fn unchanged(conn: &Connection, credential_id: &str, change: StatusChange) -> CredentialError {
+    let exists = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM credentials WHERE id = ?1)",
+        params![credential_id],
+        |row| row.get::<_, bool>(0),
+    );
+    match exists {
+        Ok(true) => CredentialError::NotIssuer(change),
+        Ok(false) => CredentialError::NotFound(credential_id.to_string()),
+        Err(error) => CredentialError::Database(error),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::credentials::fixtures::{sample_request, setup, test_key, NOW};
-    use crate::credentials::{self, Issuer};
+    use crate::credentials::{self, CredentialError, Issuer, StatusChange};
     use crate::crypto::did::derive_did_key;
 
     #[test]
@@ -211,7 +226,14 @@ mod tests {
             NOW,
         )
         .unwrap_err();
-        assert!(error.contains("only the credential issuer"));
+        assert!(
+            matches!(error, CredentialError::NotIssuer(StatusChange::Revoke)),
+            "{error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            "only the credential issuer may revoke it"
+        );
 
         let revoked: i64 = db
             .conn()
@@ -247,7 +269,13 @@ mod tests {
             NOW,
         )
         .unwrap_err();
-        assert!(suspend_error.contains("caller is not its issuer"));
+        assert!(
+            matches!(
+                suspend_error,
+                CredentialError::NotIssuer(StatusChange::Suspend)
+            ),
+            "{suspend_error:?}"
+        );
 
         suspend(
             db.conn(),
@@ -259,7 +287,13 @@ mod tests {
         )
         .unwrap();
         let reinstate_error = reinstate(db.conn(), &local_issuer, credential_id).unwrap_err();
-        assert!(reinstate_error.contains("caller is not its issuer"));
+        assert!(
+            matches!(
+                reinstate_error,
+                CredentialError::NotIssuer(StatusChange::Reinstate)
+            ),
+            "{reinstate_error:?}"
+        );
 
         let suspended: i64 = db
             .conn()
@@ -270,6 +304,24 @@ mod tests {
             )
             .unwrap();
         assert_eq!(suspended, 1);
+    }
+
+    #[test]
+    fn a_status_change_to_an_unknown_credential_names_it() {
+        let (db, _, issuer, _) = setup();
+        let missing = "urn:uuid:missing";
+        assert!(matches!(
+            revoke(db.conn(), &issuer, missing, "gone", NOW).unwrap_err(),
+            CredentialError::NotRevocable(id) if id == missing
+        ));
+        assert!(matches!(
+            suspend(db.conn(), &issuer, missing, None, None, NOW).unwrap_err(),
+            CredentialError::NotFound(id) if id == missing
+        ));
+        assert!(matches!(
+            reinstate(db.conn(), &issuer, missing).unwrap_err(),
+            CredentialError::NotFound(id) if id == missing
+        ));
     }
 
     #[test]

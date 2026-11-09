@@ -85,10 +85,10 @@ struct AccountFields {
 /// this VC is local-only and must never be announced or exported publicly.
 fn issue_birthdate_vc(
     conn: &rusqlite::Connection,
-    signing_key: &ed25519_dalek::SigningKey,
+    issuer: &crate::credentials::Issuer,
     birthdate: &str,
 ) -> Result<(), String> {
-    let did = crate::crypto::did::derive_did_key(signing_key);
+    let did = issuer.did();
     let mut properties = serde_json::Map::new();
     properties.insert("birthdate".to_string(), birthdate.into());
     let req = crate::credentials::IssueCredentialRequest {
@@ -102,12 +102,7 @@ fn issue_birthdate_vc(
         integrity_policy: None,
     };
     let now = crate::clock::now_rfc3339();
-    crate::credentials::issue(
-        conn,
-        &crate::credentials::Issuer::from_key(signing_key.clone()),
-        &req,
-        &now,
-    )?;
+    crate::credentials::issue(conn, issuer, &req, &now).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -167,7 +162,7 @@ pub async fn move_incompatible_profile_data(state: State<'_, AppState>) -> Resul
 #[tauri::command]
 pub async fn get_profile_session_token(
     state: State<'_, AppState>,
-) -> Result<Option<String>, String> {
+) -> Result<Option<crate::profile::scope::ProfileSession>, String> {
     Ok(state.profile_operations.session())
 }
 
@@ -188,7 +183,8 @@ pub async fn create_profile(
 ) -> Result<CreateProfileResponse, String> {
     let operations = app.state::<AppState>().profile_operations.clone();
     let cleanup_app = app.clone();
-    operations
+    let ready_app = app.clone();
+    let response = operations
         .activate(async move {
             let state = app.state::<AppState>();
             // Username (@handle) and display name are both mandatory.
@@ -265,7 +261,7 @@ pub async fn create_profile(
                 // The birthdate doubles as a self-asserted record in the
                 // credentials store (VC-first). Local-only — never gossiped.
                 if let Some(b) = &birthdate {
-                    issue_birthdate_vc(db.conn(), &w.signing_key, b)?;
+                    issue_birthdate_vc(db.conn(), &crate::credentials::Issuer::from_wallet(&w), b)?;
                 }
             }
 
@@ -295,7 +291,9 @@ pub async fn create_profile(
                 profile: read_profile_from_db(&state)?,
             })
         }, async move { cleanup_app.state::<AppState>().stop_active_profile().await })
-        .await
+        .await?;
+    profile_ready(&ready_app);
+    Ok(response)
 }
 
 /// Create a profile from an existing BIP-39 mnemonic. Same flow as
@@ -315,7 +313,8 @@ pub async fn restore_profile_with_mnemonic(
 ) -> Result<UnlockProfileResponse, String> {
     let operations = app.state::<AppState>().profile_operations.clone();
     let cleanup_app = app.clone();
-    operations
+    let ready_app = app.clone();
+    let response = operations
         .activate(async move {
             let state = app.state::<AppState>();
             let username = crate::domain::identity::validate_username(&username)?;
@@ -386,7 +385,7 @@ pub async fn restore_profile_with_mnemonic(
                     .map_err(|e| e.to_string())?;
 
                 if let Some(b) = &birthdate {
-                    issue_birthdate_vc(db.conn(), &w.signing_key, b)?;
+                    issue_birthdate_vc(db.conn(), &crate::credentials::Issuer::from_wallet(&w), b)?;
                 }
             }
 
@@ -409,7 +408,28 @@ pub async fn restore_profile_with_mnemonic(
                 profile: read_profile_from_db(&state)?,
             })
         }, async move { cleanup_app.state::<AppState>().stop_active_profile().await })
-        .await
+        .await?;
+    profile_ready(&ready_app);
+    Ok(response)
+}
+
+/// Bring profile-language OS surfaces in line once a profile is active: the
+/// Android notification channel is renamed in the background.
+fn profile_ready(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let Some(lease) = state
+        .profile_operations
+        .session()
+        .and_then(|session| state.profile_operations.admit(&session).ok())
+    else {
+        return;
+    };
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = crate::notifications::refresh_channel(&app, lease).await {
+            log::debug!("notification channel refresh failed: {e}");
+        }
+    });
 }
 
 /// Unlock an existing profile with its password.
@@ -421,7 +441,8 @@ pub async fn unlock_profile(
 ) -> Result<UnlockProfileResponse, String> {
     let operations = app.state::<AppState>().profile_operations.clone();
     let cleanup_app = app.clone();
-    operations
+    let ready_app = app.clone();
+    let response = operations
         .activate(async move {
             let state = app.state::<AppState>();
             let id = ProfileId::parse(&id).map_err(|e| e.to_string())?;
@@ -497,7 +518,9 @@ pub async fn unlock_profile(
                 profile: read_profile_from_db(&state)?,
             })
         }, async move { cleanup_app.state::<AppState>().stop_active_profile().await })
-        .await
+        .await?;
+    profile_ready(&ready_app);
+    Ok(response)
 }
 
 /// Lock the currently-active profile. Idempotent.

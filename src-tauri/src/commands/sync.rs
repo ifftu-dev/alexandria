@@ -8,12 +8,13 @@
 
 use crate::profile::scope::ProfileState as State;
 
-use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
+use crate::db::executor::DatabaseWorkload;
 use crate::domain::sync::{DeviceInfo, SyncHistoryEntry, SyncResult, SyncStatus};
 use crate::p2p::device_sync::SyncRequest;
 use crate::p2p::sync;
 use crate::profile::scope::ProfileLease;
 use crate::AppState;
+use tauri::{AppHandle, Manager};
 
 /// Get information about the local device.
 ///
@@ -120,7 +121,7 @@ pub async fn sync_status(state: State<'_, AppState>) -> Result<SyncStatus, Strin
 /// [`SyncResult`] across all peers. Peers that are offline or
 /// unreachable are skipped (logged), not fatal.
 #[tauri::command]
-pub async fn sync_now(state: State<'_, AppState>) -> Result<SyncResult, String> {
+pub async fn sync_now(app: AppHandle, state: State<'_, AppState>) -> Result<SyncResult, String> {
     let started = std::time::Instant::now();
 
     // Snapshot the paired peers up front, then release the DB lock
@@ -148,7 +149,7 @@ pub async fn sync_now(state: State<'_, AppState>) -> Result<SyncResult, String> 
 
     for (peer_id, key, addrs) in targets {
         match sync_one_peer(
-            &state.db_executor,
+            &app,
             state.profile_lease(),
             DatabaseWorkload::Learner,
             &state.p2p_node,
@@ -199,11 +200,13 @@ fn sync_targets(conn: &rusqlite::Connection) -> Result<Vec<SyncTarget>, String> 
 /// on, run one sync exchange with every paired peer. Invoked from the
 /// app's periodic queue loop. Returns rows merged across all peers.
 pub(crate) async fn auto_sync_all(
-    db_executor: &DatabaseExecutor,
+    app: &AppHandle,
     lease: &ProfileLease,
     node: &crate::commands::pairing::NodeHandle,
 ) -> usize {
-    let targets = match db_executor
+    let targets = match app
+        .state::<AppState>()
+        .db_executor
         .execute(
             DatabaseWorkload::Background,
             lease.clone(),
@@ -228,7 +231,7 @@ pub(crate) async fn auto_sync_all(
     let mut merged = 0usize;
     for (peer_id, key, addrs) in targets {
         match sync_one_peer(
-            db_executor,
+            app,
             lease.clone(),
             DatabaseWorkload::Background,
             node,
@@ -247,7 +250,7 @@ pub(crate) async fn auto_sync_all(
 
 /// Run a single already-paired sync exchange (no pairing handshake).
 async fn sync_one_peer(
-    db_executor: &DatabaseExecutor,
+    app: &AppHandle,
     lease: ProfileLease,
     workload: DatabaseWorkload,
     node_handle: &crate::commands::pairing::NodeHandle,
@@ -258,7 +261,9 @@ async fn sync_one_peer(
     let started = std::time::Instant::now();
 
     let key_for_payload = *key;
-    let (device_id, stake_address, sealed) = db_executor
+    let (device_id, stake_address, sealed) = app
+        .state::<AppState>()
+        .db_executor
         .execute(workload, lease.clone(), "sync.payload.build", move |db| {
             let device_id = sync::get_or_create_local_device(db.conn(), std::env::consts::OS)?;
             let stake = sync::local_stake_address(db.conn())?.ok_or("no local identity")?;
@@ -289,16 +294,8 @@ async fn sync_one_peer(
             .map_err(|e| e.to_string())?
     };
 
-    crate::commands::pairing::finish_exchange(
-        db_executor,
-        lease,
-        workload,
-        peer_id,
-        key,
-        response,
-        started,
-    )
-    .await
+    crate::commands::pairing::finish_exchange(app, lease, workload, peer_id, key, response, started)
+        .await
 }
 
 /// Toggle automatic background sync.

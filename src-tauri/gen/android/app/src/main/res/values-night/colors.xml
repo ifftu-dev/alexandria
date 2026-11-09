@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark launch handoff colours; see values/colors.xml. -->
+    <color name="launch_background">#FF111827</color>
+    <color name="launch_mark">#FF818CF8</color>
+</resources>

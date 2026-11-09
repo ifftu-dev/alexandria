@@ -176,7 +176,9 @@ pub async fn guardian_accept_invite(
 
     // Issue the guardianship credential (RoleCredential role=guardian,
     // subject = child DID) with our signing key.
-    let issuer = Issuer::from_keystore(&state.keystore).await?;
+    let issuer = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?;
     let issuer_did = issuer.did().clone();
     let now = crate::clock::now_rfc3339();
     let invite_for_db = invite.clone();
@@ -205,7 +207,8 @@ pub async fn guardian_accept_invite(
                         integrity_session_id: None,
                         integrity_policy: None,
                     };
-                    let vc = crate::credentials::issue(conn, &issuer, &req, &now)?;
+                    let vc = crate::credentials::issue(conn, &issuer, &req, &now)
+                        .map_err(|e| e.to_string())?;
                     let vc_json = serde_json::to_string(&vc).map_err(|e| e.to_string())?;
                     let vc_id = vc.id.clone().unwrap_or_default();
 
@@ -522,24 +525,12 @@ async fn send_approval_requests(
     key: &[u8; 32],
     peer_str: &str,
 ) -> Result<(), String> {
-    let pending: Vec<proto::ApprovalRequestPayload> = db_executor
+    let pending: Vec<crate::ai_access::ApprovalRequest> = db_executor
         .execute(
             workload,
             lease.clone(),
             "guardian.approvals.pending",
-            |db| {
-                let pending =
-                    crate::ai_access::pending_approvals(db.conn(), 20).map_err(refused)?;
-                Ok(pending
-                    .into_iter()
-                    .map(|p| proto::ApprovalRequestPayload {
-                        request_id: p.id,
-                        connection_name: p.connection_name,
-                        endpoint: p.endpoint,
-                        model: p.model,
-                    })
-                    .collect())
-            },
+            |db| crate::ai_access::pending_approvals(db.conn(), 20).map_err(refused),
         )
         .await?;
     if pending.is_empty() {
@@ -584,31 +575,13 @@ async fn deliver_approval_decisions(
     peer_str: &str,
 ) -> Result<(), String> {
     let owned_link = link_id.to_string();
-    let undelivered: Vec<proto::ApprovalDecisionPayload> = db_executor
+    let undelivered = db_executor
         .execute(
             workload,
             lease.clone(),
             "guardian.approvals.undelivered",
             move |db| {
-                let mut stmt = db
-                    .conn()
-                    .prepare(
-                        "SELECT id, endpoint, status FROM guardian_ai_requests
-                      WHERE link_id = ?1 AND status != 'pending' AND delivered = 0",
-                    )
-                    .map_err(|e| e.to_string())?;
-                let rows = stmt
-                    .query_map([&owned_link], |r| {
-                        Ok(proto::ApprovalDecisionPayload {
-                            request_id: r.get(0)?,
-                            endpoint: r.get(1)?,
-                            approved: r.get::<_, String>(2)? == "approved",
-                        })
-                    })
-                    .map_err(|e| e.to_string())?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| e.to_string())?;
-                Ok(rows)
+                crate::ai_access::undelivered_decisions(db.conn(), &owned_link).map_err(refused)
             },
         )
         .await?;
@@ -633,15 +606,7 @@ async fn deliver_approval_decisions(
         };
         match response {
             GuardianResponse::Acknowledged => {
-                let (link, id, status) = (
-                    link_id.to_string(),
-                    decision.request_id.clone(),
-                    if decision.approved {
-                        "approved"
-                    } else {
-                        "declined"
-                    },
-                );
+                let link = link_id.to_string();
                 db_executor
                     .execute(
                         workload,
@@ -649,14 +614,9 @@ async fn deliver_approval_decisions(
                         "guardian.approvals.delivered",
                         move |db| {
                             // Only if the decision did not change while it was in flight.
-                            db.conn()
-                                .execute(
-                                    "UPDATE guardian_ai_requests SET delivered = 1
-                                  WHERE id = ?1 AND link_id = ?2 AND status = ?3",
-                                    rusqlite::params![id, link, status],
-                                )
-                                .map_err(|e| e.to_string())?;
-                            Ok(())
+                            crate::ai_access::mark_delivered(db.conn(), &link, &decision)
+                                .map(|_| ())
+                                .map_err(refused)
                         },
                     )
                     .await?;
@@ -671,59 +631,18 @@ async fn deliver_approval_decisions(
     Ok(())
 }
 
-/// A ward's request as the guardian sees it.
-#[derive(Debug, serde::Serialize)]
-pub struct GuardianAiRequest {
-    pub id: String,
-    pub link_id: String,
-    pub ward_name: Option<String>,
-    pub connection_name: String,
-    pub endpoint: String,
-    pub model: String,
-    pub status: String,
-    pub received_at: String,
-    pub decided_at: Option<String>,
-    pub delivered: bool,
-}
-
 #[tauri::command]
 pub async fn guardian_list_ai_requests(
     state: State<'_, AppState>,
-) -> Result<Vec<GuardianAiRequest>, String> {
+) -> Result<Vec<crate::domain::guardian_ai::GuardianAiRequest>, String> {
     state
         .db_executor
-        .execute(DatabaseWorkload::Learner, state.profile_lease(), "guardian.ai-requests", |db| {
-            let mut stmt = db
-                .conn()
-                .prepare(
-                    "SELECT r.id, r.link_id, l.peer_display_name, r.connection_name, r.endpoint, r.model,
-                            r.status, r.received_at, r.decided_at, r.delivered
-                       FROM guardian_ai_requests r
-                       JOIN guardian_links l ON l.id = r.link_id
-                      WHERE l.side = 'guardian' AND l.status = 'active'
-                      ORDER BY r.received_at DESC",
-                )
-                .map_err(|e| e.to_string())?;
-            let rows = stmt
-                .query_map([], |r| {
-                    Ok(GuardianAiRequest {
-                        id: r.get(0)?,
-                        link_id: r.get(1)?,
-                        ward_name: r.get(2)?,
-                        connection_name: r.get(3)?,
-                        endpoint: r.get(4)?,
-                        model: r.get(5)?,
-                        status: r.get(6)?,
-                        received_at: r.get(7)?,
-                        decided_at: r.get(8)?,
-                        delivered: r.get(9)?,
-                    })
-                })
-                .map_err(|e| e.to_string())?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?;
-            Ok(rows)
-        })
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "guardian.ai-requests",
+            |db| crate::ai_access::ward_requests(db.conn()).map_err(refused),
+        )
         .await
 }
 
@@ -738,22 +657,24 @@ pub async fn guardian_decide_ai_request(
 ) -> Result<(), String> {
     state
         .db_executor
-        .execute(DatabaseWorkload::Learner, state.profile_lease(), "guardian.ai-decide", move |db| {
-            let changed = db
-                .conn()
-                .execute(
-                    "UPDATE guardian_ai_requests
-                        SET status = ?3, decided_at = datetime('now'), delivered = 0
-                      WHERE id = ?1 AND link_id = ?2
-                        AND EXISTS(SELECT 1 FROM guardian_links WHERE id = ?2 AND side = 'guardian' AND status = 'active')",
-                    rusqlite::params![request_id, link_id, if approve { "approved" } else { "declined" }],
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "guardian.ai-decide",
+            move |db| {
+                let changed = crate::ai_access::record_guardian_decision(
+                    db.conn(),
+                    &link_id,
+                    &request_id,
+                    approve,
                 )
-                .map_err(|e| e.to_string())?;
-            if changed == 0 {
-                return Err("not_found: this request is no longer available".into());
-            }
-            Ok(())
-        })
+                .map_err(refused)?;
+                if !changed {
+                    return Err("not_found: this request is no longer available".into());
+                }
+                Ok(())
+            },
+        )
         .await
 }
 

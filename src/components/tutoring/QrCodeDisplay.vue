@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from 'vue'
 import QRCode from 'qrcode'
+import { errorMessage } from '@/utils/errorMessage'
 
 const props = defineProps<{
   value: string
@@ -24,7 +25,7 @@ async function render() {
       },
     })
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = errorMessage(e)
   }
 }
 

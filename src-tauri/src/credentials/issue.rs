@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 // the rest of the codebase had moved to v2.
 use alexandria_verify::vc::context::W3C_VC_V2;
 
-use super::{status_list, Issuer};
+use super::{status_list, CredentialError, Issuer, PolicyViolation, SupersessionRequires};
 use crate::crypto::did::Did;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
@@ -53,68 +53,55 @@ pub struct IssuancePolicy {
 }
 
 impl IssuancePolicy {
-    /// Returns `Err(reason)` for the first bound the assertion violates.
-    fn evaluate(&self, a: &IntegrityAssertion, facts: &SessionFacts) -> Result<(), String> {
+    /// The first bound the assertion violates, if any.
+    fn evaluate(
+        &self,
+        a: &IntegrityAssertion,
+        facts: &SessionFacts,
+    ) -> Result<(), PolicyViolation> {
         if self.require_clean && a.status != "completed" {
-            return Err(format!(
-                "issuance policy: session status is '{}', requires 'completed'",
-                a.status
-            ));
+            return Err(PolicyViolation::NotClean {
+                status: a.status.clone(),
+            });
         }
         if let Some(min) = self.min_integrity {
             match a.integrity_score {
                 Some(score) if score >= min => {}
-                Some(score) => {
-                    return Err(format!(
-                        "issuance policy: integrity score {score:.3} below minimum {min:.3}"
-                    ))
-                }
-                None => {
-                    return Err(
-                        "issuance policy: minimum integrity required but session has no score"
-                            .into(),
-                    )
-                }
+                Some(score) => return Err(PolicyViolation::IntegrityBelowMinimum { score, min }),
+                None => return Err(PolicyViolation::NoIntegrityScore),
             }
         }
         if let Some(max) = self.max_critical {
             if a.critical_count > max {
-                return Err(format!(
-                    "issuance policy: {} critical flags exceed maximum {max}",
-                    a.critical_count
-                ));
+                return Err(PolicyViolation::TooManyCritical {
+                    count: a.critical_count,
+                    max,
+                });
             }
         }
         if let Some(max) = self.max_warning {
             if a.warning_count > max {
-                return Err(format!(
-                    "issuance policy: {} warning flags exceed maximum {max}",
-                    a.warning_count
-                ));
+                return Err(PolicyViolation::TooManyWarnings {
+                    count: a.warning_count,
+                    max,
+                });
             }
         }
         if let Some(req) = &self.required_assurance_level {
             if &a.assurance_level != req {
-                return Err(format!(
-                    "issuance policy: assurance level '{}' does not meet required '{req}'",
-                    a.assurance_level
-                ));
+                return Err(PolicyViolation::AssuranceBelowRequired {
+                    level: a.assurance_level.clone(),
+                    required: req.clone(),
+                });
             }
         }
         if let Some(min) = self.min_camera_coverage {
             match facts.camera_coverage {
-                Some(cov) if cov >= min => {}
-                Some(cov) => {
-                    return Err(format!(
-                        "issuance policy: camera coverage {cov:.2} below minimum {min:.2}"
-                    ))
+                Some(coverage) if coverage >= min => {}
+                Some(coverage) => {
+                    return Err(PolicyViolation::CameraCoverageBelowMinimum { coverage, min })
                 }
-                None => {
-                    return Err(
-                        "issuance policy: camera coverage required but session has no snapshots"
-                            .into(),
-                    )
-                }
+                None => return Err(PolicyViolation::NoSnapshots),
             }
         }
         Ok(())
@@ -130,16 +117,14 @@ pub struct SessionFacts {
 }
 
 impl SessionFacts {
-    fn load(conn: &Connection, session_id: &str) -> Result<Self, String> {
-        let (total, with_camera): (i64, i64) = conn
-            .query_row(
-                "SELECT COUNT(*),
+    fn load(conn: &Connection, session_id: &str) -> Result<Self, CredentialError> {
+        let (total, with_camera): (i64, i64) = conn.query_row(
+            "SELECT COUNT(*),
                         COALESCE(SUM(CASE WHEN camera_score IS NOT NULL THEN 1 ELSE 0 END), 0)
                  FROM integrity_snapshots WHERE session_id = ?1",
-                params![session_id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .map_err(|e| e.to_string())?;
+            params![session_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
         Ok(Self {
             camera_coverage: (total > 0).then(|| with_camera as f64 / total as f64),
         })
@@ -156,7 +141,7 @@ pub(crate) fn build_integrity_assertion(
     session_id: &str,
     now: &str,
     trust: &crate::sentinel::attestation::TrustConfig,
-) -> Result<IntegrityAssertion, String> {
+) -> Result<IntegrityAssertion, CredentialError> {
     use crate::sentinel::attestation::{effective_assurance, SessionAttestationFacts};
     let row = conn
         .query_row(
@@ -177,9 +162,8 @@ pub(crate) fn build_integrity_assertion(
                 ))
             },
         )
-        .optional()
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("integrity session {session_id} not found"))?;
+        .optional()?
+        .ok_or_else(|| CredentialError::SessionNotFound(session_id.to_string()))?;
     let (
         status,
         integrity_score,
@@ -250,10 +234,10 @@ pub fn issue(
     issuer: &Issuer,
     req: &IssueCredentialRequest,
     now: &str,
-) -> Result<VerifiableCredential, String> {
+) -> Result<VerifiableCredential, CredentialError> {
     let (issuer_key, issuer_did) = (issuer.key(), issuer.did());
     if !req.subject.as_str().starts_with("did:") {
-        return Err("subject MUST be a DID (§10 non-transferability)".into());
+        return Err(CredentialError::SubjectNotDid);
     }
 
     let list_id = status_list::ensure(conn, issuer_did)?;
@@ -287,7 +271,8 @@ pub fn issue(
         now,
         &list_id,
         index,
-    )?;
+    )
+    .map_err(CredentialError::Envelope)?;
 
     // § Integrity→VC bridge: summarise the bound session, enforce the
     // optional issuance gate, and embed the attestation in the envelope.
@@ -309,9 +294,7 @@ pub fn issue(
         }
         None => {
             if req.integrity_policy.is_some() {
-                return Err(
-                    "integrity_policy requires integrity_session_id to evaluate against".into(),
-                );
+                return Err(CredentialError::PolicyWithoutSession);
             }
             None
         }
@@ -342,10 +325,10 @@ pub fn issue(
         issuer_key,
         issuer_did,
     )
-    .map_err(|e| format!("sign: {e}"))?;
+    .map_err(CredentialError::Sign)?;
 
-    let signed_json = serde_json::to_string(&signed).map_err(|e| e.to_string())?;
-    let integrity_hash = integrity_hash_of(&signed)?;
+    let signed_json = serde_json::to_string(&signed)?;
+    let integrity_hash = integrity_hash_of(&signed).map_err(CredentialError::Envelope)?;
 
     // §11.4 supersession invariants: a newer credential may
     // supersede an older only when the same subject, claim kind, and
@@ -358,20 +341,23 @@ pub fn issue(
                 params![prior_id],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
-            .optional()
-            .map_err(|e| e.to_string())?;
+            .optional()?;
         let (prior_issuer, prior_subject, prior_kind) =
-            prior.ok_or_else(|| format!("supersedes target {prior_id} not found locally"))?;
+            prior.ok_or_else(|| CredentialError::SupersededNotFound(prior_id.clone()))?;
         if prior_issuer != issuer_did.as_str() {
-            return Err("§11.4: supersession requires same issuer as the prior credential".into());
+            return Err(CredentialError::Supersession(
+                SupersessionRequires::SameIssuer,
+            ));
         }
         if prior_subject != req.subject.as_str() {
-            return Err("§11.4: supersession requires same subject as the prior credential".into());
+            return Err(CredentialError::Supersession(
+                SupersessionRequires::SameSubject,
+            ));
         }
         if prior_kind != claim_kind {
-            return Err(
-                "§11.4: supersession requires same claim kind as the prior credential".into(),
-            );
+            return Err(CredentialError::Supersession(
+                SupersessionRequires::SameClaimKind,
+            ));
         }
     }
 
@@ -398,7 +384,7 @@ pub fn issue(
             provenance,
         ],
     )
-    .map_err(|e| format!("insert credential: {e}"))?;
+    .map_err(CredentialError::step("insert credential"))?;
 
     // Auto-enqueue for §12.3 integrity anchoring. Failure here is
     // non-fatal — anchoring is a survivability convenience, not the
@@ -422,6 +408,7 @@ pub fn issue(
 mod tests {
     use super::*;
     use crate::credentials::fixtures::{sample_request, setup, test_key, NOW};
+    use crate::credentials::{CredentialError, PolicyViolation, SupersessionRequires};
 
     /// Insert a terminal integrity session row for bridge tests.
     fn seed_session(
@@ -473,8 +460,15 @@ mod tests {
         });
         let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
         assert!(
-            err.contains("camera coverage 0.67 below minimum 0.90"),
-            "{err}"
+            matches!(
+                err,
+                CredentialError::Policy(PolicyViolation::CameraCoverageBelowMinimum { .. })
+            ),
+            "{err:?}"
+        );
+        assert_eq!(
+            err.to_string(),
+            "issuance policy: camera coverage 0.67 below minimum 0.90"
         );
     }
 
@@ -489,7 +483,10 @@ mod tests {
             ..Default::default()
         });
         let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
-        assert!(err.contains("no snapshots"), "{err}");
+        assert!(
+            matches!(err, CredentialError::Policy(PolicyViolation::NoSnapshots)),
+            "{err:?}"
+        );
 
         // Without the camera bound, the same session issues fine.
         req.integrity_policy = Some(IssuancePolicy::default());
@@ -535,7 +532,14 @@ mod tests {
                 ..Default::default()
             });
             let error = issue(db.conn(), &key, &req, NOW).unwrap_err();
-            assert!(error.contains("does not meet required"), "{error}");
+            assert!(
+                matches!(
+                    &error,
+                    CredentialError::Policy(PolicyViolation::AssuranceBelowRequired { level, required: wanted })
+                        if level == "local" && wanted == required
+                ),
+                "{error:?}"
+            );
         }
 
         req.integrity_policy = None;
@@ -557,7 +561,42 @@ mod tests {
             ..Default::default()
         });
         let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
-        assert!(err.contains("issuance policy"), "unexpected error: {err}");
+        assert!(
+            matches!(
+                &err,
+                CredentialError::Policy(PolicyViolation::NotClean { status }) if status == "suspended"
+            ),
+            "{err:?}"
+        );
+        assert_eq!(
+            err.to_string(),
+            "issuance policy: session status is 'suspended', requires 'completed'"
+        );
+
+        req.integrity_policy = Some(IssuancePolicy {
+            min_integrity: Some(0.70),
+            ..Default::default()
+        });
+        assert!(matches!(
+            issue(db.conn(), &key, &req, NOW).unwrap_err(),
+            CredentialError::Policy(PolicyViolation::IntegrityBelowMinimum { .. })
+        ));
+        req.integrity_policy = Some(IssuancePolicy {
+            max_critical: Some(1),
+            ..Default::default()
+        });
+        assert!(matches!(
+            issue(db.conn(), &key, &req, NOW).unwrap_err(),
+            CredentialError::Policy(PolicyViolation::TooManyCritical { count: 2, max: 1 })
+        ));
+        req.integrity_policy = Some(IssuancePolicy {
+            max_warning: Some(0),
+            ..Default::default()
+        });
+        assert!(matches!(
+            issue(db.conn(), &key, &req, NOW).unwrap_err(),
+            CredentialError::Policy(PolicyViolation::TooManyWarnings { count: 1, max: 0 })
+        ));
     }
 
     #[test]
@@ -586,7 +625,22 @@ mod tests {
             ..Default::default()
         });
         let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
-        assert!(err.contains("requires integrity_session_id"), "got: {err}");
+        assert!(
+            matches!(err, CredentialError::PolicyWithoutSession),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_integrity_session_is_refused() {
+        let (db, key, _, subject) = setup();
+        let mut req = sample_request(subject);
+        req.integrity_session_id = Some("sess_missing".into());
+        let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
+        assert!(
+            matches!(&err, CredentialError::SessionNotFound(id) if id == "sess_missing"),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -618,7 +672,7 @@ mod tests {
         let (db, key, _, _) = setup();
         let req = sample_request(Did("alice@example.com".into()));
         let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
-        assert!(err.contains("DID"), "got {err}");
+        assert!(matches!(err, CredentialError::SubjectNotDid), "{err:?}");
     }
 
     #[test]
@@ -655,7 +709,17 @@ mod tests {
             NOW,
         )
         .unwrap_err();
-        assert!(err.contains("issuer"), "got {err}");
+        assert!(
+            matches!(
+                err,
+                CredentialError::Supersession(SupersessionRequires::SameIssuer)
+            ),
+            "{err:?}"
+        );
+        assert_eq!(
+            err.to_string(),
+            "§11.4: supersession requires same issuer as the prior credential"
+        );
     }
 
     #[test]
@@ -664,6 +728,9 @@ mod tests {
         let mut req = sample_request(subject);
         req.supersedes = Some("urn:uuid:does-not-exist".into());
         let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
-        assert!(err.contains("not found"), "got {err}");
+        assert!(
+            matches!(&err, CredentialError::SupersededNotFound(id) if id == "urn:uuid:does-not-exist"),
+            "{err:?}"
+        );
     }
 }

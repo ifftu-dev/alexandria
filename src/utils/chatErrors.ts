@@ -5,6 +5,7 @@
 
 import { CHAT_ERROR_CODES, type ChatErrorCode } from '@/generated/chat-vocab'
 import type { MessageKey } from '@/i18n/keys'
+import { errorMessage } from '@/utils/errorMessage'
 
 const CODES: ReadonlySet<string> = new Set(CHAT_ERROR_CODES)
 
@@ -18,7 +19,7 @@ export function isChatErrorCode(value: string): value is ChatErrorCode {
  * whatever follows the colon.
  */
 export function parseChatError(value: unknown): { code: ChatErrorCode | null; head: string; detail: string } {
-  const text = String(value instanceof Error ? value.message : value)
+  const text = errorMessage(value)
   const colon = text.indexOf(':')
   const head = (colon < 0 ? text : text.slice(0, colon)).trim()
   const detail = colon < 0 ? '' : text.slice(colon + 1).trim()

@@ -20,7 +20,7 @@ pub async fn list_enrollments(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "enrollment.list",
-            move |db| enrollment::list(db, status),
+            move |db| enrollment::list(db, status).map_err(|e| e.to_string()),
         )
         .await
 }
@@ -34,7 +34,7 @@ pub async fn enroll(state: State<'_, AppState>, course_id: String) -> Result<Enr
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "enrollment.enroll",
-            move |db| enrollment::enroll(db, &course_id),
+            move |db| enrollment::enroll(db, &course_id).map_err(|e| e.to_string()),
         )
         .await
 }
@@ -52,7 +52,9 @@ pub async fn update_progress(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "enrollment.update_progress",
-            move |db| enrollment::update_progress(db, enrollment_id, req),
+            move |db| {
+                enrollment::update_progress(db, enrollment_id, req).map_err(|e| e.to_string())
+            },
         )
         .await
 }
@@ -69,7 +71,7 @@ pub async fn get_progress(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "enrollment.get_progress",
-            move |db| enrollment::progress(db, &enrollment_id),
+            move |db| enrollment::progress(db, &enrollment_id).map_err(|e| e.to_string()),
         )
         .await
 }
@@ -100,6 +102,7 @@ pub async fn record_element_submission(
                     answers_json,
                     score,
                 )
+                .map_err(|e| e.to_string())
             },
         )
         .await
@@ -119,7 +122,10 @@ pub async fn get_element_submission(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "enrollment.get_submission",
-            move |db| enrollment::latest_submission(db, &enrollment_id, &element_id),
+            move |db| {
+                enrollment::latest_submission(db, &enrollment_id, &element_id)
+                    .map_err(|e| e.to_string())
+            },
         )
         .await
 }

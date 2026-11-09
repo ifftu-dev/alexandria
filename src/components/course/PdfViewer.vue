@@ -2,6 +2,7 @@
 import { ref, onMounted, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { AppSpinner } from '@/components/ui'
 
 
 const { t } = useI18n()
@@ -92,7 +93,7 @@ watch(() => props.contentCid, loadPdf)
   <div class="pdf-viewer">
     <!-- Loading -->
     <div v-if="loading" class="flex items-center justify-center py-16">
-      <div class="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      <AppSpinner size="lg" />
     </div>
 
     <!-- Error -->
@@ -202,7 +203,7 @@ watch(() => props.contentCid, loadPdf)
         </div>
         <div class="h-1 overflow-hidden rounded-full bg-muted/30">
           <div
-            class="h-full rounded-full bg-primary transition-all duration-300"
+            class="h-full rounded-full bg-primary transition-all duration-(--duration-slow)"
             :style="{ width: `${progressPercent}%` }"
           />
         </div>

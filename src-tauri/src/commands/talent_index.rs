@@ -82,7 +82,8 @@ fn candidate_skills(conn: &Connection, subject_did: &str) -> Result<Vec<Candidat
     // Revalidation drops other calculation versions, recomputes changed
     // states and removes states whose last verified input disappeared, so a
     // learner is never offered a stale or unbacked strength.
-    crate::aggregation::store::revalidate_cached_states(conn, Some(subject_did), &now)?;
+    crate::aggregation::store::revalidate_cached_states(conn, Some(subject_did), &now)
+        .map_err(|e| e.to_string())?;
     let version = crate::aggregation::AggregationConfig::default().version;
     let mut stmt = conn
         .prepare(
@@ -321,7 +322,10 @@ pub async fn sign_consented_record(
     state: State<'_, AppState>,
     only: Option<&[String]>,
 ) -> Result<Option<SignedTalentIndexRecord>, String> {
-    let (signing_key, did) = Issuer::from_keystore(&state.keystore).await?.into_parts();
+    let (signing_key, did) = Issuer::from_keystore(&state.keystore)
+        .await
+        .map_err(|e| e.to_string())?
+        .into_parts();
     let now = crate::clock::now_rfc3339();
     let only = only.map(<[String]>::to_vec);
     state

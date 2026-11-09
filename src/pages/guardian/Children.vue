@@ -4,7 +4,7 @@ import { onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useGuardian, childAge } from '@/composables/useGuardian'
-import { AppButton, AppBadge, AppInput, AppModal, EmptyState } from '@/components/ui'
+import { AppButton, AppBadge, AppInput, AppModal, EmptyState, MotionList } from '@/components/ui'
 
 const route = useRoute()
 const router = useRouter()
@@ -102,11 +102,15 @@ function statusLabel(status: string): string {
       :description="$t('guardian.children.emptyDescription')"
     />
 
-    <div v-else class="grid gap-4 sm:grid-cols-2">
+    <MotionList
+      v-else
+      appear
+      class="grid gap-4 sm:grid-cols-2"
+    >
       <button
         v-for="child in children"
         :key="child.id"
-        class="rounded-xl border border-border bg-card p-5 text-start transition-colors hover:border-primary/50"
+        class="pressable rounded-xl border border-border bg-card p-5 text-start hover:border-primary/50 [--press-scale:0.985]"
         @click="router.push(`/guardian/child/${child.id}`)"
       >
         <div class="flex items-center gap-3">
@@ -130,7 +134,7 @@ function statusLabel(status: string): string {
           {{ child.last_sync_at ? $t('guardian.children.lastSynced', { time: child.last_sync_at.slice(0, 16) }) : $t('guardian.children.notSynced') }}
         </p>
       </button>
-    </div>
+    </MotionList>
 
     <!-- Add child modal -->
     <AppModal :open="showAdd" :title="$t('guardian.children.addModalTitle')" @close="showAdd = false">

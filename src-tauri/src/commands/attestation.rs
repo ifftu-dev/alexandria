@@ -37,7 +37,7 @@ pub fn credential_trust_impl(
     verification_time: &str,
     network_id: &str,
 ) -> Result<Option<CredentialTrust>, String> {
-    let Some(credential) = store::get(conn, credential_id)? else {
+    let Some(credential) = store::get(conn, credential_id).map_err(|e| e.to_string())? else {
         return Ok(None);
     };
     let policy = VerificationPolicy::default();

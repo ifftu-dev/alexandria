@@ -36,7 +36,7 @@ beforeEach(() => {
 it.each(['password', 'biometric'])('preserves a held tap through the real picker %s unlock flow', async method => {
   mocks.biometric.mockResolvedValue(method === 'biometric')
   const links = (await import('@/deeplink/useDeepLinks')).useDeepLinks()
-  await links.openNotification({ id: 'tap-A', profileId: 'A', networkId: 'network', recipient: 'binding', route: '/settings/organisations' })
+  await links.openNotification({ id: 'tap-A', profile_id: 'A', network_id: 'network', recipient: 'binding', route: '/settings/organisations' })
   const Picker = (await import('./ProfileSelect.vue')).default
   const wrapper = mount(Picker, { global: {
     plugins: [createI18n({ legacy: false, locale: 'en', missingWarn: false, fallbackWarn: false })],

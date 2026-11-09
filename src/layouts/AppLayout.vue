@@ -6,7 +6,7 @@ import { usePlatform } from '@/composables/usePlatform'
 import { useMode } from '@/composables/useMode'
 import { useAccountStatus } from '@/composables/useAccountStatus'
 import { useSettings, useSetting } from '@/composables/useSettings'
-import { animateMotion } from '@/composables/useMotion'
+import { useSettleIn } from '@/composables/useMotion'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 import AppTopBar from '@/components/layout/AppTopBar.vue'
 import AppBottomBar from '@/components/layout/AppBottomBar.vue'
@@ -28,15 +28,11 @@ const isImmersiveRoute = computed(() => route.name === 'learn' || route.name ===
 // here and let the footer clear the tab bar itself.
 const isPlayerRoute = computed(() => route.name === 'learn')
 const routeContent = ref<HTMLElement | null>(null)
-let cancelRouteMotion = () => {}
+const settleRoute = useSettleIn()
 watch(() => route.path, () => {
-  cancelRouteMotion()
   // Persistent media and assessment surfaces own their state and presentation.
-  if (!isImmersiveRoute.value && routeContent.value) {
-    cancelRouteMotion = animateMotion(routeContent.value, [{ opacity: 0.65, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], 200)
-  }
+  settleRoute(isImmersiveRoute.value ? null : routeContent.value)
 }, { flush: 'post' })
-onUnmounted(() => cancelRouteMotion())
 
 // Sidebar collapsed state lives in the per-profile settings store
 // (`ui.sidebar_collapsed`, scope=sync) so it propagates to the
