@@ -15,9 +15,12 @@ ability to check a signature has to be everywhere to be worth anything.
 ## No I/O
 
 The crate does not open a socket, a file, or a database. Verification needs
-persistent state in four places — the issuer's key at a point in time, a status
-list's bits, a local suspension flag, and whether something supersedes the
-credential — and each arrives through the `VerificationStore` trait.
+persistent state in five places — the issuer's key at a point in time, a status
+list's bits, a local suspension flag, whether something supersedes the
+credential, and an observed Cardano integrity anchor of its hash — and each
+arrives through the `VerificationStore` trait. The anchor lookup has a default
+that knows no anchors; the verifier recomputes the hash and checks the anchor's
+recorded hash and issuer before setting `integrityAnchored`.
 
 ```rust
 use alexandria_verify::{

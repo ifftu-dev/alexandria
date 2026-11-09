@@ -810,9 +810,11 @@ Alexandria infrastructure (§20.4 survivability).
    gossip propagation. PR 5 + PR 9.
 4. **Anchoring** — Per-credential integrity anchor queue
    (`cardano::anchor_queue`) writes BLAKE3(JCS bytes) into
-   metadata-only Cardano txs. Idle-node contract: silently
-   no-ops without Blockfrost / wallet credentials. PR 8 (queue),
-   PR 16 (real submission).
+   metadata-only Cardano txs, treasury-funded when configured and
+   always signed by the issuer. Idle-node contract: silently
+   no-ops without Blockfrost / wallet credentials. A confirmed
+   anchor makes the credential `integrityAnchored` when verified
+   on this node. PR 8 (queue), PR 16 (real submission).
 5. **Aggregation** — Deterministic, explainable trust scores via
    the §14 weighted-mean + saturating-confidence pipeline
    (`aggregation::aggregate_skill_state`, PR 6) + anti-gaming
@@ -890,7 +892,7 @@ this on every test run.
 | §6–§7 (credential taxonomy + canonical structure) | PR 4 | Implemented |
 | §8–§10 (required fields, issuance, non-transferability) | PR 4–5 | Implemented |
 | §11 (expiration, revocation, suspension, supersession) | PR 5 | Implemented |
-| §12 (storage, durability, integrity anchoring) | PR 8 + PR 10 + PR 145 | Storage + anchor queue + PinBoard implemented. Anchor tick runs every 60s with wallet derived from the unlocked keystore; metadata-only txs submit to Cardano preprod when a Blockfrost project id is configured (Settings → Cardano, or `BLOCKFROST_PROJECT_ID` env var). Mainnet reference-script deployment still pending. |
+| §12 (storage, durability, integrity anchoring) | PR 8 + PR 10 + PR 145 | Storage + anchor queue + PinBoard implemented. Anchor tick runs every 60s with wallet derived from the unlocked keystore; the issuer signs each anchor and the treasury pays when `ALEXANDRIA_TREASURY_*` is configured, else the issuer's wallet does; metadata-only txs submit to Cardano preprod when a Blockfrost project id is configured (Settings → Cardano, or `BLOCKFROST_PROJECT_ID` env var). Mainnet reference-script deployment still pending. |
 | §13 (verification algorithm + acceptance predicate) | PR 4–5 | Implemented with typed accept/pending/reject results and missing/unavailable store evidence |
 | §14 (trust aggregation, weights, confidence, levels) | PR 6 | Implemented |
 | §15 (anti-gaming controls) | PR 7 | Cluster cap + inflation penalty implemented; cluster_issuers is per-DID until governance signals land |
