@@ -244,6 +244,9 @@ pub fn rejection_reasons(result: &VerificationResult) -> Vec<&'static str> {
                 VerificationPendingReason::SupersessionStateUnavailable => {
                     "supersession lookup is unavailable"
                 }
+                VerificationPendingReason::IntegrityAnchorUnavailable => {
+                    "integrity anchor lookup is unavailable"
+                }
             })
             .collect();
     }
