@@ -2,8 +2,9 @@
 //!
 //! Each row in `credential_anchors` points to a `credentials` row; the processor
 //! builds a metadata-only Cardano tx (no mint) via
-//! `anchor_tx::build_anchor_metadata_tx`, submits via Blockfrost, and
-//! records the resulting tx hash on success.
+//! `anchor_tx::build_anchor_metadata_tx`, funded by the treasury when one is
+//! configured, submits via Blockfrost, and records the resulting tx hash on
+//! success.
 
 use crate::cardano::anchor_tx;
 use crate::cardano::blockfrost::BlockfrostClient;
@@ -24,15 +25,7 @@ const TICK_BATCH: i64 = 10;
 /// failed.
 const MAX_ATTEMPTS: u32 = 5;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AnchorStatus {
-    Pending,
-    OutcomeUnknown,
-    Submitted,
-    Confirmed,
-    Failed,
-}
+pub use crate::domain::credential_anchor::{AnchorStatus, CredentialAnchorState};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CredentialAnchor {
@@ -215,11 +208,16 @@ async fn build_and_submit(
         .await?;
 
     let issuer = Did(issuer_did);
+    // Policy: the Alexandria treasury pays for chain writes. Read per
+    // attempt, like the completion queue, so a configured treasury is
+    // picked up without a restart; absent, the issuer's wallet pays.
+    let treasury = crate::cardano::treasury::TreasuryPayer::from_env();
     let anchor = anchor_tx::build_anchor_metadata_tx(
         &integrity_hash,
         &issuer,
         &issuance_date,
         wallet,
+        treasury.as_ref(),
         blockfrost,
     )
     .await
@@ -265,8 +263,7 @@ fn load_pending(conn: &rusqlite::Connection) -> Result<Vec<CredentialAnchor>, St
             Ok(CredentialAnchor {
                 credential_id: r.get(0)?,
                 anchor_tx_hash: r.get(1)?,
-                anchor_status: serde_json::from_value(serde_json::Value::String(status))
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                anchor_status: AnchorStatus::parse(&status).ok_or(rusqlite::Error::InvalidQuery)?,
                 attempts: r.get(3)?,
                 last_error: r.get(4)?,
                 next_attempt_at: r.get(5)?,
@@ -358,6 +355,57 @@ fn mark_failed_permanent(
     )
     .map_err(|e| format!("mark_failed_permanent: {e}"))?;
     Ok(())
+}
+
+const STATE_COLUMNS: &str = "credential_id, anchor_status, anchor_tx_hash, attempts, \
+     last_error, enqueued_at, confirmed_at";
+
+fn state_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<CredentialAnchorState> {
+    let status: String = r.get(1)?;
+    Ok(CredentialAnchorState {
+        credential_id: r.get(0)?,
+        status: AnchorStatus::parse(&status).ok_or_else(|| {
+            rusqlite::Error::FromSqlConversionFailure(
+                1,
+                rusqlite::types::Type::Text,
+                format!("unknown anchor status {status:?}").into(),
+            )
+        })?,
+        tx_hash: r.get(2)?,
+        attempts: r.get(3)?,
+        last_error: r.get(4)?,
+        enqueued_at: r.get(5)?,
+        confirmed_at: r.get(6)?,
+    })
+}
+
+/// The anchor state of every credential this node queued, by credential id.
+pub fn list_states(conn: &rusqlite::Connection) -> Result<Vec<CredentialAnchorState>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {STATE_COLUMNS} FROM credential_anchors ORDER BY credential_id"
+        ))
+        .map_err(|e| format!("list credential anchors: {e}"))?;
+    let rows = stmt
+        .query_map([], state_row)
+        .map_err(|e| format!("list credential anchors: {e}"))?;
+    rows.collect::<Result<_, _>>()
+        .map_err(|e| format!("list credential anchors: {e}"))
+}
+
+/// One credential's anchor state; `None` when it was never queued here.
+pub fn state(
+    conn: &rusqlite::Connection,
+    credential_id: &str,
+) -> Result<Option<CredentialAnchorState>, String> {
+    use rusqlite::OptionalExtension;
+    conn.query_row(
+        &format!("SELECT {STATE_COLUMNS} FROM credential_anchors WHERE credential_id = ?1"),
+        rusqlite::params![credential_id],
+        state_row,
+    )
+    .optional()
+    .map_err(|e| format!("read credential anchor: {e}"))
 }
 
 /// Enqueue a credential for anchoring. Idempotent: a no-op insert
@@ -453,6 +501,22 @@ mod tests {
             )
             .unwrap();
         assert_eq!(status, "pending");
+    }
+
+    #[test]
+    fn state_reads_only_credentials_this_node_queued() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        seed_credential(db.conn(), "cred-1");
+        seed_credential(db.conn(), "cred-2");
+        assert_eq!(state(db.conn(), "cred-1").unwrap(), None);
+        enqueue(db.conn(), "cred-1").unwrap();
+        let queued = state(db.conn(), "cred-1").unwrap().unwrap();
+        assert_eq!(queued.status, AnchorStatus::Pending);
+        assert_eq!(queued.tx_hash, None);
+        let all = list_states(db.conn()).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].credential_id, "cred-1");
     }
 
     #[test]
