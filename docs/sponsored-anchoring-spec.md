@@ -224,15 +224,11 @@ There are also frontend unit tests for the badge and detail copy (prior art: the
 
 ## Notes
 
-### 2026-11-10: implemented, sponsor not yet deployed
+### 2026-11-10: implemented
 
 Built as specified, with one correction. The wallet's `did:key` is not its Cardano payment key (the did:key is derived from the extended key's first 32 bytes as an Ed25519 seed). So the anchor's required signer is the `did:key` key itself, witnessing alongside the payment key that pays or lends collateral. A verifier can then check the signer from the DID alone.
 
-Still open:
-
-- **Deploy the sponsor.** Build `anchor_sponsor` with the pinned Aiken compiler; v1.1.24 changes every existing validator's hash, so its blueprint was not committed. Apply the parameters, deploy the reference script, split and fund the pool, then add `anchor_sponsor` to the network profile. This needs the deployer and founder keys.
-- **Live preprod run.** `live_anchor_preprod` (ignored) needs a funded test mnemonic, and a deployed sponsor for the sponsored path.
-- Protocol spec §3.1 still says the payment key is the `did:key` signing material; the implementation differs (see above). That predates this spec.
+Still open: protocol spec §3.1 still says the payment key is the `did:key` signing material; the implementation differs (see above). That predates this spec.
 
 ### 2026-11-10: review fixes
 
@@ -241,3 +237,10 @@ Still open:
 - A credential may hold several receipts; a wrong imported one never displaces the right one. Unconfirmed lookups back off, so they cannot starve the rest.
 - Collateral risks the smallest sufficient UTxO.
 - The slot-to-POSIX offset comes from the network profile (`anchor_sponsor.slot_offset_secs`).
+
+### 2026-11-10: deployed on preprod, live runs pass
+
+- **Sponsor.** Built with the pinned compiler (existing validator hashes unchanged) and parameterised with a 1 tADA fee cap, a one-hour window, a ten-minute maximum validity and the treasury key as a 1-of-1 reclaim key. Script hash `b6467c8ac00884023575fc42a0278b2bbe83f1516b60fc7bde5399dd`; reference script and a pool of ten 25 tADA UTxOs in transaction `9e9288ce814c9c7ca3bb0f5015fc619871249934b8982be1157cee5f8949ebf3`. The network profile names it (revision 3).
+- **Reclaim, live.** The pool was first funded with `cardano-cli --tx-out-inline-datum-value`, which wrote a CBOR map instead of the Plutus datum, so no `Sponsor` spend could read it. All ten UTxOs were recovered with `Reclaim` and re-locked with the correct datum.
+- **Live batches (`live_batch_anchor_preprod`).** An issuer-funded batch (`16e64ab7810543ba513931e23e42d9a8e54dbc7c76f1d042fff3e0ba246fe1b6`) and a sponsor-funded batch (`acd3a3ab592afdfddbd0e33a76da94f81a18d00b002d4eb6db035ca20883993f`) each anchored two credentials, confirmed, read back from the ledger with the issuer's `did:key` key as the only required signer, and verified as anchored. The sponsored one cost the issuer nothing: the sponsor UTxO paid a 0.30 tADA fee and returned the rest with `next_allowed` one window later, and the collateral was not taken.
+- Mainnet needs a founder multisig as the reclaim key and its own parameters.
