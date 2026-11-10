@@ -4,7 +4,10 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { AppBadge, AppButton, AppAlert } from '@/components/ui'
 import { useCredentials } from '@/composables/useCredentials'
+import { anchorBadge } from '@/components/credential/anchorStatus'
+import { explorerTxUrl } from '@/utils/cardanoExplorer'
 import type {
+  CredentialAnchorState,
   CredentialTrust,
   EndorsementMismatch,
   EndorsementOutcome,
@@ -24,6 +27,8 @@ const credentialId = computed(() => route.params.id as string)
 const credential = ref<VerifiableCredential | null>(null)
 const verification = ref<VerificationResult | null>(null)
 const trust = ref<CredentialTrust | null>(null)
+const anchor = ref<CredentialAnchorState | null>(null)
+const retryingAnchor = ref(false)
 const loading = ref(true)
 const verifying = ref(false)
 const revoking = ref(false)
@@ -56,7 +61,32 @@ async function reverify() {
 
 async function loadTrust() {
   trust.value = (await api.trust(credentialId.value)) ?? null
+  anchor.value = (await api.anchor(credentialId.value)) ?? null
 }
+
+async function retryAnchor() {
+  retryingAnchor.value = true
+  anchor.value = (await api.retryAnchor(credentialId.value)) ?? anchor.value
+  retryingAnchor.value = false
+}
+
+const anchorBody = computed((): string => {
+  const value = anchor.value
+  if (!value) return t('credentials.anchor.body.none')
+  switch (value.status) {
+    case 'confirmed':
+      return t('credentials.anchor.body.confirmed', { time: value.confirmed_at ?? '' })
+    case 'pending':
+      return value.last_error
+        ? t('credentials.anchor.body.retrying', { error: value.last_error })
+        : t('credentials.anchor.body.pending')
+    case 'submitted':
+    case 'outcome_unknown':
+      return t('credentials.anchor.body.submitted')
+    case 'failed':
+      return t('credentials.anchor.body.failed', { error: value.last_error ?? '' })
+  }
+})
 
 async function revoke() {
   if (!credential.value?.id) return
@@ -101,6 +131,7 @@ function pendingReasonLabel(reason: VerificationPendingReason): string {
     case 'status_list_unavailable': return t('credentials.detail.trustPending.statusListUnavailable')
     case 'suspension_state_unavailable': return t('credentials.detail.trustPending.suspensionUnavailable')
     case 'supersession_state_unavailable': return t('credentials.detail.trustPending.supersessionUnavailable')
+    case 'integrity_anchor_unavailable': return t('credentials.detail.trustPending.anchorUnavailable')
   }
 }
 
@@ -302,6 +333,39 @@ const decisionVariant = computed(() => {
         <p class="mt-1 text-xs text-muted-foreground">
           {{ $t('credentials.detail.statusEvidenceNote') }}
         </p>
+      </section>
+
+      <!-- Cardano integrity anchor (§11.3.1) -->
+      <section class="mb-6 rounded-xl bg-card shadow-sm p-6" data-anchor-section>
+        <div class="mb-2 flex items-center justify-between gap-3">
+          <h2 class="text-base font-semibold">{{ $t('credentials.anchor.title') }}</h2>
+          <AppBadge v-if="anchor" :variant="anchorBadge(anchor.status).variant">
+            {{ $t(anchorBadge(anchor.status).label) }}
+          </AppBadge>
+        </div>
+        <p class="break-words text-sm text-foreground">{{ anchorBody }}</p>
+        <div v-if="anchor?.tx_hash || anchor?.status === 'failed'" class="mt-3 flex flex-wrap items-center gap-3 text-sm">
+          <a
+            v-if="anchor?.tx_hash"
+            class="text-primary hover:underline"
+            :href="explorerTxUrl(anchor.tx_hash)"
+            target="_blank"
+            rel="noopener"
+          >{{ $t('credentials.anchor.viewTransaction') }}</a>
+          <span v-if="anchor?.tx_hash" class="truncate font-mono text-xs text-muted-foreground" :title="anchor.tx_hash">
+            {{ anchor.tx_hash }}
+          </span>
+          <AppButton
+            v-if="anchor?.status === 'failed'"
+            variant="outline"
+            size="sm"
+            :loading="retryingAnchor"
+            @click="retryAnchor"
+          >
+            {{ $t('credentials.anchor.retry') }}
+          </AppButton>
+        </div>
+        <p class="mt-3 text-xs text-muted-foreground">{{ $t('credentials.anchor.note') }}</p>
       </section>
 
       <!-- Integrity attestation (§ Integrity→VC bridge) -->

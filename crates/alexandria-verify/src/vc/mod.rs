@@ -9,6 +9,7 @@
 //! Integrity proof (`DataIntegrityProof`, cryptosuite `eddsa-jcs-2022`) and,
 //! when revocable, a Bitstring Status List entry.
 
+pub mod anchor;
 pub mod canonicalize;
 pub mod context;
 pub mod id;
@@ -548,6 +549,9 @@ pub enum VerificationPendingReason {
     StatusListUnavailable,
     SuspensionStateUnavailable,
     SupersessionStateUnavailable,
+    /// The policy requires an integrity anchor and the anchor lookup failed.
+    /// A missing anchor is not pending: it is `integrityAnchored: false`.
+    IntegrityAnchorUnavailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

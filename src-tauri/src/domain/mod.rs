@@ -5,6 +5,7 @@ pub mod classroom;
 pub mod completion;
 pub mod course;
 pub mod course_document;
+pub mod credential_anchor;
 pub mod enrollment;
 pub mod evidence;
 pub mod governance;

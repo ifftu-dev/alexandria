@@ -10,7 +10,8 @@
 //! 4. Check subject binding (subject.id is a well-formed DID).
 //! 5. Check expiration against `verification_time`.
 //! 6. Resolve referenced status and local lifecycle state.
-//! 7. Emit an accepted, pending, or rejected `VerificationResult`.
+//! 7. Check a caller-observed integrity anchor against the recomputed hash.
+//! 8. Emit an accepted, pending, or rejected `VerificationResult`.
 //!
 //! Missing or unavailable issuer/status evidence produces a typed pending
 //! result. A malformed reference or a failed cryptographic/policy check is a
@@ -131,6 +132,25 @@ pub fn verify_credential(
             StoreLookup::Unavailable => result
                 .pending_reasons
                 .push(VerificationPendingReason::SupersessionStateUnavailable),
+        }
+    }
+
+    // -- integrity anchor (§11.3.1) ------------------------------------------
+    // The store supplies what the caller saw on the ledger; the hash is
+    // recomputed here, so an anchor of different content or by a different
+    // issuer is not this credential's anchor. A failed lookup only matters
+    // when the policy requires an anchor.
+    if let Ok(credential_hash) = super::anchor::integrity_hash(credential) {
+        match db.integrity_anchor(&credential_hash) {
+            StoreLookup::Found(anchor) => {
+                result.integrity_anchored =
+                    super::anchor::anchor_matches(&anchor, credential, &credential_hash);
+            }
+            StoreLookup::Missing => {}
+            StoreLookup::Unavailable if policy.require_integrity_anchor => result
+                .pending_reasons
+                .push(VerificationPendingReason::IntegrityAnchorUnavailable),
+            StoreLookup::Unavailable => {}
         }
     }
 
@@ -294,6 +314,9 @@ fn finalize(
                 | VerificationPendingReason::IssuerKeyUnavailable
         )
     });
+    let anchor_pending = result
+        .pending_reasons
+        .contains(&VerificationPendingReason::IntegrityAnchorUnavailable);
     let valid_or_pending = (result.valid_signature && result.issuer_resolved)
         || (!result.issuer_resolved && issuer_evidence_pending);
     let accept = valid_or_pending
@@ -301,7 +324,7 @@ fn finalize(
         && result.subject_bound
         && type_allowed(credential, policy)
         && !result.revoked
-        && (!policy.require_integrity_anchor || result.integrity_anchored)
+        && (!policy.require_integrity_anchor || result.integrity_anchored || anchor_pending)
         && !(policy.reject_expired && result.expired)
         && !(policy.reject_suspended && result.suspended)
         && !(policy.reject_superseded && result.superseded);
@@ -702,5 +725,122 @@ mod tests {
         );
         assert!(!result.subject_bound);
         assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
+    }
+
+    /// A store that knows nothing except one answer about anchors.
+    struct AnchorStore(StoreLookup<crate::vc::anchor::IntegrityAnchor>);
+
+    impl VerificationStore for AnchorStore {
+        fn key_at(&self, _did: &Did, _at: &str) -> StoreLookup<KeyRegistryEntry> {
+            StoreLookup::Missing
+        }
+        fn status_list_bits(&self, _list_id: &str) -> StoreLookup<Vec<u8>> {
+            StoreLookup::Missing
+        }
+        fn suspension(&self, _credential_id: &str) -> StoreLookup<(bool, Option<String>)> {
+            StoreLookup::Missing
+        }
+        fn is_superseded(&self, _credential_id: &str) -> StoreLookup<bool> {
+            StoreLookup::Missing
+        }
+        fn integrity_anchor(&self, hash: &str) -> StoreLookup<crate::vc::anchor::IntegrityAnchor> {
+            match &self.0 {
+                // Answer for whatever hash is asked, so a mismatch is the
+                // verifier's finding and not the store's.
+                StoreLookup::Found(anchor) => {
+                    StoreLookup::Found(crate::vc::anchor::IntegrityAnchor {
+                        credential_hash: if anchor.credential_hash.is_empty() {
+                            hash.to_string()
+                        } else {
+                            anchor.credential_hash.clone()
+                        },
+                        ..anchor.clone()
+                    })
+                }
+                StoreLookup::Missing => StoreLookup::Missing,
+                StoreLookup::Unavailable => StoreLookup::Unavailable,
+            }
+        }
+    }
+
+    fn anchor_of(vc: &VerifiableCredential) -> crate::vc::anchor::IntegrityAnchor {
+        crate::vc::anchor::IntegrityAnchor {
+            credential_hash: String::new(),
+            issuer_did: vc.issuer.as_str().to_string(),
+            tx_hash: "ab".repeat(32),
+            anchored_at: Some(NOW.into()),
+        }
+    }
+
+    fn requiring_anchor() -> VerificationPolicy {
+        VerificationPolicy {
+            require_integrity_anchor: true,
+            ..VerificationPolicy::default()
+        }
+    }
+
+    #[test]
+    fn integrity_hash_names_the_content_not_the_signature() {
+        let (_, vc) = signed(None);
+        let mut resigned = vc.clone();
+        resigned.proof.proof_value = "zDifferentSignature".into();
+        let hash = crate::vc::anchor::integrity_hash(&vc).unwrap();
+        assert_eq!(hash.len(), 64);
+        assert_eq!(hash, crate::vc::anchor::integrity_hash(&resigned).unwrap());
+        let mut changed = vc.clone();
+        changed.valid_from = "2026-01-02T00:00:00Z".into();
+        assert_ne!(hash, crate::vc::anchor::integrity_hash(&changed).unwrap());
+    }
+
+    #[test]
+    fn a_matching_ledger_anchor_marks_the_credential_anchored() {
+        let (_, vc) = signed(None);
+        let store = AnchorStore(StoreLookup::Found(anchor_of(&vc)));
+        let result = verify_credential(&store, &vc, NOW, &requiring_anchor());
+        assert!(result.integrity_anchored);
+        assert_eq!(result.acceptance_decision, AcceptanceDecision::Accept);
+    }
+
+    #[test]
+    fn an_anchor_of_other_content_or_by_another_issuer_is_not_this_credentials() {
+        let (_, vc) = signed(None);
+        let other_hash = crate::vc::anchor::IntegrityAnchor {
+            credential_hash: "00".repeat(32),
+            ..anchor_of(&vc)
+        };
+        let other_issuer = crate::vc::anchor::IntegrityAnchor {
+            issuer_did: derive_did_key(&test_signing_key("someone")).as_str().into(),
+            ..anchor_of(&vc)
+        };
+        for anchor in [other_hash, other_issuer] {
+            let store = AnchorStore(StoreLookup::Found(anchor));
+            let result = verify_credential(&store, &vc, NOW, &requiring_anchor());
+            assert!(!result.integrity_anchored);
+            assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
+            // Without the requirement the credential still stands on its
+            // signature.
+            let result = verify_credential(&store, &vc, NOW, &VerificationPolicy::default());
+            assert!(!result.integrity_anchored);
+            assert_eq!(result.acceptance_decision, AcceptanceDecision::Accept);
+        }
+    }
+
+    #[test]
+    fn a_failed_anchor_lookup_is_pending_only_when_the_policy_requires_an_anchor() {
+        let (_, vc) = signed(None);
+        let store = AnchorStore(StoreLookup::Unavailable);
+        let required = verify_credential(&store, &vc, NOW, &requiring_anchor());
+        assert_eq!(required.acceptance_decision, AcceptanceDecision::Pending);
+        assert_eq!(
+            required.pending_reasons,
+            vec![VerificationPendingReason::IntegrityAnchorUnavailable]
+        );
+        let optional = verify_credential(&store, &vc, NOW, &VerificationPolicy::default());
+        assert_eq!(optional.acceptance_decision, AcceptanceDecision::Accept);
+        assert!(optional.pending_reasons.is_empty());
+
+        let missing = verify_credential(&NullStore, &vc, NOW, &requiring_anchor());
+        assert!(!missing.integrity_anchored);
+        assert_eq!(missing.acceptance_decision, AcceptanceDecision::Reject);
     }
 }

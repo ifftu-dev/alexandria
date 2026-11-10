@@ -12,6 +12,7 @@ import {
   type CredentialClass,
 } from '@/components/credential/credentialKind'
 import {
+  type CredentialAnchorState,
   type CredentialType,
   type DerivedSkillState,
   type IssueClaimRequest,
@@ -34,6 +35,8 @@ const localDid = ref<string | null>(null)
 const skillNames = ref<Map<string, string>>(new Map())
 // id → input credential, for resolving each derived state's `sources`.
 const credById = ref<Map<string, VerifiableCredential>>(new Map())
+// id → anchor state, for the credentials this device issued.
+const anchorById = ref<Map<string, CredentialAnchorState>>(new Map())
 const initialLoading = ref(true)
 const recomputing = ref(false)
 
@@ -69,6 +72,8 @@ async function refresh() {
   const map = new Map<string, VerifiableCredential>()
   for (const c of api.credentials.value) if (c.id) map.set(c.id, c)
   credById.value = map
+  const anchors = (await api.listAnchors()) ?? []
+  anchorById.value = new Map(anchors.map((a) => [a.credential_id, a]))
 
   let states = localDid.value
     ? (await api.listDerivedStates(localDid.value)) ?? []
@@ -472,6 +477,7 @@ async function exportBundle() {
       :skill-name="activeState ? skillLabel(activeState.skill_id) : ''"
       :source-count="activeState?.active_evidence_count ?? 0"
       :sources="activeState ? resolvedSources(activeState) : []"
+      :anchors="anchorById"
       @close="sourceOpen = false"
       @open-credential="openCredential"
     />

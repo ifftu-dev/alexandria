@@ -5,10 +5,10 @@
 //! `did:key` resolution.
 //!
 //! The crate performs no I/O. Verification needs to consult persistent state
-//! in four places — the issuer's key at a point in time, a status list's bits,
-//! a local suspension flag, and whether something supersedes the credential —
-//! and each of those arrives through [`VerificationStore`] rather than a
-//! database handle. Callers implement the trait over whatever they have:
+//! in five places — the issuer's key at a point in time, a status list's bits,
+//! a local suspension flag, whether something supersedes the credential, and
+//! an observed ledger anchor of its hash — and each of those arrives through
+//! [`VerificationStore`] rather than a database handle or a chain client. Callers implement the trait over whatever they have:
 //! SQLite in the app, a credential bundle in the CLI, Postgres on a server.
 //!
 //! That indirection is the point. A verifier should link a signature checker,
@@ -50,6 +50,16 @@ pub trait VerificationStore {
 
     /// Whether a locally-held credential supersedes this one.
     fn is_superseded(&self, credential_id: &str) -> StoreLookup<bool>;
+
+    /// A confirmed ledger anchor recording `credential_hash` (spec §11.3.1),
+    /// if the caller has observed one. The verifier checks that the anchor's
+    /// hash and issuer are the credential's own before trusting it.
+    ///
+    /// Stores that know nothing about anchors keep the default: `Missing`, so
+    /// `integrityAnchored` is false.
+    fn integrity_anchor(&self, _credential_hash: &str) -> StoreLookup<vc::anchor::IntegrityAnchor> {
+        StoreLookup::Missing
+    }
 }
 
 /// Result of consulting verification state supplied by a caller.

@@ -8,10 +8,12 @@
 use crate::clock::now_rfc3339;
 use crate::profile::scope::ProfileState as State;
 
+use crate::cardano::anchor_queue;
 use crate::credentials::{
     self, bundle, lifecycle, status_list, store, IssueCredentialRequest, Issuer,
 };
 use crate::db::executor::DatabaseWorkload;
+use crate::domain::credential_anchor::CredentialAnchorState;
 use crate::domain::vc::{VerifiableCredential, VerificationResult};
 use crate::AppState;
 
@@ -260,6 +262,65 @@ pub async fn verify_credential_cmd(
                     &now,
                     &crate::domain::vc::VerificationPolicy::default(),
                 ))
+            },
+        )
+        .await
+}
+
+/// Anchor state for every credential this node queued for anchoring.
+#[tauri::command]
+pub async fn list_credential_anchors(
+    state: State<'_, AppState>,
+) -> Result<Vec<CredentialAnchorState>, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.anchors",
+            |db| anchor_queue::list_states(db.conn()),
+        )
+        .await
+}
+
+/// One credential's anchor state; `None` when this node never queued it.
+#[tauri::command]
+pub async fn get_credential_anchor(
+    state: State<'_, AppState>,
+    credential_id: String,
+) -> Result<Option<CredentialAnchorState>, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.anchor",
+            move |db| anchor_queue::state(db.conn(), &credential_id),
+        )
+        .await
+}
+
+/// Queue a failed anchor for another attempt. Only a credential this node
+/// already queued can be retried: anchoring is the issuer's act, so a
+/// credential received from elsewhere is never queued here. A failure whose
+/// signed transaction is journaled is reconciled, never rebuilt.
+#[tauri::command]
+pub async fn retry_credential_anchor(
+    state: State<'_, AppState>,
+    credential_id: String,
+) -> Result<Option<CredentialAnchorState>, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.anchor-retry",
+            move |db| {
+                if anchor_queue::state(db.conn(), &credential_id)?.is_none() {
+                    return Ok(None);
+                }
+                anchor_queue::enqueue_or_retry(db.conn(), &credential_id)?;
+                anchor_queue::state(db.conn(), &credential_id)
             },
         )
         .await

@@ -13,6 +13,7 @@ import { useModalFocus } from '@/composables/useModalFocus'
 import { motionDuration, useMotion } from '@/composables/useMotion'
 import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import { CREDENTIAL_KINDS, type CredentialClass } from '@/components/credential/credentialKind'
+import { explorerTxUrl } from '@/utils/cardanoExplorer'
 
 const { t } = useI18n()
 const { reduced } = useMotion()
@@ -350,7 +351,7 @@ function continueToDashboard() {
             <a
               v-if="shortTx && witnessStatus === 'confirmed'"
               class="mint-tx"
-              :href="`https://preprod.cardanoscan.io/transaction/${txHash}`"
+              :href="explorerTxUrl(txHash ?? '')"
               target="_blank"
               rel="noopener"
             >{{ $t('courses.completion.viewPublicRecord') }}</a>

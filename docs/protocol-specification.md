@@ -809,6 +809,8 @@ A(c) = (H(c), t_i, issuer_ref)
 
 where `H(c)` is `blake3` of the JCS-canonical bytes of the VC with `proofValue` emptied (§14.23.2). The full credential is NOT stored on-chain. Anchoring is an integrity-timestamping mechanism; it neither creates nor transfers a token and does not replace the signature-based verification defined in §14.13.
 
+The issuer's payment key, which is also its `did:key` signing key (§11.4), MUST be a required signer of the anchor transaction, whoever funds it. The Alexandria treasury funds the transaction when one is configured, and the issuer's wallet funds it otherwise. Only the issuer's own node queues an anchor; a credential received from elsewhere is never anchored by its holder.
+
 ### 11.4 Decentralised Identity
 
 The user's 24-word BIP-39 mnemonic IS their identity. Key derivation follows CIP-1852 via pallas-wallet, producing a payment key (m/1852'/1815'/0'/0/0) and a stake key (m/1852'/1815'/0'/2/0). The payment key serves as the Cardano signing key, the message signing key for gossip envelopes, and the DID-key signing material for the VC layer (§14.5). The libp2p peer identity is derived **per device** by HKDF over the payment key plus a device-local secret (`device_id`), so the same mnemonic loaded onto two devices yields distinct `PeerId`s. The stake key signs `stake_pubkey_registration` transactions that bind the stake address to the gossip-envelope public key for privileged-topic authority (see [`docs/stake-pubkey-registry.md`](./stake-pubkey-registry.md)). There is no email, no OAuth, and no custodial wallet service.
@@ -1424,12 +1426,19 @@ The verifier MUST output a structured result:
 `acceptanceDecision` is one of `accept`, `pending`, or `reject`.
 `pendingReasons` contains stable snake-case reason codes:
 `issuer_key_missing`, `issuer_key_unavailable`, `status_list_missing`,
-`status_list_unavailable`, `suspension_state_unavailable`, and
-`supersession_state_unavailable`. `statusValid` is false when a present status
+`status_list_unavailable`, `suspension_state_unavailable`,
+`supersession_state_unavailable`, and `integrity_anchor_unavailable`. `statusValid` is false when a present status
 reference is malformed or its bit index lies outside the supplied list.
-The current shared verifier does not independently resolve Cardano integrity
-anchors, so `integrityAnchored` remains false; a policy that requires it rejects
-until an anchor verifier supplies that fact.
+`integrity_anchor_unavailable` is reported only when the policy requires an
+integrity anchor and the anchor lookup failed.
+
+The shared verifier reads no chain. The caller supplies an anchor it observed in
+a confirmed transaction (§11.3.1); the verifier recomputes `H(c)` and sets
+`integrityAnchored` only when the anchor's recorded hash and issuer are the
+credential's own. A missing anchor leaves `integrityAnchored` false, which
+rejects under a policy that requires it. The application supplies the confirmed
+anchors of credentials its node issued; anchors of credentials received from
+elsewhere are not yet resolved, so those remain unanchored.
 
 #### 14.13.2 Verification Procedure
 
