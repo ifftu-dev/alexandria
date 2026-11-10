@@ -18,6 +18,7 @@ On-chain governance for the Alexandria learning platform, implementing Section 1
 | `soulbound` | Historical spending validator for CIP-68 reputation tokens |
 | `vote_minting` | Vote receipt token minting. One receipt per voter per election/proposal to prevent double-voting |
 | `completion` | Completion-witness minting policy keyed to the learner and course completion root |
+| `anchor_sponsor` | Treasury fee pool for credential-anchor txs: capped fee per spend, one spend per UTxO per window, m-of-n reclaim. Not yet deployed |
 
 ## Library Modules
 
@@ -27,6 +28,7 @@ On-chain governance for the Alexandria learning platform, implementing Section 1
 | `reputation` | CIP-68 token name construction, reference token helpers |
 | `state_token` | DAO state token name construction and UTxO lookup |
 | `utils` | Quorum checks, majority/supermajority, deadline validation, top-N candidate selection |
+| `sponsor` | `anchor_sponsor` datum and redeemer types |
 
 ## Building
 
@@ -37,6 +39,10 @@ aiken build
 ```
 
 Produces `plutus.json` — the CIP-57 blueprint containing all validator scripts.
+
+### Applying `anchor_sponsor` parameters
+
+`anchor_sponsor` takes five parameters, applied one at a time in order: `fee_cap` (lovelace), `window` (POSIX ms), `max_validity` (POSIX ms), `reclaim_keys` (list of key hashes), `reclaim_threshold`. Each is hex CBOR Plutus Data, e.g. `aiken blueprint apply -m anchor_sponsor -v anchor_sponsor -o plutus.json 1a001e8480` for a 2 ADA fee cap; repeat for the rest. `Sponsor` always fails unless `window > max_validity`, and `Reclaim` needs `reclaim_threshold >= 1`. Build with the pinned compiler so the existing validator hashes stay unchanged.
 
 ## Testing
 
