@@ -67,6 +67,75 @@ pub struct NetworkProfile {
     pub committee_https_endpoints: Vec<String>,
     pub protocol_namespace: String,
     pub optional_governance_anchor_address: Option<String>,
+    /// The deployed anchor sponsor (spec §11.3.1): the treasury script that
+    /// pays credential-anchor fees. Absent until it is deployed; nodes then
+    /// fund anchors from the issuer's wallet.
+    #[serde(default)]
+    pub anchor_sponsor: Option<AnchorSponsorProfile>,
+}
+
+/// Coordinates and parameters of the deployed `anchor_sponsor` validator.
+/// The parameters repeat what was applied to the script so a node can build a
+/// spend the script accepts; the script hash is what binds them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AnchorSponsorProfile {
+    /// Blake2b-224 hash of the parameterised script, hex.
+    pub script_hash: String,
+    /// The script's enterprise address, bech32.
+    pub address: String,
+    /// The CIP-33 reference-script UTxO, `<tx_hash>#<index>`.
+    pub reference_input: String,
+    /// Most lovelace one sponsored transaction may spend on its fee.
+    pub fee_cap_lovelace: u64,
+    /// Rate-limit window per sponsor UTxO, POSIX milliseconds.
+    pub window_ms: u64,
+    /// Widest validity interval the script accepts, POSIX milliseconds.
+    pub max_validity_ms: u64,
+    /// This network's Shelley-era slot clock: `posix_seconds = slot +
+    /// slot_offset_secs`. The script sees POSIX time and the ledger slots,
+    /// so a sponsored spend's datum is computed through this.
+    pub slot_offset_secs: u64,
+}
+
+impl AnchorSponsorProfile {
+    /// POSIX milliseconds at the start of `slot`.
+    pub fn slot_to_posix_ms(&self, slot: u64) -> u64 {
+        (slot + self.slot_offset_secs) * 1000
+    }
+
+    /// The reference input as `(tx_hash, index)`.
+    pub fn reference(&self) -> Option<(&str, u64)> {
+        let (hash, index) = self.reference_input.split_once('#')?;
+        Some((hash, index.parse().ok()?))
+    }
+
+    fn validate(&self) -> Result<(), NetworkProfileError> {
+        let hex_of = |value: &str, bytes: usize| {
+            value.len() == bytes * 2 && value.bytes().all(|b| b.is_ascii_hexdigit())
+        };
+        if !hex_of(&self.script_hash, 28) {
+            return invalid("anchor_sponsor.script_hash must be 28 bytes of hex");
+        }
+        if !self.address.starts_with("addr") {
+            return invalid("anchor_sponsor.address must be a bech32 Shelley address");
+        }
+        match self.reference() {
+            Some((hash, _)) if hex_of(hash, 32) => {}
+            _ => return invalid("anchor_sponsor.reference_input must be <tx_hash>#<index>"),
+        }
+        if self.fee_cap_lovelace == 0 || self.max_validity_ms == 0 || self.slot_offset_secs == 0 {
+            return invalid(
+                "anchor_sponsor fee cap, validity width and slot offset must be positive",
+            );
+        }
+        // The script's rate limit holds only when a spender cannot back-date
+        // the interval past a whole window.
+        if self.window_ms <= self.max_validity_ms {
+            return invalid("anchor_sponsor.window_ms must exceed max_validity_ms");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -329,6 +398,10 @@ impl NetworkProfile {
                     "governance_locator, committee_instance_id and committee_https_endpoints must be enabled together",
                 )
             }
+        }
+
+        if let Some(sponsor) = &self.anchor_sponsor {
+            sponsor.validate()?;
         }
 
         reject_placeholders(self)?;

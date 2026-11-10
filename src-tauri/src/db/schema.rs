@@ -118,6 +118,9 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (31, "push_error_codes", include_str!("push_error_codes.sql")),
     // Each subject field's stable atlas slot (colour and map region).
     (32, "subject_field_atlas_slot", include_str!("subject_field_atlas_slot.sql")),
+    // Batched credential anchors: Merkle-root batches, per-credential
+    // receipts, and cached ledger observations of anchor transactions.
+    (33, "anchor_batches", include_str!("anchor_batches.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

@@ -194,7 +194,9 @@ fn the_view_set_is_exact() {
 /// search adds one FTS5 table (6 schema tables with its shadows) and 3
 /// triggers; chat artifacts add 1 table and 2 indexes. Notifications add
 /// 4 tables (inbox, deduplication, registration, operation state) and 1 unread index.
-/// Subject-field atlas slots add 1 unique index.
+/// Subject-field atlas slots add 1 unique index. Batched credential anchors
+/// add 3 tables (batches, receipts, observations) and, net of the rebuilt
+/// anchor queue, 2 indexes.
 #[test]
 fn the_schema_object_counts_are_pinned() {
     let db = migrated();
@@ -202,8 +204,8 @@ fn the_schema_object_counts_are_pinned() {
         .into_iter()
         .filter(|t| t != "_migrations" && t != "_schema_identity")
         .count();
-    assert_eq!(tables, 135, "table count changed");
-    assert_eq!(names(db.conn(), "index").len(), 128, "index count changed");
+    assert_eq!(tables, 138, "table count changed");
+    assert_eq!(names(db.conn(), "index").len(), 130, "index count changed");
     assert_eq!(
         names(db.conn(), "trigger").len(),
         6,
@@ -548,7 +550,7 @@ fn with_provisional_notifications(db: Database) -> Database {
 #[test]
 fn provisional_notifications_upgrade_preserves_data_and_backfills_call_kinds() {
     let db = provisional_notification_database();
-    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 14);
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 15);
     assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
     let saved: (
         String,
@@ -665,7 +667,8 @@ fn provisional_notifications_upgrade_preserves_data_and_backfills_call_kinds() {
             (29, "notification_recipient_lifecycle".into()),
             (30, "notification_mutation_body".into()),
             (31, "push_error_codes".into()),
-            (32, "subject_field_atlas_slot".into())
+            (32, "subject_field_atlas_slot".into()),
+            (33, "anchor_batches".into())
         ]
     );
     let applied_at: String = db
@@ -713,7 +716,7 @@ fn notifications_migrate_fresh_and_current_main_without_changing_existing_calls(
         }
         assert_eq!(
             super::run_migrations_on_connection(db.conn()).unwrap(),
-            32 - prior_version
+            33 - prior_version
         );
         assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
         db.conn().execute_batch(
@@ -799,7 +802,7 @@ fn provisional_notifications_failed_upgrade_reopens_and_retries_atomically() {
     db.conn()
         .execute_batch("DROP TRIGGER fail_upgrade")
         .unwrap();
-    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 14);
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 15);
     assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
 }
 

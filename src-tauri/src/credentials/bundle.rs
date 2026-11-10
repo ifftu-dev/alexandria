@@ -29,6 +29,11 @@ pub struct CredentialBundle {
     /// the bundle's author can still check these against the issuer's key.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub status_list_credentials: Vec<VerifiableCredential>,
+    /// Anchor receipts for the credentials, where this node holds one. A
+    /// receipt proves a credential is a leaf of an anchored batch once its
+    /// transaction is looked up on the ledger, which this bundle cannot do.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anchor_receipts: Vec<alexandria_verify::vc::anchor::AnchorReceipt>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -108,11 +113,20 @@ pub fn export_signed(
 
     // Credentials, ordered deterministically by id so ad-hoc ordering
     // in the credentials table doesn't leak into the bundle.
-    let mut stmt = conn.prepare("SELECT signed_vc_json FROM credentials ORDER BY id")?;
+    let mut stmt = conn.prepare("SELECT c.signed_vc_json FROM credentials c ORDER BY c.id")?;
     let cred_rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
-    let mut credentials = Vec::new();
+    let mut credentials: Vec<VerifiableCredential> = Vec::new();
     for r in cred_rows {
         credentials.push(serde_json::from_str(&r?)?);
+    }
+    // Each credential's best receipt: this node's own, else a verified one.
+    let mut anchor_receipts = Vec::new();
+    for credential in &credentials {
+        if let Some(receipt) = crate::cardano::anchor_queue::receipt_for(conn, credential)
+            .map_err(CredentialError::AnchorReceipt)?
+        {
+            anchor_receipts.push(receipt);
+        }
     }
 
     let mut stmt = conn.prepare(
@@ -177,6 +191,7 @@ pub fn export_signed(
         key_registry,
         status_lists,
         status_list_credentials,
+        anchor_receipts,
     };
     serde_json_canonicalizer::to_string(&bundle).map_err(CredentialError::Canonicalize)
 }
@@ -391,6 +406,7 @@ pub fn verify_bundle_offline(
 struct BundleStore {
     keys: Vec<KeyRegistryRow>,
     status_lists: Vec<(String, Vec<u8>)>,
+    anchor_receipts: Vec<alexandria_verify::vc::anchor::AnchorReceipt>,
 }
 
 impl BundleStore {
@@ -426,6 +442,7 @@ impl BundleStore {
         Ok(Self {
             keys: bundle.key_registry.clone(),
             status_lists,
+            anchor_receipts: bundle.anchor_receipts.clone(),
         })
     }
 }
@@ -475,6 +492,24 @@ impl crate::domain::vc::VerificationStore for BundleStore {
         _credential_id: &str,
     ) -> crate::domain::vc::StoreLookup<(bool, Option<String>)> {
         crate::domain::vc::StoreLookup::Missing
+    }
+
+    /// A bundle can carry a credential's receipt but not the ledger's word
+    /// on the transaction it names, so an anchor with a receipt is
+    /// unavailable here rather than confirmed.
+    fn integrity_anchor(
+        &self,
+        credential_hash: &str,
+    ) -> crate::domain::vc::StoreLookup<alexandria_verify::vc::anchor::AnchorEvidence> {
+        let holds_receipt = self.anchor_receipts.iter().any(|receipt| {
+            alexandria_verify::vc::anchor::receipt_root(credential_hash, receipt)
+                .is_some_and(|root| root.eq_ignore_ascii_case(&receipt.root))
+        });
+        if holds_receipt {
+            crate::domain::vc::StoreLookup::Unavailable
+        } else {
+            crate::domain::vc::StoreLookup::Missing
+        }
     }
 
     fn is_superseded(&self, _credential_id: &str) -> crate::domain::vc::StoreLookup<bool> {
@@ -812,6 +847,57 @@ mod tests {
             "a revoked credential must not verify from the signed list"
         );
         assert_eq!(total, 1);
+    }
+
+    #[test]
+    fn anchor_receipts_travel_with_the_bundle_without_changing_acceptance() {
+        use crate::domain::vc::VerificationStore;
+        use alexandria_verify::vc::anchor::{merkle_root, AnchorReceipt};
+
+        let (db, key, _issuer, subject) = setup();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
+        assert!(
+            !export(db.conn()).unwrap().contains("anchor_receipts"),
+            "no receipt, no field: older bundles keep their bytes"
+        );
+
+        let hash = crate::domain::vc::integrity_hash_of(&vc).unwrap();
+        let leaf: [u8; 32] = hex::decode(&hash).unwrap().try_into().unwrap();
+        let receipt = AnchorReceipt {
+            v: 1,
+            leaf_index: 0,
+            leaf_count: 1,
+            path: vec![],
+            root: hex::encode(merkle_root(&[leaf])),
+            tx_hash: "ab".repeat(32),
+            issuer_did: vc.issuer.as_str().to_string(),
+        };
+        crate::cardano::anchor_queue::import_receipt(db.conn(), &vc, &receipt).unwrap();
+
+        let json = export(db.conn()).unwrap();
+        let bundle: CredentialBundle = serde_json::from_str(&json).unwrap();
+        assert_eq!(bundle.anchor_receipts, vec![receipt.clone()]);
+        let offline = verify_offline(&json, NOW).unwrap();
+        assert_eq!(offline.accepted, 1, "an anchor is never a gate");
+        assert!(
+            !offline.results[0].integrity_anchored,
+            "a bundle cannot show the ledger, so it never claims an anchor"
+        );
+
+        // The bundle holds this credential's receipt, so the anchor is
+        // unknown rather than absent; a receipt for other content is absent.
+        let store = BundleStore::new(&bundle).unwrap();
+        assert_eq!(
+            store.integrity_anchor(&hash),
+            crate::domain::vc::StoreLookup::Unavailable
+        );
+        let mut tampered = bundle.clone();
+        tampered.anchor_receipts[0].root = "00".repeat(32);
+        let store = BundleStore::new(&tampered).unwrap();
+        assert_eq!(
+            store.integrity_anchor(&hash),
+            crate::domain::vc::StoreLookup::Missing
+        );
     }
 
     #[test]

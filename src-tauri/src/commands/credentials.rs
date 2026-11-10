@@ -267,7 +267,8 @@ pub async fn verify_credential_cmd(
         .await
 }
 
-/// Anchor state for every credential this node queued for anchoring.
+/// Anchor state for every credential this node queued, and for received
+/// credentials whose imported receipt verifies.
 #[tauri::command]
 pub async fn list_credential_anchors(
     state: State<'_, AppState>,
@@ -283,7 +284,8 @@ pub async fn list_credential_anchors(
         .await
 }
 
-/// One credential's anchor state; `None` when this node never queued it.
+/// One credential's anchor state; `None` when this node never queued it and
+/// holds no verified receipt for it.
 #[tauri::command]
 pub async fn get_credential_anchor(
     state: State<'_, AppState>,
@@ -316,7 +318,7 @@ pub async fn retry_credential_anchor(
             state.profile_lease(),
             "credentials.anchor-retry",
             move |db| {
-                if anchor_queue::state(db.conn(), &credential_id)?.is_none() {
+                if !anchor_queue::is_queued(db.conn(), &credential_id)? {
                     return Ok(None);
                 }
                 anchor_queue::enqueue_or_retry(db.conn(), &credential_id)?;

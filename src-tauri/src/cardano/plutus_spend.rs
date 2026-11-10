@@ -27,15 +27,21 @@ use super::tx_builder::{
     extended_private_key, parse_tx_hash, sign_raw_tx, TxBuildError, TTL_OFFSET,
 };
 
-const PRICE_MEM_NUM: u64 = 577;
+pub(crate) const PRICE_MEM_NUM: u64 = 577;
 const PRICE_MEM_DEN: u64 = 10_000;
 const PRICE_STEP_NUM: u64 = 721;
 const PRICE_STEP_DEN: u64 = 10_000_000;
-const MIN_COLLATERAL_LOVELACE: u64 = 5_000_000;
-const EST_MEM: u64 = 3_000_000;
-const EST_STEPS: u64 = 1_200_000_000;
+pub(crate) const MIN_COLLATERAL_LOVELACE: u64 = 5_000_000;
+pub(crate) const EST_MEM: u64 = 3_000_000;
+pub(crate) const EST_STEPS: u64 = 1_200_000_000;
 
-fn plutus_fee(min_fee_a: u64, min_fee_b: u64, tx_size: u64, mem: u64, steps: u64) -> u64 {
+pub(crate) fn plutus_fee(
+    min_fee_a: u64,
+    min_fee_b: u64,
+    tx_size: u64,
+    mem: u64,
+    steps: u64,
+) -> u64 {
     let size_fee = min_fee_a * tx_size + min_fee_b;
     let exec_fee = (mem * PRICE_MEM_NUM).div_ceil(PRICE_MEM_DEN)
         + (steps * PRICE_STEP_NUM).div_ceil(PRICE_STEP_DEN);

@@ -6,7 +6,10 @@ pub mod completion_queue;
 pub mod completion_recovery;
 pub mod completion_tx_builder;
 pub mod cost_models;
+#[cfg(test)]
+pub(crate) mod fake_ledger;
 pub mod gov_tx_builder;
+pub mod ledger;
 pub mod plutus_data;
 pub mod plutus_spend;
 pub mod relay_registry_chain;

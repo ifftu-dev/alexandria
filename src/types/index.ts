@@ -1511,9 +1511,10 @@ export type VerificationPendingReason =
 export type AnchorStatus = 'pending' | 'outcome_unknown' | 'submitted' | 'confirmed' | 'failed'
 
 /**
- * Mirrors `domain::credential_anchor::CredentialAnchorState`: where this
- * node's Cardano anchor of a credential it issued stands. Only `confirmed`
- * makes a credential `integrityAnchored`.
+ * Mirrors `domain::credential_anchor::CredentialAnchorState`: where a
+ * credential's Cardano anchor stands. Credentials this node issued go through
+ * the batch queue; a received one is `confirmed` once its imported receipt
+ * verifies against the ledger.
  */
 export interface CredentialAnchorState {
   credential_id: string
@@ -1521,6 +1522,8 @@ export interface CredentialAnchorState {
   tx_hash: string | null
   attempts: number
   last_error: string | null
+  /** The last error is one a wallet balance fixes (fee or collateral). */
+  needs_funds: boolean
   enqueued_at: string
   confirmed_at: string | null
 }

@@ -146,6 +146,7 @@ pub async fn build_batch_anchor_tx(
     Ok(anchor_tx::AnchorTx {
         signed_cbor,
         tx_hash,
+        invalid_from_slot: tip_slot + TTL_OFFSET,
     })
 }
 

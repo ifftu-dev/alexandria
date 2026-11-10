@@ -16,10 +16,7 @@ use std::future::Future;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use super::{
-    blockfrost::{BlockfrostClient, TransactionReceipt},
-    tx_builder,
-};
+use super::{blockfrost::TransactionReceipt, ledger::Ledger, tx_builder};
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::db::Database;
 use crate::profile::scope::ProfileLease;
@@ -273,9 +270,9 @@ pub fn mark_applied(
 /// Submit only if this operation has never been journaled. A repeated call
 /// returns the original identity, even if its caller built different bytes.
 /// Different recovery context for the same operation is an error.
-pub(crate) async fn submit_once(
+pub(crate) async fn submit_once<L: Ledger>(
     journal: &Journal,
-    blockfrost: &BlockfrostClient,
+    blockfrost: &L,
     operation: Operation<'_>,
     signed_cbor: &[u8],
     context_json: &str,
@@ -285,19 +282,14 @@ pub(crate) async fn submit_once(
         operation,
         signed_cbor,
         context_json,
-        |bytes| async move {
-            blockfrost
-                .submit_tx(&bytes)
-                .await
-                .map_err(|e| e.to_string())
-        },
+        |bytes| async move { blockfrost.submit(&bytes).await },
     )
     .await
 }
 
-pub(crate) async fn submit_once_with_members(
+pub(crate) async fn submit_once_with_members<L: Ledger>(
     journal: &Journal,
-    blockfrost: &BlockfrostClient,
+    blockfrost: &L,
     operation: Operation<'_>,
     signed_cbor: &[u8],
     context_json: &str,
@@ -309,12 +301,7 @@ pub(crate) async fn submit_once_with_members(
         signed_cbor,
         context_json,
         members,
-        |bytes| async move {
-            blockfrost
-                .submit_tx(&bytes)
-                .await
-                .map_err(|e| e.to_string())
-        },
+        |bytes| async move { blockfrost.submit(&bytes).await },
     )
     .await
 }
@@ -531,16 +518,13 @@ where
 
 /// Reconcile only the journaled identity. Not found, unavailable, or timed out
 /// is not proof of rejection and never makes the operation eligible to rebuild.
-pub(crate) async fn reconcile(
+pub(crate) async fn reconcile<L: Ledger>(
     journal: &Journal,
-    blockfrost: &BlockfrostClient,
+    blockfrost: &L,
     operation: Operation<'_>,
 ) -> Result<Option<Submission>, String> {
     reconcile_with(journal, operation, |hash| async move {
-        blockfrost
-            .get_transaction_receipt(&hash)
-            .await
-            .map_err(|e| e.to_string())
+        blockfrost.receipt(&hash).await
     })
     .await
 }
@@ -744,6 +728,7 @@ mod tests {
                 hash,
                 slot: 42,
                 valid_contract: true,
+                block_time: None,
             }))
         })
         .await
@@ -858,6 +843,7 @@ mod tests {
                 hash,
                 slot: 42,
                 valid_contract: true,
+                block_time: None,
             }))
         })
         .await
@@ -1204,6 +1190,7 @@ mod tests {
                 hash,
                 slot: 42,
                 valid_contract: false,
+                block_time: None,
             }))
         })
         .await
@@ -1251,6 +1238,7 @@ mod tests {
                 hash,
                 slot: 42,
                 valid_contract: false,
+                block_time: None,
             }))
         })
         .await
@@ -1269,6 +1257,7 @@ mod tests {
                 hash: "0".repeat(64),
                 slot: 42,
                 valid_contract: true,
+                block_time: None,
             }))
         })
         .await;

@@ -51,13 +51,15 @@ pub trait VerificationStore {
     /// Whether a locally-held credential supersedes this one.
     fn is_superseded(&self, credential_id: &str) -> StoreLookup<bool>;
 
-    /// A confirmed ledger anchor recording `credential_hash` (spec §11.3.1),
-    /// if the caller has observed one. The verifier checks that the anchor's
-    /// hash and issuer are the credential's own before trusting it.
+    /// The anchor receipt for `credential_hash` and the caller's ledger
+    /// observation of the transaction it names (spec §11.3.1), if both are
+    /// known. The verifier folds the receipt from the recomputed hash and
+    /// checks root, transaction, issuer and required signer before trusting
+    /// it.
     ///
     /// Stores that know nothing about anchors keep the default: `Missing`, so
     /// `integrityAnchored` is false.
-    fn integrity_anchor(&self, _credential_hash: &str) -> StoreLookup<vc::anchor::IntegrityAnchor> {
+    fn integrity_anchor(&self, _credential_hash: &str) -> StoreLookup<vc::anchor::AnchorEvidence> {
         StoreLookup::Missing
     }
 }

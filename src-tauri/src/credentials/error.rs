@@ -178,6 +178,8 @@ pub enum CredentialError {
     ListBits(#[from] base64::DecodeError),
     #[error("canonicalize bundle: {0}")]
     Canonicalize(#[source] serde_json::Error),
+    #[error("read anchor receipt: {0}")]
+    AnchorReceipt(String),
 
     // --- Status changes --------------------------------------------------
     /// The caller is not the credential's issuer (ADR 0003).

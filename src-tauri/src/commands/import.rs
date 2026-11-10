@@ -368,6 +368,37 @@ fn credentials_in(payload: &str) -> Result<Vec<VerifiableCredential>, String> {
     Ok(vec![vc])
 }
 
+/// Anchor receipts a bundle carries. A malformed list is ignored rather than
+/// failing the import: a receipt is a convenience, never a gate.
+fn anchor_receipts_in(payload: &str) -> Vec<alexandria_verify::vc::anchor::AnchorReceipt> {
+    crate::credentials::store::parse_credential_payload(payload)
+        .ok()
+        .and_then(|value| value.get("anchor_receipts").cloned())
+        .and_then(|receipts| serde_json::from_value(receipts).ok())
+        .unwrap_or_default()
+}
+
+/// Keep the receipt that folds from this credential's own integrity hash to
+/// its root. It counts once the ledger shows the transaction it names.
+fn keep_anchor_receipt(
+    conn: &rusqlite::Connection,
+    vc: &VerifiableCredential,
+    receipts: &[alexandria_verify::vc::anchor::AnchorReceipt],
+) {
+    let Ok(hash) = crate::domain::vc::integrity_hash_of(vc) else {
+        return;
+    };
+    let own = receipts.iter().find(|receipt| {
+        alexandria_verify::vc::anchor::receipt_root(&hash, receipt)
+            .is_some_and(|root| root.eq_ignore_ascii_case(&receipt.root))
+    });
+    if let Some(receipt) = own {
+        if let Err(error) = crate::cardano::anchor_queue::import_receipt(conn, vc, receipt) {
+            log::warn!("anchor receipt not kept: {error}");
+        }
+    }
+}
+
 fn credential_entries(
     list: &[serde_json::Value],
     label: &str,
@@ -403,14 +434,21 @@ pub fn import_credentials_impl(
         failed: Vec::new(),
     };
 
+    let receipts = anchor_receipts_in(payload);
     for (i, vc) in credentials.iter().enumerate() {
         let label = vc
             .id
             .clone()
             .unwrap_or_else(|| format!("credential {}", i + 1));
         match import_credential_impl(conn, vc, now) {
-            Ok(outcome) if outcome.stored => summary.imported += 1,
-            Ok(_) => summary.already_present += 1,
+            Ok(outcome) => {
+                if outcome.stored {
+                    summary.imported += 1;
+                } else {
+                    summary.already_present += 1;
+                }
+                keep_anchor_receipt(conn, vc, &receipts);
+            }
             Err(reason) => summary.failed.push(ImportFailure {
                 credential_id: label,
                 reason,
@@ -819,6 +857,63 @@ mod tests {
         let summary = import_credentials_impl(db.conn(), &bundle, NOW).unwrap();
         assert_eq!(summary.imported, 2);
         assert!(summary.failed.is_empty());
+    }
+
+    #[test]
+    fn a_bundle_keeps_only_receipts_that_fold_from_its_credentials() {
+        use alexandria_verify::vc::anchor::{merkle_path, merkle_root, AnchorReceipt};
+
+        let db = open_db();
+        let a = signed_vc(
+            &key("issuer"),
+            CredentialType::EntitlementCredential,
+            "urn:test:receipt:a",
+            entitlement_props(),
+            None,
+        );
+        let b = signed_vc(
+            &key("issuer"),
+            CredentialType::EntitlementCredential,
+            "urn:test:receipt:b",
+            entitlement_props(),
+            None,
+        );
+        let leaf = |vc: &VerifiableCredential| -> [u8; 32] {
+            hex::decode(crate::domain::vc::integrity_hash_of(vc).unwrap())
+                .unwrap()
+                .try_into()
+                .unwrap()
+        };
+        let leaves = [leaf(&a), leaf(&b)];
+        let receipt = |index: usize| AnchorReceipt {
+            v: 1,
+            leaf_index: index as u64,
+            leaf_count: 2,
+            path: merkle_path(&leaves, index)
+                .iter()
+                .map(hex::encode)
+                .collect(),
+            root: hex::encode(merkle_root(&leaves)),
+            tx_hash: "ab".repeat(32),
+            issuer_did: a.issuer.as_str().to_string(),
+        };
+        let mut wrong = receipt(1);
+        wrong.path = vec!["00".repeat(32)];
+        let bundle = serde_json::json!({
+            "formatVersion": "1",
+            "credentials": [a, b],
+            "keyRegistry": [],
+            "statusLists": [],
+            "anchor_receipts": [receipt(0), wrong],
+        })
+        .to_string();
+
+        import_credentials_impl(db.conn(), &bundle, NOW).unwrap();
+        let kept = |vc: &VerifiableCredential| {
+            crate::cardano::anchor_queue::receipt_for(db.conn(), vc).unwrap()
+        };
+        assert_eq!(kept(&a), Some(receipt(0)));
+        assert_eq!(kept(&b), None, "a receipt that does not fold is dropped");
     }
 
     /// A bundle's key registry and status lists are assertions about issuer

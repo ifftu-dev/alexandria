@@ -4,13 +4,13 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The anchor queue's state for one credential. Rows exist only for
-/// credentials this node issued; a credential received from elsewhere has no
-/// state here.
+/// Where one credential's anchor stands. Queue states exist for credentials
+/// this node issued; a credential received from elsewhere is only ever
+/// `Confirmed`, once its imported receipt verifies against the ledger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnchorStatus {
-    /// Queued; not yet signed and sent.
+    /// Queued for the next batch; not yet signed and sent.
     Pending,
     /// Sent, but whether the ledger took it is not yet known.
     OutcomeUnknown,
@@ -56,6 +56,8 @@ pub struct CredentialAnchorState {
     pub tx_hash: Option<String>,
     pub attempts: u32,
     pub last_error: Option<String>,
+    /// The last error is one a wallet balance fixes (fee or collateral).
+    pub needs_funds: bool,
     pub enqueued_at: String,
     pub confirmed_at: Option<String>,
 }
