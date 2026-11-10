@@ -12,6 +12,95 @@
   },
   "validators": [
     {
+      "title": "anchor_sponsor.anchor_sponsor.spend",
+      "datum": {
+        "title": "datum",
+        "schema": {
+          "$ref": "#/definitions/alexandria~1sponsor~1SponsorDatum"
+        }
+      },
+      "redeemer": {
+        "title": "redeemer",
+        "schema": {
+          "$ref": "#/definitions/alexandria~1sponsor~1SponsorRedeemer"
+        }
+      },
+      "parameters": [
+        {
+          "title": "fee_cap",
+          "schema": {
+            "$ref": "#/definitions/Int"
+          }
+        },
+        {
+          "title": "window",
+          "schema": {
+            "$ref": "#/definitions/Int"
+          }
+        },
+        {
+          "title": "max_validity",
+          "schema": {
+            "$ref": "#/definitions/Int"
+          }
+        },
+        {
+          "title": "reclaim_keys",
+          "schema": {
+            "$ref": "#/definitions/List<aiken~1crypto~1VerificationKeyHash>"
+          }
+        },
+        {
+          "title": "reclaim_threshold",
+          "schema": {
+            "$ref": "#/definitions/Int"
+          }
+        }
+      ],
+      "compiledCode": "5905cb0101002222229800aba2aba1aba0aab9faab9eaab9dab9a9bad0069bad0059bad0049bac0039bad00248888888888896600264653001300d00198069807000cdc3a4005300d00248889660026004601a6ea800e2653001301200198091809800cdc3a400091119912cc004c00c0062b3001301437540150028b202a8acc004c0200062b3001301437540150028b202a8b20244048264b300130023012375401315980099b8800e00f8acc004c008c048dd5001c4c966002600660266ea8006266446464b3001300c301737540031332259800980719198008009bac301e301b375401c44b30010018a40011332259800998029810980f1baa3009301e375400400d13370000290014400501c180f800998010011810000a03a899192cc004c080006264b30013375e6040603a6ea800401e264b30013370e9002180e9baa0018992cc004c038c078dd5000c4c8c966002604a005198009bab300c30213754601860426ea80366e452201009b8f488100991919912cc004c064c090dd500144c9660026034604a6ea8006266e95200033028374e660506052604c6ea800ccc0a0c0a4c098dd5000a5eb812f5c1002409060506052007001408c604c0022980103d87a800033024302530223754604a60446ea8004cc090c094c088dd5180698111baa0014bd701812181298129812981298129812981298109baa01448888c966002602a604a6ea800a26464b30015980099b89003025899b89003375a605660586058605860506ea806e294102645660026466ebcdd318009bab30143029375401a6e98c0040208c8cc004004008896600200314bd6f7b63044ca60026eb8c0ac0066eacc0b000660600049112cc004c03400e2b3001300c0038800c401502d44cc0c4cdd81ba9003374c0046600c00c0028168605c00281622b30015980099b89337026eb4c0acc0b000800408e266e24dd6981598141baa302b3028375403000314a081322b30013370e6eb4c0acc0a0dd500519b800010248cc005660026eb0c058c0a0dd500dc528c5282052a50a51409914a0813229410264528204c8a5040986eb4c0a8004dd6181498131baa0028b20483233702600200a60026eacc044c098dd5005119199119801001000912cc0040060071323322598009805001456600260120051001803205489980280298180022054375c60520026eb4c0a8004c0b000502a191919800800802112cc0040060071323322598009805801456600260140051001803205689980280298188022056375c60540026eacc0ac004c0b400502b0a5eb7bdb180520004590221bad3023001301f37540031640746042603c6ea80062c80e0c00cc074dd5000c5901b180f800c5901d19198008009bac3002301c375401e44b30010018a5eb8226644b3001330063022301f375400400f13302100233004004001899802002000a03a3020001302100140784603c603e603e0031640606eb8c06cc060dd500091192cc004c03cc068dd5000c4cdc79bae301e301b375400200514a080c8c074c068dd5001459016180d180b9baa0013019301637546002602c6ea8008c05cc050dd50009180c180c800c5901219198008009bac30173014375400e44b30010018a6103d87a80008992cc004cdd7980c980b1baa001007899ba548000cc0600052f5c1133003003301a0024050603000280b22c808a2c808a2b300133712900100644cdc480619198008009919800800807912cc004006297ae08991980c9ba9001330030033233001001301c0032259800800c52f5c11332259800cc004cdc7801002d28528a03289980e9ba900233004004001899802002000a032375c6038002603a00280d0dd7180c800a02e2259800800c52000899912cc004c8cc004004dd61803180c1baa00b2259800800c528456600266e3cdd7180e0008024528c4cc008008c0740050172034899b800014800a200280a8dd7180c00099801001180c800a02c8b202240444602c602e602e602e602e602e602e602e602e00260226ea8020601c6ea800e2c8060601a00260106ea803629344d95900601",
+      "hash": "76a8328473341f2d060b68d5275480fa9ae1eed6349d7889d5e3d58e"
+    },
+    {
+      "title": "anchor_sponsor.anchor_sponsor.else",
+      "redeemer": {
+        "schema": {}
+      },
+      "parameters": [
+        {
+          "title": "fee_cap",
+          "schema": {
+            "$ref": "#/definitions/Int"
+          }
+        },
+        {
+          "title": "window",
+          "schema": {
+            "$ref": "#/definitions/Int"
+          }
+        },
+        {
+          "title": "max_validity",
+          "schema": {
+            "$ref": "#/definitions/Int"
+          }
+        },
+        {
+          "title": "reclaim_keys",
+          "schema": {
+            "$ref": "#/definitions/List<aiken~1crypto~1VerificationKeyHash>"
+          }
+        },
+        {
+          "title": "reclaim_threshold",
+          "schema": {
+            "$ref": "#/definitions/Int"
+          }
+        }
+      ],
+      "compiledCode": "5905cb0101002222229800aba2aba1aba0aab9faab9eaab9dab9a9bad0069bad0059bad0049bac0039bad00248888888888896600264653001300d00198069807000cdc3a4005300d00248889660026004601a6ea800e2653001301200198091809800cdc3a400091119912cc004c00c0062b3001301437540150028b202a8acc004c0200062b3001301437540150028b202a8b20244048264b300130023012375401315980099b8800e00f8acc004c008c048dd5001c4c966002600660266ea8006266446464b3001300c301737540031332259800980719198008009bac301e301b375401c44b30010018a40011332259800998029810980f1baa3009301e375400400d13370000290014400501c180f800998010011810000a03a899192cc004c080006264b30013375e6040603a6ea800401e264b30013370e9002180e9baa0018992cc004c038c078dd5000c4c8c966002604a005198009bab300c30213754601860426ea80366e452201009b8f488100991919912cc004c064c090dd500144c9660026034604a6ea8006266e95200033028374e660506052604c6ea800ccc0a0c0a4c098dd5000a5eb812f5c1002409060506052007001408c604c0022980103d87a800033024302530223754604a60446ea8004cc090c094c088dd5180698111baa0014bd701812181298129812981298129812981298109baa01448888c966002602a604a6ea800a26464b30015980099b89003025899b89003375a605660586058605860506ea806e294102645660026466ebcdd318009bab30143029375401a6e98c0040208c8cc004004008896600200314bd6f7b63044ca60026eb8c0ac0066eacc0b000660600049112cc004c03400e2b3001300c0038800c401502d44cc0c4cdd81ba9003374c0046600c00c0028168605c00281622b30015980099b89337026eb4c0acc0b000800408e266e24dd6981598141baa302b3028375403000314a081322b30013370e6eb4c0acc0a0dd500519b800010248cc005660026eb0c058c0a0dd500dc528c5282052a50a51409914a0813229410264528204c8a5040986eb4c0a8004dd6181498131baa0028b20483233702600200a60026eacc044c098dd5005119199119801001000912cc0040060071323322598009805001456600260120051001803205489980280298180022054375c60520026eb4c0a8004c0b000502a191919800800802112cc0040060071323322598009805801456600260140051001803205689980280298188022056375c60540026eacc0ac004c0b400502b0a5eb7bdb180520004590221bad3023001301f37540031640746042603c6ea80062c80e0c00cc074dd5000c5901b180f800c5901d19198008009bac3002301c375401e44b30010018a5eb8226644b3001330063022301f375400400f13302100233004004001899802002000a03a3020001302100140784603c603e603e0031640606eb8c06cc060dd500091192cc004c03cc068dd5000c4cdc79bae301e301b375400200514a080c8c074c068dd5001459016180d180b9baa0013019301637546002602c6ea8008c05cc050dd50009180c180c800c5901219198008009bac30173014375400e44b30010018a6103d87a80008992cc004cdd7980c980b1baa001007899ba548000cc0600052f5c1133003003301a0024050603000280b22c808a2c808a2b300133712900100644cdc480619198008009919800800807912cc004006297ae08991980c9ba9001330030033233001001301c0032259800800c52f5c11332259800cc004cdc7801002d28528a03289980e9ba900233004004001899802002000a032375c6038002603a00280d0dd7180c800a02e2259800800c52000899912cc004c8cc004004dd61803180c1baa00b2259800800c528456600266e3cdd7180e0008024528c4cc008008c0740050172034899b800014800a200280a8dd7180c00099801001180c800a02c8b202240444602c602e602e602e602e602e602e602e602e00260226ea8020601c6ea800e2c8060601a00260106ea803629344d95900601",
+      "hash": "76a8328473341f2d060b68d5275480fa9ae1eed6349d7889d5e3d58e"
+    },
+    {
       "title": "completion.completion_minting.mint",
       "redeemer": {
         "title": "redeemer",
@@ -414,6 +503,43 @@
         }
       ]
     },
+    "alexandria/sponsor/SponsorDatum": {
+      "title": "SponsorDatum",
+      "description": "Inline datum on every sponsor UTxO.",
+      "anyOf": [
+        {
+          "title": "SponsorDatum",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": [
+            {
+              "title": "next_allowed",
+              "description": "Earliest POSIX time (ms) at which the validity-interval lower bound\n of the next `Sponsor` spend may start.",
+              "$ref": "#/definitions/Int"
+            }
+          ]
+        }
+      ]
+    },
+    "alexandria/sponsor/SponsorRedeemer": {
+      "title": "SponsorRedeemer",
+      "anyOf": [
+        {
+          "title": "Sponsor",
+          "description": "Pay one anchor tx fee (at most `fee_cap`) and re-lock the rest.",
+          "dataType": "constructor",
+          "index": 0,
+          "fields": []
+        },
+        {
+          "title": "Reclaim",
+          "description": "m-of-n reclaim multisig: withdraw, re-split or migrate the pool.",
+          "dataType": "constructor",
+          "index": 1,
+          "fields": []
+        }
+      ]
+    },
     "alexandria/types/DaoDatum": {
       "title": "DaoDatum",
       "description": "Datum for a DAO's state UTxO at the registry validator.",
@@ -430,7 +556,7 @@
             },
             {
               "title": "reputation_policy",
-              "description": "Policy ID of the reputation minting policy \u2014 governance reads these tokens",
+              "description": "Policy ID of the reputation minting policy — governance reads these tokens",
               "$ref": "#/definitions/cardano~1assets~1PolicyId"
             },
             {
@@ -515,7 +641,7 @@
       "anyOf": [
         {
           "title": "SubjectFieldDao",
-          "description": "Top-level DAO for a Subject Field (whitepaper \u00a74.2.1)",
+          "description": "Top-level DAO for a Subject Field (whitepaper §4.2.1)",
           "dataType": "constructor",
           "index": 0,
           "fields": [
@@ -527,7 +653,7 @@
         },
         {
           "title": "SubjectDao",
-          "description": "Sub-DAO for a single Subject (whitepaper \u00a74.2.2)",
+          "description": "Sub-DAO for a single Subject (whitepaper §4.2.2)",
           "dataType": "constructor",
           "index": 1,
           "fields": [
@@ -836,7 +962,7 @@
             },
             {
               "title": "min_vote_proficiency",
-              "description": "Minimum proficiency to vote (whitepaper \u00a74.5.1)",
+              "description": "Minimum proficiency to vote (whitepaper §4.5.1)",
               "$ref": "#/definitions/alexandria~1types~1ProficiencyLevel"
             },
             {
@@ -1108,7 +1234,7 @@
     },
     "alexandria/types/StakePubkeyRegistrationDatum": {
       "title": "StakePubkeyRegistrationDatum",
-      "description": "On-chain attestation that a stake address has bound itself to a\n specific Ed25519 public key for gossip-envelope signing.\n\n Posted as an inline datum on a UTXO sent to the `stake_pubkey_registration`\n script address. The script is intentionally immutable (always fails on\n spend) \u2014 to invalidate a binding the issuer publishes a new\n registration with a non-overlapping validity window.\n\n Security is anchored off-chain: the verifier scanning the registry\n address rejects any entry whose creating transaction is NOT signed\n by the claimed `stake_key_hash` (`tx.extra_signatories`).\n\n Mirrors the SQLite `stake_pubkey_registry` schema (migration 052)\n and the Rust types in `src-tauri/src/p2p/registry.rs`.",
+      "description": "On-chain attestation that a stake address has bound itself to a\n specific Ed25519 public key for gossip-envelope signing.\n\n Posted as an inline datum on a UTXO sent to the `stake_pubkey_registration`\n script address. The script is intentionally immutable (always fails on\n spend) — to invalidate a binding the issuer publishes a new\n registration with a non-overlapping validity window.\n\n Security is anchored off-chain: the verifier scanning the registry\n address rejects any entry whose creating transaction is NOT signed\n by the claimed `stake_key_hash` (`tx.extra_signatories`).\n\n Mirrors the SQLite `stake_pubkey_registry` schema (migration 052)\n and the Rust types in `src-tauri/src/p2p/registry.rs`.",
       "anyOf": [
         {
           "title": "StakePubkeyRegistrationDatum",
@@ -1117,7 +1243,7 @@
           "fields": [
             {
               "title": "stake_key_hash",
-              "description": "Blake2b-224 hash of the stake key being registered. The off-chain\n reader recomputes this from the bech32 stake address (`stake1u\u2026`)\n and matches it against the tx witness set.",
+              "description": "Blake2b-224 hash of the stake key being registered. The off-chain\n reader recomputes this from the bech32 stake address (`stake1u…`)\n and matches it against the tx witness set.",
               "$ref": "#/definitions/aiken~1crypto~1VerificationKeyHash"
             },
             {
@@ -1127,12 +1253,12 @@
             },
             {
               "title": "valid_from",
-              "description": "POSIX seconds \u2014 start of the binding's validity window.",
+              "description": "POSIX seconds — start of the binding's validity window.",
               "$ref": "#/definitions/Int"
             },
             {
               "title": "valid_until",
-              "description": "POSIX seconds \u2014 end of the window, or 0 for an open-ended binding.",
+              "description": "POSIX seconds — end of the window, or 0 for an open-ended binding.",
               "$ref": "#/definitions/Int"
             }
           ]

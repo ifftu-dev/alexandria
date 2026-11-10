@@ -587,3 +587,124 @@ async fn an_imported_receipt_is_observed_on_the_ledger_and_then_verifies() {
     assert_eq!(state.status, AnchorStatus::Confirmed);
     assert_eq!(state.tx_hash.as_deref(), Some(tx.hash.as_str()));
 }
+
+/// Live preprod run of the whole anchorer: issue two credentials, flush them
+/// as one batch, wait for confirmation, and check the verifier finds them
+/// anchored. Ignored by default. Uses the network profile's sponsor unless
+/// `ALEXANDRIA_ANCHOR_SPONSOR` (an `anchor_sponsor` JSON object) or
+/// `ALEXANDRIA_ANCHOR_FUNDING=issuer` says otherwise. The wallet needs an
+/// ADA-only UTxO of 5 tADA or more:
+///   BLOCKFROST_PROJECT_ID=preprod… ALEXANDRIA_TEST_MNEMONIC_FILE=… \
+///     cargo test -p alexandria-node live_batch_anchor_preprod -- --ignored --nocapture
+#[tokio::test]
+#[ignore]
+async fn live_batch_anchor_preprod() {
+    let pid = std::env::var("BLOCKFROST_PROJECT_ID").expect("BLOCKFROST_PROJECT_ID");
+    let mnemonic = std::fs::read_to_string(
+        std::env::var("ALEXANDRIA_TEST_MNEMONIC_FILE").expect("ALEXANDRIA_TEST_MNEMONIC_FILE"),
+    )
+    .unwrap();
+    let sponsor: Option<AnchorSponsorProfile> =
+        match std::env::var("ALEXANDRIA_ANCHOR_FUNDING").as_deref() {
+            Ok("issuer") => None,
+            _ => match std::env::var("ALEXANDRIA_ANCHOR_SPONSOR") {
+                Ok(json) => Some(serde_json::from_str(&json).expect("anchor sponsor JSON")),
+                Err(_) => crate::network_profile::embedded_preprod()
+                    .ok()
+                    .and_then(|p| p.anchor_sponsor.clone()),
+            },
+        };
+    let wallet = crate::crypto::wallet::wallet_from_mnemonic(mnemonic.trim()).unwrap();
+    let issuer = Issuer::from_wallet(&wallet);
+    let profile = TestProfile::migrated();
+    let ledger = crate::cardano::blockfrost::BlockfrostClient::new(pid).unwrap();
+    let policy = BatchPolicy {
+        cap: 2,
+        ..BatchPolicy::default()
+    };
+    let vcs = [
+        issue(&profile, &issuer, "live-a"),
+        issue(&profile, &issuer, "live-b"),
+    ];
+    let pass = || {
+        let journal = profile.background();
+        let (ledger, wallet, sponsor, policy) = (&ledger, &wallet, sponsor.as_ref(), &policy);
+        async move {
+            tick(
+                &journal,
+                Some(ledger),
+                Some(wallet),
+                sponsor,
+                policy,
+                &crate::clock::now_rfc3339(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+    let state = |vc: &VerifiableCredential| {
+        profile
+            .with_conn(|conn| state(conn, vc.id.as_deref().unwrap()))
+            .unwrap()
+            .unwrap()
+    };
+
+    pass().await;
+    let submitted = state(&vcs[0]);
+    let funding: Option<String> = profile.with_conn(|conn| {
+        conn.query_row("SELECT funding FROM anchor_batches", [], |r| r.get(0))
+            .ok()
+    });
+    println!(
+        "LIVE_BATCH: status={:?} tx={:?} funding={funding:?} error={:?}",
+        submitted.status, submitted.tx_hash, submitted.last_error
+    );
+    assert!(
+        matches!(
+            submitted.status,
+            AnchorStatus::Submitted | AnchorStatus::OutcomeUnknown
+        ),
+        "batch not sent: {:?}",
+        submitted.last_error
+    );
+    if sponsor.is_some() {
+        assert_eq!(funding.as_deref(), Some("sponsor"));
+    }
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
+    while state(&vcs[0]).status != AnchorStatus::Confirmed {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "not confirmed in 10 minutes"
+        );
+        tokio::time::sleep(std::time::Duration::from_secs(20)).await;
+        pass().await;
+    }
+    for vc in &vcs {
+        assert_eq!(state(vc).status, AnchorStatus::Confirmed);
+        let anchored = profile.with_conn(|conn| {
+            verify_credential_db(
+                conn,
+                vc,
+                &crate::clock::now_rfc3339(),
+                &VerificationPolicy::default(),
+            )
+            .integrity_anchored
+        });
+        assert!(anchored, "confirmed but not anchored");
+    }
+    // The ledger's own copy of the transaction reads back as the anchor.
+    let tx_hash = state(&vcs[0]).tx_hash.unwrap();
+    let observed = crate::cardano::ledger::observe_anchor(&ledger, &tx_hash)
+        .await
+        .unwrap()
+        .expect("ledger shows the anchor");
+    assert_eq!(
+        observed.required_signers,
+        vec![crate::cardano::anchor_tx::did_key_hash(&wallet).to_string()]
+    );
+    println!(
+        "LIVE_BATCH_CONFIRMED: tx={tx_hash} root={} leaves={} anchored_at={:?}",
+        observed.root, observed.leaf_count, observed.anchored_at
+    );
+}
