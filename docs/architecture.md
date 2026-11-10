@@ -552,7 +552,7 @@ See [Protocol Specification](protocol-specification.md) for full wire formats.
 | Protocol parameters | Blockfrost REST (`/epochs/latest/parameters`) |
 | Transaction submission | Blockfrost REST (`/tx/submit`) |
 | Fee estimation | Linear fee model from protocol params |
-| VC integrity anchoring | Metadata-only tx (label 1697) timestamping the canonical VC hash |
+| VC integrity anchoring | Metadata-only tx (label 1697) timestamping a Merkle root over a batch of canonical VC hashes; fee from the `anchor_sponsor` script or the issuer |
 | Completion-witness minting | Merkle-root completion witness; validator deployed |
 | Reputation snapshots | Signed as-of `DerivedCredential`; optional metadata-only anchor of its canonical VC hash |
 | Governance metadata | DAO/election/proposal tx builders and queue records; validator-backed enforcement is still pending |
@@ -560,7 +560,7 @@ See [Protocol Specification](protocol-specification.md) for full wire formats.
 
 ### Transaction Types
 
-1. **VC Integrity Anchor** — Metadata-only transaction (label 1697) that timestamps the canonical hash of a W3C Verifiable Credential without publishing credential content.
+1. **VC Integrity Anchor** — Transaction (label 1697) that timestamps a Merkle root over a batch of canonical W3C Verifiable Credential hashes without publishing credential content. The `anchor_sponsor` validator pays the fee when deployed; each credential keeps a receipt proving its leaf.
 2. **Completion Witness** — Mints a completion witness keyed to the Merkle root of a learner's graded element submissions; the completion validator is deployed.
 3. **Reputation Snapshot** — Local signed `DerivedCredential` over all currently eligible evidence; optional metadata-only VC-hash anchor uses the credential queue
 
@@ -808,13 +808,18 @@ Alexandria infrastructure (§20.4 survivability).
 3. **Status** — Bitstring Status List bitmap per issuer in
    `credential_status_lists`. Versioned to prevent rollback on
    gossip propagation. PR 5 + PR 9.
-4. **Anchoring** — Per-credential integrity anchor queue
-   (`cardano::anchor_queue`) writes BLAKE3(JCS bytes) into
-   metadata-only Cardano txs, treasury-funded when configured and
-   always signed by the issuer. Idle-node contract: silently
-   no-ops without Blockfrost / wallet credentials. A confirmed
-   anchor makes the credential `integrityAnchored` when verified
-   on this node. PR 8 (queue), PR 16 (real submission).
+4. **Anchoring** — Batched integrity anchors
+   (`cardano::anchor_queue`). The issuer's node anchors one Merkle
+   root over its queued credentials' BLAKE3(JCS) hashes per batch
+   (six hours or 256 credentials) in a label-1697 metadata tx signed
+   by the issuer's `did:key` key. The `anchor_sponsor` script, the
+   treasury's anchoring funds, pays when the network profile names
+   one; otherwise the issuer's wallet does. Each credential keeps a
+   Merkle receipt, exported in bundles. Chain access goes through
+   the `cardano::ledger::Ledger` port (Blockfrost today).
+   Idle-node contract: silently no-ops without a ledger. A
+   credential is `integrityAnchored` when its receipt folds to a
+   root this node observed on chain.
 5. **Aggregation** — Deterministic, explainable trust scores via
    the §14 weighted-mean + saturating-confidence pipeline
    (`aggregation::aggregate_skill_state`, PR 6) + anti-gaming
@@ -892,7 +897,7 @@ this on every test run.
 | §6–§7 (credential taxonomy + canonical structure) | PR 4 | Implemented |
 | §8–§10 (required fields, issuance, non-transferability) | PR 4–5 | Implemented |
 | §11 (expiration, revocation, suspension, supersession) | PR 5 | Implemented |
-| §12 (storage, durability, integrity anchoring) | PR 8 + PR 10 + PR 145 | Storage + anchor queue + PinBoard implemented. Anchor tick runs every 60s with wallet derived from the unlocked keystore; the issuer signs each anchor and the treasury pays when `ALEXANDRIA_TREASURY_*` is configured, else the issuer's wallet does; metadata-only txs submit to Cardano preprod when a Blockfrost project id is configured (Settings → Cardano, or `BLOCKFROST_PROJECT_ID` env var). Mainnet reference-script deployment still pending. |
+| §12 (storage, durability, integrity anchoring) | PR 8 + PR 10 + PR 145 | Storage + anchor queue + PinBoard implemented. The anchor tick runs every 60s with the wallet derived from the unlocked keystore and batches the issuer's credentials under one Merkle root; the `anchor_sponsor` script pays when the network profile names it, else the issuer's wallet does; transactions go to Cardano preprod when a Blockfrost project id is configured (Settings → Cardano, or `BLOCKFROST_PROJECT_ID` env var). The sponsor is not yet deployed; mainnet reference-script deployment is still pending. |
 | §13 (verification algorithm + acceptance predicate) | PR 4–5 | Implemented with typed accept/pending/reject results and missing/unavailable store evidence |
 | §14 (trust aggregation, weights, confidence, levels) | PR 6 | Implemented |
 | §15 (anti-gaming controls) | PR 7 | Cluster cap + inflation penalty implemented; cluster_issuers is per-DID until governance signals land |

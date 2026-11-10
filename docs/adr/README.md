@@ -13,3 +13,4 @@ Status values:
 | [0002](0002-bundled-network-profiles.md) | Networks are bundled profiles; each user profile is bound to one `network_id` | implemented | 2026-09-15 |
 | [0003](0003-credential-authority.md) | Credential status is issuer-bound; challenge and plugin-attestation authority are retired | implemented | 2026-09-15 |
 | [0004](0004-tauri-free-runtime-crate-boundary.md) | The Tauri-free runtime lives behind a crate boundary (`alexandria-studio`) | active | 2026-09-16 |
+| [0005](0005-sponsored-batched-anchoring.md) | Credential anchors are batched Merkle roots, paid by an on-chain sponsor instead of a treasury key | active | 2026-11-10 |
