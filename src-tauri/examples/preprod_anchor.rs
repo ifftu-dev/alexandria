@@ -1,6 +1,7 @@
-//! Preprod live-submission smoke test for PR 16's credential anchor.
+//! Preprod live-submission smoke test for the credential anchor record.
 //!
-//! Validates `cardano::anchor_tx::build_anchor_metadata` +
+//! Anchors a batch of one (version-2 record: Merkle root over a single
+//! credential hash). Validates `cardano::anchor_tx::build_anchor_metadata` +
 //! `tx_builder::inject_metadata` end-to-end by submitting a real
 //! metadata-only tx to Cardano preprod under `ALEXANDRIA_ANCHOR_LABEL`
 //! (1697). Uses the mark2 treasury key (a raw Shelley Ed25519 key,
@@ -22,7 +23,7 @@
 use std::env;
 
 use anyhow::{anyhow, bail, Context, Result};
-use app_lib::cardano::anchor_tx::build_anchor_metadata;
+use app_lib::cardano::anchor_tx::{build_anchor_metadata, AnchorRecord};
 use app_lib::cardano::blockfrost::BlockfrostClient;
 use app_lib::cardano::tx_builder::{self, MIN_UTXO_LOVELACE, TTL_OFFSET};
 use app_lib::crypto::did::Did;
@@ -166,7 +167,18 @@ async fn main() -> Result<()> {
 
     // Inject the label-1697 metadata via our own builder — this is
     // the code PR 16 added.
-    let metadata = build_anchor_metadata(&credential_hash, &issuer_did, &issued_at);
+    // A batch of one: the root is the leaf hash of the credential hash.
+    let leaf: [u8; 32] = hex::decode(&credential_hash)
+        .ok()
+        .and_then(|b| b.try_into().ok())
+        .ok_or_else(|| anyhow!("--credential-hash must be 32 bytes of hex"))?;
+    let root = hex::encode(alexandria_verify::vc::anchor::merkle_root(&[leaf]));
+    let metadata = build_anchor_metadata(&AnchorRecord {
+        root: root.clone(),
+        leaf_count: 1,
+        issuer_did: issuer_did.clone(),
+        anchored_from: issued_at.clone(),
+    });
     let (with_metadata, _hash_after_inject) =
         tx_builder::inject_metadata(&built.tx_bytes.0, metadata)
             .map_err(|e| anyhow!("inject_metadata: {e}"))?;
@@ -184,6 +196,7 @@ async fn main() -> Result<()> {
     eprintln!("  metadata label: 1697 (ALEXANDRIA_ANCHOR_LABEL)");
     eprintln!("  anchor payload:");
     eprintln!("    credential_hash = {credential_hash}");
+    eprintln!("    root (1 leaf)   = {root}");
     eprintln!("    issuer_did      = {}", issuer_did.as_str());
     eprintln!("    issued_at       = {issued_at}");
 

@@ -44,7 +44,7 @@ DOMAINS = [
     ("Assessments", r"^(question_banks|assessment_items|assessment_item_skills|assessment_attempts|attempt_items)$"),
     ("Goals", r"^goal_template"),
     ("Community plugins", r"^(plugin_|element_submissions$)"),
-    ("Verifiable credentials", r"^(key_registry|credentials|credential_status_lists|credential_anchors|credentials_pending_verification|credential_allowlist|presentations_seen|pinboard_observations)$"),
+    ("Verifiable credentials", r"^(key_registry|credentials|credential_status_lists|credential_anchors|anchor_batches|anchor_receipts|anchor_observations|credentials_pending_verification|credential_allowlist|presentations_seen|pinboard_observations)$"),
     ("Chain journal", r"^chain_submission"),
     ("Completion and endorsements", r"^(completion_|course_completion_endorsements$)"),
     ("Discussions", r"^(opinions|discussion_)"),

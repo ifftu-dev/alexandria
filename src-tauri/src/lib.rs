@@ -994,9 +994,20 @@ pub fn run() {
                                     }
                                 }
 
-                                // Credential anchor queue (VC integrity hashes → Cardano metadata-only txs)
-                                match cardano::anchor_queue::tick(&chain_journal, &bf, &wallet)
-                                    .await
+                                // Credential anchors: batched Merkle roots, paid by the
+                                // network profile's anchor sponsor when one is deployed.
+                                let anchor_sponsor = network_profile::embedded_preprod()
+                                    .ok()
+                                    .and_then(|profile| profile.anchor_sponsor.clone());
+                                match cardano::anchor_queue::tick(
+                                    &chain_journal,
+                                    bf.as_ref(),
+                                    wallet.as_ref(),
+                                    anchor_sponsor.as_ref(),
+                                    &cardano::anchor_queue::BatchPolicy::default(),
+                                    &clock::now_rfc3339(),
+                                )
+                                .await
                                 {
                                     Ok(n) if n > 0 => {
                                         log::info!("anchor queue: processed {n} items");

@@ -714,6 +714,7 @@ export type MessageKey =
   | 'courses.video.unablePlay'
   | 'credentials.anchor.body.confirmed'
   | 'credentials.anchor.body.failed'
+  | 'credentials.anchor.body.failedHint'
   | 'credentials.anchor.body.none'
   | 'credentials.anchor.body.pending'
   | 'credentials.anchor.body.retrying'

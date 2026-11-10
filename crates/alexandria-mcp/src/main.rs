@@ -15,7 +15,7 @@ use rmcp::model::{
 };
 use rmcp::{
     handler::server::{router::tool::ToolRouter, tool::ToolCallContext, wrapper::Parameters},
-    model::{Implementation, ServerCapabilities, ServerInfo},
+    model::{Implementation, ServerCapabilities, ServerConfig},
     service::RequestContext,
     tool, tool_handler, tool_router, ErrorData, Json, RoleServer, ServerHandler, ServiceExt,
 };
@@ -927,8 +927,8 @@ fn server_meta() -> MetaObject {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for AlexandriaMcp {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(
             Implementation::new("alexandria-mcp", env!("CARGO_PKG_VERSION")),
         )
     }
@@ -1049,11 +1049,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(|_| std::io::Error::from(std::io::ErrorKind::BrokenPipe))?;
         Ok::<_, std::io::Error>(output)
     });
-    AlexandriaMcp::new()
+    match AlexandriaMcp::new()
         .serve((Box::pin(sink), Box::pin(input)))
-        .await?
-        .waiting()
-        .await?;
+        .await
+    {
+        Ok(running) => {
+            running.waiting().await?;
+        }
+        // Stdin closed before any `initialize`, for example after a stateless
+        // `server/discover`: the session is over, not failed.
+        Err(rmcp::service::ServerInitializeError::ConnectionClosed(_)) => {}
+        Err(error) => return Err(error.into()),
+    }
     writer.await??;
     Ok(())
 }

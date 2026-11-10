@@ -110,7 +110,7 @@ describe('CredentialDetail revoke', () => {
 const TX = 'ba27e829cb186b6a242cddfeb3f283fd60c8e0c62d7f34f92fccf4f733adad2f'
 const anchorState = (over: Record<string, unknown>) => ({
   credential_id: 'urn:alexandria:vc:demo', status: 'pending', tx_hash: null, attempts: 0,
-  last_error: null, enqueued_at: '2026-11-09T00:00:00Z', confirmed_at: null, ...over,
+  last_error: null, needs_funds: false, enqueued_at: '2026-11-09T00:00:00Z', confirmed_at: null, ...over,
 })
 
 describe('CredentialDetail public record', () => {
@@ -127,11 +127,21 @@ describe('CredentialDetail public record', () => {
     expect(section.findAll('button')).toHaveLength(0)
   })
 
+  it('suggests adding tADA only when a balance would fix the error', async () => {
+    mocks.anchor.mockResolvedValue(anchorState({
+      status: 'pending', last_error: 'needs funds: no sponsor available', needs_funds: true,
+    }))
+    const section = (await open()).find('[data-anchor-section]')
+    expect(section.text()).toContain('credentials.anchor.body.retrying')
+    expect(section.text()).toContain('credentials.anchor.body.failedHint')
+  })
+
   it('offers a retry for a failed anchor and shows the new state', async () => {
     mocks.anchor.mockResolvedValue(anchorState({ status: 'failed', attempts: 5, last_error: 'no UTxOs at funding address' }))
     mocks.retryAnchor.mockResolvedValue(anchorState({ status: 'pending' }))
     const wrapper = await open()
     const section = wrapper.find('[data-anchor-section]')
+    expect(section.text()).not.toContain('credentials.anchor.body.failedHint')
     expect(section.text()).toContain('no UTxOs at funding address')
     await section.find('button').trigger('click')
     await flushPromises()

@@ -727,8 +727,10 @@ mod tests {
         assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
     }
 
+    use crate::vc::anchor::{AnchorEvidence, AnchorReceipt, IntegrityAnchor};
+
     /// A store that knows nothing except one answer about anchors.
-    struct AnchorStore(StoreLookup<crate::vc::anchor::IntegrityAnchor>);
+    struct AnchorStore(StoreLookup<AnchorEvidence>);
 
     impl VerificationStore for AnchorStore {
         fn key_at(&self, _did: &Did, _at: &str) -> StoreLookup<KeyRegistryEntry> {
@@ -743,32 +745,45 @@ mod tests {
         fn is_superseded(&self, _credential_id: &str) -> StoreLookup<bool> {
             StoreLookup::Missing
         }
-        fn integrity_anchor(&self, hash: &str) -> StoreLookup<crate::vc::anchor::IntegrityAnchor> {
-            match &self.0 {
-                // Answer for whatever hash is asked, so a mismatch is the
-                // verifier's finding and not the store's.
-                StoreLookup::Found(anchor) => {
-                    StoreLookup::Found(crate::vc::anchor::IntegrityAnchor {
-                        credential_hash: if anchor.credential_hash.is_empty() {
-                            hash.to_string()
-                        } else {
-                            anchor.credential_hash.clone()
-                        },
-                        ..anchor.clone()
-                    })
-                }
-                StoreLookup::Missing => StoreLookup::Missing,
-                StoreLookup::Unavailable => StoreLookup::Unavailable,
-            }
+        // Answers for whatever hash is asked, so a mismatch is the verifier's
+        // finding and not the store's.
+        fn integrity_anchor(&self, _hash: &str) -> StoreLookup<AnchorEvidence> {
+            self.0.clone()
         }
     }
 
-    fn anchor_of(vc: &VerifiableCredential) -> crate::vc::anchor::IntegrityAnchor {
-        crate::vc::anchor::IntegrityAnchor {
-            credential_hash: String::new(),
-            issuer_did: vc.issuer.as_str().to_string(),
-            tx_hash: "ab".repeat(32),
-            anchored_at: Some(NOW.into()),
+    /// A three-credential batch holding `vc` at index 1, anchored by its
+    /// issuer: the evidence an honest store would hand over.
+    fn evidence_for(vc: &VerifiableCredential) -> AnchorEvidence {
+        let own: [u8; 32] = hex::decode(crate::vc::anchor::integrity_hash(vc).unwrap())
+            .unwrap()
+            .try_into()
+            .unwrap();
+        let leaves = [[1u8; 32], own, [3u8; 32]];
+        let root = hex::encode(crate::vc::anchor::merkle_root(&leaves));
+        let tx_hash = "ab".repeat(32);
+        let issuer = vc.issuer.as_str().to_string();
+        AnchorEvidence {
+            receipt: AnchorReceipt {
+                v: 1,
+                leaf_index: 1,
+                leaf_count: 3,
+                path: crate::vc::anchor::merkle_path(&leaves, 1)
+                    .iter()
+                    .map(hex::encode)
+                    .collect(),
+                root: root.clone(),
+                tx_hash: tx_hash.clone(),
+                issuer_did: issuer.clone(),
+            },
+            observed: IntegrityAnchor {
+                root,
+                leaf_count: 3,
+                required_signers: vec![crate::vc::anchor::issuer_key_hash(&issuer).unwrap()],
+                issuer_did: issuer,
+                tx_hash,
+                anchored_at: Some(NOW.into()),
+            },
         }
     }
 
@@ -793,27 +808,47 @@ mod tests {
     }
 
     #[test]
-    fn a_matching_ledger_anchor_marks_the_credential_anchored() {
+    fn a_receipt_that_folds_to_the_issuers_anchored_root_marks_the_credential_anchored() {
         let (_, vc) = signed(None);
-        let store = AnchorStore(StoreLookup::Found(anchor_of(&vc)));
+        let store = AnchorStore(StoreLookup::Found(evidence_for(&vc)));
         let result = verify_credential(&store, &vc, NOW, &requiring_anchor());
         assert!(result.integrity_anchored);
         assert_eq!(result.acceptance_decision, AcceptanceDecision::Accept);
     }
 
     #[test]
-    fn an_anchor_of_other_content_or_by_another_issuer_is_not_this_credentials() {
+    fn a_forged_or_borrowed_receipt_leaves_the_credential_unanchored() {
         let (_, vc) = signed(None);
-        let other_hash = crate::vc::anchor::IntegrityAnchor {
-            credential_hash: "00".repeat(32),
-            ..anchor_of(&vc)
-        };
-        let other_issuer = crate::vc::anchor::IntegrityAnchor {
-            issuer_did: derive_did_key(&test_signing_key("someone")).as_str().into(),
-            ..anchor_of(&vc)
-        };
-        for anchor in [other_hash, other_issuer] {
-            let store = AnchorStore(StoreLookup::Found(anchor));
+        let honest = evidence_for(&vc);
+        let someone = derive_did_key(&test_signing_key("someone"))
+            .as_str()
+            .to_string();
+        let mut cases = Vec::new();
+        // Another credential's receipt: the path no longer reaches the root.
+        let mut e = honest.clone();
+        e.receipt.leaf_index = 0;
+        cases.push(e);
+        let mut e = honest.clone();
+        e.receipt.path[0] = "00".repeat(32);
+        cases.push(e);
+        // A root the ledger never recorded.
+        let mut e = honest.clone();
+        e.observed.root = "11".repeat(32);
+        cases.push(e);
+        // A receipt naming another transaction.
+        let mut e = honest.clone();
+        e.receipt.tx_hash = "cd".repeat(32);
+        cases.push(e);
+        // Anchored under another issuer's name.
+        let mut e = honest.clone();
+        e.observed.issuer_did = someone.clone();
+        cases.push(e);
+        // The metadata names the issuer, but the issuer never signed.
+        let mut e = honest.clone();
+        e.observed.required_signers = vec![crate::vc::anchor::issuer_key_hash(&someone).unwrap()];
+        cases.push(e);
+        for evidence in cases {
+            let store = AnchorStore(StoreLookup::Found(evidence));
             let result = verify_credential(&store, &vc, NOW, &requiring_anchor());
             assert!(!result.integrity_anchored);
             assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);

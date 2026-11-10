@@ -17,10 +17,14 @@ ability to check a signature has to be everywhere to be worth anything.
 The crate does not open a socket, a file, or a database. Verification needs
 persistent state in five places — the issuer's key at a point in time, a status
 list's bits, a local suspension flag, whether something supersedes the
-credential, and an observed Cardano integrity anchor of its hash — and each
-arrives through the `VerificationStore` trait. The anchor lookup has a default
-that knows no anchors; the verifier recomputes the hash and checks the anchor's
-recorded hash and issuer before setting `integrityAnchored`.
+credential, and the credential's anchor receipt with the caller's observation of
+the Cardano transaction it names — and each arrives through the
+`VerificationStore` trait. The anchor lookup has a default that knows no
+anchors. Otherwise the verifier recomputes the credential's hash, folds the
+receipt's Merkle path up to the anchored root (RFC 9162 tree, BLAKE3), and
+checks the root, the issuer and that the issuer's `did:key` key signed the
+transaction before setting `integrityAnchored`. `vc::anchor` also builds the
+trees and audit paths, so issuers and verifiers share one implementation.
 
 ```rust
 use alexandria_verify::{

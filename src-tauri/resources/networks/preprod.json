@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "network_id": "preprod",
-  "profile_revision": 2,
+  "profile_revision": 3,
   "cardano_network": "preprod",
   "cardano_network_magic": 1,
   "relays": [
@@ -60,5 +60,14 @@
   "default_governance_anchor": {
     "dao_id": "af785f1d14788f2d43c8ce8e29c15cd82c4c4cd0e3f56d1646df0dd116e0b671",
     "envelope_blake3": "44961c11e052776f04f8b851b3a69a5a039b433690fd6fbd59bf4aa18cd23f3e"
+  },
+  "anchor_sponsor": {
+    "script_hash": "b6467c8ac00884023575fc42a0278b2bbe83f1516b60fc7bde5399dd",
+    "address": "addr_test1wzmyvly2cqyggq34wh7y9gp83v4maql3294kplrmmefenhga9qkh0",
+    "reference_input": "9e9288ce814c9c7ca3bb0f5015fc619871249934b8982be1157cee5f8949ebf3#0",
+    "fee_cap_lovelace": 1000000,
+    "window_ms": 3600000,
+    "max_validity_ms": 600000,
+    "slot_offset_secs": 1655683200
   }
 }

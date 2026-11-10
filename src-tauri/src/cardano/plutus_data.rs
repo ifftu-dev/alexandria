@@ -106,8 +106,65 @@ pub fn encode_completion_burn_redeemer() -> Result<Vec<u8>, TxBuildError> {
     Ok(buf)
 }
 
+// ---- Anchor sponsor (validators/anchor_sponsor.ak) ----
+
+/// Encode a `SponsorDatum { next_allowed }`: `Constr 0 [Int]`, POSIX ms.
+pub fn encode_sponsor_datum(next_allowed_ms: i64) -> Result<Vec<u8>, TxBuildError> {
+    let mut buf = Vec::new();
+    let mut encoder = pallas_codec::minicbor::Encoder::new(&mut buf);
+    begin_constr(&mut encoder, 0, 1)?;
+    encode_int(&mut encoder, next_allowed_ms)?;
+    Ok(buf)
+}
+
+/// Decode a `SponsorDatum`, accepting definite or indefinite field arrays.
+/// `None` for anything else.
+pub fn decode_sponsor_datum(bytes: &[u8]) -> Option<i64> {
+    use pallas_codec::minicbor::Decoder;
+    let mut d = Decoder::new(bytes);
+    if u64::from(d.tag().ok()?) != 121 {
+        return None;
+    }
+    let len = d.array().ok()?;
+    if len.is_some_and(|n| n != 1) {
+        return None;
+    }
+    let value = d.i64().ok()?;
+    if len.is_none() && d.datatype().ok()? != pallas_codec::minicbor::data::Type::Break {
+        return None;
+    }
+    Some(value)
+}
+
+/// Encode the `Sponsor` redeemer: `Constr 0 []`.
+pub fn encode_sponsor_redeemer() -> Result<Vec<u8>, TxBuildError> {
+    let mut buf = Vec::new();
+    let mut encoder = pallas_codec::minicbor::Encoder::new(&mut buf);
+    begin_constr(&mut encoder, 0, 0)?;
+    Ok(buf)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sponsor_datum_round_trips_and_rejects_other_shapes() {
+        let bytes = encode_sponsor_datum(1_700_000_000_123).unwrap();
+        // Constr 0 [Int]: tag 121, a one-element array.
+        assert_eq!(&bytes[..3], &[0xd8, 0x79, 0x81]);
+        assert_eq!(decode_sponsor_datum(&bytes), Some(1_700_000_000_123));
+        // The same datum with an indefinite-length field list, as some
+        // serialisers write it.
+        let mut indefinite = vec![0xd8, 0x79, 0x9f];
+        indefinite.extend_from_slice(&bytes[3..]);
+        indefinite.push(0xff);
+        assert_eq!(decode_sponsor_datum(&indefinite), Some(1_700_000_000_123));
+        assert_eq!(
+            decode_sponsor_datum(&encode_sponsor_redeemer().unwrap()),
+            None
+        );
+        assert_eq!(decode_sponsor_datum(&[0x01]), None);
+    }
+
     use super::*;
 
     #[test]

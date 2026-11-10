@@ -22,6 +22,10 @@ pub struct UTxO {
     /// the Conway reference-script fee.
     #[serde(default)]
     pub reference_script_hash: Option<String>,
+    /// Inline datum CBOR (hex), when the output carries one. Script state
+    /// UTxOs such as the anchor sponsor's keep their state here.
+    #[serde(default)]
+    pub inline_datum: Option<String>,
 }
 
 impl<'de> Deserialize<'de> for UTxO {
@@ -36,6 +40,8 @@ impl<'de> Deserialize<'de> for UTxO {
             amount: Vec<AmountEntry>,
             #[serde(default)]
             reference_script_hash: Option<String>,
+            #[serde(default)]
+            inline_datum: Option<String>,
         }
         let raw = Shadow::deserialize(d)?;
         let idx = raw
@@ -47,6 +53,7 @@ impl<'de> Deserialize<'de> for UTxO {
             tx_index: idx,
             amount: raw.amount,
             reference_script_hash: raw.reference_script_hash,
+            inline_datum: raw.inline_datum,
         })
     }
 }
@@ -154,6 +161,7 @@ mod tests {
                 },
             ],
             reference_script_hash: None,
+            inline_datum: None,
         };
         assert_eq!(utxo.lovelace(), 5_000_000);
     }
@@ -165,6 +173,7 @@ mod tests {
             tx_index: 0,
             amount: vec![],
             reference_script_hash: None,
+            inline_datum: None,
         };
         assert_eq!(utxo.lovelace(), 0);
     }

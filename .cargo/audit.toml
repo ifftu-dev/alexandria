@@ -6,6 +6,26 @@
 
 [advisories]
 ignore = [
+    # libsqlite3-sys 0.36.0 — SQLite before 3.54.0 can return uninitialised
+    # page-cache memory when it opens a database with a sibling `-wal` file
+    # of a different page size (RUSTSEC-2026-0459, CVE-2026-119375; local,
+    # needs the victim to open crafted files).
+    #
+    # Ignored because the patched release would not patch us: every build
+    # here uses `bundled-sqlcipher`, and even libsqlite3-sys 0.39.x builds
+    # SQLCipher from `sqlcipher-src =419.0.6`, which bundles the affected
+    # SQLite 3.53.4. Upgrading rusqlite would only silence this check.
+    #
+    # Exposure is also narrow: the app and CLI open only their own profile
+    # databases, under the app's data directory, keyed with SQLCipher, whose
+    # per-page HMAC rejects pages written without the key. A party able to
+    # plant a crafted database and WAL there already controls the profile.
+    #
+    # Revisit when sqlcipher-src bundles SQLite >= 3.54.0 (then upgrade
+    # rusqlite), and immediately if any path opens a database file supplied
+    # by someone else.
+    "RUSTSEC-2026-0459",
+
     # tract-nnef 0.21.10 — integer overflow in the NNEF tensor parser giving an
     # out-of-bounds read on model load (RUSTSEC-2026-0217, CVSS 6.1).
     #

@@ -1,7 +1,7 @@
 # Alexandria Protocol Specification
 
 Status: live
-Updated: 2026-10-27
+Updated: 2026-11-10
 Category: Standards Track
 
 ---
@@ -801,15 +801,28 @@ Credential integrity is anchored via the W3C-VC integrity-anchoring path (§11.3
 
 #### 11.3.1 VC integrity anchoring
 
-The §14 Verifiable Credentials path anchors credential integrity on Cardano by submitting a metadata-only transaction (no minting, no output token) whose metadata label is `1697` (`ALEXANDRIA_ANCHOR_LABEL`). The metadata carries the canonical hash of the VC, the issuer DID, and the issuance timestamp, following the formula from §14.12.3:
+The §14 Verifiable Credentials path anchors credential integrity on Cardano in batches. An issuer's node collects the integrity hashes `H(c)` of the credentials it issued, builds a Merkle tree over them (§14.12.3), and records the root in one transaction under metadata label `1697` (`ALEXANDRIA_ANCHOR_LABEL`), version 2:
 
 ```
-A(c) = (H(c), t_i, issuer_ref)
+{ 1697: { "root": <hex>, "leaf_count": <n>, "issuer_did": <did:key:z…>,
+          "anchored_from": <ISO 8601>, "v": 2 } }
 ```
 
-where `H(c)` is `blake3` of the JCS-canonical bytes of the VC with `proofValue` emptied (§14.23.2). The full credential is NOT stored on-chain. Anchoring is an integrity-timestamping mechanism; it neither creates nor transfers a token and does not replace the signature-based verification defined in §14.13.
+`anchored_from` is the earliest issuance time in the batch. `H(c)` is `blake3` of the JCS-canonical bytes of the VC with `proofValue` emptied (§14.23.2). The full credential is NOT stored on-chain. Anchoring is an integrity-timestamping mechanism; it neither creates nor transfers a token and does not replace the signature-based verification defined in §14.13. Version-1 records (one hash per transaction) are no longer written or read.
 
-The issuer's payment key, which is also its `did:key` signing key (§11.4), MUST be a required signer of the anchor transaction, whoever funds it. The Alexandria treasury funds the transaction when one is configured, and the issuer's wallet funds it otherwise. Only the issuer's own node queues an anchor; a credential received from elsewhere is never anchored by its holder.
+The key of the issuer's `did:key` MUST be a required signer of the anchor transaction, however it is funded, so the anchor is attributable to the DID itself. Only the issuer's own node anchors; a credential received from elsewhere is never anchored by its holder. A node flushes a batch once its oldest queued credential was issued six hours ago, or once 256 are queued. A batch is bound to its exact signed bytes before it is sent and is never rebuilt. It is replaced by a new batch only when it failed on chain or can no longer be included (the tip has passed its validity interval by a margin).
+
+Each credential in a confirmed batch gets an **anchor receipt** (§14.12.3), kept beside the credential and exported in credential bundles (§20.4). A holder's node keeps the receipts that arrive with a bundle and looks their transactions up on the ledger.
+
+**Funding.** The fee is paid by the **anchor sponsor** when the network profile names one, and by the issuer's wallet otherwise. The sponsor is a Plutus V3 spending validator (`anchor_sponsor`) holding the Alexandria treasury's anchoring funds, split across many UTxOs, so no node needs a treasury key. It is parameterised by a fee cap, a rate-limit window, a maximum validity-interval width (smaller than the window) and an m-of-n reclaim multisig. Its inline datum is `next_allowed` (POSIX ms). Its `Sponsor` redeemer passes only when:
+
+- exactly one input is the script's and exactly one output returns to the script's address;
+- the lovelace leaving the script is at most the fee cap and at most the transaction's fee, so it can pay the fee and nothing else, and the output keeps the input's native assets;
+- the validity interval is finite, no wider than the maximum width, and starts at or after `next_allowed`;
+- the output datum's `next_allowed` is the interval's lower bound plus the window;
+- at least one key signed.
+
+The validator never reads the anchor record: Plutus scripts cannot see metadata, and sponsored and self-funded anchors verify the same way. A spender gains nothing from the fee, so the worst a malicious node can do is spend `fee cap × pool UTxOs` per window. `Reclaim` passes with m-of-n reclaim signatures and recovers or moves the funds. A sponsored spend needs collateral from the issuer's own wallet, which the ledger takes only if the script fails. The sponsor's script hash, address, reference-script UTxO, parameters and the network's slot-to-POSIX offset are read from the network profile (`anchor_sponsor`); until it is deployed there, issuers fund their own anchors. A batch that cannot be built or paid for stays queued with the reason; only a batch that failed on chain or expired counts toward a credential's attempts.
 
 ### 11.4 Decentralised Identity
 
@@ -1328,11 +1341,31 @@ Implementations SHOULD support one or more of: local encrypted wallet storage, e
 
 #### 14.12.3 Integrity Anchoring
 
-Credential hashes SHOULD be anchored in a public integrity layer. Let `H(c)` be the canonical hash of credential `c`. If anchored, the anchor record MUST store:
+Credential hashes SHOULD be anchored in a public integrity layer. Let `H(c)` be the canonical hash of credential `c`. An anchor MAY commit to many credentials at once through a Merkle root `R` over their hashes. If anchored, the anchor record MUST store:
 
 ```
-A(c) = (H(c), t_i, issuer_ref)
+A = (R, n, t_i, issuer_ref)        with H(c) a leaf of the tree whose root is R
 ```
+
+where `n` is the number of leaves and `t_i` the earliest issuance time among them. A batch of one is valid.
+
+The tree is the RFC 6962 / RFC 9162 Merkle tree with BLAKE3 and domain separation. Leaves are the 32-byte `H(c)` values in batch order:
+
+```
+leaf(d)    = BLAKE3(0x00 || d)
+node(l, r) = BLAKE3(0x01 || l || r)
+MTH({d})   = leaf(d)
+MTH(D[n])  = node(MTH(D[0:k]), MTH(D[k:n]))    k = largest power of two < n
+```
+
+An **anchor receipt** proves one credential's place in an anchored batch:
+
+```
+{ "v": 1, "leaf_index": i, "leaf_count": n, "path": [<hex>, …],
+  "root": <hex>, "tx_hash": <hex>, "issuer_did": <did> }
+```
+
+`path` is the RFC 9162 audit path for leaf `i`, ordered from the leaf up. A receipt is a sidecar: it is never embedded in the credential, so the credential's signature is unaffected. A verifier folds `H(c)` up the path with the RFC 9162 §2.1.3.2 algorithm and accepts the receipt only if it reaches `root`. The reference implementation (`alexandria_verify::vc::anchor`) carries worked examples for 1, 2, 3 and 5 leaves.
 
 The full credential SHOULD NOT be stored on-chain unless explicitly required and privacy-compatible.
 
@@ -1432,13 +1465,20 @@ reference is malformed or its bit index lies outside the supplied list.
 `integrity_anchor_unavailable` is reported only when the policy requires an
 integrity anchor and the anchor lookup failed.
 
-The shared verifier reads no chain. The caller supplies an anchor it observed in
-a confirmed transaction (§11.3.1); the verifier recomputes `H(c)` and sets
-`integrityAnchored` only when the anchor's recorded hash and issuer are the
-credential's own. A missing anchor leaves `integrityAnchored` false, which
-rejects under a policy that requires it. The application supplies the confirmed
-anchors of credentials its node issued; anchors of credentials received from
-elsewhere are not yet resolved, so those remain unanchored.
+The shared verifier reads no chain. The caller supplies the credential's anchor
+receipt (§14.12.3) together with what it observed of the transaction the receipt
+names (§11.3.1): the recorded root, leaf count and issuer, and the transaction's
+required signers. The verifier recomputes `H(c)` and sets `integrityAnchored`
+only when the receipt folds from `H(c)` to its root, the root, leaf count and
+transaction match the observation, the receipt and the observation both name
+the credential's issuer, and the issuer's `did:key` key hash (Blake2b-224 of
+its Ed25519 public key) is a required signer. A missing receipt leaves
+`integrityAnchored` false, which rejects under a policy that requires it; a
+receipt whose transaction has not been observed is pending under such a policy.
+The application supplies receipts for credentials its node anchored and for
+those that arrived with a bundle once their transaction is observed. A bundle
+verified offline carries receipts but no observation, so it never claims an
+anchor.
 
 #### 14.13.2 Verification Procedure
 
@@ -2054,7 +2094,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 | **VC sign/verify** | `domain::vc/{mod,canonicalize,context,sign,status,verify}` | Data Integrity `eddsa-jcs-2022` proofs over RFC 8785 JCS, Bitstring Status List, §14.7 / §14.13 |
 | **Trust aggregation** | `aggregation::{mod,weights,level,independence,antigaming,config}` | §14.14 engine + §14.15 anti-gaming; reproduces the §14.26 worked example |
 | **VC P2P layer** | `p2p::{vc_did,vc_status,vc_fetch,presentation,pinboard,archive}` | Wire layer for §14.5, §14.11.2, §14.18, §14.12.2 |
-| **VC storage** | `commands::{credentials,presentation,pinning,aggregation}`; tables `credentials`, `credential_status_lists`, `key_registry`, `credential_allowlist`, `credential_anchors` | Issuance, verification, revocation, suspension, allowlist, presentation envelopes, PinBoard commitments |
+| **VC storage** | `commands::{credentials,presentation,pinning,aggregation}`; tables `credentials`, `credential_status_lists`, `key_registry`, `credential_allowlist`, `credential_anchors`, `anchor_batches`, `anchor_receipts`, `anchor_observations` | Issuance, verification, revocation, suspension, allowlist, presentation envelopes, PinBoard commitments |
 
 ### 15.2 Database
 
@@ -2066,7 +2106,7 @@ The reference implementation is a Tauri v2 application — a single binary that 
 | Taxonomy | `subject_fields`, `subjects`, `skills`, `skill_prerequisites`, `skill_relations`, `taxonomy_versions` |
 | Courses | `courses`, `course_chapters`, `course_elements`, `element_skill_tags` |
 | Learning | `enrollments`, `element_progress`, `course_notes` |
-| Credentials | `credentials`, `credential_status_lists`, `key_registry`, `credential_anchors` |
+| Credentials | `credentials`, `credential_status_lists`, `key_registry`, `credential_anchors`, `anchor_batches`, `anchor_receipts`, `anchor_observations` |
 | Reputation | `reputation_assertions` (derived from `credentials`), `reputation_snapshots`, `reputation_snapshot_inputs` |
 | Integrity | `integrity_sessions`, `integrity_snapshots` |
 | P2P | `peers`, `pins`, `sync_log`, `catalog` |

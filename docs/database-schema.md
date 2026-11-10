@@ -9,8 +9,8 @@ Status: live
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 32 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 130 tables, 128 indexes, 1 view, 6 triggers.
+**Schema**: 33 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 133 tables, 130 indexes, 1 view, 6 triggers.
 
 ---
 
@@ -55,6 +55,7 @@ and requires a database's history to be an exact prefix of this list:
 30. `notification_mutation_body`
 31. `push_error_codes`
 32. `subject_field_atlas_slot`
+33. `anchor_batches`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -577,7 +578,38 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `granted_at` TEXT NOT NULL default `datetime('now')`
 - `granted_until` TEXT — NULL for 'always'
 
-### Verifiable credentials (8)
+### Verifiable credentials (11)
+
+#### `anchor_batches`
+
+- `id` TEXT PK
+- `issuer_did` TEXT NOT NULL
+- `root` TEXT NOT NULL
+- `leaf_count` INTEGER NOT NULL
+- `funding` TEXT NOT NULL
+- `status` TEXT NOT NULL default `'outcome_unknown'`
+- `tx_hash` TEXT NOT NULL
+- `invalid_from_slot` INTEGER NOT NULL
+- `created_at` TEXT NOT NULL default `datetime('now')`
+- `confirmed_at` TEXT
+
+#### `anchor_observations`
+
+- `tx_hash` TEXT PK
+- `root` TEXT NOT NULL
+- `anchor_json` TEXT NOT NULL
+- `observed_at` TEXT NOT NULL default `datetime('now')`
+
+#### `anchor_receipts`
+
+- `credential_hash` TEXT PK
+- `tx_hash` TEXT PK
+- `root` TEXT NOT NULL
+- `receipt_json` TEXT NOT NULL
+- `source` TEXT NOT NULL
+- `verified` INTEGER NOT NULL default `0`
+- `next_observe_at` TEXT
+- `stored_at` TEXT NOT NULL default `datetime('now')`
 
 #### `credential_allowlist`
 
@@ -588,8 +620,10 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 #### `credential_anchors`
 
 - `credential_id` TEXT PK → `credentials.id`
+- `batch_id` TEXT → `anchor_batches.id`
+- `leaf_index` INTEGER
 - `anchor_tx_hash` TEXT
-- `anchor_status` TEXT NOT NULL default `'pending'` — pending|submitted|confirmed|failed
+- `anchor_status` TEXT NOT NULL default `'pending'`
 - `attempts` INTEGER NOT NULL default `0`
 - `last_error` TEXT
 - `next_attempt_at` TEXT
@@ -1704,6 +1738,7 @@ erDiagram
     course_chapters ||--o{ course_notes : chapter_id
     enrollments ||--o{ course_notes : enrollment_id
     courses ||--o{ course_tutor_policies : course_id
+    anchor_batches ||--o{ credential_anchors : batch_id
     credentials ||--o{ credential_anchors : credential_id
     subject_fields ||--o{ demo_opinion_examples : subject_field_id
     subject_fields ||--o{ developer_discussion_drafts : subject_field_id

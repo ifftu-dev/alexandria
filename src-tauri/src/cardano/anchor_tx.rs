@@ -1,138 +1,352 @@
-//! Build a metadata-only Cardano tx that embeds a credential hash as
-//! an integrity anchor. Distinct from the NFT mint path (§12.3, §19).
+//! Build the transaction that anchors one batch of credentials (protocol spec
+//! §11.3.1). Distinct from the NFT mint path (§12.3, §19).
 //!
-//! The tx body is the simplest possible: one ADA-only input from the
-//! funding wallet, one output back to it (less fee), no mint, no datums,
-//! no Plutus refs. The Alexandria treasury funds it when configured
-//! (`cardano::treasury`); otherwise the issuer's own wallet does. Either
-//! way the issuer's payment key, which is also its `did:key`, is a
-//! required signer, so the anchor is attributable to the issuer and not
-//! to whoever paid. Auxiliary data carries a single map under
-//! `ALEXANDRIA_ANCHOR_LABEL` (1697) per `cardano::script_refs`:
+//! The anchor record is label-1697 metadata, version 2:
 //!
 //! ```text
-//! {
-//!   1697: {
-//!     "credential_hash": <hex>,
-//!     "issuer_did":      <did:key:z…>,
-//!     "issued_at":       <ISO 8601>,
-//!     "v":               1
-//!   }
-//! }
+//! { 1697: { "root": <hex>, "leaf_count": <n>, "issuer_did": <did:key:z…>,
+//!           "anchored_from": <ISO 8601>, "v": 2 } }
 //! ```
 //!
-//! Metadata is injected via `tx_builder::inject_metadata` — the
-//! pallas-txbuilder `StagingTransaction` API doesn't accept aux
-//! data directly so we recompute the body's `auxiliary_data_hash`
-//! after embedding.
+//! `root` is the Merkle root over the batch's integrity hashes
+//! (`alexandria_verify::vc::anchor`). The issuer's payment key, which is also
+//! its `did:key`, is a required signer however the fee is paid.
+//!
+//! Two ways to pay:
+//!
+//! - **Sponsor.** Spend one UTxO of the `anchor_sponsor` script (the
+//!   Alexandria treasury) through its reference script. The script lets the
+//!   fee out, up to its cap, and requires the rest back at the script with
+//!   `next_allowed` pushed one window past this transaction's lower bound.
+//!   The issuer's wallet only supplies collateral, which the ledger takes
+//!   only if the script fails.
+//! - **Issuer.** A metadata-only transaction from the issuer's wallet.
+//!
+//! The script never reads the metadata, so both kinds verify the same way.
 
 use pallas_addresses::Address as PallasAddress;
 use pallas_codec::utils::KeyValuePairs;
+use pallas_crypto::hash::Hash;
 use pallas_primitives::{Metadatum, MetadatumLabel};
-use pallas_txbuilder::{BuildConway, Input, Output, StagingTransaction};
+use pallas_txbuilder::{BuildConway, ExUnits, Input, Output, ScriptKind, StagingTransaction};
 
+use crate::cardano::cost_models::PLUTUS_V3_COST_MODEL;
+use crate::cardano::ledger::{Ledger, ANCHOR_RECORD_VERSION};
+use crate::cardano::plutus_data;
+use crate::cardano::plutus_spend::{plutus_fee, EST_MEM, EST_STEPS, MIN_COLLATERAL_LOVELACE};
 use crate::cardano::script_refs::ALEXANDRIA_ANCHOR_LABEL;
-use crate::cardano::treasury::TreasuryPayer;
 use crate::cardano::tx_builder::{self, MIN_UTXO_LOVELACE, TTL_OFFSET};
 use crate::cardano::types::UTxO;
 use crate::crypto::did::Did;
+use crate::crypto::wallet::Wallet;
+use crate::network_profile::AnchorSponsorProfile;
 
-/// CBOR bytes of a signed tx carrying:
-/// `metadata: { 1697: { credential_hash, issuer_did, issued_at, v } }`.
+/// Marks an error the wallet's balance can fix. The UI offers the funding hint
+/// for errors that carry it.
+pub const NEEDS_FUNDS: &str = "needs funds";
+
+/// Least lovelace a sponsor UTxO must keep after paying a fee, so the
+/// continuing output (address, inline datum) stays above the ledger minimum.
+pub const SPONSOR_MIN_CONTINUING_LOVELACE: u64 = 2_000_000;
+
+/// The version-2 anchor record for one batch.
+#[derive(Debug, Clone)]
+pub struct AnchorRecord {
+    pub root: String,
+    pub leaf_count: u64,
+    pub issuer_did: Did,
+    /// Earliest issuance time in the batch.
+    pub anchored_from: String,
+}
+
+/// Who pays the fee.
+pub enum Funding<'a> {
+    Sponsor {
+        profile: &'a AnchorSponsorProfile,
+        utxo: &'a UTxO,
+    },
+    Issuer,
+}
+
+impl Funding<'_> {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Funding::Sponsor { .. } => "sponsor",
+            Funding::Issuer => "issuer",
+        }
+    }
+}
+
+/// A signed anchor transaction.
 pub struct AnchorTx {
     pub signed_cbor: Vec<u8>,
     pub tx_hash: String,
+    /// First slot at which the transaction can no longer be included.
+    pub invalid_from_slot: u64,
 }
 
-/// Build and sign an anchor tx for `credential_hash`.
-///
-/// `treasury`, when present, pays: its UTxO is spent and the change returns
-/// to it, and it witnesses alongside the issuer. Without it the issuer's
-/// wallet pays.
-pub async fn build_anchor_metadata_tx(
-    credential_hash: &str,
-    issuer_did: &Did,
-    issued_at: &str,
-    wallet: &crate::crypto::wallet::Wallet,
-    treasury: Option<&TreasuryPayer>,
-    blockfrost: &crate::cardano::blockfrost::BlockfrostClient,
+/// Build and sign the anchor transaction for `record`.
+pub async fn build_anchor_tx<L: Ledger>(
+    record: &AnchorRecord,
+    funding: Funding<'_>,
+    wallet: &Wallet,
+    ledger: &L,
 ) -> Result<AnchorTx, String> {
-    let funding_address = treasury
-        .map(|t| t.address.as_str())
-        .unwrap_or(wallet.payment_address.as_str());
-
-    // 1. Query chain state in parallel — same pattern as tx_builder.
-    let (utxos_res, params_res, tip_res) = tokio::join!(
-        blockfrost.get_utxos(funding_address),
-        blockfrost.get_protocol_params(),
-        blockfrost.get_tip_slot(),
+    let (utxos, params, tip_slot) = tokio::join!(
+        ledger.utxos(&wallet.payment_address),
+        ledger.protocol_params(),
+        ledger.tip_slot(),
     );
-    let utxos = utxos_res.map_err(|e| format!("get_utxos: {e}"))?;
-    let params = params_res.map_err(|e| format!("get_protocol_params: {e}"))?;
-    let tip_slot = tip_res.map_err(|e| format!("get_tip_slot: {e}"))?;
-
-    if utxos.is_empty() {
-        return Err(format!("no UTxOs at funding address {funding_address}"));
-    }
-    let fee = tx_builder::estimate_fee(&params, if treasury.is_some() { 2 } else { 1 });
-    let selected = select_funding_utxo(&utxos, fee + MIN_UTXO_LOVELACE).ok_or_else(|| {
-        format!(
-            "insufficient funds at {funding_address}: no ADA-only UTxO holds {} lovelace",
-            fee + MIN_UTXO_LOVELACE
-        )
-    })?;
-
-    // 2. Parse + size the tx.
-    let pallas_addr = PallasAddress::from_bech32(funding_address)
-        .map_err(|e| format!("bad funding address: {e}"))?;
-    let change = selected.lovelace() - fee;
-    let input_tx_hash =
-        tx_builder::parse_tx_hash(&selected.tx_hash).map_err(|e| format!("parse tx hash: {e}"))?;
-
-    // 3. Build the body via pallas-txbuilder. No mint / no Plutus. The
-    //    issuer is a required signer whoever pays.
-    let staging = StagingTransaction::new()
-        .input(Input::new(input_tx_hash, selected.tx_index))
-        .output(Output::new(pallas_addr, change))
-        .disclosed_signer(pallas_crypto::hash::Hash::<28>::from(
-            wallet.payment_key_hash,
-        ))
-        .fee(fee)
-        .invalid_from_slot(tip_slot + TTL_OFFSET)
-        .network_id(0); // preprod
-
-    let built = staging
-        .build_conway_raw()
-        .map_err(|e| format!("build_conway_raw: {e}"))?;
-
-    // 4. Build + inject the anchor metadata.
-    let metadata = build_anchor_metadata(credential_hash, issuer_did, issued_at);
-    let (with_metadata, _hash_after_inject) =
-        tx_builder::inject_metadata(&built.tx_bytes.0, metadata)
-            .map_err(|e| format!("inject_metadata: {e}"))?;
-
-    // 5. Sign: the issuer always, the treasury when it funded the input.
-    let issuer_key = tx_builder::extended_private_key(&wallet.payment_key_extended)
+    let (wallet_utxos, params, tip_slot) = (utxos?, params?, tip_slot?);
+    let metadata = build_anchor_metadata(record);
+    let payment_key = tx_builder::extended_private_key(&wallet.payment_key_extended)
         .map_err(|e| format!("payment key: {e}"))?;
-    let signed_cbor = match treasury {
-        Some(t) => tx_builder::sign_raw_tx_many(&with_metadata, &[&issuer_key, &t.key]),
-        None => tx_builder::sign_raw_tx(&with_metadata, &issuer_key),
-    }
-    .map_err(|e| format!("sign: {e}"))?;
-    let tx_hash = tx_builder::compute_tx_hash(&signed_cbor).map_err(|e| format!("hash: {e}"))?;
+    // The issuer's `did:key` key is the required signer, so a verifier can
+    // tie the anchor to the DID with nothing but the DID. It is not the
+    // wallet's payment key, which only witnesses the inputs it pays from.
+    let did_key = pallas_wallet::PrivateKey::Normal(pallas_crypto::key::ed25519::SecretKey::from(
+        wallet.signing_key.to_bytes(),
+    ));
+    let issuer_hash = did_key_hash(wallet);
 
+    let (unsigned, invalid_from_slot) = match funding {
+        Funding::Issuer => {
+            let fee = tx_builder::estimate_fee(&params, 1);
+            let selected = select_ada_only(&wallet_utxos, fee + MIN_UTXO_LOVELACE).ok_or_else(
+                || {
+                    format!(
+                        "{NEEDS_FUNDS}: no sponsor available, and the wallet has no ADA-only UTxO holding {} lovelace",
+                        fee + MIN_UTXO_LOVELACE
+                    )
+                },
+            )?;
+            let address = PallasAddress::from_bech32(&wallet.payment_address)
+                .map_err(|e| format!("bad wallet address: {e}"))?;
+            let invalid_from = tip_slot + TTL_OFFSET;
+            let built = StagingTransaction::new()
+                .input(Input::new(
+                    parse_hash(&selected.tx_hash)?,
+                    selected.tx_index,
+                ))
+                .output(Output::new(address, selected.lovelace() - fee))
+                .disclosed_signer(issuer_hash)
+                .fee(fee)
+                .invalid_from_slot(invalid_from)
+                .network_id(0)
+                .build_conway_raw()
+                .map_err(|e| format!("build: {e}"))?;
+            let (with_metadata, _) = tx_builder::inject_metadata(&built.tx_bytes.0, metadata)
+                .map_err(|e| format!("inject_metadata: {e}"))?;
+            (with_metadata, invalid_from)
+        }
+        Funding::Sponsor { profile, utxo } => {
+            let plan = SponsorPlan::new(profile, utxo, tip_slot)?;
+            // The smallest sufficient UTxO: collateral is forfeited whole if
+            // the script fails on chain, and no collateral return is set.
+            let collateral = smallest_ada_only(&wallet_utxos, MIN_COLLATERAL_LOVELACE)
+                .ok_or_else(|| {
+                    format!(
+                        "{NEEDS_FUNDS}: a sponsored anchor needs collateral, an ADA-only UTxO of at least {} lovelace in the wallet",
+                        MIN_COLLATERAL_LOVELACE
+                    )
+                })?
+                .clone();
+            // Execution units as `(mem, steps)`; `ExUnits` is not `Copy`.
+            let build = |fee: u64, (mem, steps): (u64, u64)| -> Result<Vec<u8>, String> {
+                plan.build(
+                    fee,
+                    ExUnits { mem, steps },
+                    &collateral,
+                    issuer_hash,
+                    metadata.clone(),
+                )
+            };
+            let estimate = |(mem, steps): (u64, u64), size: u64| {
+                plutus_fee(params.min_fee_a, params.min_fee_b, size, mem, steps)
+            };
+            let est_units = (EST_MEM, EST_STEPS);
+            let draft = build(
+                estimate(est_units, 1_500).min(profile.fee_cap_lovelace),
+                est_units,
+            )?;
+            let units = match ledger.evaluate(&draft).await {
+                Ok(units) if !units.is_empty() => units
+                    .into_iter()
+                    .fold((0, 0), |(m, s), (um, us)| (m.max(um), s.max(us))),
+                Ok(_) => est_units,
+                Err(e) => return Err(format!("sponsor script evaluation failed: {e}")),
+            };
+            let fee = estimate(units, draft.len() as u64 + 200);
+            if fee > profile.fee_cap_lovelace {
+                return Err(format!(
+                    "anchor fee {fee} lovelace exceeds the sponsor's cap of {}",
+                    profile.fee_cap_lovelace
+                ));
+            }
+            (build(fee, units)?, plan.invalid_from_slot)
+        }
+    };
+
+    let signed_cbor = tx_builder::sign_raw_tx_many(&unsigned, &[&payment_key, &did_key])
+        .map_err(|e| format!("sign: {e}"))?;
+    let tx_hash = tx_builder::compute_tx_hash(&signed_cbor).map_err(|e| format!("hash: {e}"))?;
     Ok(AnchorTx {
         signed_cbor,
         tx_hash,
+        invalid_from_slot,
     })
+}
+
+/// The shape of one sponsored spend, fixed before fees are known.
+struct SponsorPlan<'a> {
+    profile: &'a AnchorSponsorProfile,
+    utxo: &'a UTxO,
+    valid_from_slot: u64,
+    invalid_from_slot: u64,
+    next_allowed_ms: i64,
+}
+
+impl<'a> SponsorPlan<'a> {
+    fn new(
+        profile: &'a AnchorSponsorProfile,
+        utxo: &'a UTxO,
+        tip_slot: u64,
+    ) -> Result<Self, String> {
+        if !sponsor_utxo_is_spendable(profile, utxo, tip_slot) {
+            return Err("the chosen sponsor UTxO is not spendable now".into());
+        }
+        // Lower bound at the tip: the script needs it at or after the
+        // datum's `next_allowed`, and the ledger needs it in the past. The
+        // interval is as wide as the script allows, in whole slots.
+        let valid_from_slot = tip_slot;
+        let invalid_from_slot = valid_from_slot + profile.max_validity_ms / 1000;
+        let next_allowed_ms =
+            i64::try_from(profile.slot_to_posix_ms(valid_from_slot) + profile.window_ms)
+                .map_err(|_| "sponsor window out of range")?;
+        Ok(Self {
+            profile,
+            utxo,
+            valid_from_slot,
+            invalid_from_slot,
+            next_allowed_ms,
+        })
+    }
+
+    fn build(
+        &self,
+        fee: u64,
+        units: ExUnits,
+        collateral: &UTxO,
+        issuer: Hash<28>,
+        metadata: KeyValuePairs<MetadatumLabel, Metadatum>,
+    ) -> Result<Vec<u8>, String> {
+        let (ref_hash, ref_index) = self
+            .profile
+            .reference()
+            .ok_or("anchor sponsor reference input is malformed")?;
+        let script_address = PallasAddress::from_bech32(&self.profile.address)
+            .map_err(|e| format!("bad sponsor address: {e}"))?;
+        let script_input = Input::new(parse_hash(&self.utxo.tx_hash)?, self.utxo.tx_index);
+        let continuing = self.utxo.lovelace() - fee;
+        let datum = plutus_data::encode_sponsor_datum(self.next_allowed_ms)
+            .map_err(|e| format!("sponsor datum: {e}"))?;
+        let redeemer =
+            plutus_data::encode_sponsor_redeemer().map_err(|e| format!("redeemer: {e}"))?;
+        let built = StagingTransaction::new()
+            .input(script_input.clone())
+            .add_spend_redeemer(script_input, redeemer, Some(units))
+            .reference_input(Input::new(parse_hash(ref_hash)?, ref_index))
+            .output(Output::new(script_address, continuing).set_inline_datum(datum))
+            .collateral_input(Input::new(
+                parse_hash(&collateral.tx_hash)?,
+                collateral.tx_index,
+            ))
+            .language_view(ScriptKind::PlutusV3, PLUTUS_V3_COST_MODEL.to_vec())
+            .disclosed_signer(issuer)
+            .fee(fee)
+            .valid_from_slot(self.valid_from_slot)
+            .invalid_from_slot(self.invalid_from_slot)
+            .network_id(0)
+            .build_conway_raw()
+            .map_err(|e| format!("build: {e}"))?;
+        let (with_metadata, _) = tx_builder::inject_metadata(&built.tx_bytes.0, metadata)
+            .map_err(|e| format!("inject_metadata: {e}"))?;
+        Ok(with_metadata)
+    }
+}
+
+/// Whether the sponsor script would let this UTxO pay a fee at `tip_slot`:
+/// a plain lovelace UTxO (no reference script, no tokens) whose datum's
+/// `next_allowed` has passed, holding enough for the fee cap and a valid
+/// continuing output.
+pub fn sponsor_utxo_is_spendable(
+    profile: &AnchorSponsorProfile,
+    utxo: &UTxO,
+    tip_slot: u64,
+) -> bool {
+    let Some(next_allowed) = utxo
+        .inline_datum
+        .as_deref()
+        .and_then(|datum| hex::decode(datum).ok())
+        .and_then(|bytes| plutus_data::decode_sponsor_datum(&bytes))
+    else {
+        return false;
+    };
+    !utxo.has_reference_script()
+        && utxo.amount.iter().all(|a| a.unit == "lovelace")
+        && utxo.lovelace() >= profile.fee_cap_lovelace + SPONSOR_MIN_CONTINUING_LOVELACE
+        && i128::from(next_allowed) <= i128::from(profile.slot_to_posix_ms(tip_slot))
+}
+
+/// Pick a spendable sponsor UTxO. Nodes choose by a hash of their issuer and
+/// the tip, so concurrent nodes spread across the pool instead of racing for
+/// the first entry.
+pub fn select_sponsor_utxo<'a>(
+    profile: &AnchorSponsorProfile,
+    utxos: &'a [UTxO],
+    tip_slot: u64,
+    issuer: &Did,
+) -> Option<&'a UTxO> {
+    let mut eligible: Vec<&UTxO> = utxos
+        .iter()
+        .filter(|u| sponsor_utxo_is_spendable(profile, u, tip_slot))
+        .collect();
+    if eligible.is_empty() {
+        return None;
+    }
+    eligible.sort_by(|a, b| (&a.tx_hash, a.tx_index).cmp(&(&b.tx_hash, b.tx_index)));
+    let mut seed = blake3::Hasher::new();
+    seed.update(issuer.as_str().as_bytes());
+    seed.update(&tip_slot.to_be_bytes());
+    let digest = seed.finalize();
+    let pick = u64::from_be_bytes(digest.as_bytes()[..8].try_into().ok()?);
+    let index = usize::try_from(pick % eligible.len() as u64).ok()?;
+    Some(eligible[index])
+}
+
+/// The smallest ADA-only UTxO holding at least `needed` lovelace.
+fn smallest_ada_only(utxos: &[UTxO], needed: u64) -> Option<&UTxO> {
+    utxos
+        .iter()
+        .filter(|u| {
+            !u.has_reference_script()
+                && u.amount.iter().all(|a| a.unit == "lovelace")
+                && u.lovelace() >= needed
+        })
+        .min_by_key(|u| u.lovelace())
+}
+
+/// Blake2b-224 of the wallet's `did:key` public key: the anchor's required
+/// signer (`alexandria_verify::vc::anchor::issuer_key_hash` of its DID).
+pub fn did_key_hash(wallet: &Wallet) -> Hash<28> {
+    pallas_crypto::hash::Hasher::<224>::hash(wallet.signing_key.verifying_key().as_bytes())
 }
 
 /// The largest ADA-only UTxO holding at least `needed` lovelace.
 ///
-/// The change output is lovelace-only, so spending a UTxO that carries other
-/// assets would strand them; reference-script UTxOs (the treasury deploys
-/// validators) must never be spent.
-fn select_funding_utxo(utxos: &[UTxO], needed: u64) -> Option<&UTxO> {
+/// Spending a UTxO that carries other assets would strand them, and
+/// reference-script UTxOs must never be spent.
+fn select_ada_only(utxos: &[UTxO], needed: u64) -> Option<&UTxO> {
     utxos
         .iter()
         .filter(|u| {
@@ -143,29 +357,25 @@ fn select_funding_utxo(utxos: &[UTxO], needed: u64) -> Option<&UTxO> {
         .max_by_key(|u| u.lovelace())
 }
 
-/// Build the `{ 1697: { … } }` auxiliary-data map. Public so tests +
-/// the `anchor_queue` processor + the `preprod_anchor` example can
-/// re-derive it for snapshotting.
-pub fn build_anchor_metadata(
-    credential_hash: &str,
-    issuer_did: &Did,
-    issued_at: &str,
-) -> KeyValuePairs<MetadatumLabel, Metadatum> {
+fn parse_hash(hex_str: &str) -> Result<Hash<32>, String> {
+    tx_builder::parse_tx_hash(hex_str).map_err(|e| format!("parse tx hash: {e}"))
+}
+
+/// The `{ 1697: { … } }` auxiliary data for `record`.
+pub fn build_anchor_metadata(record: &AnchorRecord) -> KeyValuePairs<MetadatumLabel, Metadatum> {
+    let text = |k: &str, v: &str| (Metadatum::Text(k.into()), Metadatum::Text(v.into()));
     let inner = Metadatum::Map(KeyValuePairs::from(vec![
+        text("root", &record.root),
         (
-            Metadatum::Text("credential_hash".into()),
-            Metadatum::Text(credential_hash.into()),
+            Metadatum::Text("leaf_count".into()),
+            Metadatum::Int(i64::try_from(record.leaf_count).unwrap_or(i64::MAX).into()),
         ),
+        text("issuer_did", record.issuer_did.as_str()),
+        text("anchored_from", &record.anchored_from),
         (
-            Metadatum::Text("issuer_did".into()),
-            Metadatum::Text(issuer_did.as_str().into()),
+            Metadatum::Text("v".into()),
+            Metadatum::Int(ANCHOR_RECORD_VERSION.into()),
         ),
-        (
-            Metadatum::Text("issued_at".into()),
-            Metadatum::Text(issued_at.into()),
-        ),
-        // Schema version — bumps when the inner shape changes.
-        (Metadatum::Text("v".into()), Metadatum::Int(1.into())),
     ]));
     KeyValuePairs::from(vec![(ALEXANDRIA_ANCHOR_LABEL, inner)])
 }
@@ -173,60 +383,15 @@ pub fn build_anchor_metadata(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cardano::types::AmountEntry;
 
-    #[test]
-    fn anchor_tx_is_a_plain_data_container() {
-        let tx = AnchorTx {
-            signed_cbor: vec![0x82, 0x00, 0x00],
-            tx_hash: "deadbeef".into(),
-        };
-        assert_eq!(tx.tx_hash, "deadbeef");
-        assert_eq!(tx.signed_cbor.len(), 3);
-    }
-
-    #[test]
-    fn anchor_metadata_lives_under_label_1697() {
-        let kvs = build_anchor_metadata(
-            "0123456789abcdef",
-            &Did("did:key:zIssuerTest".into()),
-            "2026-04-13T00:00:00Z",
-        );
-        let labels: Vec<MetadatumLabel> = kvs.iter().map(|(l, _)| *l).collect();
-        assert_eq!(labels, vec![ALEXANDRIA_ANCHOR_LABEL]);
-        assert_eq!(ALEXANDRIA_ANCHOR_LABEL, 1697);
-    }
-
-    #[test]
-    fn anchor_metadata_carries_required_fields() {
-        let kvs = build_anchor_metadata(
-            "deadbeef",
-            &Did("did:key:zIssuerXyz".into()),
-            "2026-04-13T00:00:00Z",
-        );
-        let inner = match &kvs.iter().next().unwrap().1 {
-            Metadatum::Map(m) => m.clone(),
-            other => panic!("expected Map, got {:?}", other),
-        };
-        let keys: Vec<String> = inner
-            .iter()
-            .filter_map(|(k, _)| match k {
-                Metadatum::Text(s) => Some(s.to_string()),
-                _ => None,
-            })
-            .collect();
-        assert!(keys.contains(&"credential_hash".to_string()));
-        assert!(keys.contains(&"issuer_did".to_string()));
-        assert!(keys.contains(&"issued_at".to_string()));
-        assert!(keys.contains(&"v".to_string()));
-    }
-
-    fn utxo(index: u64, lovelace: u64, token: bool, script: bool) -> UTxO {
-        let mut amount = vec![crate::cardano::types::AmountEntry {
+    pub(crate) fn utxo(index: u64, lovelace: u64, token: bool, script: bool) -> UTxO {
+        let mut amount = vec![AmountEntry {
             unit: "lovelace".into(),
             quantity: lovelace.to_string(),
         }];
         if token {
-            amount.push(crate::cardano::types::AmountEntry {
+            amount.push(AmountEntry {
                 unit: "ab".repeat(28),
                 quantity: "1".into(),
             });
@@ -236,68 +401,85 @@ mod tests {
             tx_index: index,
             amount,
             reference_script_hash: script.then(|| "cd".repeat(28)),
+            inline_datum: None,
         }
     }
 
     #[test]
-    fn funding_spends_the_largest_ada_only_utxo_and_never_a_script_or_token() {
+    fn issuer_funding_spends_the_largest_ada_only_utxo_and_never_a_script_or_token() {
         let utxos = [
             utxo(0, 90_000_000, false, true),
             utxo(1, 80_000_000, true, false),
             utxo(2, 6_000_000, false, false),
             utxo(3, 20_000_000, false, false),
         ];
-        assert_eq!(select_funding_utxo(&utxos, 5_300_000).unwrap().tx_index, 3);
-        assert!(select_funding_utxo(&utxos, 30_000_000).is_none());
-        assert!(select_funding_utxo(&utxos[..2], 1).is_none());
+        assert_eq!(select_ada_only(&utxos, 5_300_000).unwrap().tx_index, 3);
+        assert!(select_ada_only(&utxos, 30_000_000).is_none());
+        assert!(select_ada_only(&utxos[..2], 1).is_none());
     }
 
     #[test]
-    fn anchor_metadata_is_deterministic() {
-        // Two builds with the same inputs ⇒ identical CBOR. Required
-        // for the §20.4 survivability bundle to be content-addressable
-        // even when it includes anchor records as evidence.
-        let a = build_anchor_metadata("h1", &Did("did:key:zA".into()), "2026-04-13T00:00:00Z");
-        let b = build_anchor_metadata("h1", &Did("did:key:zA".into()), "2026-04-13T00:00:00Z");
-        // KeyValuePairs doesn't impl PartialEq directly across all
-        // variants, so encode and compare bytes.
-        use pallas_codec::minicbor;
-        let mut ba = Vec::new();
-        let mut bb = Vec::new();
-        minicbor::encode(&a, &mut ba).unwrap();
-        minicbor::encode(&b, &mut bb).unwrap();
-        assert_eq!(ba, bb);
+    fn collateral_risks_the_smallest_sufficient_utxo() {
+        let utxos = [
+            utxo(0, 500_000_000, false, false),
+            utxo(1, 4_000_000, false, false),
+            utxo(2, 6_000_000, false, false),
+            utxo(3, 9_000_000, true, false),
+        ];
+        assert_eq!(smallest_ada_only(&utxos, 5_000_000).unwrap().tx_index, 2);
     }
 
-    /// Live preprod anchor paid by the treasury. Ignored by default. The
-    /// issuer is a freshly generated wallet with no funds, so acceptance
-    /// shows that the treasury paid and the issuer only signed:
-    ///   BLOCKFROST_PROJECT_ID=preprod… ALEXANDRIA_TREASURY_SKEY=… \
-    ///   ALEXANDRIA_TREASURY_ADDR=… cargo test -p alexandria-node \
-    ///     live_treasury_anchor_preprod -- --ignored --nocapture
+    /// Live preprod anchor of a one-credential batch. Ignored by default.
+    /// The wallet needs a little tADA (fee, or collateral when sponsored).
+    /// With `ALEXANDRIA_ANCHOR_SPONSOR` set to an `anchor_sponsor` profile
+    /// object (JSON), a spendable sponsor UTxO pays instead of the wallet:
+    ///   BLOCKFROST_PROJECT_ID=preprod… ALEXANDRIA_TEST_MNEMONIC="…" \
+    ///   [ALEXANDRIA_ANCHOR_SPONSOR='{…}'] cargo test -p alexandria-node \
+    ///     live_anchor_preprod -- --ignored --nocapture
     #[test]
     #[ignore]
-    fn live_treasury_anchor_preprod() {
+    fn live_anchor_preprod() {
         let pid = std::env::var("BLOCKFROST_PROJECT_ID").expect("BLOCKFROST_PROJECT_ID");
-        let treasury = TreasuryPayer::from_env().expect("ALEXANDRIA_TREASURY_SKEY/_ADDR");
-        let issuer = crate::crypto::wallet::generate_wallet().unwrap();
-        let did = crate::crypto::did::derive_did_key(&issuer.signing_key);
+        let mnemonic = std::env::var("ALEXANDRIA_TEST_MNEMONIC").expect("ALEXANDRIA_TEST_MNEMONIC");
+        let sponsor: Option<AnchorSponsorProfile> = std::env::var("ALEXANDRIA_ANCHOR_SPONSOR")
+            .ok()
+            .map(|json| serde_json::from_str(&json).expect("anchor sponsor JSON"));
+        let wallet = crate::crypto::wallet::wallet_from_mnemonic(&mnemonic).unwrap();
         let issued_at = crate::clock::now_rfc3339();
-        let hash = hex::encode(blake3::hash(issued_at.as_bytes()).as_bytes());
+        let leaf = *blake3::hash(issued_at.as_bytes()).as_bytes();
+        let record = AnchorRecord {
+            root: hex::encode(alexandria_verify::vc::anchor::merkle_root(&[leaf])),
+            leaf_count: 1,
+            issuer_did: crate::crypto::did::derive_did_key(&wallet.signing_key),
+            anchored_from: issued_at,
+        };
 
         let rt = tokio::runtime::Runtime::new().unwrap();
         let outcome = rt.block_on(async {
             let bf = crate::cardano::blockfrost::BlockfrostClient::new(pid).unwrap();
-            let built =
-                build_anchor_metadata_tx(&hash, &did, &issued_at, &issuer, Some(&treasury), &bf)
-                    .await?;
-            bf.submit_tx(&built.signed_cbor)
-                .await
-                .map_err(|e| format!("submit: {e}"))
+            let funding = match &sponsor {
+                Some(profile) => {
+                    let (utxos, tip) = (bf.utxos(&profile.address).await?, bf.tip_slot().await?);
+                    let utxo = select_sponsor_utxo(profile, &utxos, tip, &record.issuer_did)
+                        .ok_or("no spendable sponsor UTxO")?
+                        .clone();
+                    Some((profile, utxo))
+                }
+                None => None,
+            };
+            let built = match &funding {
+                Some((profile, utxo)) => {
+                    build_anchor_tx(&record, Funding::Sponsor { profile, utxo }, &wallet, &bf)
+                        .await?
+                }
+                None => build_anchor_tx(&record, Funding::Issuer, &wallet, &bf).await?,
+            };
+            bf.submit(&built.signed_cbor).await
         });
         println!(
-            "LIVE_ANCHOR_RESULT: {outcome:?} hash={hash} issuer={}",
-            did.as_str()
+            "LIVE_ANCHOR_RESULT: {outcome:?} root={} issuer={}",
+            record.root,
+            record.issuer_did.as_str()
         );
         outcome.expect("anchor accepted on preprod");
     }

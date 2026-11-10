@@ -344,6 +344,9 @@ const decisionVariant = computed(() => {
           </AppBadge>
         </div>
         <p class="break-words text-sm text-foreground">{{ anchorBody }}</p>
+        <p v-if="anchor?.needs_funds" class="mt-2 text-sm text-muted-foreground">
+          {{ $t('credentials.anchor.body.failedHint') }}
+        </p>
         <div v-if="anchor?.tx_hash || anchor?.status === 'failed'" class="mt-3 flex flex-wrap items-center gap-3 text-sm">
           <a
             v-if="anchor?.tx_hash"

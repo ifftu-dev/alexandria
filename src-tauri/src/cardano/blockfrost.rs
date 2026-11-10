@@ -159,6 +159,9 @@ pub struct TransactionReceipt {
     pub hash: String,
     pub slot: u64,
     pub valid_contract: bool,
+    /// Block time, POSIX seconds.
+    #[serde(default)]
+    pub block_time: Option<u64>,
 }
 
 /// Preprod base URL.
@@ -783,6 +786,7 @@ mod tests {
                     quantity: "2000000".into(),
                 }],
                 reference_script_hash: None,
+                inline_datum: None,
             },
             UTxO {
                 tx_hash: "bbb".into(),
@@ -792,6 +796,7 @@ mod tests {
                     quantity: "10000000".into(),
                 }],
                 reference_script_hash: None,
+                inline_datum: None,
             },
         ];
         let selected = BlockfrostClient::select_utxo(&utxos, 5_000_000);
@@ -810,6 +815,7 @@ mod tests {
                 quantity: "1000000".into(),
             }],
             reference_script_hash: None,
+            inline_datum: None,
         }];
         let selected = BlockfrostClient::select_utxo(&utxos, 5_000_000);
         assert!(selected.is_none());

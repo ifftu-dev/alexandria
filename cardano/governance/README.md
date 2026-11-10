@@ -18,6 +18,7 @@ On-chain governance for the Alexandria learning platform, implementing Section 1
 | `soulbound` | Historical spending validator for CIP-68 reputation tokens |
 | `vote_minting` | Vote receipt token minting. One receipt per voter per election/proposal to prevent double-voting |
 | `completion` | Completion-witness minting policy keyed to the learner and course completion root |
+| `anchor_sponsor` | Treasury fee pool for credential-anchor txs: capped fee per spend, one spend per UTxO per window, m-of-n reclaim. Deployed on preprod; coordinates in the network profile |
 
 ## Library Modules
 
@@ -27,6 +28,7 @@ On-chain governance for the Alexandria learning platform, implementing Section 1
 | `reputation` | CIP-68 token name construction, reference token helpers |
 | `state_token` | DAO state token name construction and UTxO lookup |
 | `utils` | Quorum checks, majority/supermajority, deadline validation, top-N candidate selection |
+| `sponsor` | `anchor_sponsor` datum and redeemer types |
 
 ## Building
 
@@ -37,6 +39,16 @@ aiken build
 ```
 
 Produces `plutus.json` — the CIP-57 blueprint containing all validator scripts.
+
+### Applying `anchor_sponsor` parameters
+
+`anchor_sponsor` takes five parameters, applied one at a time in order: `fee_cap` (lovelace), `window` (POSIX ms), `max_validity` (POSIX ms), `reclaim_keys` (list of key hashes), `reclaim_threshold`. Each is hex CBOR Plutus Data, e.g. `aiken blueprint apply -m anchor_sponsor -v anchor_sponsor -o plutus.json 1a001e8480` for a 2 ADA fee cap; repeat for the rest. `Sponsor` always fails unless `window > max_validity`, and `Reclaim` needs `reclaim_threshold >= 1`. Build with the pinned compiler (`aiken.toml`) so the existing validator hashes stay unchanged.
+
+### The preprod sponsor
+
+Deployed with a 1 tADA fee cap, a one-hour window, a ten-minute maximum validity and the treasury key as a 1-of-1 reclaim key; mainnet should use a founder multisig. The script hash, address, reference-script UTxO and parameters are `anchor_sponsor` in `src-tauri/resources/networks/preprod.json`. The reference script sits at the treasury address, like the other validators'.
+
+To add funds, send lovelace-only outputs to the sponsor address with the inline datum `d8798100` (`SponsorDatum { next_allowed: 0 }`) as raw CBOR, for example with `cardano-cli`'s `--tx-out-inline-datum-cbor-file`. Don't use `--tx-out-inline-datum-value`: it stores plain JSON as a CBOR map, which the script cannot read, and such outputs can only be recovered with `Reclaim`.
 
 ## Testing
 
