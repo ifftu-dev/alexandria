@@ -813,22 +813,12 @@ fn validity_upper_bound(signed_cbor: &[u8]) -> Result<u64, String> {
         .ok_or_else(|| "transaction has no validity upper bound; refusing to journal it".into())
 }
 
-/// Reconcile only the journaled identity, at an unknown tip: it never
-/// expires anything. Not found, unavailable, or timed out is not proof of
-/// rejection and never makes the operation eligible to rebuild.
-pub(crate) async fn reconcile<L: Ledger>(
-    journal: &Journal,
-    blockfrost: &L,
-    operation: Operation<'_>,
-) -> Result<Option<Submission>, String> {
-    reconcile_at(journal, blockfrost, operation, None).await
-}
-
 /// Reconcile the journaled identity at `tip`, read from the ledger before
 /// this call (`None` when the tip is unavailable). A receipt confirms or fails
-/// the transaction as [`reconcile`] does. With no receipt, and only when the
-/// tip is known and past the validity upper bound plus
-/// [`EXPIRY_MARGIN_SLOTS`], the transaction becomes
+/// the transaction. Not found, unavailable, or timed out is not proof of
+/// rejection and never makes the operation eligible to rebuild. With no
+/// receipt, and only when the tip is known and past the validity upper bound
+/// plus [`EXPIRY_MARGIN_SLOTS`], the transaction becomes
 /// [`SubmissionStatus::Expired`]. A provider error never expires anything.
 pub(crate) async fn reconcile_at<L: Ledger>(
     journal: &Journal,
@@ -1380,7 +1370,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(retry, uncertain);
-        let recovered = reconcile(&journal, &client, OPERATION)
+        let recovered = reconcile_at(&journal, &client, OPERATION, None)
             .await
             .unwrap()
             .unwrap();
@@ -1671,7 +1661,7 @@ mod tests {
         assert_eq!(stored.tx_hash, expected);
         let recovered = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            reconcile(&journal, &client, OPERATION),
+            reconcile_at(&journal, &client, OPERATION, None),
         )
         .await
         .unwrap()

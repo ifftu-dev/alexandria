@@ -253,7 +253,7 @@ async fn locking_stalled_post_cleans_profile_and_recovers_original_after_switch(
     );
     let recovered = tokio::time::timeout(
         Duration::from_secs(5),
-        lease.run_until_closed(submission::reconcile(&journal, &client, OPERATION)),
+        lease.run_until_closed(submission::reconcile_at(&journal, &client, OPERATION, None)),
     )
     .await
     .unwrap()
