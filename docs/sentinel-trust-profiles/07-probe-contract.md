@@ -23,4 +23,5 @@ Spec: Implementation Decisions → Probes (all but the llm and interview bullets
 - Reseed time box: 1.5 × (attempt duration ÷ items), clamped to 15 s–5 min. Per-item timing does not exist yet (ticket 03).
 - Policy `none` still records one skipped probe step (reason `policy_none`), so the chain shows the policy.
 - The built-in MCQ grader wasm was rebuilt with `alex_probe` (a complement probe: pick every option that is not correct), so its grader CID changed. The editor graders have no `alex_probe` yet, so the `plugin` policy is skipped (`provider_unavailable`) for their items.
+- Beyond the bullets: a failed verification raises the session to `flagged` and feeds ticket 01's fusion input `verification_failed`, following the spec's decision rule.
 - Authoring is IPC only (`assessment_item_probe_*`, allowlisted); there is no instructor UI yet. Authored probes do not travel with items over sync.

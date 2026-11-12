@@ -18,6 +18,7 @@ use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::hash::entity_id;
+use crate::sentinel::scoring::SessionStatus;
 
 /// What a verification step concluded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,9 +170,43 @@ pub fn record_verification(
         params![new.session_id, commitment_hash],
     )
     .map_err(|e| e.to_string())?;
+    // A failed verification is credential-affecting on its own (the fusion
+    // decision rule): raise the session to `flagged`. Status only moves up.
+    if new.outcome == VerificationOutcome::Failed {
+        let current: String = tx
+            .query_row(
+                "SELECT status FROM integrity_sessions WHERE id = ?1",
+                params![new.session_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        if SessionStatus::parse(&current).unwrap_or(SessionStatus::Active) < SessionStatus::Flagged
+        {
+            tx.execute(
+                "UPDATE integrity_sessions SET status = ?2 WHERE id = ?1",
+                params![new.session_id, SessionStatus::Flagged.as_str()],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
     let result = read_result(&tx, &id)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(result)
+}
+
+/// Whether any verification step in the session failed. The fusion
+/// decision's `verification_failed` input.
+pub fn has_failed_verification(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM integrity_verifications \
+                        WHERE session_id = ?1 AND outcome = 'failed')",
+        params![session_id],
+        |r| r.get(0),
+    )
+    .map_err(|e| e.to_string())
 }
 
 const RESULT_COLUMNS: &str = "id, session_id, attempt_id, step, policy, outcome, reason, \
@@ -343,6 +378,36 @@ mod tests {
         record_verification(db.conn(), &result(VerificationOutcome::Failed, "reseed")).unwrap();
         let s = session_verification_summary(db.conn(), "s1").unwrap();
         assert_eq!(s.outcome, Some(VerificationOutcome::Failed));
+    }
+
+    fn status(db: &Database) -> String {
+        db.conn()
+            .query_row(
+                "SELECT status FROM integrity_sessions WHERE id = 's1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn a_failed_verification_flags_the_session_and_skipped_does_not() {
+        let db = db_with_session();
+        record_verification(db.conn(), &result(VerificationOutcome::Skipped, "reseed")).unwrap();
+        record_verification(db.conn(), &result(VerificationOutcome::Satisfied, "reseed")).unwrap();
+        assert_eq!(status(&db), "active");
+        assert!(!has_failed_verification(db.conn(), "s1").unwrap());
+
+        record_verification(db.conn(), &result(VerificationOutcome::Failed, "reseed")).unwrap();
+        assert_eq!(status(&db), "flagged");
+        assert!(has_failed_verification(db.conn(), "s1").unwrap());
+
+        // Status only moves up: a suspended session stays suspended.
+        db.conn()
+            .execute("UPDATE integrity_sessions SET status = 'suspended'", [])
+            .unwrap();
+        record_verification(db.conn(), &result(VerificationOutcome::Failed, "reseed")).unwrap();
+        assert_eq!(status(&db), "suspended");
     }
 
     #[test]
