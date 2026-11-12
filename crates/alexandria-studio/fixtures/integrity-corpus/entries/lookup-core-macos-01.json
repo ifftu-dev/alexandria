@@ -1,0 +1,27 @@
+{
+  "id": "lookup-core-macos-01",
+  "label": "answer_lookup",
+  "provenance": "synthetic",
+  "profile": "core",
+  "platform": "macos",
+  "device_class": "desktop",
+  "windows": [
+    {
+      "features": {
+        "focus": {
+          "app_switches": 3
+        }
+      }
+    },
+    {
+      "features": {
+        "focus": {
+          "app_switches": 2
+        }
+      }
+    },
+    {
+      "features": {}
+    }
+  ]
+}

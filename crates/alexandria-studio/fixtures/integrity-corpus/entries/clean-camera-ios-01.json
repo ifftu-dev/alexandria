@@ -1,0 +1,31 @@
+{
+  "id": "clean-camera-ios-01",
+  "label": "clean",
+  "provenance": "synthetic",
+  "profile": "camera",
+  "platform": "ios",
+  "device_class": "phone",
+  "windows": [
+    {
+      "features": {
+        "camera": {
+          "face_present": true,
+          "face_count": 1,
+          "face_checks": 10,
+          "gaze_checks": 10
+        }
+      }
+    },
+    {
+      "features": {
+        "camera": {
+          "face_present": true,
+          "face_count": 1,
+          "face_checks": 10,
+          "gaze_checks": 10,
+          "gaze_down_glances": 3
+        }
+      }
+    }
+  ]
+}

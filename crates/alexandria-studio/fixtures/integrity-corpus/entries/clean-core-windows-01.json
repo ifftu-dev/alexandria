@@ -1,0 +1,23 @@
+{
+  "id": "clean-core-windows-01",
+  "label": "clean",
+  "provenance": "synthetic",
+  "profile": "core",
+  "platform": "windows",
+  "device_class": "desktop",
+  "windows": [
+    {
+      "features": {}
+    },
+    {
+      "features": {
+        "focus": {
+          "app_switches": 1
+        }
+      }
+    },
+    {
+      "features": {}
+    }
+  ]
+}

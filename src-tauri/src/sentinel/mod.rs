@@ -29,6 +29,8 @@
 //!   `alexandria_studio::integrity` (Tauri-free)
 //! - `snapshots` — the integrity snapshot chain: validation, commitment,
 //!   severity, status, and flags the backend records itself
+//! - `corpus_capture` — opt-in capture of committed windows for the
+//!   measurement corpus; off unless a maintainer sets the capture env var
 //! - `evidence` — learner-consented retention of appeal evidence for
 //!   flagged sessions; nothing is persisted without an explicit yes
 //!
@@ -39,6 +41,7 @@
 pub mod active_app;
 pub mod android_environment;
 pub mod attestation;
+pub mod corpus_capture;
 pub mod display_topology;
 pub mod evidence;
 pub mod face_detect;

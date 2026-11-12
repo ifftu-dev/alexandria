@@ -1,0 +1,16 @@
+{
+  "id": "clean-core-ios-01",
+  "label": "clean",
+  "provenance": "synthetic",
+  "profile": "core",
+  "platform": "ios",
+  "device_class": "phone",
+  "windows": [
+    {
+      "features": {}
+    },
+    {
+      "features": {}
+    }
+  ]
+}
