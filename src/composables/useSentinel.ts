@@ -384,6 +384,8 @@ let webviewCombos: WebviewCombo[] = []    // combos the webview received this wi
 let blurIntervals: BlurInterval[] = []    // [start,end] in performance.now() space
 let phantomWindow: string[] = []
 let nativeHotkeyCount = 0
+// Native events drained since the last window that reached the backend.
+let unsentNativeHotkeys: HotkeyEvent[] = []
 const WEBVIEW_COMBO_CAP = 512
 
 // Camera device identity — the video track label the player / interview
@@ -845,6 +847,41 @@ function createSentinelService() {
 
   let snapshotWork: Promise<void> | null = null
 
+  /**
+   * Start a new snapshot window: forget everything accumulated for the one
+   * just sent. Session-wide state (baselines, latest scans, the open face
+   * readings) is not touched.
+   */
+  const resetWindow = () => {
+    keystrokeBuffer = []
+    mouseBuffer = []
+    tabSwitchCount = 0
+    totalUnfocusedMs = 0
+    pasteEventCount = 0
+    pastedCharCount = 0
+    environmentChanged = false
+    appFocusLostCount = 0
+    appFocusLostMs = 0
+    displayChangeCount = 0
+    displayNativeToggle = false
+    obscuredTouchesWindow = 0
+    webviewCombos = []
+    blurIntervals = []
+    phantomWindow = []
+    nativeHotkeyCount = 0
+    unsentNativeHotkeys = []
+    totalFaceChecks = 0
+    faceAbsentChecks = 0
+    gazeTotalChecks = 0
+    gazeOffscreenChecks = 0
+    gazeOccludedChecks = 0
+    gazeDownGlances = 0
+    livenessChecks = 0
+    livenessSpoofChecks = 0
+    livenessRealProbSum = 0
+    responseTracker.clearWindow()
+  }
+
   const captureSnapshot = async (strict: boolean) => {
     const generation = lifecycleGeneration
     const snapshotSessionId = sessionId.value
@@ -975,8 +1012,11 @@ function createSentinelService() {
       if (hotkeysRunning && hotkeyStatus) {
         try {
           const drained = await tauriInvoke<HotkeyEvent[]>('sentinel_hotkeys_drain')
-          const native = Array.isArray(drained) ? drained : []
           if (!isCurrent()) return
+          // The ring is drained, so events from a window that failed to
+          // submit are kept here until one is sent.
+          if (Array.isArray(drained)) unsentNativeHotkeys = [...unsentNativeHotkeys, ...drained]
+          const native = unsentNativeHotkeys
           nativeHotkeyCount = native.length
           if (blurStartedAt) blurIntervals.push({ start: blurStartedAt, end: performance.now() })
           phantomWindow = phantomCombos({
@@ -1058,6 +1098,7 @@ function createSentinelService() {
       sentinelDebug.lastApp = lastFocusApp
       sentinelDebug.features = features
 
+      let sent = false
       try {
         // Features only: the backend derives the scores and flags, and says
         // what the session's status became.
@@ -1080,43 +1121,14 @@ function createSentinelService() {
           suspended.value = true
           sentinelDebug.suspended = true
         }
+        sent = true
       } catch (error) { if (strict) throw error }
       if (!isCurrent()) return
+      // A window the backend never received stays open: its data goes out
+      // with the next one.
+      if (!sent) return
 
-      // Reset per-snapshot accumulators
-      gazeTotalChecks = 0
-      gazeOffscreenChecks = 0
-      gazeOccludedChecks = 0
-      gazeDownGlances = 0
-      livenessChecks = 0
-      livenessSpoofChecks = 0
-      livenessRealProbSum = 0
-      appFocusLostCount = 0
-      appFocusLostMs = 0
-      displayChangeCount = 0
-      displayNativeToggle = false
-      obscuredTouchesWindow = 0
-      webviewCombos = []
-      blurIntervals = []
-      phantomWindow = []
-      nativeHotkeyCount = 0
-      keystrokeBuffer = []
-      mouseBuffer = []
-      tabSwitchCount = 0
-      totalUnfocusedMs = 0
-      pasteEventCount = 0
-      pastedCharCount = 0
-      environmentChanged = false
-      totalFaceChecks = 0
-      faceAbsentChecks = 0
-      gazeTotalChecks = 0
-      gazeOffscreenChecks = 0
-      gazeOccludedChecks = 0
-      gazeDownGlances = 0
-      livenessChecks = 0
-      livenessSpoofChecks = 0
-      livenessRealProbSum = 0
-      responseTracker.clearWindow()
+      resetWindow()
       snapshotWindowStartMs = Date.now()
 
   }
@@ -1332,6 +1344,7 @@ function createSentinelService() {
       blurIntervals = []
       phantomWindow = []
       nativeHotkeyCount = 0
+      unsentNativeHotkeys = []
       if (purpose === 'assessment') {
         try {
           const st = await tauriInvoke<HotkeyStatus>('sentinel_hotkeys_status')

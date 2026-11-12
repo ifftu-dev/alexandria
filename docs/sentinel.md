@@ -101,7 +101,7 @@ denominator term.
 
 - **Activation**: Starts when a learner opens the course player (enrolled), begins any assessment attempt (standalone, with no enrollment), an instructor starts a consented interview with Sentinel enabled, or a candidate agrees to an organisation's integrity check before joining an interview held in Alexandria. Interview monitoring observes the conductor device, preferring its interviewer participant and falling back to the candidate in a candidate-only plan.
 - **Start sequence**: `integrity_start_session` → `integrity_attest_session` → optional companion pairing → `integrity_select_profile` (see [Trust profiles](#trust-profiles)) → first snapshot.
-- **Snapshot interval**: Random 15-45 seconds. Each window `collectFeatures()` builds a `WindowFeatures` and submits it; nothing is scored in the webview.
+- **Snapshot interval**: Random 15-45 seconds. Each window `collectFeatures()` builds a `WindowFeatures` and submits it; nothing is scored in the webview. The window's accumulators reset only once the backend accepted it: a window whose submit failed stays open, and its data (including drained native hotkey events and settled response visits) goes out with the next one.
 - **Profile storage**: the behavioural baseline is saved through `sentinel_save_behavioral_profile` per user and device
 - **Profile update**: Exponential Moving Average with alpha=0.2 (alpha=0.5 during training wizard)
 - **Consistency scoring**: Activates after `sampleCount > 10`

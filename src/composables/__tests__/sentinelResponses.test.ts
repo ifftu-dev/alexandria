@@ -298,3 +298,37 @@ describe('response-process collector', () => {
     expect(features.map(f => f.response)).toEqual([null])
   })
 })
+
+describe('a window that fails to submit', () => {
+  it('is carried into the next window instead of being dropped', async () => {
+    const service = await startedService()
+    const answered = mocks.invoke.getMockImplementation()!
+    let refuse = true
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'integrity_submit_snapshot' && refuse) {
+        refuse = false
+        throw new Error('database busy')
+      }
+      return answered(command, args)
+    })
+    service.responses.present('q1', { chars: 100, difficulty: 2, input: 'choice' })
+    service.responses.present('q2', { chars: 100, difficulty: 2, input: 'choice' })
+    await vi.advanceTimersByTimeAsync(9_000)
+    service.responses.input('q1', { changesAnswer: false })
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: 'a' }))
+    await vi.advanceTimersByTimeAsync(2_000)
+    // Turning to q2 ends the visit to q1 inside this window.
+    service.responses.input('q2', { changesAnswer: false })
+    // The periodic submit at 15 s is refused.
+    await vi.advanceTimersByTimeAsync(4_000)
+    expect(refuse).toBe(false)
+    await service.stop()
+    const sent = mocks.invoke.mock.calls
+      .filter(([name]) => name === 'integrity_submit_snapshot')
+      .map(([, args]) => (args?.req as { features: WindowFeatures }).features)
+    const last = sent[sent.length - 1]!
+    expect(last.response?.items.map(i => i.item_id)).toEqual(['q1', 'q2'])
+    expect(last.typing.keystrokes).toBe(1)
+  })
+})

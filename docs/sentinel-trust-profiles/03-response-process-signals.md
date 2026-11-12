@@ -31,3 +31,4 @@ Review fix, 2026-11-12: the `process` rung counted summed first visits against i
 - Ids the attempt never served are ignored.
 - An item left unanswered and never visited is left out of the requirement: it carries no response and scores nothing, so it cannot be counted against the learner.
 - These cover every served item, so what the rung asks of coverage is that the tracker reported at least one served item. A session whose tracker never ran stays at `none`.
+- Review fix: the client cleared the response tracker's window (and every other window accumulator) even when the snapshot submit failed, so those visits never reached the backend. A window is now cleared only after the backend accepted it; otherwise it stays open and goes out with the next one. Native hotkey events drained from the ring are kept the same way.
