@@ -1,7 +1,7 @@
 # Project Structure
 
 Status: live
-Updated: 2026-10-27
+Updated: 2026-11-12
 
 > Alexandria — Tauri v2 desktop and mobile application (macOS, iOS, Android)
 
@@ -100,10 +100,12 @@ src-tauri/
     │   └── jd_parser.rs    # Pure n-gram matcher over skill names + synonyms
     ├── assessment/         # Dynamic assessment engine (pure)
     │   ├── mod.rs          # SplitMix64 PRNG + option shuffle
-    │   ├── randomizer.rs   # Difficulty-stratified question draw (per-attempt seed)
+    │   ├── randomizer.rs   # Adaptive, exposure-weighted, difficulty-stratified draw (per-attempt seed)
     │   ├── irt.rs          # Item-response-theory ability estimation
     │   ├── adaptive.rs     # Adaptive item selection over the IRT engine
     │   ├── items.rs        # Unified assessment items
+    │   ├── probes.rs       # Follow-up probes after submission (reseed/authored/plugin/llm)
+    │   ├── llm_probe.rs    # One-shot generated probe run type (not chat)
     │   ├── policy.rs       # Attempt limits + cooldowns
     │   ├── mcq.rs          # MCQ item handling
     │   ├── goal_plan.rs    # Goal → prerequisite path planning
@@ -177,6 +179,16 @@ src-tauri/
     │   ├── processes.rs    # Interview-cheat / remote-control / virtual-camera watchlist (desktop)
     │   ├── global_hotkeys.rs     # Listen-only modifier-combo monitor (phantom shortcuts, desktop)
     │   ├── prior_blob.rs   # Labelled-sample blob shape for the encrypted holdout
+    │   ├── scoring.rs      # Re-export of alexandria_studio::integrity (flags, fusion, profiles, rungs)
+    │   ├── snapshots.rs    # Commit windows; decide session status from committed flags
+    │   ├── trust_profile.rs # Profile selection, lock, degradation, policy floor
+    │   ├── camera_budget.rs / camera_pipeline.rs / inference_worker.rs # Benchmark, tracking, camera thread
+    │   ├── verification.rs # Probe and live-segment results in the commitment chain
+    │   ├── consistency.rs  # Longitudinal consistency at grading
+    │   ├── surface.rs      # Assertion facts, coverage, sponsor review queue
+    │   ├── voice_activity.rs # Voice onsets and second voice (DSP, no model)
+    │   ├── corpus_capture.rs # Opt-in measurement-corpus capture
+    │   ├── companion/      # Companion phone pairing over iroh
     │   └── attestation/    # device_attested: App Attest + Play Integrity capture and verification
     │
     ├── tutoring/           # `live` crate integration (MoQ rooms/sessions)

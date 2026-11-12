@@ -1,7 +1,7 @@
 # Skills & Reputation
 
 Status: live
-Updated: 2026-10-27
+Updated: 2026-11-12
 
 > Open skill graph, evidence-based credentials, and reputation system.
 
@@ -210,8 +210,8 @@ community grader path is implemented.
 
 Seeded **question banks** (see [`protocol-specification.md`](./protocol-specification.md) §8.4), whose items live in `assessment_items`, verify claimed skills:
 
-- `assessment_start_attempt` draws a randomized, difficulty-stratified subset (per-attempt seed) and shuffles options; the answer key (`assessment_items.grader_private`) is **never** included in the returned questions.
-- Sentinel auto-activates for every attempt (the learner is told), binding the attempt to an integrity session.
+- `assessment_start_attempt` draws an adaptive, exposure-weighted, difficulty-stratified subset (per-attempt seed) and shuffles options; the answer key (`assessment_items.grader_private`) is **never** included in the returned questions. The draw (`assessment::randomizer::draw` with a `DrawContext`) prefers items this profile has never been served, then the least-exposed ones (exposure is the number of this profile's attempts that served an item), and within a tier prefers the difficulty band its last 30 graded answers suggest; exposure wins over band. Items marked `"transfer": true` in their public content are served on top of the standard draw. A resumed attempt keeps its original draw, and the same seed with no history gives the same draw as before. Grading does not yet require transfer items or unseen items, and the adaptive (IRT) path is unchanged.
+- Sentinel auto-activates for every attempt (the learner is told), binding the attempt to an integrity session. The session's trust profile and the role's policy floor are settled before the first item, and a probe step may follow submission (see [sentinel.md](sentinel.md) §Trust profiles and §Probes).
 - `assessment_grade` grades **host-side** against the locally-held key and, on pass, issues an `AssessmentCredential` bound to that integrity session, then recomputes derived skill states.
 
 Attempt ownership is checked against the authenticated learner's DID. Grading

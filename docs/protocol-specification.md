@@ -1,7 +1,7 @@
 # Alexandria Protocol Specification
 
 Status: live
-Updated: 2026-11-10
+Updated: 2026-11-12
 Category: Standards Track
 
 ---
@@ -843,8 +843,8 @@ Sentinel is a client-side anti-cheat system that monitors assessment integrity t
 ### 12.2 Design Principles
 
 1. **Privacy-first** — All behavioral data (keystrokes, mouse movements, video frames) is processed entirely on-device. Only numeric scores and categorical flags are stored and broadcast.
-2. **Non-punitive by default** — Sentinel informs rather than punishes. Flagged sessions surface for review; automated suspensions require multiple strong signals.
-3. **Dual scoring** — Rule-based and AI-based systems run in parallel. Rule-based is authoritative; AI is advisory until validated with labeled data.
+2. **Non-punitive by default** — Sentinel informs rather than punishes. A single flag sends a session to review; a credential-affecting outcome needs two independent channels over a certified threshold or a failed verification step. Only backend-recorded assistant use suspends.
+3. **Measured before it counts** — Every signal is advisory until a reviewed certification admits it with an error rate measured on a labelled corpus. No certification is in force yet.
 4. **On-device, no downloads** — All ML models run on-device with no model downloads or remote inference. The keystroke autoencoder and mouse-trajectory CNN run in Rust on the `candle` framework; the face embedder is hand-written TypeScript (LBP histograms). The paste classifier runs via `tract` (pure Rust ONNX); its weights are embedded with `include_bytes!`, and no command replaces them at runtime.
 5. **Incremental trust** — Behavioral profiles build over time. Consistency scoring activates after 10+ samples.
 
@@ -872,7 +872,7 @@ Sentinel is a client-side anti-cheat system that monitors assessment integrity t
 | `global_hotkeys` / `phantom_hotkeys` | Native (desktop) | int | advisory |
 | `camera_device_virtual` | Rule | bool | advisory |
 
-The weights are relative coefficients: the score divides the weighted sum by the coefficients actually present, so a missing optional signal contributes neither score nor denominator. Developer-tools detection is not a signal; a snapshot carrying `devtools_score` or a `devtools_detected` flag is rejected. Advisory signals raise flags but carry no score weight. Each signal's thresholds, the flag it raises, and that flag's severity are specified in [`docs/sentinel.md`](sentinel.md) (Signal Taxonomy, Flagging Logic); flag severity is authoritative on the issuing device, and an unknown flag counts as info.
+The client submits raw per-window features; the issuing device derives every score and flag from them, and a snapshot carrying any client-computed score or flag (including the retired `devtools_score`) is rejected. The weights build a descriptive composite score: relative coefficients divided by the coefficients actually present, so a missing optional signal contributes neither score nor denominator. The composite no longer decides a session's outcome. Response-process signals (time to first input against a reading floor, uniform relay lag, idle-then-burst, answer change after idle, gaze-down or second voice just before a response) and longitudinal divergence at grading are further advisory signals. Each signal's thresholds, the flag it raises, and that flag's severity are specified in [`docs/sentinel.md`](sentinel.md) (Signal Taxonomy, Flagging Logic); flag severity is authoritative on the issuing device, and an unknown flag counts as info.
 
 ### 12.4 ML Models
 
@@ -884,13 +884,22 @@ Three per-user models are trained on-device. The keystroke autoencoder and mouse
 
 ### 12.5 Session Outcomes
 
-- **Clean**: Default.
-- **Flagged**: 1 critical OR 3+ warnings OR integrity < 0.40.
-- **Suspended**: 2+ critical OR (1 critical + 2 warnings).
+Signals are grouped into independent evidence channels. Each window a signal fires adds its certified log-likelihood ratio to its channel; a signal without a certified ratio adds zero and is advisory. A session's status follows, in order:
 
-### 12.6 Trust Factor Propagation
+- **Suspended**: assistant use recorded by the backend during an attempt (`in_app_assistant_during_attempt`, `mcp_call_during_attempt`). An interview-purpose session is `flagged` instead.
+- **Flagged**: a failed verification step, or two channels over the trust profile's threshold.
+- **Review**: any warning or critical flag, or one channel over threshold.
+- **Completed**: anything else, once the session ends.
 
-When a session ends `flagged` or `suspended`, the backend records the terminal status + integrity score on the `integrity_sessions` row — that is the trust signal credential issuance reads. A trust penalty (0.20 per critical flag, 0.10 per warning) is computed for observability and logged; it is not stored. A bound session reaches the credential through the `integrity` attestation block (§14.9.5).
+Status only moves up. Flag severity is authoritative on the issuing device, and an unknown flag counts as info in a channel of its own.
+
+### 12.6 Trust Profiles and Verification Rungs
+
+At session start the issuing device locks the session to one trust profile: `core`, `attested` (core + device attestation), `camera` (core + camera) or `full` (core + both), the highest the device's attestation, capabilities, a camera benchmark, per-capability consent and the sponsor's policy floor permit. The selection is the first link of the session's commitment chain. A signal lost afterwards is recorded as degraded, never renegotiated, and a signal the profile does not include is recorded as not run.
+
+The verification rung records positive evidence independent of the device, as a strict ladder: `none` → `process` (response-process signals observed over every served item, from the backend's draw) → `probed` (every follow-up probe on the learner's own answers satisfied) → `consistent` (the outcome agrees with the learner's own history on the skill) → `live` (a live segment in an interview held in Alexandria). Missing or skipped evidence leaves a session a rung lower and never counts against the learner; a failed probe flags the session.
+
+A session reaches the credential through the `integrity` attestation block (§14.9.5), with the terminal status, the composite score, the profile, the rung and the coverage statement digest. Coverage statements and the measurement behind certified rates are specified in [`docs/sentinel.md`](sentinel.md) (Trust profiles, Verification rungs, Integrity Assurance).
 
 ### 12.7 Privacy Guarantees
 
@@ -904,6 +913,10 @@ These guarantees are architectural — they are enforced by the code structure, 
 - No server-side data: All behavioral processing happens on-device.
 - Native environment checks return matches, not inventories: process and window enumerations stay in the backend (only watchlist matches and suspicious windows' owner and reason cross IPC, never titles); the shortcut monitor records only modifier combos and refuses text-entry chords; a camera's device label is never persisted.
 - Device attestation carries no identity: the platform key is per-app, per-install, and the stored blobs bind a nonce and an app id, not a person.
+- Consent is per capability: camera, microphone and companion phone are separate choices recorded on the session; none is enabled because the device has it.
+- Voice checks in interviews are never recorded, transcribed or stored: only voice onset times and whether a second voice was present are used.
+- Under a sponsor's `llm` probe policy, the skill and the text of the learner's chosen options leave the device for the sponsor's model connection, only with the learner's consent at attempt start; the item's prompt, other options and key never do.
+- Monitoring cannot see a second person or a second device, and every coverage statement says so.
 
 ---
 
@@ -1158,7 +1171,13 @@ Each credential MUST conform to the following logical structure.
     "criticalCount": 0,
     "warningCount": 1,
     "assuranceLevel": "local",
-    "generatedAt": "2026-04-13T00:00:00Z"
+    "generatedAt": "2026-04-13T00:00:00Z",
+    "trustProfile": "core",
+    "verificationRung": "probed",
+    "coverageStatementDigest": "blake3:...",
+    "signalsRun": ["core"],
+    "signalsNotRun": ["device_attestation", "camera"],
+    "probe": { "outcome": "satisfied", "policies": ["reseed"], "satisfied": 2, "failed": 0, "skipped": 0 }
   },
   "proof": {
     "type": "DataIntegrityProof",
@@ -1235,15 +1254,48 @@ A credential MAY be bound to a Sentinel integrity session at issuance. The reque
 - `integritySessionId` — the `integrity_sessions.id` whose terminal state backs the assessment.
 - `integrityPolicy` (optional) — an issuance gate evaluated against that session.
 
-When a session is bound, the issuer summarises its terminal state into the `integrity` attestation block (§14.7) and embeds it in the signed envelope. The attestation carries `assuranceLevel`:
+When a session is bound, the issuer summarises its terminal state into the `integrity` attestation block (§14.7) and embeds it in the signed envelope. Every field is re-derived from the session at issuance, never copied from stored client text. The block carries:
+
+| Field | Meaning |
+|---|---|
+| `sessionId` | The bound `integrity_sessions.id` |
+| `status` | Terminal session status: `completed`, `review`, `flagged` or `suspended` (§12.5) |
+| `integrityScore` | Descriptive composite score in `[0,1]`, when the session recorded one |
+| `criticalCount`, `warningCount` | Flag counts by severity |
+| `assuranceLevel` | The device axis, below |
+| `commitmentRoot` | Terminal root of the session's commitment chain |
+| `generatedAt` | Issuance time |
+| `trustProfile` | The profile the session was locked to: `core`, `attested`, `camera` or `full`. Absent when the session never selected one |
+| `verificationRung` | The verification axis: `none`, `process`, `probed`, `consistent` or `live` (§12.6) |
+| `coverageStatementDigest` | `blake3:` digest of the coverage statement for this profile and rung: what was checked, what was not, platform ceilings and certified error rates. Every statement states that monitoring cannot see a second person or a second device |
+| `signalsRun` | Signal sets the profile ran: `core`, plus `device_attestation` and `camera` where included |
+| `signalsDegraded` | Signals the profile ran that were lost: `camera` when camera coverage was incomplete, `device_attestation` when the stored attestation no longer verifies |
+| `signalsNotRun` | Signal sets the profile does not include |
+| `probe` | When a probe step ran: `outcome` (`failed` if any failed, else `satisfied` if any, else `skipped`), the `policies` used, and `satisfied` / `failed` / `skipped` counts |
+
+The profile, rung, digest, signal lists and probe summary are optional and omitted when empty. A verifier that re-serialises the typed credential to check its proof must know these fields, or it drops them and the proof fails (see the trust-profiles spec Notes on the `alexandria-verify` release).
+
+`assuranceLevel` is one of:
 
 - `"local"` — privacy-first default. Figures are device-reported; under this level a determined attacker could suppress flags, so verifiers SHOULD weight `local` attestations accordingly.
-- `"device_attested"` — the issuing device re-verified, at issuance, a platform attestation bound to the session: Apple App Attest (an attestation object chaining to Apple's App Attestation Root CA over the session nonce, plus an assertion by the attested key over the terminal `commitmentRoot`) or Google Play Integrity (a classic token for the session nonce, decrypted and verified with the developer's response keys, `PLAY_RECOGNIZED` and `MEETS_DEVICE_INTEGRITY`). The platform vouches that an unmodified build of the app on a genuine device produced the session; it does not vouch for the person. Desktop platforms cannot reach this level.
+- `"device_attested"` — the issuing device re-verified, at issuance, a platform attestation bound to the session: Apple App Attest (an attestation object chaining to Apple's App Attestation Root CA over the session nonce, plus an assertion by the attested key over the terminal `commitmentRoot`) or Google Play Integrity (a classic token for the session nonce, decrypted and verified with the developer's response keys, `PLAY_RECOGNIZED` and `MEETS_DEVICE_INTEGRITY`). The platform vouches that an unmodified build of the app on a genuine device produced the session; it does not vouch for the person. A desktop cannot attest itself (App Attest reports unsupported on every Mac); it reaches this level only when the learner's own attested phone joined the session as a companion, which proves that a genuine app on the learner's phone joined, not that it watched.
 - `"anchored"` and `"high_assurance"` — reserved for a snapshot-commitment root anchored with a timestamp and immutability proof, and for an independently witnessed session. The implementation has no verified path to either, and a policy requiring a reserved level refuses issuance.
 
-The session nonce is `SHA-256("alexandria-device-attest-v1" ‖ 0x00 ‖ session_id ‖ 0x00 ‖ started_at)`. A stored level is never copied into a credential: the issuer recomputes the nonce and re-verifies the stored attestation, and embeds `"local"` when it does not verify.
+The session nonce is `SHA-256("alexandria-device-attest-v1" ‖ 0x00 ‖ session_id ‖ 0x00 ‖ started_at)`. A stored level is never copied into a credential: the issuer recomputes the nonce and re-verifies the stored attestation, and embeds `"local"` when it does not verify. A companion phone's attestation is credited only when its binding names the issuing profile's own learner DID.
 
-The `integrityPolicy` bounds — `minIntegrity`, `maxCritical`, `maxWarning`, `requireClean`, `requiredAssuranceLevel`, `minCameraCoverage` — are each optional. `minCameraCoverage` (0–1) is the fraction of the bound session's stored snapshots with the camera opted in; a session with no snapshots never satisfies it. If **any** set bound is violated, issuance MUST be refused (no credential is minted); the issuer returns the first violated bound. A policy without a bound session is a request error. A bound session without a policy embeds the attestation but gates on nothing.
+The `integrityPolicy` bounds are each optional:
+
+| Bound | Refuses issuance when |
+|---|---|
+| `minIntegrity` | The composite score is below it, or absent |
+| `maxCritical`, `maxWarning` | A flag count exceeds it |
+| `requireClean` | The status is not `completed` |
+| `requiredAssuranceLevel` | `assuranceLevel` differs |
+| `minTrustProfile` | The session's profile does not include every signal set the floor names (`camera` does not meet an `attested` floor). A camera counts only when at least 90% of committed windows had camera checks, and the attestation only when it verifies at issuance. The floor is also judged when the attempt starts, and issuance refuses unless the two judgements agree |
+| `minVerificationRung` | The session's rung is below it |
+| `probePolicy` | A policy other than `none` did not run, or a probe failed. A skipped probe is accepted; require a satisfied one with `minVerificationRung: probed` |
+
+`probeConnectionId` names the model connection that writes generated probes under the `llm` policy; it is not judged at issuance. The camera coverage bound of earlier revisions (`minCameraCoverage`) is removed: coverage is now a property of the `camera` and `full` profiles. If **any** set bound is violated, issuance MUST be refused (no credential is minted); the issuer returns the first violated bound. A policy without a bound session is a request error. A bound session without a policy embeds the attestation but gates on nothing.
 
 This makes a "trusted" credential one that was only minted when the assessment behind it satisfied the sponsor's integrity rules, with the evidence travelling inside the signed credential for any verifier to check.
 

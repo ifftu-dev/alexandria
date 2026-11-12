@@ -3,7 +3,7 @@
 Status: live
 Updated: 2026-11-12
 
-How maintainers build the Sentinel measurement corpus, evaluate it and certify signals. A signal affects a session's outcome only once a reviewed certification admits it with a measured rate; until then it is advisory. Background: [sentinel-trust-profiles-spec.md](sentinel-trust-profiles-spec.md) (Measurement corpus and evaluation).
+How maintainers build the Sentinel measurement corpus, evaluate it and certify signals. A signal affects a session's outcome only once a reviewed certification admits it with a measured rate; until then it is advisory. Background: [sentinel-trust-profiles-spec.md](sentinel-trust-profiles-spec.md) (Measurement corpus and evaluation); how certified ratios feed the fusion and the coverage statements: [sentinel.md](sentinel.md) §Fusion and session outcome and §Measurement and certification. Retraining the bundled models is [sentinel-runbook.md](sentinel-runbook.md).
 
 ## Pieces
 

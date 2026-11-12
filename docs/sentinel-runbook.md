@@ -1,12 +1,14 @@
 # Sentinel Model Runbook
 
 Status: live
-Updated: 2026-10-10
+Updated: 2026-11-12
 
 > Operational playbook for the bundled Sentinel paste classifier.
 > Audience: maintainers who retrain or roll back the model.
 > Companion docs: [sentinel.md](sentinel.md),
-> [sentinel-federation.md](sentinel-federation.md).
+> [sentinel-federation.md](sentinel-federation.md). Measuring and
+> certifying signals for the trust profiles is a separate playbook:
+> [sentinel-corpus-runbook.md](sentinel-corpus-runbook.md).
 >
 > **Backend architecture note.** All ML inference and training runs in
 > the Rust backend (`tract` for ONNX inference, `candle` for per-user
@@ -34,6 +36,7 @@ Updated: 2026-10-10
 | Check what a client runs | Tauri app or IPC | `sentinel_paste_classifier_info` |
 | Re-export the liveness model | `scripts/sentinel/` | `python export-minifasnet.py <Silent-Face-Anti-Spoofing checkout> <out.onnx>` (see Procedure 4) |
 | Enable device attestation | Apple developer portal, Play Console, `preprod.json` | See Procedure 5 |
+| Build a corpus, evaluate, certify signals | `crates/alexandria-studio/` | [sentinel-corpus-runbook.md](sentinel-corpus-runbook.md) |
 
 ---
 
@@ -167,6 +170,16 @@ The script prints the softmax for an all-zero and an all-128 input; paste both i
    ```
 
 5. `cargo test -p alexandria-node --lib -- network_profile` refuses a key that is not 32 bytes or not a P-256 public key. The keys let a client read verdicts, not forge them.
+
+**Desktop (companion phone).** macOS cannot attest itself (App Attest reports unsupported on every Mac), so a desktop reaches `device_attested` only with a companion phone. Once the phone side above works:
+
+1. Sign in as the same learner on the desktop and the phone, both online.
+2. Desktop: in the assessment runner tick **Pair my phone first**, then start. A one-time code appears (5-minute expiry).
+3. Phone: Sentinel dashboard → **Join from phone**, paste the code, join.
+4. Expect the Sentinel Dev panel's attestation row to read `device_attested (phone)` and the trust profile `attested`; after grading the credential carries `assuranceLevel: device_attested`. `integrity_sessions.attestation_json` holds a `companion` binding and, after an iOS phone signs the end, its assertion.
+5. Negative checks: a phone signed in as another learner is refused; an expired code is refused; skipping the pairing leaves the session `core` / `local`. Try the desktop and phone on different networks as well as one Wi-Fi.
+
+An Android phone without the response keys pairs but stays `local`. The phone does not yet act as the session's camera. Results go in ticket 16 of the trust-profiles spec.
 
 ## Threat-model checklist
 
