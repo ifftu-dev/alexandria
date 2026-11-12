@@ -770,6 +770,8 @@ export interface IntegritySession {
   ended_at: string | null
   /** `local`, or `device_attested` once a platform attestation verified. */
   assurance_level: string
+  /** Items whose first visit arrived with response-process timing. */
+  response_items: number
   /** The locked trust profile; null until one is chosen. */
   trust_profile: TrustProfile | null
 }
