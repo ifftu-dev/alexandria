@@ -386,26 +386,66 @@ fn checkpoint(
         return Err("duplicate submission member".into());
     }
     if inserted {
-        for member in members {
-            tx.execute(
-                "INSERT INTO chain_submission_members
-                 (network, member_kind, member_id, operation_kind, operation_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    NETWORK,
-                    member.kind,
-                    member.id,
-                    operation.kind,
-                    operation.id
-                ],
-            )
-            .map_err(|e| format!("submission member already reserved or invalid: {e}"))?;
-        }
+        insert_members(&tx, operation, members)?;
     } else {
         require_members(&tx, operation, &expected)?;
     }
     tx.commit().map_err(|e| e.to_string())?;
     Ok((inserted, original))
+}
+
+fn insert_members(
+    conn: &Connection,
+    operation: Operation<'_>,
+    members: &[Member<'_>],
+) -> Result<(), String> {
+    for member in members {
+        conn.execute(
+            "INSERT INTO chain_submission_members
+             (network, member_kind, member_id, operation_kind, operation_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                NETWORK,
+                member.kind,
+                member.id,
+                operation.kind,
+                operation.id
+            ],
+        )
+        .map_err(|e| format!("submission member already reserved or invalid: {e}"))?;
+    }
+    Ok(())
+}
+
+fn holds_members(conn: &Connection, operation: Operation<'_>) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM chain_submission_members WHERE network = ?1
+         AND operation_kind = ?2 AND operation_id = ?3)",
+        params![NETWORK, operation.kind, operation.id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Unbind the members of an expired operation, so another operation may take
+/// them, and finish its projection. The operation stays expired; a later
+/// [`replace_expired`] for it binds the members it names again.
+pub fn release_expired_members(
+    tx: &rusqlite::Transaction<'_>,
+    operation: Operation<'_>,
+) -> Result<(), String> {
+    let expired = lookup(tx, operation)?
+        .is_some_and(|submission| submission.status == SubmissionStatus::Expired);
+    if !expired {
+        return Err("only an expired operation can release its members".into());
+    }
+    tx.execute(
+        "DELETE FROM chain_submission_members
+         WHERE network = ?1 AND operation_kind = ?2 AND operation_id = ?3",
+        params![NETWORK, operation.kind, operation.id],
+    )
+    .map_err(|e| e.to_string())?;
+    mark_applied(tx, operation)
 }
 
 /// Refuse unless `operation` is bound to exactly `expected` (sorted) members.
@@ -604,10 +644,12 @@ pub fn history(
 
 /// Give an operation whose journaled transaction is
 /// [`SubmissionStatus::Expired`] a new transaction, the one exception to
-/// "never rebuilt". The recovery context and members must be the ones already
-/// bound. The expired bytes move to [`history`] and the new bytes are
-/// checkpointed in the same committed transaction before sending, as with a
-/// first submission. Anything else is refused without sending.
+/// "never rebuilt". The recovery context must be the one already bound, and
+/// so must the members, unless [`release_expired_members`] unbound them; then
+/// the members given are bound again. The expired bytes move to [`history`]
+/// and the new bytes are checkpointed in the same committed transaction
+/// before sending, as with a first submission. Anything else is refused
+/// without sending.
 pub(crate) async fn replace_expired<L: Ledger>(
     journal: &Journal,
     ledger: &L,
@@ -700,7 +742,16 @@ fn replace_checkpoint(
     }
     let mut expected: Vec<(&str, &str)> = members.iter().map(|m| (m.kind, m.id)).collect();
     expected.sort_unstable();
-    require_members(&tx, operation, &expected)?;
+    if holds_members(&tx, operation)? {
+        require_members(&tx, operation, &expected)?;
+    } else {
+        // Its members were released; bind the same ones again, unless another
+        // operation has taken one of them since.
+        if expected.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err("duplicate submission member".into());
+        }
+        insert_members(&tx, operation, members)?;
+    }
     if current.tx_hash == tx_hash {
         return Err("a replacement must be a new transaction".into());
     }

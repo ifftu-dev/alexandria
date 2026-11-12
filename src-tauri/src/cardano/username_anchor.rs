@@ -25,7 +25,9 @@ use crate::cardano::anchor_tx::AnchorBuildError;
 use crate::cardano::blockfrost::BlockfrostClient;
 use crate::cardano::ledger::{Ledger, PassTip};
 use crate::cardano::reservations::{select_unreserved, ReservedOutpoints};
-use crate::cardano::submission::{self, Journal, Member, Operation, Submission, SubmissionStatus};
+use crate::cardano::submission::{
+    self, Journal, Member, Operation, Submission, SubmissionStatus, SubmitError,
+};
 use crate::cardano::{anchor_tx, tx_builder};
 use crate::domain::username_claim::{CardanoAnchor, UsernameClaim};
 
@@ -321,6 +323,7 @@ async fn pass<L: Ledger>(
             submission::reserved_outpoints(database.conn(), tip)
         })
         .await?;
+    let batch_id = next.id;
     let tx = match build_batch_anchor_tx(&entries, w, ledger, tip, &reserved).await {
         Ok(tx) => tx,
         // A wait, not a failure: the claims stay pending for the next pass.
@@ -328,9 +331,13 @@ async fn pass<L: Ledger>(
             log::info!("username anchoring waits: {busy}");
             return Ok(());
         }
-        Err(error) => return Err(error.to_string()),
+        Err(error) => {
+            if next.replaces_expired {
+                abandon(journal, &batch_id).await?;
+            }
+            return Err(error.to_string());
+        }
     };
-    let batch_id = next.id;
     let members: Vec<Member<'_>> = next
         .context
         .claims
@@ -345,7 +352,7 @@ async fn pass<L: Ledger>(
         id: &batch_id,
     };
     let submitted = if next.replaces_expired {
-        submission::replace_expired(
+        match submission::replace_expired(
             journal,
             ledger,
             operation,
@@ -353,7 +360,15 @@ async fn pass<L: Ledger>(
             &next.context_json,
             &members,
         )
-        .await?
+        .await
+        {
+            Ok(submitted) => submitted,
+            Err(SubmitError::Failed(error)) => {
+                abandon(journal, &batch_id).await?;
+                return Err(error);
+            }
+            Err(error) => return Err(error.into()),
+        }
     } else {
         submission::submit_once_with_members(
             journal,
@@ -390,32 +405,34 @@ struct NextBatch {
     replaces_expired: bool,
 }
 
-/// An expired batch first: its claims are bound to that operation for good,
-/// so they go out again with exactly the same claims and operation id.
-/// Otherwise up to [`MAX_BATCH`] unanchored claims no batch holds yet.
+/// An expired batch that still holds its claims comes first: when every one
+/// of them is still worth anchoring, it goes out again with exactly the same
+/// claims and operation id. One holding a claim that went stale is abandoned
+/// instead, which frees its other claims. Otherwise up to [`MAX_BATCH`]
+/// unanchored claims no batch holds yet, under the operation id their claims
+/// give; that is an expired operation's own id when the claims are the same.
 fn next_batch(conn: &rusqlite::Connection) -> Result<Option<NextBatch>, String> {
-    let expired: Option<(String, String)> = conn
-        .query_row(
-            "SELECT operation_id, context_json FROM chain_submissions
-             WHERE network = 'cardano-preprod' AND operation_kind = ?1 AND status = 'expired'
-             ORDER BY updated_at, operation_id LIMIT 1",
-            [OPERATION_KIND],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()
-        .map_err(|e| e.to_string())?;
-    if let Some((id, context_json)) = expired {
+    while let Some((id, context_json)) = expired_batch_holding_claims(conn)? {
         let context: BatchContext =
             serde_json::from_str(&context_json).map_err(|e| e.to_string())?;
         if context.version != 1 {
             return Err("unsupported username batch recovery version".into());
         }
-        return Ok(Some(NextBatch {
-            id,
-            context,
-            context_json,
-            replaces_expired: true,
-        }));
+        // Never pay to anchor a claim that was released, replaced, or
+        // anchored elsewhere since the batch was built.
+        let mut still_pending = true;
+        for member in &context.claims {
+            still_pending &= claim_still_pending(conn, member)?;
+        }
+        if still_pending {
+            return Ok(Some(NextBatch {
+                id,
+                context,
+                context_json,
+                replaces_expired: true,
+            }));
+        }
+        abandon_batch(conn, &id)?;
     }
 
     // Collect unanchored claims (tier < 2).
@@ -448,12 +465,87 @@ fn next_batch(conn: &rusqlite::Connection) -> Result<Option<NextBatch>, String> 
             .collect(),
     };
     let context_json = serde_json::to_string(&context).map_err(|e| e.to_string())?;
+    let id = crate::crypto::hash::entity_id(&[OPERATION_KIND, &context_json]);
+    let replaces_expired = submission::lookup(
+        conn,
+        Operation {
+            kind: OPERATION_KIND,
+            id: &id,
+        },
+    )?
+    .is_some_and(|saved| saved.status == SubmissionStatus::Expired);
     Ok(Some(NextBatch {
-        id: crate::crypto::hash::entity_id(&[OPERATION_KIND, &context_json]),
+        id,
         context,
         context_json,
-        replaces_expired: false,
+        replaces_expired,
     }))
+}
+
+/// The oldest expired batch whose claims are still bound to it.
+fn expired_batch_holding_claims(
+    conn: &rusqlite::Connection,
+) -> Result<Option<(String, String)>, String> {
+    conn.query_row(
+        "SELECT s.operation_id, s.context_json FROM chain_submissions s
+         WHERE s.network = 'cardano-preprod' AND s.operation_kind = ?1 AND s.status = 'expired'
+           AND EXISTS (SELECT 1 FROM chain_submission_members m
+                       WHERE m.network = s.network AND m.operation_kind = s.operation_kind
+                         AND m.operation_id = s.operation_id)
+         ORDER BY s.updated_at, s.operation_id LIMIT 1",
+        [OPERATION_KIND],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Whether a batch member is still the cached claim for its username, still
+/// verifies, is not released, and is not anchored yet.
+fn claim_still_pending(conn: &rusqlite::Connection, member: &BatchMember) -> Result<bool, String> {
+    let json: Option<String> = conn
+        .query_row(
+            "SELECT claim_json FROM username_claims WHERE username = ?1 AND tier < 2",
+            [&member.username],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(json
+        .and_then(|json| serde_json::from_str::<UsernameClaim>(&json).ok())
+        .is_some_and(|claim| {
+            claim.username == member.username
+                && claim.sig == member.signature
+                && claim.verify().is_ok()
+                && claim.release.is_none()
+        }))
+}
+
+/// Give up an expired batch: it is not replaced under its current claims,
+/// and the claims it held join the next batch built from pending claims.
+fn abandon_batch(conn: &rusqlite::Connection, id: &str) -> Result<(), String> {
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    submission::release_expired_members(
+        &tx,
+        Operation {
+            kind: OPERATION_KIND,
+            id,
+        },
+    )?;
+    tx.commit().map_err(|e| e.to_string())
+}
+
+/// A replacement for an expired batch that fails must not hold back the
+/// claims that arrived since: abandon the batch, so its claims join them in
+/// the next batch.
+async fn abandon(journal: &Journal, id: &str) -> Result<(), String> {
+    let id = id.to_owned();
+    journal
+        .run("username_anchor.abandon", move |database| {
+            abandon_batch(database.conn(), &id)
+        })
+        .await
 }
 
 async fn recover_batches<L: Ledger>(
@@ -594,6 +686,7 @@ mod tests {
     use crate::cardano::fake_ledger::{ada, FakeLedger};
     use crate::cardano::test_chain::{self, FakeChain, TestProfile, SHORT_LIMITS};
     use crate::crypto::did::derive_did_key;
+    use crate::crypto::wallet::Wallet;
     use crate::db::Database;
     use ed25519_dalek::SigningKey;
 
@@ -916,6 +1009,169 @@ mod tests {
                 slot: bound + 30
             })
         );
+        assert_eq!(ledger.submissions().len(), 2);
+    }
+
+    /// Usernames a batch transaction anchors, sorted.
+    fn anchored_usernames(bytes: &[u8]) -> Vec<String> {
+        let tx = MultiEraTx::decode(bytes).unwrap();
+        let Some(Metadatum::Map(fields)) = tx.metadata().find(USERNAME_ANCHOR_LABEL).cloned()
+        else {
+            panic!("no username anchor metadata");
+        };
+        let claims = fields
+            .iter()
+            .find_map(|(key, value)| match (key, value) {
+                (Metadatum::Text(key), Metadatum::Array(claims)) if key == "c" => Some(claims),
+                _ => None,
+            })
+            .unwrap();
+        let mut names: Vec<String> = claims
+            .iter()
+            .filter_map(|entry| match entry {
+                Metadatum::Map(entry) => entry.iter().find_map(|(key, value)| match (key, value) {
+                    (Metadatum::Text(key), Metadatum::Text(name)) if key == "u" => {
+                        Some(name.clone())
+                    }
+                    _ => None,
+                }),
+                _ => None,
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// Submit a batch for the cached claims, then let it never land and the
+    /// tip pass its window, so the next pass finds it expired.
+    async fn expire_first_batch(journal: &Journal, ledger: &FakeLedger, wallet: &Wallet) {
+        use crate::cardano::tx_builder::TTL_OFFSET;
+        tick(journal, Some(ledger), Some(wallet)).await.unwrap();
+        let (dead, _) = ledger.submissions()[0].clone();
+        ledger.drop_tx(&dead);
+        ledger.set_tip(TIP + TTL_OFFSET + submission::EXPIRY_MARGIN_SLOTS + 1);
+    }
+
+    #[tokio::test]
+    async fn an_expired_batch_holding_a_stale_claim_is_abandoned_for_a_fresh_batch() {
+        let profile = TestProfile::migrated();
+        let kept = claim(1, "ada_99");
+        let stale = claim(2, "bob_22");
+        profile.with_conn(|conn| {
+            cache(conn, &kept);
+            cache(conn, &stale);
+        });
+        let wallet = test_chain::wallet();
+        let ledger = FakeLedger::at_tip(TIP);
+        ledger.set_utxos(&wallet.payment_address, vec![ada(0x11, 0, 20_000_000)]);
+        let journal = profile.background();
+        expire_first_batch(&journal, &ledger, &wallet).await;
+
+        // Before the rebuild, one claim is released and a new one arrives.
+        let mut released = stale.clone();
+        released.release(200, &SigningKey::from_bytes(&[2; 32]));
+        let arrived = claim(3, "carl_33");
+        profile.with_conn(|conn| {
+            cache(conn, &released);
+            cache(conn, &arrived);
+        });
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+
+        // Nobody pays to anchor the released claim; the claim still valid
+        // goes out with the new one under a fresh operation.
+        let submissions = ledger.submissions();
+        assert_eq!(submissions.len(), 2);
+        assert_eq!(
+            anchored_usernames(&submissions[1].1),
+            vec!["ada_99".to_string(), "carl_33".to_string()]
+        );
+        let journaled = batches(&profile);
+        assert_eq!(journaled.len(), 2);
+        assert_eq!(journaled[0].1.status, SubmissionStatus::Expired);
+        assert_eq!(
+            (journaled[1].1.tx_hash.as_str(), journaled[1].1.status),
+            (submissions[1].0.as_str(), SubmissionStatus::Submitted)
+        );
+        let history = profile.with_conn(|conn| {
+            submission::history(
+                conn,
+                Operation {
+                    kind: OPERATION_KIND,
+                    id: &journaled[0].0,
+                },
+            )
+            .unwrap()
+        });
+        assert!(history.is_empty(), "the expired batch was never replaced");
+    }
+
+    #[tokio::test]
+    async fn a_failed_rebuild_of_an_expired_batch_does_not_hold_back_new_claims() {
+        let profile = TestProfile::migrated();
+        profile.with_conn(|conn| cache(conn, &claim(1, "ada_99")));
+        let wallet = test_chain::wallet();
+        let ledger = FakeLedger::at_tip(TIP);
+        ledger.set_utxos(&wallet.payment_address, vec![ada(0x11, 0, 20_000_000)]);
+        let journal = profile.background();
+        expire_first_batch(&journal, &ledger, &wallet).await;
+
+        // The rebuild cannot be paid for.
+        ledger.set_utxos(&wallet.payment_address, vec![]);
+        assert!(tick(&journal, Some(&ledger), Some(&wallet)).await.is_err());
+        assert_eq!(ledger.submissions().len(), 1);
+
+        // A new claim arrives and the wallet is funded: one batch carries both.
+        profile.with_conn(|conn| cache(conn, &claim(3, "carl_33")));
+        ledger.set_utxos(&wallet.payment_address, vec![ada(0x33, 0, 20_000_000)]);
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+        let submissions = ledger.submissions();
+        assert_eq!(submissions.len(), 2);
+        assert_eq!(
+            anchored_usernames(&submissions[1].1),
+            vec!["ada_99".to_string(), "carl_33".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_abandoned_batch_rebuilt_with_the_same_claims_replaces_its_entry() {
+        let profile = TestProfile::migrated();
+        profile.with_conn(|conn| cache(conn, &claim(1, "ada_99")));
+        let wallet = test_chain::wallet();
+        let ledger = FakeLedger::at_tip(TIP);
+        ledger.set_utxos(&wallet.payment_address, vec![ada(0x11, 0, 20_000_000)]);
+        let journal = profile.background();
+        expire_first_batch(&journal, &ledger, &wallet).await;
+        let (dead, _) = ledger.submissions()[0].clone();
+        ledger.set_utxos(&wallet.payment_address, vec![]);
+        assert!(tick(&journal, Some(&ledger), Some(&wallet)).await.is_err());
+
+        // Nothing new arrived: the same claims rebuild the same operation.
+        ledger.set_utxos(&wallet.payment_address, vec![ada(0x33, 0, 20_000_000)]);
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+        let submissions = ledger.submissions();
+        assert_eq!(submissions.len(), 2);
+        let journaled = batches(&profile);
+        assert_eq!(journaled.len(), 1);
+        let (batch_id, saved) = &journaled[0];
+        assert_eq!(
+            (saved.tx_hash.as_str(), saved.status),
+            (submissions[1].0.as_str(), SubmissionStatus::Submitted)
+        );
+        let history = profile.with_conn(|conn| {
+            submission::history(
+                conn,
+                Operation {
+                    kind: OPERATION_KIND,
+                    id: batch_id,
+                },
+            )
+            .unwrap()
+        });
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].tx_hash, dead);
+
+        // Its claim is bound to it again: no second batch takes it.
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
         assert_eq!(ledger.submissions().len(), 2);
     }
 
