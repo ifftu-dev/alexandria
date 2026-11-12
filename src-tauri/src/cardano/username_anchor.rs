@@ -184,20 +184,51 @@ pub async fn verify_anchor<L: Ledger>(
     ))
 }
 
+/// A username pass that stopped on an error, with the claims it anchored
+/// before stopping. Those are already committed, so the caller republishes
+/// them all the same.
+#[derive(Debug)]
+pub(crate) struct UsernamePassError {
+    pub anchored: Vec<UsernameClaim>,
+    pub error: String,
+}
+
+impl std::fmt::Display for UsernamePassError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.error)
+    }
+}
+
 /// Batch-anchor every unanchored claim in the local cache. Returns the
-/// number of claims anchored. The enriched claims republish to the DHT
-/// through the caller (claims are keyed per-username there).
+/// claims anchored this pass, also when a later step fails. The enriched
+/// claims republish to the DHT through the caller (claims are keyed
+/// per-username there).
 pub(crate) async fn tick<L: Ledger>(
     journal: &Journal,
     ledger: Option<&L>,
     wallet: Option<&crate::crypto::wallet::Wallet>,
-) -> Result<Vec<UsernameClaim>, String> {
+) -> Result<Vec<UsernameClaim>, UsernamePassError> {
     let Some(ledger) = ledger else {
         return Ok(Vec::new());
     };
+    let mut anchored = Vec::new();
+    match pass(journal, ledger, wallet, &mut anchored).await {
+        Ok(()) => Ok(anchored),
+        Err(error) => Err(UsernamePassError { anchored, error }),
+    }
+}
+
+/// One pass of [`tick`]. Every claim it anchors goes into `anchored` as soon
+/// as its projection commits.
+async fn pass<L: Ledger>(
+    journal: &Journal,
+    ledger: &L,
+    wallet: Option<&crate::crypto::wallet::Wallet>,
+    anchored: &mut Vec<UsernameClaim>,
+) -> Result<(), String> {
     // Recovery and the next build share one tip request.
     let tip = PassTip::new(ledger);
-    let mut anchored = recover_batches(journal, ledger, &tip).await?;
+    recover_batches(journal, ledger, &tip, anchored).await?;
 
     // Verification pass: claims anchored by OTHER nodes arrive via the
     // DHT with anchor_verified = 0. Confirm their digests on-chain so
@@ -259,7 +290,7 @@ pub(crate) async fn tick<L: Ledger>(
     }
 
     let Some(w) = wallet else {
-        return Ok(anchored);
+        return Ok(());
     };
 
     let Some(next) = journal
@@ -268,7 +299,7 @@ pub(crate) async fn tick<L: Ledger>(
         })
         .await?
     else {
-        return Ok(anchored);
+        return Ok(());
     };
     let entries: Vec<(String, String)> = next
         .context
@@ -295,7 +326,7 @@ pub(crate) async fn tick<L: Ledger>(
         // A wait, not a failure: the claims stay pending for the next pass.
         Err(busy @ AnchorBuildError::WalletBusy(_)) => {
             log::info!("username anchoring waits: {busy}");
-            return Ok(anchored);
+            return Ok(());
         }
         Err(error) => return Err(error.to_string()),
     };
@@ -347,7 +378,7 @@ pub(crate) async fn tick<L: Ledger>(
             })
             .await?,
     );
-    Ok(anchored)
+    Ok(())
 }
 
 /// The claims the next batch carries, under their operation id.
@@ -429,14 +460,15 @@ async fn recover_batches<L: Ledger>(
     journal: &Journal,
     ledger: &L,
     tip: &PassTip<'_, L>,
-) -> Result<Vec<UsernameClaim>, String> {
+    anchored: &mut Vec<UsernameClaim>,
+) -> Result<(), String> {
     let ids = journal
         .run("username_anchor.scan", |database| {
             submission::unapplied_operations(database.conn(), OPERATION_KIND, 10)
         })
         .await?;
     if ids.is_empty() {
-        return Ok(Vec::new());
+        return Ok(());
     }
     // Expiry needs a known tip; without one, reconciliation never expires.
     let tip = match tip.get().await {
@@ -446,7 +478,6 @@ async fn recover_batches<L: Ledger>(
             None
         }
     };
-    let mut anchored = Vec::new();
     for id in ids {
         let operation = Operation {
             kind: OPERATION_KIND,
@@ -471,7 +502,7 @@ async fn recover_batches<L: Ledger>(
             Err(error) => log::debug!("username batch reconciliation pending: {error}"),
         }
     }
-    Ok(anchored)
+    Ok(())
 }
 
 fn project_batch(
@@ -886,6 +917,38 @@ mod tests {
             })
         );
         assert_eq!(ledger.submissions().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn claims_anchored_before_a_later_error_still_reach_the_caller() {
+        let profile = TestProfile::migrated();
+        let first = claim(1, "ada_99");
+        profile.with_conn(|conn| cache(conn, &first));
+        let wallet = test_chain::wallet();
+        let ledger = FakeLedger::at_tip(TIP);
+        ledger.set_utxos(&wallet.payment_address, vec![ada(0x11, 0, 20_000_000)]);
+        let journal = profile.background();
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+        let (landed, _) = ledger.submissions()[0].clone();
+
+        // The first batch lands; the next one cannot be paid for.
+        ledger.include(&landed, TIP + 20);
+        profile.with_conn(|conn| cache(conn, &claim(2, "bob_22")));
+        ledger.set_utxos(&wallet.payment_address, vec![]);
+        let stopped = tick(&journal, Some(&ledger), Some(&wallet))
+            .await
+            .unwrap_err();
+
+        assert!(stopped.error.contains("no UTxOs"), "{}", stopped.error);
+        assert_eq!(stopped.anchored.len(), 1, "republished despite the error");
+        assert_eq!(stopped.anchored[0].username, first.username);
+        assert_eq!(
+            stopped.anchored[0].anchor,
+            Some(CardanoAnchor {
+                tx_hash: landed,
+                slot: TIP + 20
+            })
+        );
     }
 
     #[tokio::test]

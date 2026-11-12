@@ -1021,36 +1021,38 @@ pub fn run() {
                                 // Username claim batch anchoring (registry phase 3):
                                 // one metadata tx (label 1698) anchors up to 80
                                 // unanchored claims. Silent no-op without chain creds.
-                                match cardano::username_anchor::tick(
+                                // Claims anchored before a later error in the
+                                // pass are committed and republish all the same.
+                                let anchored = match cardano::username_anchor::tick(
                                     &chain_journal,
                                     bf.as_ref(),
                                     wallet.as_ref(),
                                 )
                                 .await
                                 {
-                                    Ok(anchored) if !anchored.is_empty() => {
-                                        log::info!(
-                                            "username anchors: {} claims anchored",
-                                            anchored.len()
-                                        );
-                                        // Republish enriched (tier 2) claims to the DHT.
-                                        let node_guard = node_for_sync.lock().await;
-                                        if let Some(node) = node_guard.as_ref() {
-                                            for claim in anchored {
-                                                if let Ok(payload) = serde_json::to_vec(&claim) {
-                                                    let key =
-                                                        crate::domain::username_claim::dht_key(
-                                                            &claim.username,
-                                                        );
-                                                    let _ = node.put_dht_record(key, payload).await;
-                                                }
+                                    Ok(anchored) => anchored,
+                                    Err(stopped) => {
+                                        log::debug!("username anchors: {stopped}");
+                                        stopped.anchored
+                                    }
+                                };
+                                if !anchored.is_empty() {
+                                    log::info!(
+                                        "username anchors: {} claims anchored",
+                                        anchored.len()
+                                    );
+                                    // Republish enriched (tier 2) claims to the DHT.
+                                    let node_guard = node_for_sync.lock().await;
+                                    if let Some(node) = node_guard.as_ref() {
+                                        for claim in anchored {
+                                            if let Ok(payload) = serde_json::to_vec(&claim) {
+                                                let key = crate::domain::username_claim::dht_key(
+                                                    &claim.username,
+                                                );
+                                                let _ = node.put_dht_record(key, payload).await;
                                             }
                                         }
                                     }
-                                    Err(e) => {
-                                        log::debug!("username anchors: {e}");
-                                    }
-                                    _ => {}
                                 }
 
                                 // One issuer for the passes below that sign.
