@@ -223,11 +223,13 @@ pub async fn integrity_select_profile(
 ) -> Result<crate::sentinel::trust_profile::SelectedProfile, String> {
     use crate::sentinel::trust_profile::select_for_session;
     // When a paired phone is the camera, its benchmark is the one that
-    // matters; the desktop's own camera is not used.
+    // matters; the desktop's own camera is not used. Without companion
+    // consent the phone is dropped from the session here, before anything
+    // it reported is read.
     let phone = state
         .content_node
         .companion()
-        .role(&session_id)
+        .consented_role(&session_id, request.consent.companion_phone)
         .filter(|role| role.camera);
     let benchmark = if let Some(role) = phone {
         role.benchmark.filter(|_| request.needs_benchmark())

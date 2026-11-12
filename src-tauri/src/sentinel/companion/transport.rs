@@ -229,6 +229,17 @@ impl CompanionHub {
         })
     }
 
+    /// The paired phone's role once the learner answered companion consent
+    /// at profile selection. Declined, the phone is dropped from the session
+    /// (offer withdrawn, link closed), so neither its benchmark nor its
+    /// camera windows reach selection or any snapshot.
+    pub fn consented_role(&self, session_id: &str, consented: bool) -> Option<CompanionRole> {
+        if !consented {
+            self.close(session_id);
+        }
+        self.role(session_id)
+    }
+
     /// The camera scores the phone sent since the last call, merged.
     pub fn take_camera_window(&self, session_id: &str) -> Option<CameraFeatures> {
         self.lock()
@@ -777,6 +788,37 @@ mod tests {
         });
         p.join(None).await.unwrap();
         assert!(seen.await.unwrap().is_some_and(|role| role.camera));
+    }
+
+    #[tokio::test]
+    async fn declining_companion_consent_drops_the_phone_so_it_supplies_nothing() {
+        let p = pair(true).await;
+        let _stored = p.store_with(Ok(()));
+        let benchmark = BenchmarkResult {
+            detect_ms: 9.0,
+            liveness_ms: 7.0,
+            track_ms: 0.1,
+        };
+        p.join(Some(benchmark)).await.unwrap();
+        p.phone.send_camera(window(3, Some(0.9))).await.unwrap();
+        // The learner declines: no benchmark and no camera window from the
+        // phone reach selection or any snapshot.
+        assert_eq!(p.desktop.consented_role(SESSION, false), None);
+        assert_eq!(p.desktop.role(SESSION), None);
+        assert!(p.desktop.take_camera_window(SESSION).is_none());
+        assert!(p.phone.send_camera(window(1, None)).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn consenting_keeps_the_phone_as_the_sessions_camera() {
+        let p = pair(true).await;
+        let _stored = p.store_with(Ok(()));
+        p.join(None).await.unwrap();
+        assert!(p
+            .desktop
+            .consented_role(SESSION, true)
+            .is_some_and(|role| role.camera));
+        assert!(p.desktop.role(SESSION).is_some());
     }
 
     #[tokio::test]

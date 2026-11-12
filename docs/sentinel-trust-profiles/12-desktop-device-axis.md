@@ -30,3 +30,4 @@ Spec: Implementation Decisions → Device axis.
 - Phone UI: Sentinel dashboard → Join from phone (phones only) takes a pasted code; the desktop shows the code in the assessment runner when "Pair my phone first" is ticked. There is no QR code.
 - The transport tests were written after the transport code, not before it.
 - Review fix: the desktop read the phone's role (camera, benchmark) right after answering the join, while the transport inserted the phone link only once it received that answer, so the read could miss the link. `Joined::answer` now puts the link in place before it replies; a desktop that answers too late leaves no link.
+- Review fix: declining companion consent cleared the stored attestation but left the phone link up, so the phone's benchmark still fed selection and its camera windows still replaced the desktop's. Selection now drops the link first (`CompanionHub::consented_role`).

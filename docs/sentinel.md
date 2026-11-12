@@ -273,7 +273,7 @@ At session start the backend, not the client, picks the profile. The client call
 
 The selection record (profile, inputs, exclusions, signals not run, benchmark result and both budgets) is stored on `integrity_sessions.profile_selection_json` and folded into the commitment chain as its first link, before any snapshot. Selection is refused once the profile is locked or once anything is committed.
 
-Consent is per capability (camera, microphone, companion phone) and recorded on the session (`consent_camera`, `consent_microphone`, `consent_companion_phone`). A profile that needs an unconsented capability is not selectable, and a companion pairing made without companion consent is dropped at selection. The microphone is used only by [voice checks](#candidate-integrity-check); no profile requires it.
+Consent is per capability (camera, microphone, companion phone) and recorded on the session (`consent_camera`, `consent_microphone`, `consent_companion_phone`). A profile that needs an unconsented capability is not selectable, and a companion pairing made without companion consent is dropped at selection: its attestation is cleared and the phone link is closed, so the phone's benchmark and camera windows are not used either. The microphone is used only by [voice checks](#candidate-integrity-check); no profile requires it.
 
 ### Lock and degradation
 
