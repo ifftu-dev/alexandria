@@ -35,8 +35,8 @@ fn checkpoint(db: &Database, context: &CompletionContext, status: SubmissionStat
     db.conn()
         .execute(
             "INSERT INTO chain_submissions (network, operation_kind, operation_id,
-         tx_hash, signed_cbor, context_json, status, confirmed_slot)
-         VALUES ('cardano-preprod', ?1, ?2, ?3, X'00', ?4, ?5, ?6)",
+         tx_hash, signed_cbor, invalid_from_slot, context_json, status, confirmed_slot)
+         VALUES ('cardano-preprod', ?1, ?2, ?3, X'00', 0, ?4, ?5, ?6)",
             rusqlite::params![
                 KIND,
                 context.operation_id(),

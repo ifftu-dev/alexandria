@@ -10,7 +10,7 @@ Status: live
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
 **Schema**: 33 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 134 tables, 131 indexes, 1 view, 6 triggers.
+**Objects**: 134 tables, 132 indexes, 1 view, 6 triggers.
 
 ---
 
@@ -734,6 +734,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `operation_id` TEXT PK
 - `tx_hash` TEXT NOT NULL
 - `signed_cbor` BLOB NOT NULL
+- `invalid_from_slot` INTEGER NOT NULL
 - `context_json` TEXT NOT NULL
 - `status` TEXT NOT NULL default `'outcome_unknown'`
 - `confirmed_slot` INTEGER

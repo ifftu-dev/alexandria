@@ -55,8 +55,8 @@ fn checkpoint(conn: &Connection, context: &CompletionContext, status: Submission
     )
     .then_some(42);
     conn.execute(
-        "INSERT INTO chain_submissions (network, operation_kind, operation_id, tx_hash, signed_cbor, context_json, status, confirmed_slot)
-         VALUES ('cardano-preprod', ?1, ?2, ?3, X'00', ?4, ?5, ?6)",
+        "INSERT INTO chain_submissions (network, operation_kind, operation_id, tx_hash, signed_cbor, invalid_from_slot, context_json, status, confirmed_slot)
+         VALUES ('cardano-preprod', ?1, ?2, ?3, X'00', 0, ?4, ?5, ?6)",
         params![KIND, context.operation_id(), "a".repeat(64), serde_json::to_string(context).unwrap(),
             serde_json::to_value(status).unwrap().as_str().unwrap(), slot],
     ).unwrap();

@@ -197,7 +197,8 @@ fn the_view_set_is_exact() {
 /// Subject-field atlas slots add 1 unique index. Batched credential anchors
 /// add 3 tables (batches, receipts, observations) and, net of the rebuilt
 /// anchor queue, 2 indexes. Submission history for replaced expired
-/// transactions adds 1 table and 1 index.
+/// transactions adds 1 table and 1 index; the journal's validity-bound window
+/// adds 1 index.
 #[test]
 fn the_schema_object_counts_are_pinned() {
     let db = migrated();
@@ -206,7 +207,7 @@ fn the_schema_object_counts_are_pinned() {
         .filter(|t| t != "_migrations" && t != "_schema_identity")
         .count();
     assert_eq!(tables, 139, "table count changed");
-    assert_eq!(names(db.conn(), "index").len(), 131, "index count changed");
+    assert_eq!(names(db.conn(), "index").len(), 132, "index count changed");
     assert_eq!(
         names(db.conn(), "trigger").len(),
         6,

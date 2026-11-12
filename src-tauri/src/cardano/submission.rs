@@ -357,13 +357,14 @@ fn checkpoint(
     if synchronous < 2 {
         return Err("submission checkpoint requires SQLite synchronous FULL or stronger".into());
     }
+    let bound = stored_bound(signed_cbor)?;
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
     let inserted = tx
         .execute(
             "INSERT INTO chain_submissions
-             (network, operation_kind, operation_id, tx_hash, signed_cbor, context_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             (network, operation_kind, operation_id, tx_hash, signed_cbor, invalid_from_slot, context_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(network, operation_kind, operation_id) DO NOTHING",
             params![
                 NETWORK,
@@ -371,6 +372,7 @@ fn checkpoint(
                 operation.id,
                 tx_hash,
                 signed_cbor,
+                bound,
                 context_json
             ],
         )
@@ -765,11 +767,18 @@ fn replace_checkpoint(
     )
     .map_err(|e| e.to_string())?;
     tx.execute(
-        "UPDATE chain_submissions SET tx_hash = ?4, signed_cbor = ?5, status = 'outcome_unknown',
-             confirmed_slot = NULL, applied_at = NULL, last_error = NULL,
+        "UPDATE chain_submissions SET tx_hash = ?4, signed_cbor = ?5, invalid_from_slot = ?6,
+             status = 'outcome_unknown', confirmed_slot = NULL, applied_at = NULL, last_error = NULL,
              created_at = datetime('now'), updated_at = datetime('now')
          WHERE network = ?1 AND operation_kind = ?2 AND operation_id = ?3 AND status = 'expired'",
-        params![NETWORK, operation.kind, operation.id, tx_hash, signed_cbor],
+        params![
+            NETWORK,
+            operation.kind,
+            operation.id,
+            tx_hash,
+            signed_cbor,
+            stored_bound(signed_cbor)?
+        ],
     )
     .map_err(|e| e.to_string())?;
     let replaced = lookup(&tx, operation)?.ok_or("submission checkpoint missing")?;
@@ -782,28 +791,26 @@ fn replace_checkpoint(
 /// [`EXPIRY_MARGIN_SLOTS`] is at or after `tip`, whatever its status. Inside
 /// that window a transaction is on chain, so its inputs are spent, or may
 /// still land; after it, the provider's view of them is accurate either way.
-/// Decoded from the stored signed bytes; no network request.
+/// The window is read from the stored bound; only transactions inside it are
+/// decoded. No network request.
 pub fn reserved_outpoints(conn: &Connection, tip: u64) -> Result<ReservedOutpoints, String> {
+    let earliest_bound = i64::try_from(tip.saturating_sub(EXPIRY_MARGIN_SLOTS))
+        .map_err(|_| "tip exceeds storage range")?;
     let mut statement = conn
         .prepare(
-            "SELECT signed_cbor FROM chain_submissions WHERE network = ?1 AND status != 'expired'",
+            "SELECT signed_cbor FROM chain_submissions
+             WHERE network = ?1 AND invalid_from_slot >= ?2 AND status != 'expired'",
         )
         .map_err(|e| e.to_string())?;
     let rows = statement
-        .query_map(params![NETWORK], |row| row.get::<_, Vec<u8>>(0))
+        .query_map(params![NETWORK, earliest_bound], |row| {
+            row.get::<_, Vec<u8>>(0)
+        })
         .map_err(|e| e.to_string())?;
     let mut reserved = ReservedOutpoints::default();
     for bytes in rows {
         let bytes = bytes.map_err(|e| e.to_string())?;
         let tx = MultiEraTx::decode(&bytes).map_err(|e| format!("decode journaled tx: {e}"))?;
-        // Bytes journaled before bounds were required may still land at any
-        // time, so they reserve with no end.
-        if tx
-            .ttl()
-            .is_some_and(|ttl| ttl.saturating_add(EXPIRY_MARGIN_SLOTS) < tip)
-        {
-            continue;
-        }
         for input in tx.inputs().iter().chain(tx.collateral().iter()) {
             reserved.insert(Outpoint {
                 tx_hash: input.hash().to_string(),
@@ -821,9 +828,9 @@ fn expire_if_past_window(
     operation: Operation<'_>,
     tip: u64,
 ) -> Result<(), String> {
-    let bytes: Option<Vec<u8>> = conn
+    let bound: Option<i64> = conn
         .query_row(
-            "SELECT signed_cbor FROM chain_submissions
+            "SELECT invalid_from_slot FROM chain_submissions
              WHERE network = ?1 AND operation_kind = ?2 AND operation_id = ?3
                AND status IN ('outcome_unknown', 'submitted') AND confirmed_slot IS NULL",
             params![NETWORK, operation.kind, operation.id],
@@ -831,17 +838,11 @@ fn expire_if_past_window(
         )
         .optional()
         .map_err(|e| e.to_string())?;
-    let Some(bytes) = bytes else {
+    let Some(bound) = bound else {
         return Ok(());
     };
-    let Some(ttl) = MultiEraTx::decode(&bytes)
-        .map_err(|e| format!("decode journaled tx: {e}"))?
-        .ttl()
-    else {
-        // No bound: it may still land at any time.
-        return Ok(());
-    };
-    if tip <= ttl.saturating_add(EXPIRY_MARGIN_SLOTS) {
+    let bound = u64::try_from(bound).map_err(|_| "stored validity bound is negative")?;
+    if tip <= bound.saturating_add(EXPIRY_MARGIN_SLOTS) {
         return Ok(());
     }
     conn.execute(
@@ -862,6 +863,13 @@ fn validity_upper_bound(signed_cbor: &[u8]) -> Result<u64, String> {
         .map_err(|e| format!("decode signed transaction: {e}"))?
         .ttl()
         .ok_or_else(|| "transaction has no validity upper bound; refusing to journal it".into())
+}
+
+/// [`validity_upper_bound`] as the journal stores it, in
+/// `chain_submissions.invalid_from_slot`.
+fn stored_bound(signed_cbor: &[u8]) -> Result<i64, String> {
+    i64::try_from(validity_upper_bound(signed_cbor)?)
+        .map_err(|_| "validity upper bound exceeds storage range".into())
 }
 
 /// Reconcile the journaled identity at `tip`, read from the ledger before
@@ -1830,6 +1838,24 @@ mod tests {
         assert_eq!(reserved_at(&profile, TTL + 1_800), all);
         assert_eq!(reserved_at(&profile, TTL + 1_801), vec![outpoint(7, 2)]);
         assert_eq!(reserved_at(&profile, later + 1_801), Vec::new());
+    }
+
+    #[tokio::test]
+    async fn reservations_decode_only_transactions_inside_their_window() {
+        let profile = TestProfile::migrated();
+        journal_spending(&profile.background(), "live", TTL, &[(1, 0)], &[], true).await;
+        // A long-settled row whose bytes no longer decode: outside the
+        // window, it is never read.
+        profile.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO chain_submissions (network, operation_kind, operation_id, tx_hash,
+                     signed_cbor, invalid_from_slot, context_json, status)
+                 VALUES ('cardano-preprod', 'test', 'settled', ?1, X'00', 10, '{}', 'confirmed')",
+                ["e".repeat(64)],
+            )
+            .unwrap()
+        });
+        assert_eq!(reserved_at(&profile, TTL), vec![outpoint(1, 0)]);
     }
 
     #[tokio::test]

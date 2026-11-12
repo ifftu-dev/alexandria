@@ -1310,8 +1310,8 @@ mod tests {
         };
         conn.execute(
             "INSERT INTO chain_submissions
-             (network, operation_kind, operation_id, tx_hash, signed_cbor, context_json, status, confirmed_slot)
-             VALUES ('cardano-preprod', ?1, 'batch', ?2, X'00', ?3, ?4, ?5)",
+             (network, operation_kind, operation_id, tx_hash, signed_cbor, invalid_from_slot, context_json, status, confirmed_slot)
+             VALUES ('cardano-preprod', ?1, 'batch', ?2, X'00', 0, ?3, ?4, ?5)",
             rusqlite::params![OPERATION_KIND, "a".repeat(64), serde_json::to_string(&context).unwrap(), status,
                 matches!(status, "confirmed" | "failed_on_chain").then_some(42)],
         ).unwrap();

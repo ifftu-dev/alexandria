@@ -366,6 +366,10 @@ CREATE TABLE chain_submissions (
     operation_id TEXT NOT NULL CHECK (length(operation_id) > 0),
     tx_hash TEXT NOT NULL CHECK (length(tx_hash) = 64),
     signed_cbor BLOB NOT NULL CHECK (length(signed_cbor) > 0),
+    -- The transaction's validity upper bound, from its signed bytes: the
+    -- first slot it can no longer be included. Reservations and expiry
+    -- read it here instead of decoding every row.
+    invalid_from_slot INTEGER NOT NULL CHECK (invalid_from_slot >= 0),
     context_json TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'outcome_unknown' CHECK (status IN ('outcome_unknown', 'submitted', 'confirmed', 'failed_on_chain', 'expired')),
     confirmed_slot INTEGER CHECK (confirmed_slot >= 0),
@@ -1391,6 +1395,7 @@ CREATE INDEX idx_catalog_kind ON catalog(kind);
 CREATE INDEX idx_chain_submission_history_operation ON chain_submission_history(network, operation_kind, operation_id);
 CREATE INDEX idx_chain_submissions_recovery ON chain_submissions(network, operation_kind, applied_at, updated_at);
 CREATE INDEX idx_chain_submissions_status ON chain_submissions(network, status);
+CREATE INDEX idx_chain_submissions_window ON chain_submissions(network, invalid_from_slot);
 CREATE INDEX idx_channels_classroom ON classroom_channels(classroom_id, position);
 CREATE INDEX idx_classrooms_owner ON classrooms(owner_address);
 CREATE INDEX idx_classrooms_status ON classrooms(status);
