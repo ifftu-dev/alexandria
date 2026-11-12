@@ -13,6 +13,7 @@
 use std::fmt;
 use std::future::Future;
 
+use pallas_traverse::MultiEraTx;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -428,6 +429,7 @@ where
     // locally and never accepted on the authority of an HTTP response.
     let tx_hash =
         tx_builder::compute_tx_hash(signed_cbor).map_err(|e| SubmitError::Failed(e.to_string()))?;
+    validity_upper_bound(signed_cbor).map_err(SubmitError::Failed)?;
     serde_json::from_str::<serde_json::Value>(context_json)
         .map_err(|e| SubmitError::Failed(e.to_string()))?;
     let owned = OwnedOperation::new(operation);
@@ -514,6 +516,16 @@ where
             ..original
         }
     }))
+}
+
+/// The slot from which `signed_cbor` can no longer be included. Every
+/// journaled transaction must have one, so each reservation ends and each
+/// transaction can expire.
+fn validity_upper_bound(signed_cbor: &[u8]) -> Result<u64, String> {
+    MultiEraTx::decode(signed_cbor)
+        .map_err(|e| format!("decode signed transaction: {e}"))?
+        .ttl()
+        .ok_or_else(|| "transaction has no validity upper bound; refusing to journal it".into())
 }
 
 /// Reconcile only the journaled identity. Not found, unavailable, or timed out
@@ -619,13 +631,37 @@ mod tests {
     };
     const CONTEXT: &str = r#"{"version":1}"#;
 
+    /// Validity upper bound of the transactions these tests sign.
+    const TTL: u64 = 10_000;
+
     fn signed_transaction(fee: u64) -> Vec<u8> {
-        let built = StagingTransaction::new()
-            .input(Input::new(Hash::from([0x42; 32]), 0))
+        transaction(fee, Some(TTL), &[(0x42, 0)], &[])
+    }
+
+    /// Signed bytes spending `inputs` and pledging `collateral`, each given as
+    /// `(tx hash byte, output index)`.
+    fn transaction(
+        fee: u64,
+        ttl: Option<u64>,
+        inputs: &[(u8, u64)],
+        collateral: &[(u8, u64)],
+    ) -> Vec<u8> {
+        let mut staging = StagingTransaction::new()
             .output(Output::new(Address::from_bech32(
                 "addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp"
             ).unwrap(), 2_000_000))
-            .fee(fee).network_id(0).build_conway_raw().unwrap();
+            .fee(fee)
+            .network_id(0);
+        for (byte, index) in inputs {
+            staging = staging.input(Input::new(Hash::from([*byte; 32]), *index));
+        }
+        for (byte, index) in collateral {
+            staging = staging.collateral_input(Input::new(Hash::from([*byte; 32]), *index));
+        }
+        if let Some(ttl) = ttl {
+            staging = staging.invalid_from_slot(ttl);
+        }
+        let built = staging.build_conway_raw().unwrap();
         tx_builder::sign_raw_tx(
             &built.tx_bytes.0,
             &PrivateKey::Normal(SecretKey::from([7; 32])),
@@ -1325,5 +1361,19 @@ mod tests {
                 format!("GET /txs/{expected}")
             ]
         );
+    }
+    #[tokio::test]
+    async fn transaction_without_validity_upper_bound_is_never_journaled() {
+        let profile = TestProfile::migrated();
+        let journal = profile.background();
+        let unbounded = transaction(200_000, None, &[(0x42, 0)], &[]);
+        let error = submit_with(&journal, OPERATION, &unbounded, CONTEXT, |_| async {
+            panic!("an unbounded transaction must not send")
+        })
+        .await
+        .unwrap_err();
+        assert!(!error.is_retryable());
+        assert!(error.to_string().contains("validity upper bound"), "{error}");
+        assert!(saved(&profile, OPERATION).is_none());
     }
 }
