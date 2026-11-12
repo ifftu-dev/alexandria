@@ -24,6 +24,8 @@ import { useSentinelView } from '@/composables/useSentinelView'
 import { useDiagnostics } from '@/composables/useDiagnostics'
 import { AppButton } from '@/components/ui'
 import AssessmentProbes from './AssessmentProbes.vue'
+import CompanionPhoneOffer from '@/components/integrity/CompanionPhoneOffer.vue'
+import { isMobilePlatform } from '@/composables/usePlatform'
 import type { AttemptRoleTarget, StartedAttempt, GradeResult, SkillDetail } from '@/types'
 
 const route = useRoute()
@@ -64,6 +66,8 @@ const exchangeStart = computed(() =>
 const roles = ref<AttemptRoleTarget[]>([])
 const choosing = ref(false)
 const selectedRoleId = ref('')
+/** Desktop: pair the learner's attested phone before the profile is chosen. */
+const pairPhone = ref(false)
 const selectedRole = computed(() =>
   roles.value.find(r => r.role_assessment_id === selectedRoleId.value) ?? null,
 )
@@ -116,7 +120,7 @@ async function begin(roleAssessmentId: string | null) {
     // Auto-activate Sentinel for the assessment (standalone, no enrollment).
     // A camera the learner already turned on is opted in from the start.
     // The role's policy floor guides the backend's trust profile choice.
-    await sentinel.start(null, cameraStream.value !== null, 'assessment', { roleAssessmentId })
+    await sentinel.start(null, cameraStream.value !== null, 'assessment', { roleAssessmentId, companionPhone: pairPhone.value })
     if (disposed) return
     const sessionId = sentinel.getSessionId()
     if (!sessionId || !sentinel.isActive.value) throw new Error('Assessment monitoring is not active')
@@ -312,6 +316,12 @@ async function submit() {
         </AppButton>
         <p v-if="cameraError" class="text-error">{{ cameraError }}</p>
       </div>
+
+      <label v-if="!isMobilePlatform" class="flex items-center gap-3 text-sm" data-testid="companion-toggle">
+        <input v-model="pairPhone" type="checkbox" />
+        <span class="text-foreground">{{ $t('sentinel.companion.pairToggle') }}</span>
+      </label>
+      <CompanionPhoneOffer />
 
       <p v-if="error" class="text-sm text-error">{{ error }}</p>
       <AppButton :disabled="startBlocked" data-testid="start-attempt" @click="begin(selectedRoleId || null)">

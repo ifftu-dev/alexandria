@@ -7,6 +7,7 @@ import { useSentinel } from '@/composables/useSentinel'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { getLoadedClassifierInfo } from '@/composables/useSentinel'
 import SentinelTrainingWizard from '@/components/integrity/SentinelTrainingWizard.vue'
+import { isMobilePlatform } from '@/composables/usePlatform'
 import type {
   IntegritySession,
   SentinelHoldoutRef,
@@ -449,6 +450,19 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
           <div v-else class="mt-3">
             <AppButton size="sm" variant="secondary" @click="router.push('/dashboard/sentinel/holdout-evaluate')">
               {{ $t('sentinel.holdout.run') }}
+            </AppButton>
+          </div>
+        </div>
+
+        <!-- Join a desktop session as its attested phone -->
+        <div v-if="isMobilePlatform" class="card p-5">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.companion.joinTitle') }}</h2>
+              <p class="mt-1 text-xs text-muted-foreground">{{ $t('sentinel.companion.cardDescription') }}</p>
+            </div>
+            <AppButton size="sm" variant="secondary" @click="router.push('/dashboard/sentinel/companion')">
+              {{ $t('sentinel.companion.join') }}
             </AppButton>
           </div>
         </div>

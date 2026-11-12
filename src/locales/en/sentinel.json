@@ -593,5 +593,23 @@
     "noticeLater": "Not now",
     "liveSpoof": "The camera check thinks it is seeing a photo or a screen, not a person. Face the camera in good light.",
     "liveSuspended": "Session suspended"
+  },
+  "companion": {
+    "pairToggle": "Pair my phone first, so this attempt can be device-attested",
+    "offerTitle": "Pair your phone",
+    "offerBody": "On your phone, open Alexandria signed in as you, go to Sentinel, choose Join from phone and paste this code. It works once and expires in five minutes.",
+    "copy": "Copy code",
+    "copied": "Copied",
+    "waiting": "Waiting for your phone…",
+    "skip": "Continue without the phone",
+    "failed": "Your phone could not pair: {reason}",
+    "joinTitle": "Join from phone",
+    "cardDescription": "Lend this phone's device attestation to an assessment you are taking on your desktop.",
+    "joinBody": "Paste the code your desktop shows. This phone attests that it is a genuine Alexandria app signed in as you; it accepts codes only for your own sessions.",
+    "joinPlaceholder": "Companion code",
+    "join": "Join",
+    "joined": "Paired with your desktop session. Keep Alexandria open on this phone until the attempt ends.",
+    "leave": "Leave",
+    "unsupported": "Only an iPhone or Android phone can be a companion."
   }
 }
