@@ -161,7 +161,7 @@ mod tests {
             )
         );
 
-        let assertion = crate::credentials::issue::build_integrity_assertion(
+        let (assertion, _) = crate::credentials::issue::build_integrity_assertion(
             db.conn(),
             SESSION,
             "2026-11-12T11:00:00Z",
@@ -169,6 +169,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(assertion.assurance_level, att::ASSURANCE_DEVICE_ATTESTED);
+        // The paired phone is the desktop's device axis in the assertion.
+        assert_eq!(assertion.trust_profile.as_deref(), Some("attested"));
+        assert!(assertion
+            .signals_run
+            .iter()
+            .any(|s| s == "device_attestation"));
+        assert!(!assertion
+            .signals_degraded
+            .iter()
+            .any(|s| s == "device_attestation"));
 
         // Pairing again once the profile is locked is refused.
         assert!(pairable_started_at(db.conn(), SESSION)
@@ -187,7 +197,7 @@ mod tests {
 
         // The unconsented pairing is dropped, so the credential cannot
         // claim it either.
-        let assertion = crate::credentials::issue::build_integrity_assertion(
+        let (assertion, _) = crate::credentials::issue::build_integrity_assertion(
             db.conn(),
             SESSION,
             "2026-11-12T11:00:00Z",
@@ -195,6 +205,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(assertion.assurance_level, att::ASSURANCE_LOCAL);
+        assert!(!assertion
+            .signals_run
+            .iter()
+            .any(|s| s == "device_attestation"));
     }
 
     #[test]
