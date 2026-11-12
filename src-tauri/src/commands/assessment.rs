@@ -40,6 +40,9 @@ pub struct ServedQuestion {
     /// unless exactly one option is selected, so the client must know which
     /// control to render.
     pub multiple: bool,
+    /// Bank difficulty (1 to 5). Not a secret: the collector uses it with
+    /// the item's length for the response-process reading floor.
+    pub difficulty: u8,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -696,6 +699,7 @@ pub(crate) fn start_attempt_db(
             prompt: q.prompt.clone(),
             options,
             multiple: q.multiple,
+            difficulty: q.difficulty,
         });
     }
 

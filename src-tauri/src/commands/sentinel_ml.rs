@@ -343,9 +343,24 @@ pub struct BehavioralProfile {
     pub typing_pattern: TypingPattern,
     pub mouse_pattern: MousePattern,
     pub last_updated: u64,
+    /// Recent first-visit response timings: the learner's response-process
+    /// baseline on this device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_pattern: Option<ResponsePattern>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_models: Option<BehavioralAiModels>,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResponsePattern {
+    /// Same shape as a snapshot's response baseline items (snake_case).
+    pub recent: Vec<crate::sentinel::scoring::BaselineItem>,
+}
+
+/// History the collector keeps (`HISTORY_ITEMS` in `responseProcess.ts`),
+/// with headroom.
+const MAX_RESPONSE_PATTERN_ITEMS: usize = 32;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -449,6 +464,17 @@ fn validate_behavioral_profile(
         || !(0.0..=1.0).contains(&profile.mouse_pattern.click_precision)
     {
         return Err("mouse click precision must be between zero and one".into());
+    }
+    if let Some(pattern) = &profile.response_pattern {
+        if pattern.recent.len() > MAX_RESPONSE_PATTERN_ITEMS {
+            return Err("response pattern keeps too many items".into());
+        }
+        for item in &pattern.recent {
+            validate_nonnegative_finite("response latency", item.first_input_ms)?;
+            if item.difficulty.is_some_and(|d| !(1..=5).contains(&d)) {
+                return Err("response pattern difficulty must be between 1 and 5".into());
+            }
+        }
     }
     if let Some(face) = profile
         .ai_models
@@ -891,6 +917,13 @@ mod tests {
                 sample_count: 8,
             },
             last_updated: 1_700_000_000_000,
+            response_pattern: Some(ResponsePattern {
+                recent: vec![crate::sentinel::scoring::BaselineItem {
+                    chars: 120,
+                    difficulty: Some(2),
+                    first_input_ms: 6_500.0,
+                }],
+            }),
             ai_models: Some(BehavioralAiModels {
                 face_enrollment: Some(FaceEnrollment {
                     vector: vec![0.01; FACE_EMBEDDING_DIM],
@@ -944,6 +977,19 @@ mod tests {
                 .unwrap_err()
                 .contains("16 lowercase hexadecimal")
         );
+    }
+
+    #[test]
+    fn behavioral_profile_rejects_an_invalid_response_pattern() {
+        let db = behavioral_db();
+        let mut profile = behavioral_profile();
+        profile.response_pattern.as_mut().unwrap().recent[0].difficulty = Some(9);
+        assert!(save_behavioral_profile(db.conn(), &profile)
+            .unwrap_err()
+            .contains("between 1 and 5"));
+        profile.response_pattern.as_mut().unwrap().recent[0].difficulty = None;
+        profile.response_pattern.as_mut().unwrap().recent[0].first_input_ms = f64::NAN;
+        assert!(save_behavioral_profile(db.conn(), &profile).is_err());
     }
 
     #[test]

@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   suspended: { value: false },
   push: vi.fn(),
   go: vi.fn(),
+  present: vi.fn<(item: string, meta: { chars: number; difficulty: number | null; input: string }) => void>(),
+  input: vi.fn<(item: string, event: { changesAnswer: boolean }) => void>(),
 }))
 
 vi.mock('@/composables/useLocalApi', () => ({ useLocalApi: () => ({ invoke: mocks.invoke }) }))
@@ -38,6 +40,7 @@ vi.mock('@/composables/useSentinel', () => ({
     reportCameraDevice: mocks.reportCameraDevice,
     verifyFace: () => ({ present: true, count: 1, consistency: 1 }),
     scoreGaze: async () => null,
+    responses: { present: mocks.present, input: mocks.input, cue: vi.fn() },
   }),
 }))
 vi.mock('@/composables/useAssessment', () => ({
@@ -58,7 +61,7 @@ function deferred<T>() {
 
 const attempt: StartedAttempt = {
   attempt_id: 'attempt-1', skill_id: 'skill_test', pass_threshold: 0.7,
-  questions: [{ id: 'question-1', prompt: 'Question', options: ['One', 'Two'], multiple: true }],
+  questions: [{ id: 'question-1', prompt: 'Question', options: ['One', 'Two'], multiple: true, difficulty: 2 }],
   draft_answers: [],
 }
 const result: GradeResult = { score: 0.5, passed: false, credential_id: null }
@@ -363,7 +366,7 @@ describe('question rendering', () => {
   it('keeps one selection for a single-answer question', async () => {
     mocks.startAttempt.mockResolvedValue({
       ...attempt,
-      questions: [{ id: 'question-1', prompt: 'Question', options: ['One', 'Two'], multiple: false }],
+      questions: [{ id: 'question-1', prompt: 'Question', options: ['One', 'Two'], multiple: false, difficulty: 2 }],
     })
     const wrapper = render()
     await flushPromises()
@@ -375,6 +378,35 @@ describe('question rendering', () => {
     await wrapper.findAll('button').find(button => button.text() === 'learn.assessment.submit')!.trigger('click')
     await flushPromises()
     expect(mocks.grade.mock.calls[0]?.[1]).toEqual([{ question_id: 'question-1', selected: [1] }])
+  })
+
+  it('reports each served item and every selection as response events', async () => {
+    mocks.startAttempt.mockResolvedValue({
+      ...attempt,
+      questions: [
+        { id: 'single', prompt: 'Pick one', options: ['Alpha', 'Beta'], multiple: false, difficulty: 4 },
+        { id: 'multi', prompt: 'Pick all', options: ['A', 'B'], multiple: true, difficulty: 1 },
+      ],
+    })
+    const wrapper = render()
+    await flushPromises()
+    expect(mocks.present.mock.calls).toEqual([
+      ['single', { chars: 17, difficulty: 4, input: 'choice' }],
+      ['multi', { chars: 10, difficulty: 1, input: 'choice' }],
+    ])
+    const inputs = wrapper.findAll('input')
+    await inputs[0]!.trigger('change')
+    await inputs[1]!.trigger('change')
+    await inputs[2]!.trigger('change')
+    await inputs[3]!.trigger('change')
+    await inputs[2]!.trigger('change')
+    expect(mocks.input.mock.calls).toEqual([
+      ['single', { changesAnswer: false }],
+      ['single', { changesAnswer: true }],
+      ['multi', { changesAnswer: false }],
+      ['multi', { changesAnswer: false }],
+      ['multi', { changesAnswer: true }],
+    ])
   })
 
   it('names the skill from the taxonomy on the result screen', async () => {

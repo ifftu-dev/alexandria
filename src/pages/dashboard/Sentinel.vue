@@ -96,6 +96,13 @@ const FLAG_CATALOG: ReadonlyArray<{ type: FlagType; key: string; severity: FlagS
   { type: 'foreign_accessibility_service', key: 'foreignAccessibilityService', severity: 'warning' },
   { type: 'debug_bridge_enabled', key: 'debugBridgeEnabled', severity: 'warning' },
   { type: 'obscured_touch', key: 'obscuredTouch', severity: 'critical' },
+  // Response-process signals: advisory (info) until a certified ratio.
+  { type: 'response_below_reading_floor', key: 'responseBelowReadingFloor', severity: 'info' },
+  { type: 'response_relay_lag', key: 'responseRelayLag', severity: 'info' },
+  { type: 'response_idle_burst', key: 'responseIdleBurst', severity: 'info' },
+  { type: 'answer_change_after_idle', key: 'answerChangeAfterIdle', severity: 'info' },
+  { type: 'gaze_down_then_response', key: 'gazeDownThenResponse', severity: 'info' },
+  { type: 'voice_then_response', key: 'voiceThenResponse', severity: 'info' },
 ]
 const anomalyFlagTypes = computed(() => FLAG_CATALOG.map(f => ({
   type: f.type,

@@ -62,6 +62,8 @@ pub fn severity(flag: &str) -> Severity {
         | "spoof_suspected"
         | "unauthorized_process"
         | "phantom_hotkey" => Severity::Warning,
+        // Includes the response-process signals (`RESPONSE_PROCESS_SIGNALS`):
+        // unmeasured, they reach a decision only through a certified ratio.
         _ => Severity::Info,
     }
 }
@@ -89,7 +91,14 @@ pub fn channel(signal: &str) -> &str {
             "camera_presence"
         }
         "face_mismatch" | "virtual_camera" | "spoof_suspected" => "camera_identity",
-        "device_glance" | "gaze_wander" | "gaze_occluded" => "gaze",
+        // A gaze-down just before a response is gaze evidence, not a second
+        // independent channel.
+        "device_glance" | "gaze_wander" | "gaze_occluded" | "gaze_down_then_response" => "gaze",
+        "response_below_reading_floor"
+        | "response_relay_lag"
+        | "response_idle_burst"
+        | "answer_change_after_idle" => "response_process",
+        "voice_then_response" => "voice",
         // Derived from the other scores, so never independent of them.
         "low_integrity" => "composite",
         "in_app_assistant_during_attempt" | "mcp_call_during_attempt" => "assistant",

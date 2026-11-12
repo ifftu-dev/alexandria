@@ -123,6 +123,7 @@ pub(crate) fn record_backend_flag(
             composite,
             &ScoreColumns::default(),
             &flags,
+            0,
             &manifest,
         )
         .is_ok()
@@ -178,6 +179,7 @@ pub(crate) fn persist_snapshot_with(
         s.integrity,
         &columns,
         &assessment.flags,
+        features.response.as_ref().map_or(0, |r| r.observed_items()),
         manifest,
     )?;
     snapshot.consistency_score = Some(s.consistency);
@@ -209,6 +211,7 @@ fn committed_flags(
     Ok(windows)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn commit_window(
     connection: &rusqlite::Connection,
     session_id: &str,
@@ -216,6 +219,7 @@ fn commit_window(
     composite: f64,
     columns: &ScoreColumns,
     flags: &[String],
+    response_items: u32,
     manifest: &RatioManifest,
 ) -> Result<IntegritySnapshot, String> {
     let tx =
@@ -306,9 +310,16 @@ fn commit_window(
                 ),
                 critical_count  = critical_count + ?2,
                 warning_count   = warning_count  + ?3,
-                commitment_root = ?4
+                commitment_root = ?4,
+                response_items  = response_items + ?5
              WHERE id = ?1",
-        params![session_id, snap_critical, snap_warning, commitment_hash],
+        params![
+            session_id,
+            snap_critical,
+            snap_warning,
+            commitment_hash,
+            response_items
+        ],
     )
     .map_err(|e| e.to_string())?;
 

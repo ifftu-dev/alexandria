@@ -121,6 +121,8 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // Batched credential anchors: Merkle-root batches, per-credential
     // receipts, and cached ledger observations of anchor transactions.
     (33, "anchor_batches", include_str!("anchor_batches.sql")),
+    // How many items each integrity session saw with response timing.
+    (34, "integrity_response_items", include_str!("integrity_response_items.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

@@ -240,6 +240,30 @@
       "mcpCallDuringAttempt": {
         "description": "Un assistant externe connecté a demandé des données pendant la tentative",
         "trigger": "Un assistant ayant accès à ce profil a fait une demande pendant que la tentative était ouverte"
+      },
+      "responseBelowReadingFloor": {
+        "description": "Réponse avant que l'item ait pu être lu",
+        "trigger": "La première réponse est arrivée plus tôt que ne le permettent la longueur et la difficulté de l'item ; indicatif tant qu'il n'est pas mesuré"
+      },
+      "responseRelayLag": {
+        "description": "Les réponses arrivent avec un délai supplémentaire constant",
+        "trigger": "Plusieurs items ont pris à peu près le même temps supplémentaire par rapport au rythme habituel de l'apprenant ; indicatif tant qu'il n'est pas mesuré"
+      },
+      "responseIdleBurst": {
+        "description": "Inactivité, puis la réponse d'un coup",
+        "trigger": "Une longue pause sans saisie, suivie d'une rafale rapide qui a complété la réponse ; indicatif tant qu'il n'est pas mesuré"
+      },
+      "answerChangeAfterIdle": {
+        "description": "Une réponse modifiée après une pause",
+        "trigger": "Une réponse déjà donnée a été modifiée juste après une longue période d'inactivité ; indicatif tant qu'il n'est pas mesuré"
+      },
+      "gazeDownThenResponse": {
+        "description": "Regard vers le bas, puis réponse",
+        "trigger": "Un regard vers le bas a été suivi d'une réponse en quelques secondes (caméra) ; indicatif tant qu'il n'est pas mesuré"
+      },
+      "voiceThenResponse": {
+        "description": "Une autre voix, puis une réponse",
+        "trigger": "Une seconde voix a été entendue et une réponse a suivi en quelques secondes (micro) ; indicatif tant qu'il n'est pas mesuré"
       }
     }
   },

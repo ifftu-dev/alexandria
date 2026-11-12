@@ -13,6 +13,7 @@ import {
 import { isVirtualCameraLabel } from '@/utils/sentinel/virtual-camera'
 import { frameSize, type SentinelFrame } from '@/utils/sentinel/frame'
 import { normaliseWebviewCombo, phantomCombos, type WebviewCombo, type BlurInterval } from '@/utils/sentinel/hotkeys'
+import { createResponseTracker } from '@/utils/sentinel/responseProcess'
 import type {
   WindowFeatures,
   BehavioralProfile,
@@ -421,6 +422,9 @@ function createSentinelService() {
   let cameraGeneration = 0
   let lifecycleTransition: Promise<unknown> = Promise.resolve()
   let trainingKeystrokesCleanup: (() => void) | null = null
+  // Response-process timing per item (`responses.present` / `.input` /
+  // `.cue`); reset with every session.
+  const responseTracker = createResponseTracker()
   let trainingMouseCleanup: (() => void) | null = null
 
   const serializeTransition = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -744,6 +748,7 @@ function createSentinelService() {
         advisory_enabled: aiScoringEnabled.value,
         paste_classifier_enabled: pasteClassifierEnabled.value,
       },
+      response: responseTracker.pending(),
     }
   }
 
@@ -796,6 +801,9 @@ function createSentinelService() {
         profile.mousePattern.sampleCount++
       }
     }
+
+    const responseHistory = responseTracker.historyAfterSession()
+    if (responseHistory.length > 0) profile.responsePattern = { recent: responseHistory }
 
     profile.lastUpdated = Date.now()
     await saveProfile(profile.userId, deviceFp, profile)
@@ -951,6 +959,8 @@ function createSentinelService() {
       }
 
       if (!isCurrent()) return
+      // The last item's visit ends with the attempt.
+      if (strict) responseTracker.settle()
       // Native app-switch: roll any still-open blur into the elapsed total.
       if (focusLostAt) { appFocusLostMs += Date.now() - focusLostAt; focusLostAt = Date.now() }
       const features = collectFeatures({
@@ -1076,6 +1086,7 @@ function createSentinelService() {
       livenessChecks = 0
       livenessSpoofChecks = 0
       livenessRealProbSum = 0
+      responseTracker.clearWindow()
       snapshotWindowStartMs = Date.now()
 
   }
@@ -1178,6 +1189,8 @@ function createSentinelService() {
     profile = userId ? await loadProfile(userId, deviceFp) : null
     if (profile) loadAIModels(profile)
     if (generation !== lifecycleGeneration) return
+    responseTracker.reset()
+    responseTracker.setHistory(profile?.responsePattern?.recent ?? [])
 
     try {
       const response = await invoke<StartSessionResponse>('integrity_start_session', { enrollmentId, purpose })
@@ -1476,7 +1489,10 @@ function createSentinelService() {
         // screen; uncalibrated → positive pitch proxy (head tilted down).
         const lookingDown =
           est.screenY != null ? est.screenY > 1.0 : est.pitch > 0.12
-        if (lookingDown) gazeDownGlances++
+        if (lookingDown) {
+          gazeDownGlances++
+          responseTracker.cue('gaze_down')
+        }
       }
       return est
     } catch (err) {
@@ -2272,6 +2288,12 @@ function createSentinelService() {
     // Session controls
     start,
     stop,
+    /** Response-process events: item shown, response event, cross-modal cue. */
+    responses: {
+      present: responseTracker.present,
+      input: responseTracker.input,
+      cue: responseTracker.cue,
+    },
     stopForProfileLock,
     setElement,
     isAssessmentElement,

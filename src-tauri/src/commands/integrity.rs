@@ -28,6 +28,8 @@ pub struct IntegritySession {
     /// `local`, or `device_attested` once the platform attestation stored
     /// for this session verified. Re-verified at issuance.
     pub assurance_level: String,
+    /// Items whose first visit arrived with response-process timing.
+    pub response_items: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -463,7 +465,7 @@ pub async fn integrity_list_snapshots(
 /// The columns `map_session` reads, in order. Every session query selects
 /// exactly these, so a field added to one cannot be missing from another.
 const SESSION_COLUMNS: &str = "id, enrollment_id, status, integrity_score, critical_count, \
-     warning_count, started_at, ended_at, assurance_level";
+     warning_count, started_at, ended_at, assurance_level, response_items";
 
 fn map_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySession> {
     Ok(IntegritySession {
@@ -476,6 +478,7 @@ fn map_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySession> {
         started_at: row.get(6)?,
         ended_at: row.get(7)?,
         assurance_level: row.get(8)?,
+        response_items: row.get(9)?,
     })
 }
 
@@ -1179,3 +1182,7 @@ mod tests {
         assert_eq!(count, 0);
     }
 }
+
+#[cfg(test)]
+#[path = "integrity_response_tests.rs"]
+mod response_process_tests;
