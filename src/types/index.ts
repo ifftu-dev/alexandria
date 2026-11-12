@@ -1507,6 +1507,8 @@ export type InterviewSignal =
   | { question: { question_id: string } }
   | { answer: InterviewAnswerSignal }
   | 'second_voice'
+  /** Panel to candidate: an unscripted live segment was completed. */
+  | { live_segment: { segment_id: string } }
 
 /** `tutoring:interview-signal`: a signal from another participant in the call. */
 export interface InterviewSignalMessage {
@@ -2074,6 +2076,41 @@ export interface RoleAttemptSummary {
   end_reason?: string | null
 }
 
+/** One signal a reviewed session raised (`sentinel::surface::ReviewSignal`). */
+export interface ReviewSignal {
+  signal: string
+  channel: string
+  /** Committed windows it fired in. */
+  windows: number
+  /** No measured ratio: it added nothing to the posterior. */
+  advisory: boolean
+  /** The rates it was certified at, when admitted to the profile. */
+  certified: CertifiedSignal | null
+}
+
+/** A finished session rescored for a sponsor's review queue. */
+export interface SessionReview {
+  session_id: string
+  status: IntegritySessionStatus
+  trust_profile: TrustProfile | null
+  rung: VerificationRung
+  /** Summed log-likelihood ratio: posterior log-odds over the prior. */
+  posterior_llr: number
+  threshold: number | null
+  manifest_version: string
+  signals: ReviewSignal[]
+}
+
+/** A role attempt's session in `list_role_session_reviews`, most suspicious first. */
+export interface RoleSessionReview {
+  attempt_id: string
+  subject_did: string
+  integrity_session_id: string
+  score: number | null
+  passed: boolean | null
+  review: SessionReview
+}
+
 export interface CreateRoleAssessmentRequest {
   org_id: string
   role_title: string
@@ -2182,6 +2219,8 @@ export interface CredentialBundle {
   key_registry: KeyRegistryRow[]
   status_lists: StatusListRow[]
   status_list_credentials?: VerifiableCredential[]
+  /** The coverage statements the credentials' integrity assertions name. */
+  coverage_statements?: CoverageStatement[]
 }
 
 // --- Selective-disclosure presentations (§18) ----------------------------

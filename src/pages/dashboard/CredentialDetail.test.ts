@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   publishStatusLists: vi.fn(),
   anchor: vi.fn(),
   retryAnchor: vi.fn(),
+  coverageStatement: vi.fn(),
 }))
 vi.mock('@/composables/useCredentials', () => ({
   useCredentials: () => ({ ...mocks, error: ref<string | null>(null) }),
@@ -55,8 +56,8 @@ const stubs = {
   RouterLink: defineComponent({ template: '<a><slot /></a>' }),
 }
 
-async function open() {
-  mocks.get.mockResolvedValue(credential)
+async function open(subject: Record<string, unknown> = credential) {
+  mocks.get.mockResolvedValue(subject)
   mocks.verify.mockResolvedValue(verification)
   mocks.trust.mockResolvedValue(null)
   if (!mocks.anchor.getMockImplementation()) mocks.anchor.mockResolvedValue(null)
@@ -155,5 +156,47 @@ describe('CredentialDetail public record', () => {
     const section = (await open()).find('[data-anchor-section]')
     expect(section.text()).toContain('credentials.anchor.body.none')
     expect(section.find('a').exists()).toBe(false)
+  })
+})
+
+const integrity = {
+  sessionId: 'isess-1', status: 'completed', integrityScore: 0.9, criticalCount: 0, warningCount: 0,
+  assuranceLevel: 'local', generatedAt: '2026-10-09T00:00:00Z',
+  trustProfile: 'core', verificationRung: 'probed', coverageStatementDigest: 'blake3:abc',
+  signalsRun: ['core'], signalsDegraded: [], signalsNotRun: ['device_attestation', 'camera'],
+  probe: { outcome: 'satisfied', policies: ['reseed'], satisfied: 2, failed: 0, skipped: 0 },
+}
+const statement = {
+  format: 1, version: '1', profile: 'core', rung: 'probed',
+  checked: ['Typing, pointer, focus and clipboard behaviour in the assessment window.'],
+  not_checked: ['A second person, in the room or helping remotely, or a second device out of view: monitoring cannot see either.'],
+  platform_ceilings: ['Overlay, process and display checks see only what each operating system reports.'],
+  measurement: 'No signal has a certified error rate yet.',
+  certification: null, certified_signals: {},
+}
+
+describe('CredentialDetail coverage', () => {
+  beforeEach(() => {
+    Object.values(mocks).forEach(m => m.mockReset())
+  })
+
+  it('names the profile and rung and shows the coverage statement the credential names', async () => {
+    mocks.coverageStatement.mockResolvedValue(statement)
+    const wrapper = await open({ ...credential, integrity })
+    expect(mocks.coverageStatement).toHaveBeenCalledWith('blake3:abc')
+    const section = wrapper.get('[data-integrity-section]')
+    expect(section.text()).toContain('sentinel.trust.profile.core')
+    expect(section.text()).toContain('sentinel.trust.rung.probed')
+    expect(section.text()).toContain('sentinel.trust.signal.camera')
+    expect(section.text()).toContain('credentials.detail.probeValue')
+    expect(section.get('[data-testid="coverage-statement"]').text()).toContain('a second device out of view')
+  })
+
+  it('says when this build does not carry the named statement', async () => {
+    mocks.coverageStatement.mockResolvedValue(null)
+    const wrapper = await open({ ...credential, integrity })
+    const coverage = wrapper.get('[data-testid="coverage-statement"]')
+    expect(coverage.text()).toContain('sentinel.trust.coverage.unresolved')
+    expect(coverage.text()).toContain('blake3:abc')
   })
 })

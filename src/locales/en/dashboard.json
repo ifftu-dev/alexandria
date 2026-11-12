@@ -128,7 +128,10 @@
       "requiresClean": "requires a clean session",
       "minIntegrity": "min integrity {value}",
       "publish": "Publish",
-      "archive": "Archive"
+      "archive": "Archive",
+      "minProfile": "profile at least {value}",
+      "minRung": "verification at least {value}",
+      "probes": "follow-ups: {value}"
     },
     "issue": {
       "roleLabel": "Role assessment",
@@ -168,10 +171,27 @@
       "maxWarning": "Max warning",
       "requireClean": "Require a clean session",
       "assuranceLabel": "Required assurance level",
-      "assuranceNone": "(none)"
+      "assuranceNone": "(none)",
+      "minProfile": "Minimum trust profile",
+      "minRung": "Minimum verification rung",
+      "probePolicy": "Follow-up questions",
+      "noMinimum": "No minimum",
+      "coverageTitle": "What a credential under this policy covers"
     },
     "actions": {
       "create": "Create"
+    },
+    "review": {
+      "title": "Sessions ranked for review",
+      "hint": "Most suspicious first, by the combined weight of measured signals. Advisory signals have no measured error rate and add no weight.",
+      "loading": "Scoring sessions…",
+      "empty": "No finished sessions for this role yet.",
+      "weight": "weight {value}",
+      "threshold": "threshold {value}",
+      "noSignals": "No signals raised.",
+      "windows": "{count} windows",
+      "advisory": "Advisory",
+      "rates": "precision {precision}, recall {recall}"
     }
   },
   "sync": {

@@ -6,7 +6,9 @@ import { AppBadge, AppButton, AppAlert } from '@/components/ui'
 import { useCredentials } from '@/composables/useCredentials'
 import { anchorBadge } from '@/components/credential/anchorStatus'
 import { explorerTxUrl } from '@/utils/cardanoExplorer'
+import CoverageStatementView from '@/components/integrity/CoverageStatementView.vue'
 import type {
+  CoverageStatement,
   CredentialAnchorState,
   CredentialTrust,
   EndorsementMismatch,
@@ -36,6 +38,8 @@ const statusPublish = ref<{ variant: 'success' | 'warning'; message: string } | 
 const revokeReason = ref('')
 const showRevoke = ref(false)
 const error = ref<string | null>(null)
+/** The coverage statement the integrity assertion names; null when unresolved. */
+const coverage = ref<CoverageStatement | null>(null)
 
 onMounted(async () => {
   loading.value = true
@@ -45,11 +49,17 @@ onMounted(async () => {
     // Auto-verify on load — gives the user immediate signal.
     verification.value = (await api.verify(c)) ?? null
     await loadTrust()
+    const digest = c.integrity?.coverageStatementDigest
+    if (digest) coverage.value = (await api.coverageStatement(digest)) ?? null
   } else {
     error.value = api.error.value ?? t('credentials.detail.notFound')
   }
   loading.value = false
 })
+
+function signalNames(signals: string[]) {
+  return signals.map(s => t(`sentinel.trust.signal.${s}`)).join(', ')
+}
 
 async function reverify() {
   if (!credential.value) return
@@ -372,7 +382,7 @@ const decisionVariant = computed(() => {
       </section>
 
       <!-- Integrity attestation (§ Integrity→VC bridge) -->
-      <section v-if="credential.integrity" class="mb-6 rounded-xl bg-card shadow-sm p-6">
+      <section v-if="credential.integrity" class="mb-6 rounded-xl bg-card shadow-sm p-6" data-integrity-section>
         <h2 class="text-base font-semibold mb-3">{{ $t('credentials.detail.integrityTitle') }}</h2>
         <div class="grid gap-2 text-sm">
           <div class="flex items-center justify-between">
@@ -393,6 +403,38 @@ const decisionVariant = computed(() => {
             <span class="text-muted-foreground">{{ $t('credentials.detail.flags') }}</span>
             <span class="text-foreground">{{ $t('credentials.detail.flagsValue', { critical: credential.integrity.criticalCount, warning: credential.integrity.warningCount }) }}</span>
           </div>
+          <div v-if="credential.integrity.trustProfile" class="flex items-center justify-between">
+            <span class="text-muted-foreground">{{ $t('credentials.detail.integrityProfile') }}</span>
+            <span class="text-foreground">{{ $t(`sentinel.trust.profile.${credential.integrity.trustProfile}`) }}</span>
+          </div>
+          <div v-if="credential.integrity.verificationRung" class="flex items-center justify-between">
+            <span class="text-muted-foreground">{{ $t('credentials.detail.integrityRung') }}</span>
+            <span class="text-foreground">{{ $t(`sentinel.trust.rung.${credential.integrity.verificationRung}`) }}</span>
+          </div>
+          <div v-if="credential.integrity.signalsRun?.length" class="flex items-start justify-between gap-3">
+            <span class="text-muted-foreground">{{ $t('credentials.detail.signalsRun') }}</span>
+            <span class="text-end text-foreground">{{ signalNames(credential.integrity.signalsRun) }}</span>
+          </div>
+          <div v-if="credential.integrity.signalsDegraded?.length" class="flex items-start justify-between gap-3">
+            <span class="text-muted-foreground">{{ $t('credentials.detail.signalsDegraded') }}</span>
+            <span class="text-end text-warning">{{ signalNames(credential.integrity.signalsDegraded) }}</span>
+          </div>
+          <div v-if="credential.integrity.signalsNotRun?.length" class="flex items-start justify-between gap-3">
+            <span class="text-muted-foreground">{{ $t('credentials.detail.signalsNotRun') }}</span>
+            <span class="text-end text-muted-foreground">{{ signalNames(credential.integrity.signalsNotRun) }}</span>
+          </div>
+          <div v-if="credential.integrity.probe" class="flex items-center justify-between">
+            <span class="text-muted-foreground">{{ $t('credentials.detail.probe') }}</span>
+            <span class="text-foreground">{{ $t('credentials.detail.probeValue', {
+              satisfied: credential.integrity.probe.satisfied,
+              failed: credential.integrity.probe.failed,
+              skipped: credential.integrity.probe.skipped,
+            }) }}</span>
+          </div>
+          <details v-if="credential.integrity.coverageStatementDigest" open>
+            <summary class="cursor-pointer text-muted-foreground">{{ $t('sentinel.trust.coverage.title') }}</summary>
+            <CoverageStatementView class="mt-2" :statement="coverage" :digest="credential.integrity.coverageStatementDigest" />
+          </details>
           <details v-if="credential.integrity.commitmentRoot || credential.integrity.anchorRef">
             <summary class="cursor-pointer text-muted-foreground">{{ $t('common.advanced.toggle') }}</summary>
             <div class="mt-2 grid gap-2">

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import AssessmentRunner from './AssessmentRunner.vue'
-import type { AttemptRoleTarget, GradeResult, ServedProbe, StartedAttempt, SubmittedAnswer } from '@/types'
+import type { AttemptRoleTarget, GradeResult, SelectedProfile, ServedProbe, StartedAttempt, SubmittedAnswer } from '@/types'
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   finishProbes: vi.fn(),
   active: { value: false },
   suspended: { value: false },
+  trustProfile: { value: null as SelectedProfile | null },
   push: vi.fn(),
   go: vi.fn(),
   present: vi.fn<(item: string, meta: { chars: number; difficulty: number | null; input: string }) => void>(),
@@ -45,6 +46,7 @@ vi.mock('@/composables/useSentinel', () => ({
     verifyFace: () => ({ present: true, count: 1, consistency: 1 }),
     scoreGaze: async () => null,
     responses: { present: mocks.present, input: mocks.input, cue: vi.fn() },
+    trustProfile: mocks.trustProfile,
   }),
 }))
 vi.mock('@/composables/useAssessment', () => ({
@@ -86,6 +88,7 @@ beforeEach(() => {
   mocks.invoke.mockReset().mockResolvedValue(null)
   mocks.active.value = false
   mocks.suspended.value = false
+  mocks.trustProfile.value = null
   mocks.start.mockReset().mockImplementation(async () => { mocks.active.value = true })
   mocks.stop.mockReset().mockImplementation(async () => { mocks.active.value = false; return 'session-1' })
   mocks.openRoles.mockReset().mockResolvedValue([])
@@ -325,6 +328,71 @@ describe('role targeting', () => {
     expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-plain')
     expect(wrapper.get('[data-testid="role-banner"]').text()).toContain('learn.assessment.roleBanner')
     expect(mocks.setCameraOptedIn).not.toHaveBeenCalled()
+  })
+
+  /** A desktop session the backend put on `core` against `floor`. */
+  function coreSelection(floor: SelectedProfile['policy_floor']): SelectedProfile {
+    const budget = { detect_ms: 250, liveness_ms: 60, track_ms: 15, detect_interval: 3000 }
+    return {
+      profile: 'core',
+      inputs: {
+        device_attested: false,
+        capabilities: { camera: false, microphone: false, companion_phone: false },
+        consent: { camera: false, microphone: false, companion_phone: false },
+        budget: null,
+        floor: floor.required,
+      },
+      excluded: [
+        { profile: 'attested', reasons: ['not_attested'] },
+        { profile: 'camera', reasons: ['no_camera'] },
+        { profile: 'full', reasons: ['not_attested', 'no_camera'] },
+      ],
+      not_run: ['device_attestation', 'camera'],
+      benchmark: null,
+      camera_budget: budget,
+      full_budget: budget,
+      policy_floor: floor,
+    }
+  }
+
+  it('tells the learner the chosen trust profile alongside the first item', async () => {
+    mocks.openRoles.mockResolvedValue([plainRole])
+    mocks.start.mockImplementation(async () => {
+      mocks.active.value = true
+      mocks.trustProfile.value = coreSelection({ required: 'core', profile: 'core', satisfied: true, missing: [] })
+    })
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-testid="role-role-plain"]').setValue(true)
+    await wrapper.get('[data-testid="start-attempt"]').trigger('click')
+    await flushPromises()
+    const notice = wrapper.get('[data-testid="trust-profile-notice"]')
+    expect(notice.text()).toContain('sentinel.trust.notice.title')
+    expect(notice.text()).toContain('sentinel.trust.notice.floorMet')
+    expect(notice.text()).toContain('sentinel.trust.raise.connect_camera')
+    expect(wrapper.text()).toContain('Question')
+  })
+
+  it('stops before any item is served when the profile misses the sponsor minimum', async () => {
+    mocks.openRoles.mockResolvedValue([plainRole])
+    mocks.start.mockImplementation(async () => {
+      mocks.active.value = true
+      mocks.trustProfile.value = coreSelection({ required: 'attested', profile: 'core', satisfied: false, missing: ['device_attestation'] })
+    })
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-testid="role-role-plain"]').setValue(true)
+    await wrapper.get('[data-testid="start-attempt"]').trigger('click')
+    await flushPromises()
+    expect(mocks.startAttempt).not.toHaveBeenCalled()
+    expect(mocks.stop).toHaveBeenCalledOnce()
+    const notice = wrapper.get('[data-testid="trust-profile-notice"]')
+    expect(notice.text()).toContain('sentinel.trust.notice.floorUnmet')
+    expect(notice.text()).toContain('sentinel.trust.raise.pair_phone')
+    expect(notice.text()).not.toContain('sentinel.trust.raise.connect_camera')
+    expect(wrapper.text()).not.toContain('Question')
+    await wrapper.get('[data-testid="trust-profile-retry"]').trigger('click')
+    expect(mocks.go).toHaveBeenCalledWith(0)
   })
 
   it('lets the learner decline a role and starts without one', async () => {

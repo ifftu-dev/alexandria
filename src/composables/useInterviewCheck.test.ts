@@ -97,6 +97,36 @@ describe('useInterviewCheck', () => {
     await check.listen()
     expect(commands()).not.toContain('sentinel_voice_listen')
     expect(check.voiceChecks.value).toBe(false)
+    // Only the panel's signals (for live-segment marks), never the microphone.
+    expect([...mocks.handlers.keys()]).toEqual(['tutoring:interview-signal'])
+  })
+
+  it('records a live segment the panel marks in the running check', async () => {
+    mocks.invoke.mockResolvedValue(undefined)
+    const check = useInterviewCheck()
+    await check.begin({ interviewId: 'int-6', cloud: 'http://cloud.test', camera: false })
+    await check.listen()
+    emit('tutoring:interview-signal', { sender: 'panel-node', sender_name: 'Priya', signal: { live_segment: { segment_id: 'live-1' } }, timestamp: Date.now() })
+    await Promise.resolve()
+    expect(mocks.invoke).toHaveBeenCalledWith('hiring_interview_live_segment', {
+      interviewId: 'int-6',
+      integritySessionId: 'session-9',
+      segmentId: 'live-1',
+      markedBy: 'panel-node',
+      markedByName: 'Priya',
+    })
+  })
+
+  it('records no live segment for other signals or once the check has finished', async () => {
+    mocks.invoke.mockResolvedValue({ integrity_session_id: 'session-9' })
+    const check = useInterviewCheck()
+    await check.begin({ interviewId: 'int-7', cloud: 'http://cloud.test', camera: false })
+    await check.listen()
+    emit('tutoring:interview-signal', { sender: 'panel-node', sender_name: null, signal: { question: { question_id: 'q1' } }, timestamp: Date.now() })
+    await check.finish()
+    emit('tutoring:interview-signal', { sender: 'panel-node', sender_name: null, signal: { live_segment: { segment_id: 'live-2' } }, timestamp: Date.now() })
+    await Promise.resolve()
+    expect(commands()).not.toContain('hiring_interview_live_segment')
     expect(mocks.handlers.size).toBe(0)
   })
 

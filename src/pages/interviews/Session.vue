@@ -502,6 +502,25 @@ function markQuestion() {
   void askQuestion(`q${Date.now().toString(36)}`, null)
 }
 
+/** When the panel last marked a live segment done on this seat. */
+const liveMarkedAt = ref<number | null>(null)
+
+/**
+ * Tell the candidate's app an unscripted live segment was completed, so its
+ * integrity check records a live verification. Only a panel seat is an
+ * interview held in Alexandria; the candidate's app checks that too.
+ */
+async function markLiveSegment() {
+  if (!panel.value) return
+  const at = Date.now()
+  try {
+    await signals.send({ live_segment: { segment_id: `live${at.toString(36)}` } })
+    liveMarkedAt.value = at
+  } catch {
+    // Not in a call: nothing was marked.
+  }
+}
+
 async function addAuthoredFollowup(criterion: AuthoredCriterion) {
   const question = followupDrafts.value[criterion.id]?.trim()
   if (!question) return
@@ -834,7 +853,7 @@ function formatTime(ms: number) {
           <p class="text-[0.68rem] text-muted-foreground">{{ $t('interviews.session.assistantHint') }}</p>
         </div>
         <div class="flex-1 space-y-5 overflow-y-auto p-3">
-          <InterviewSignalFeed :entries="signalEntries" @mark="markQuestion" />
+          <InterviewSignalFeed :entries="signalEntries" :live="!!panel" :live-marked-at="liveMarkedAt" @mark="markQuestion" @live="markLiveSegment" />
 
           <section>
             <div class="mb-2 flex items-center justify-between"><h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{{ $t('interviews.session.followups') }}</h3><span class="text-[0.65rem] text-muted-foreground">{{ suggestions.length }}</span></div>

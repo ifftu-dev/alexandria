@@ -3,6 +3,10 @@
 // answer started against the candidate's own earlier answers, and the cues
 // just before it. The candidate's app reports these, so each line is a
 // reason to ask, never a verdict.
+//
+// On a panel seat (an interview held in Alexandria) the panel can also mark
+// an unscripted live segment done; the candidate's check records it as a
+// live verification.
 import { AppButton } from '@/components/ui'
 import type { InterviewAnswerSignal } from '@/types'
 import type { AnswerConcern } from '@/utils/sentinel/interviewFeed'
@@ -17,8 +21,14 @@ export interface SignalFeedEntry {
   concerns: AnswerConcern[]
 }
 
-defineProps<{ entries: SignalFeedEntry[] }>()
-defineEmits<{ mark: [] }>()
+defineProps<{
+  entries: SignalFeedEntry[]
+  /** A panel seat: offer the live-segment mark. */
+  live?: boolean
+  /** When the panel last marked a live segment done, ms since the epoch. */
+  liveMarkedAt?: number | null
+}>()
+defineEmits<{ mark: []; live: [] }>()
 
 const seconds = (ms: number) => (ms / 1000).toFixed(1)
 const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -31,6 +41,13 @@ const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-dig
       <AppButton size="xs" variant="outline" data-testid="mark-question" @click="$emit('mark')">{{ $t('interviews.signals.markQuestion') }}</AppButton>
     </div>
     <p class="mb-2 text-[0.68rem] leading-relaxed text-muted-foreground">{{ $t('interviews.signals.hint') }}</p>
+    <div v-if="live" class="mb-2 rounded-lg border border-border bg-card px-2.5 py-2">
+      <div class="flex items-center justify-between gap-2">
+        <p class="text-[0.68rem] leading-relaxed text-muted-foreground">{{ $t('sentinel.trust.live.hint') }}</p>
+        <AppButton size="xs" variant="outline" data-testid="mark-live-segment" @click="$emit('live')">{{ $t('sentinel.trust.live.mark') }}</AppButton>
+      </div>
+      <p v-if="liveMarkedAt" class="mt-1 text-[0.62rem] text-success">{{ $t('sentinel.trust.live.marked', { time: clock(liveMarkedAt) }) }}</p>
+    </div>
     <ul class="space-y-1.5">
       <li
         v-for="entry in entries"

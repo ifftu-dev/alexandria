@@ -6,7 +6,8 @@
 //! cues just before it, or reports a second voice. Timings and booleans
 //! only: there is no field for audio, words or anything the candidate said.
 //! The feed is the candidate's app's own report, shown to the panel as a
-//! reason to ask, never as a verdict.
+//! reason to ask, never as a verdict. The panel also marks an unscripted
+//! live segment as done, which the candidate's check records.
 
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +36,10 @@ pub enum InterviewSignal {
     },
     /// A voice pitched well apart from the candidate's started speaking.
     SecondVoice,
+    /// The panel completed an unscripted live segment with the candidate
+    /// (panel to candidate). The candidate's app records it in the running
+    /// integrity check as the `live` verification rung's evidence.
+    LiveSegment { segment_id: String },
 }
 
 impl InterviewSignal {
@@ -53,6 +58,7 @@ impl InterviewSignal {
                 question_id
             }
             Self::SecondVoice => return Ok(()),
+            Self::LiveSegment { segment_id } => segment_id,
         };
         let valid = !id.is_empty()
             && id.len() <= MAX_QUESTION_ID
@@ -128,6 +134,9 @@ mod tests {
             },
             answer("q-1", 4_200),
             InterviewSignal::SecondVoice,
+            InterviewSignal::LiveSegment {
+                segment_id: "live-1".into(),
+            },
         ] {
             let sent = message(signal);
             assert_eq!(decode(&encode(&sent).unwrap()), Some(Ok(sent)));
@@ -147,6 +156,9 @@ mod tests {
             answer("has spaces", 100),
             answer(&"x".repeat(129), 100),
             answer("q", 600_001),
+            InterviewSignal::LiveSegment {
+                segment_id: "not a token".into(),
+            },
         ] {
             let sent = message(bad);
             assert!(encode(&sent).is_err());

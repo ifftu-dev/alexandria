@@ -34,6 +34,11 @@ pub struct CredentialBundle {
     /// transaction is looked up on the ledger, which this bundle cannot do.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub anchor_receipts: Vec<alexandria_verify::vc::anchor::AnchorReceipt>,
+    /// The coverage statements the credentials' integrity assertions name by
+    /// digest, so a verifier offline reads what each assurance covered. A
+    /// statement's digest is over its own bytes, so it checks itself.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub coverage_statements: Vec<crate::sentinel::scoring::CoverageStatement>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -185,6 +190,17 @@ pub fn export_signed(
         }
     }
 
+    // Each named statement once, in digest order; a digest this build does
+    // not carry (another statement version) is left to the verifier.
+    let digests: std::collections::BTreeSet<&str> = credentials
+        .iter()
+        .filter_map(|c| c.integrity.as_ref()?.coverage_statement_digest.as_deref())
+        .collect();
+    let coverage_statements = digests
+        .into_iter()
+        .filter_map(crate::sentinel::scoring::resolve_coverage_statement)
+        .collect();
+
     let bundle = CredentialBundle {
         format_version: BUNDLE_FORMAT_VERSION.into(),
         credentials,
@@ -192,6 +208,7 @@ pub fn export_signed(
         status_lists,
         status_list_credentials,
         anchor_receipts,
+        coverage_statements,
     };
     serde_json_canonicalizer::to_string(&bundle).map_err(CredentialError::Canonicalize)
 }
@@ -946,6 +963,37 @@ mod tests {
         assert_eq!(bundle.credentials[0].id, vc.id);
         assert_eq!(bundle.status_lists.len(), 1);
         assert_eq!(bundle.status_lists[0].issuer_did, issuer.as_str());
+        // No integrity assertion, no coverage statement.
+        assert!(bundle.coverage_statements.is_empty());
+        assert!(!json.contains("coverage_statements"));
+    }
+
+    #[test]
+    fn an_exported_bundle_carries_the_coverage_statement_its_credentials_name() {
+        let (db, key, _, subject) = setup();
+        db.conn()
+            .execute(
+                "INSERT INTO integrity_sessions (id, status, trust_profile, started_at, ended_at)
+                 VALUES ('s', 'completed', 'core', ?1, ?1)",
+                rusqlite::params![NOW],
+            )
+            .unwrap();
+        let mut req = sample_request(subject);
+        req.integrity_session_id = Some("s".into());
+        let vc = credentials::issue(db.conn(), &key, &req, NOW).unwrap();
+        let digest = vc
+            .integrity
+            .and_then(|a| a.coverage_statement_digest)
+            .expect("coverage digest");
+
+        let bundle: CredentialBundle = serde_json::from_str(&export(db.conn()).unwrap()).unwrap();
+        assert_eq!(bundle.coverage_statements.len(), 1);
+        let statement = &bundle.coverage_statements[0];
+        assert_eq!(statement.digest(), digest);
+        assert!(statement
+            .not_checked
+            .iter()
+            .any(|line| line.contains("second person")));
     }
 
     #[test]

@@ -18,9 +18,10 @@
 use rusqlite::{params, OptionalExtension};
 
 use crate::sentinel::scoring::{
-    coverage_statement, decide, measurement::Certification, verification_rung, CoverageStatement,
-    ProfileSignal, RatioManifest, RungEvidence, SessionEvidence, TrustProfile, VerificationRung,
-    DEFAULT_PROFILE,
+    coverage_statement, decide,
+    measurement::{Certification, CertifiedSignal},
+    verification_rung, CoverageStatement, ProfileSignal, RatioManifest, RungEvidence,
+    SessionEvidence, TrustProfile, VerificationRung, DEFAULT_PROFILE,
 };
 use crate::sentinel::trust_profile::CAMERA_DEGRADED;
 use crate::sentinel::verification::{
@@ -171,6 +172,116 @@ pub(crate) fn session_surface(
         uncredited,
         probe,
         coverage: profile.map(|p| coverage_statement(p, rung, certification)),
+    })
+}
+
+/// One signal a session raised, as a sponsor reviewing it sees it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ReviewSignal {
+    pub signal: String,
+    /// The independent evidence channel it reports on.
+    pub channel: String,
+    /// Committed windows it fired in.
+    pub windows: u32,
+    /// No measured ratio under the session's profile: it added nothing to
+    /// the posterior and can send a session to review, never decide it.
+    pub advisory: bool,
+    /// The rates it was certified at, when the certification in force
+    /// admits it to the session's profile.
+    pub certified: Option<CertifiedSignal>,
+}
+
+/// A finished session as a sponsor's review queue ranks it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct SessionReview {
+    pub session_id: String,
+    pub status: String,
+    pub trust_profile: Option<TrustProfile>,
+    pub rung: VerificationRung,
+    /// Summed log-likelihood ratio of every channel: the session's posterior
+    /// log-odds of misconduct over the prior. Zero while nothing is measured.
+    pub posterior_llr: f64,
+    /// The profile's operating threshold per channel; `None` uncertified.
+    pub threshold: Option<f64>,
+    pub manifest_version: String,
+    /// Strongest first: by accumulated ratio, then by windows.
+    pub signals: Vec<ReviewSignal>,
+}
+
+/// Rescore `session_id` from its committed windows for a sponsor's review:
+/// the fusion posterior under `manifest`, and each raised signal with its
+/// certified rates under `certification`, or marked advisory.
+pub(crate) fn session_review(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+    manifest: &RatioManifest,
+    certification: Option<&Certification>,
+) -> Result<SessionReview, String> {
+    let (status, assurance, purpose): (String, String, String) = conn
+        .query_row(
+            "SELECT status, assurance_level, purpose FROM integrity_sessions WHERE id = ?1",
+            params![session_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .ok_or("session not found")?;
+    let surface = session_surface(
+        conn,
+        session_id,
+        assurance == "device_attested",
+        manifest,
+        None,
+    )?;
+    let profile = surface
+        .trust_profile
+        .map_or(DEFAULT_PROFILE, |p| p.as_str());
+    let windows = committed_windows(conn, session_id)?;
+    let evidence = SessionEvidence {
+        windows: windows.clone(),
+        verification_failed: crate::sentinel::verification::has_failed_verification(
+            conn, session_id,
+        )?,
+        interview: purpose == "interview",
+    };
+    let fusion = decide(&evidence, manifest, profile, true).summary;
+    let ratios = manifest.profiles.get(profile);
+    let certified = certification
+        .filter(|c| !c.synthetic)
+        .and_then(|c| c.profiles.get(profile));
+    let mut signals: Vec<ReviewSignal> = fusion
+        .channels
+        .iter()
+        .flat_map(|c| {
+            c.signals.iter().map(|signal| ReviewSignal {
+                signal: signal.clone(),
+                channel: c.channel.clone(),
+                windows: windows.iter().filter(|w| w.contains(signal)).count() as u32,
+                advisory: !ratios.is_some_and(|p| p.ratios.contains_key(signal)),
+                certified: certified.and_then(|p| p.signals.get(signal)).cloned(),
+            })
+        })
+        .collect();
+    let weight = |s: &ReviewSignal| {
+        ratios
+            .and_then(|p| p.ratios.get(&s.signal))
+            .map_or(0.0, |llr| llr * f64::from(s.windows))
+    };
+    signals.sort_by(|a, b| {
+        weight(b)
+            .total_cmp(&weight(a))
+            .then(b.windows.cmp(&a.windows))
+            .then(a.signal.cmp(&b.signal))
+    });
+    Ok(SessionReview {
+        session_id: session_id.to_string(),
+        status,
+        trust_profile: surface.trust_profile,
+        rung: surface.rung,
+        posterior_llr: fusion.channels.iter().fold(0.0, |sum, c| sum + c.llr),
+        threshold: fusion.threshold,
+        manifest_version: fusion.manifest_version,
+        signals,
     })
 }
 

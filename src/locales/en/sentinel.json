@@ -615,5 +615,84 @@
     "joined": "Paired with your desktop session. Keep Alexandria open on this phone until the attempt ends.",
     "leave": "Leave",
     "unsupported": "Only an iPhone or Android phone can be a companion."
+  },
+  "trust": {
+    "profile": {
+      "core": "Core",
+      "attested": "Attested device",
+      "camera": "Camera",
+      "full": "Attested device and camera"
+    },
+    "profileHint": {
+      "core": "Typing, pointer, focus and screen checks in the assessment window. No camera, and the device's figures are its own report.",
+      "attested": "Core checks on a device whose platform proves it runs a genuine, unmodified copy of the app.",
+      "camera": "Core checks plus face presence, liveness and gaze from the camera, on a device fast enough to run them.",
+      "full": "Core checks with both device attestation and the camera."
+    },
+    "rung": {
+      "none": "None",
+      "process": "Response process",
+      "probed": "Follow-up questions",
+      "consistent": "Consistent with history",
+      "live": "Live interview"
+    },
+    "rungHint": {
+      "none": "No verification beyond monitoring.",
+      "process": "Response timing on every item was observed and showed no measured anomaly.",
+      "probed": "Also short follow-up questions on the learner's own answers, all satisfied.",
+      "consistent": "Also agreement with the learner's practice, lessons and earlier attempts on the skill.",
+      "live": "Also an unscripted live segment in an interview held in Alexandria."
+    },
+    "signal": {
+      "core": "Core checks",
+      "device_attestation": "Device attestation",
+      "camera": "Camera checks"
+    },
+    "reason": {
+      "not_attested": "this device could not prove it runs a genuine, unmodified app",
+      "no_camera": "no camera was found",
+      "camera_not_consented": "the camera was not turned on",
+      "not_benchmarked": "the device check for the camera did not finish",
+      "over_budget": "this device cannot run the camera checks smoothly"
+    },
+    "raise": {
+      "pair_phone": "Pair your phone before you start.",
+      "attested_device": "Use a phone or tablet that passes device attestation.",
+      "connect_camera": "Connect a camera.",
+      "allow_camera": "Turn on the camera before you start.",
+      "faster_device": "Use a faster device, or close other apps first."
+    },
+    "probePolicy": {
+      "none": "None",
+      "reseed": "Same item with new values",
+      "authored": "Instructor-written follow-ups",
+      "plugin": "Made by the item's grader"
+    },
+    "notice": {
+      "title": "This attempt runs under the {profile} profile",
+      "notRun": "{signal} not run: {reason}.",
+      "floorMet": "Meets the sponsor's minimum: {required}.",
+      "floorUnmet": "Does not meet the sponsor's minimum: {required}. The attempt cannot start on this setup.",
+      "raiseTitle": "To raise the profile next time",
+      "tryAgain": "Change setup and try again",
+      "monitoringLimit": "Monitoring cannot see a second person or a second device, at any profile."
+    },
+    "coverage": {
+      "title": "What this covers",
+      "checked": "Checked",
+      "notChecked": "Not checked",
+      "ceilings": "Platform limits",
+      "measurement": "Measurement",
+      "certified": "Certified rates from version {version} ({date})",
+      "rates": "{signal}: precision {precision}, recall {recall}",
+      "unresolved": "This coverage statement is not bundled with this version of the app.",
+      "digest": "Statement digest",
+      "quoted": "Quoted exactly as the credential names it."
+    },
+    "live": {
+      "mark": "Live segment done",
+      "hint": "After an unscripted stretch of questions, mark it done. The candidate's integrity check records it as a live verification.",
+      "marked": "Marked done at {time}"
+    }
   }
 }

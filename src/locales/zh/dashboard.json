@@ -128,7 +128,10 @@
       "requiresClean": "需要一次无异常的会话",
       "minIntegrity": "最低诚信度 {value}",
       "publish": "发布",
-      "archive": "归档"
+      "archive": "归档",
+      "minProfile": "档案至少为 {value}",
+      "minRung": "验证至少为 {value}",
+      "probes": "追问：{value}"
     },
     "issue": {
       "roleLabel": "角色测评",
@@ -168,10 +171,27 @@
       "maxWarning": "最多警告项",
       "requireClean": "要求一次无异常的会话",
       "assuranceLabel": "所需保障级别",
-      "assuranceNone": "（无）"
+      "assuranceNone": "（无）",
+      "minProfile": "最低信任档案",
+      "minRung": "最低验证等级",
+      "probePolicy": "追问",
+      "noMinimum": "无最低要求",
+      "coverageTitle": "按此政策签发的凭证涵盖什么"
     },
     "actions": {
       "create": "创建"
+    },
+    "review": {
+      "title": "按审查优先级排序的会话",
+      "hint": "最可疑的排在最前，依据已测量信号的综合权重。参考信号没有经测量的错误率，不增加权重。",
+      "loading": "正在评估会话…",
+      "empty": "该职位暂时没有已完成的会话。",
+      "weight": "权重 {value}",
+      "threshold": "阈值 {value}",
+      "noSignals": "未出现任何信号。",
+      "windows": "{count} 个窗口",
+      "advisory": "参考",
+      "rates": "精确率 {precision}，召回率 {recall}"
     }
   },
   "sync": {

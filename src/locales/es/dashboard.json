@@ -128,7 +128,10 @@
       "requiresClean": "requiere una sesión limpia",
       "minIntegrity": "integridad mín. {value}",
       "publish": "Publicar",
-      "archive": "Archivar"
+      "archive": "Archivar",
+      "minProfile": "perfil al menos {value}",
+      "minRung": "verificación al menos {value}",
+      "probes": "seguimiento: {value}"
     },
     "issue": {
       "roleLabel": "Evaluación de rol",
@@ -168,10 +171,27 @@
       "maxWarning": "Máx. advertencias",
       "requireClean": "Requerir una sesión limpia",
       "assuranceLabel": "Nivel de garantía requerido",
-      "assuranceNone": "(ninguno)"
+      "assuranceNone": "(ninguno)",
+      "minProfile": "Perfil de confianza mínimo",
+      "minRung": "Nivel de verificación mínimo",
+      "probePolicy": "Preguntas de seguimiento",
+      "noMinimum": "Sin mínimo",
+      "coverageTitle": "Qué cubre una credencial emitida con esta política"
     },
     "actions": {
       "create": "Crear"
+    },
+    "review": {
+      "title": "Sesiones ordenadas para revisión",
+      "hint": "Las más sospechosas primero, según el peso combinado de las señales medidas. Las señales orientativas no tienen una tasa de error medida y no suman peso.",
+      "loading": "Puntuando sesiones…",
+      "empty": "Todavía no hay sesiones terminadas para este puesto.",
+      "weight": "peso {value}",
+      "threshold": "umbral {value}",
+      "noSignals": "No se registró ninguna señal.",
+      "windows": "{count} ventanas",
+      "advisory": "Orientativa",
+      "rates": "precisión {precision}, exhaustividad {recall}"
     }
   },
   "sync": {

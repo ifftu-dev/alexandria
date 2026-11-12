@@ -266,6 +266,18 @@ pub async fn integrity_coverage_statement(
     ))
 }
 
+/// Every coverage statement bundled with the app under the certification in
+/// force, one per trust profile and verification rung, so a sponsor reads
+/// what a policy's minimums cover before choosing them.
+#[tauri::command]
+pub async fn integrity_coverage_statements(
+) -> Result<Vec<crate::sentinel::scoring::CoverageStatement>, String> {
+    let certification = crate::sentinel::scoring::active_certification();
+    Ok(crate::sentinel::scoring::coverage_statements(
+        certification.as_ref().map(|(c, d)| (c, d.as_str())),
+    ))
+}
+
 /// iOS: extend a stored App Attest record with an assertion over the
 /// terminal commitment root, so the attested key vouches for the snapshot
 /// stream as well as the start nonce. Best effort; returns the JSON to

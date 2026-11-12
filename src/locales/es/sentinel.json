@@ -576,5 +576,84 @@
     "joined": "Vinculado a la sesión de tu ordenador. Mantén Alexandria abierta en este teléfono hasta que termine el intento.",
     "leave": "Salir",
     "unsupported": "Solo un iPhone o un teléfono Android puede vincularse."
+  },
+  "trust": {
+    "profile": {
+      "core": "Básico",
+      "attested": "Dispositivo certificado",
+      "camera": "Cámara",
+      "full": "Dispositivo certificado y cámara"
+    },
+    "profileHint": {
+      "core": "Comprobaciones de escritura, puntero, foco y pantalla en la ventana de la evaluación. Sin cámara, y las cifras del dispositivo son su propio informe.",
+      "attested": "Comprobaciones básicas en un dispositivo cuya plataforma demuestra que ejecuta una copia auténtica y sin modificar de la app.",
+      "camera": "Comprobaciones básicas más presencia del rostro, prueba de vida y mirada con la cámara, en un dispositivo lo bastante rápido para ejecutarlas.",
+      "full": "Comprobaciones básicas con certificación del dispositivo y cámara."
+    },
+    "rung": {
+      "none": "Ninguno",
+      "process": "Proceso de respuesta",
+      "probed": "Preguntas de seguimiento",
+      "consistent": "Coherente con el historial",
+      "live": "Entrevista en directo"
+    },
+    "rungHint": {
+      "none": "Ninguna verificación más allá de la supervisión.",
+      "process": "Se observó el ritmo de respuesta en cada pregunta y no mostró ninguna anomalía medida.",
+      "probed": "Además, preguntas breves de seguimiento sobre las propias respuestas del estudiante, todas superadas.",
+      "consistent": "Además, coherencia con la práctica, las lecciones y los intentos anteriores del estudiante en la habilidad.",
+      "live": "Además, un segmento en directo sin guion en una entrevista celebrada en Alexandria."
+    },
+    "signal": {
+      "core": "Comprobaciones básicas",
+      "device_attestation": "Certificación del dispositivo",
+      "camera": "Comprobaciones con cámara"
+    },
+    "reason": {
+      "not_attested": "este dispositivo no pudo demostrar que ejecuta una app auténtica y sin modificar",
+      "no_camera": "no se encontró ninguna cámara",
+      "camera_not_consented": "la cámara no se activó",
+      "not_benchmarked": "la prueba del dispositivo para la cámara no terminó",
+      "over_budget": "este dispositivo no puede ejecutar las comprobaciones con cámara con fluidez"
+    },
+    "raise": {
+      "pair_phone": "Vincula tu teléfono antes de empezar.",
+      "attested_device": "Usa un teléfono o tableta que supere la certificación del dispositivo.",
+      "connect_camera": "Conecta una cámara.",
+      "allow_camera": "Activa la cámara antes de empezar.",
+      "faster_device": "Usa un dispositivo más rápido o cierra antes otras apps."
+    },
+    "probePolicy": {
+      "none": "Ninguna",
+      "reseed": "La misma pregunta con valores nuevos",
+      "authored": "Preguntas de seguimiento escritas por el instructor",
+      "plugin": "Creadas por el corrector de la pregunta"
+    },
+    "notice": {
+      "title": "Este intento se realiza con el perfil {profile}",
+      "notRun": "{signal} no se ejecuta: {reason}.",
+      "floorMet": "Cumple el mínimo del patrocinador: {required}.",
+      "floorUnmet": "No cumple el mínimo del patrocinador: {required}. El intento no puede empezar con esta configuración.",
+      "raiseTitle": "Para subir el perfil la próxima vez",
+      "tryAgain": "Cambiar la configuración y volver a intentarlo",
+      "monitoringLimit": "La supervisión no puede ver a una segunda persona ni un segundo dispositivo, con ningún perfil."
+    },
+    "coverage": {
+      "title": "Qué cubre",
+      "checked": "Comprobado",
+      "notChecked": "No comprobado",
+      "ceilings": "Límites de la plataforma",
+      "measurement": "Medición",
+      "certified": "Tasas certificadas de la versión {version} ({date})",
+      "rates": "{signal}: precisión {precision}, exhaustividad {recall}",
+      "unresolved": "Esta declaración de cobertura no está incluida en esta versión de la app.",
+      "digest": "Huella de la declaración",
+      "quoted": "Citada exactamente como la nombra la credencial."
+    },
+    "live": {
+      "mark": "Segmento en directo terminado",
+      "hint": "Tras un tramo de preguntas sin guion, márcalo como terminado. La comprobación de integridad del candidato lo registra como una verificación en directo.",
+      "marked": "Marcado como terminado a las {time}"
+    }
   }
 }

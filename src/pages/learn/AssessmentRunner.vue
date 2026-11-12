@@ -11,6 +11,11 @@
 // requirement applies from the first question instead of surfacing as a
 // refusal at issuance.
 //
+// Before the first item the learner sees the trust profile the backend chose
+// for the session, why, and whether it meets the role's minimum. A profile
+// below the minimum stops there, with what would raise it, instead of
+// surfacing as a refusal after the effort is spent.
+//
 // After submission, any follow-up probes the assessment or role asks for run
 // while monitoring is still on (AssessmentProbes); grading follows.
 import { computed, onMounted, onUnmounted, ref } from 'vue'
@@ -25,8 +30,10 @@ import { useDiagnostics } from '@/composables/useDiagnostics'
 import { AppButton } from '@/components/ui'
 import AssessmentProbes from './AssessmentProbes.vue'
 import CompanionPhoneOffer from '@/components/integrity/CompanionPhoneOffer.vue'
+import TrustProfileNotice from '@/components/integrity/TrustProfileNotice.vue'
 import { isMobilePlatform } from '@/composables/usePlatform'
-import type { AttemptRoleTarget, StartedAttempt, GradeResult, SkillDetail } from '@/types'
+import type { AttemptRoleTarget, StartedAttempt, GradeResult, SelectedProfile, SkillDetail } from '@/types'
+import type { DeepReadonly } from 'vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -48,6 +55,8 @@ const submitted = ref(false)
 const error = ref('')
 const result = ref<GradeResult | null>(null)
 const closing = ref(false)
+/** The session's profile missed the role's minimum: nothing was served. */
+const floorBlocked = ref<DeepReadonly<SelectedProfile> | null>(null)
 const cleanupError = ref('')
 let disposed = false
 let monitoringClosed = false
@@ -124,6 +133,14 @@ async function begin(roleAssessmentId: string | null) {
     if (disposed) return
     const sessionId = sentinel.getSessionId()
     if (!sessionId || !sentinel.isActive.value) throw new Error('Assessment monitoring is not active')
+    // The backend would refuse the attempt anyway; say why before any item.
+    const selection = sentinel.trustProfile.value
+    if (selection && !selection.policy_floor.satisfied) {
+      floorBlocked.value = selection
+      choosing.value = false
+      await stopMonitoring()
+      return
+    }
     const started = exchangeStart.value
       ? await invoke<StartedAttempt>('exchange_start_assessment', { ...exchangeStart.value, integritySessionId: sessionId })
       : await startAttempt(skillId, sessionId, roleAssessmentId)
@@ -282,6 +299,12 @@ async function submit() {
 
     <div v-if="loading" class="py-10 text-center text-sm text-muted-foreground">{{ $t('learn.assessment.preparing') }}</div>
 
+    <div v-else-if="floorBlocked" class="space-y-3">
+      <h1 class="text-xl font-bold text-foreground">{{ $t('learn.assessment.verifyTitle', { name: skillName }) }}</h1>
+      <TrustProfileNotice :selected="floorBlocked" />
+      <AppButton variant="outline" data-testid="trust-profile-retry" @click="router.go(0)">{{ $t('sentinel.trust.notice.tryAgain') }}</AppButton>
+    </div>
+
     <div v-else-if="error && !attempt && !choosing" class="rounded-lg border border-error/40 bg-error/5 p-4 text-sm text-error">
       {{ error }}
     </div>
@@ -378,6 +401,8 @@ async function submit() {
           <p v-if="cameraError" class="text-xs text-error">{{ cameraError }}</p>
         </template>
       </div>
+
+      <TrustProfileNotice v-if="sentinel.trustProfile.value" :selected="sentinel.trustProfile.value" />
 
       <div v-for="(q, qi) in attempt.questions" :key="q.id" class="rounded-xl border border-border p-4">
         <p class="font-medium text-foreground">{{ qi + 1 }}. {{ q.prompt }}</p>
