@@ -1,6 +1,6 @@
 # Camera pipeline performance
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: docs/sentinel-trust-profiles-spec.md
 
@@ -52,3 +52,5 @@ Both detect every 3 s. At 10× the measured cost (about 90 ms detect, 70 ms live
 - **Native capture.** The webview's `getUserMedia` stream drives the visible preview, and desktop `nokhwa` is built for enumeration only. Opening the camera natively as well would give it two consumers. iOS calls already hand the webview native JPEG frames. Tapping those in Rust belongs with the feature-gated tutoring video path, not this ticket.
 - **Event-driven overlay scan.** The display topology was already event-driven (`sentinel://display`). The hidden-overlay scan runs in the snapshot dispatch that ticket 01 is rewriting. macOS also has no window-creation notification for other processes without per-app Accessibility observers. A Windows `SetWinEventHook` path is possible later.
 - **Cadence per profile.** The worker uses the `camera` cadence until ticket 05 passes the chosen profile in (`CameraBudget::pipeline_config`).
+
+- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.

@@ -1,7 +1,7 @@
 # Sentinel trust profiles and verified credentials
 
 Status: active
-Updated: 2026-11-12
+Updated: 2026-11-13
 Triage: ready-for-agent
 Repos: alexandria
 
@@ -214,21 +214,21 @@ Sub-tickets live in `sentinel-trust-profiles/`; each names its blockers.
 
 | Ticket | Blocked by | Triage |
 |---|---|---|
-| [01 Scoring and fusion in Rust](sentinel-trust-profiles/01-scoring-core.md) | none | ready-for-agent |
-| [02 Measurement corpus and evaluator](sentinel-trust-profiles/02-measurement-corpus.md) | 01 | ready-for-agent |
-| [03 Response-process signals](sentinel-trust-profiles/03-response-process-signals.md) | 01 | ready-for-agent |
-| [04 Adaptive draw](sentinel-trust-profiles/04-adaptive-draw.md) | none | ready-for-agent |
-| [05 Trust profiles](sentinel-trust-profiles/05-trust-profiles.md) | 01 | ready-for-agent |
-| [06 Longitudinal consistency](sentinel-trust-profiles/06-longitudinal-consistency.md) | 01 | ready-for-agent |
-| [07 Probe contract](sentinel-trust-profiles/07-probe-contract.md) | none | ready-for-agent |
-| [08 Credential surface](sentinel-trust-profiles/08-credential-surface.md) | 03, 05, 06, 07 | ready-for-agent |
-| [09 Sponsor and learner UI](sentinel-trust-profiles/09-sponsor-learner-ui.md) | 08 | ready-for-agent |
-| [10 Interview signal feed](sentinel-trust-profiles/10-interview-signal-feed.md) | 03, 07 | ready-for-agent |
-| [11 Camera performance](sentinel-trust-profiles/11-camera-performance.md) | none | ready-for-agent |
-| [12 Desktop device axis](sentinel-trust-profiles/12-desktop-device-axis.md) | 05 | ready-for-agent |
-| [13 LLM probe policy](sentinel-trust-profiles/13-llm-probe-policy.md) | 07, 08 | ready-for-agent |
+| [01 Scoring and fusion in Rust](sentinel-trust-profiles/01-scoring-core.md) | none | done |
+| [02 Measurement corpus and evaluator](sentinel-trust-profiles/02-measurement-corpus.md) | 01 | done |
+| [03 Response-process signals](sentinel-trust-profiles/03-response-process-signals.md) | 01 | done |
+| [04 Adaptive draw](sentinel-trust-profiles/04-adaptive-draw.md) | none | done |
+| [05 Trust profiles](sentinel-trust-profiles/05-trust-profiles.md) | 01 | done |
+| [06 Longitudinal consistency](sentinel-trust-profiles/06-longitudinal-consistency.md) | 01 | done |
+| [07 Probe contract](sentinel-trust-profiles/07-probe-contract.md) | none | done |
+| [08 Credential surface](sentinel-trust-profiles/08-credential-surface.md) | 03, 05, 06, 07 | done |
+| [09 Sponsor and learner UI](sentinel-trust-profiles/09-sponsor-learner-ui.md) | 08 | done |
+| [10 Interview signal feed](sentinel-trust-profiles/10-interview-signal-feed.md) | 03, 07 | done |
+| [11 Camera performance](sentinel-trust-profiles/11-camera-performance.md) | none | done |
+| [12 Desktop device axis](sentinel-trust-profiles/12-desktop-device-axis.md) | 05 | done |
+| [13 LLM probe policy](sentinel-trust-profiles/13-llm-probe-policy.md) | 07, 08 | done |
 | [14 Real corpus and pruning](sentinel-trust-profiles/14-real-corpus-and-pruning.md) | 02 | ready-for-human |
-| [15 Docs and glossary](sentinel-trust-profiles/15-docs-and-glossary.md) | 02, 04, 09–13 | ready-for-agent |
+| [15 Docs and glossary](sentinel-trust-profiles/15-docs-and-glossary.md) | 02, 04, 09–13 | done |
 | [16 Device runtime verification](sentinel-trust-profiles/16-device-runtime-verification.md) | 12 | ready-for-human |
 
 ## Decisions
@@ -254,3 +254,5 @@ Owner actions, not agent work (ticket 16):
 
 - **Republish `alexandria-verify`.** The integrity assertion gained `trustProfile`, `verificationRung`, `coverageStatementDigest`, `signalsRun`, `signalsDegraded`, `signalsNotRun` and `probe` on `alexandria_verify::vc::IntegrityAssertion`. Verifiers re-serialise the typed credential to check its proof, so a verifier on the published 0.5.0 drops these fields and rejects every credential that carries them. Publish a new minor of the crate (the added public fields break struct-literal construction), then move Cloud and the website verifier to it, before credentials with these fields leave the device. The website's display of the new fields stays out of scope until then.
 - Doc updates for the work landed in `sentinel.md`, the protocol specification (§12, §14.7, §14.9.5), `ai-chat-spec.md` §13A, `skills-and-reputation.md`, `project-structure.md`, both Sentinel runbooks and the new repo `GLOSSARY.md`. `interview-assistant.md` still describes the panel without the live signal feed, authored follow-ups and **Ask now**; `sentinel.md` §Candidate integrity check covers them.
+
+- 2026-11-13: tickets 01–13 and 15 implemented on feat/sentinel-trust-profiles and closed; a code review found eleven issues, all fixed on the same branch. Tickets 14 and 16 stay open for the owner. Spec stays active until they close.

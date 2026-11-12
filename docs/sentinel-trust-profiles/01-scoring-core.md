@@ -1,6 +1,6 @@
 # Scoring and fusion in Rust
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: docs/sentinel-trust-profiles-spec.md
 
@@ -25,3 +25,5 @@ Done when: seam-1 tests (session over in-memory DB) cover single-flag → review
 - `review` is accepted wherever terminal session statuses are listed (grading gate, evidence consent, hiring report, `alexandria-verify` exchange, dashboards). No migration: `integrity_sessions.status` has no CHECK constraint.
 - Sessions are scored under profile `core` until ticket 05 records a profile per session.
 - The calibration wizard's training metrics keep their small TS analyzers; they never reach a snapshot.
+
+- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.

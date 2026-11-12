@@ -1,6 +1,6 @@
 # Interview signal feed and suggested follow-ups
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: docs/sentinel-trust-profiles-spec.md
 Blocked by: docs/sentinel-trust-profiles/03-response-process-signals.md, docs/sentinel-trust-profiles/07-probe-contract.md
@@ -25,3 +25,5 @@ Spec: Probes → interview bullet; User stories 22, 23, 25.
 - Bullet 3: `build_integrity_report` now accepts an interview held by video call, phone or in person only when the session reached `device_attested` (ticket 12's paired phone, or a mobile device's own attestation), and refuses it otherwise. Interviews held outside Alexandria still have no UI that starts a check, and Cloud's handling of such reports is out of scope.
 - Review fix: a signal's `sender` came from the payload, so any node in the room, or a relay, could speak as a panelist. Signals are now signed by the sending node's key over the room topic (prefix `ALXIS2`), the sender is the signing node, and on the candidate's side question markers and live segments are accepted only from the panel: the bootstrap peers of the room ticket Cloud handed over. A second panelist who joined through the first's ticket is not in that set; listing panel nodes would need Cloud's room response to carry them. `hiring_interview_live_segment` no longer takes `marked_by`: it records only a segment the current call received from the panel (`CallManager::panel_live_segment`).
 - Not done at the time (since done in ticket 09): no verification result is recorded for interviews. The panel's judgement lives on the panelist's device, and the `live` rung needs it to reach the candidate's session. The voice-check consent copy is English-only for now (listed as pending in the i18n parity check).
+
+- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.

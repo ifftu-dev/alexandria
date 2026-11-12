@@ -1,6 +1,6 @@
 # Measurement corpus, offline evaluator, certification gate
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: docs/sentinel-trust-profiles-spec.md
 Blocked by: docs/sentinel-trust-profiles/01-scoring-core.md
@@ -26,3 +26,5 @@ Prior art: `crates/alexandria-decisions` offline evaluate example; committee hol
 - A certification's digest is `blake3:` over its exact file bytes. `Certification::session_manifest()` refuses synthetic certifications; `ratio_manifest()` (replay only) does not.
 - `sentinel::scoring::active_manifest()` stays uncertified: there is no real certification until ticket 14.
 - Clean-session capture is a process environment variable (`ALEXANDRIA_SENTINEL_CAPTURE_DIR`) with consent signed out of band, not an in-app consent flow. Desktop and iOS (devicectl launch environment) only; Android has no capture path yet.
+
+- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.

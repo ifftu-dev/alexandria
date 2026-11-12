@@ -1,6 +1,6 @@
 # Sponsor and learner surfaces
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: docs/sentinel-trust-profiles-spec.md
 Blocked by: docs/sentinel-trust-profiles/08-credential-surface.md
@@ -26,3 +26,5 @@ Spec: Credential and policy surface → sponsor and credential bullets; User sto
 - Live rung: new interview signal `live_segment { segment_id }` (panel to candidate). A panel seat's signal feed has "Live segment done"; the candidate's running check (`useInterviewCheck`, now listening for panel signals whether or not voice checks run) calls `hiring_interview_live_segment`, which records a satisfied `interview` verification (policy `panel`, subject the segment id, detail: interview, segment, who marked it) through `record_verification`. Refused unless the learner accepted the interview with `mode = alexandria` and an integrity check, the session's purpose is `interview` and it has not ended; a segment is recorded once. Like every result in the check it is the candidate's app's own record, folded into the commitment chain; the panel's mark is not signed by the panelist.
 - Review fix: the strict ladder made `live` unreachable for an interview check, which has no attempt to stand `process` on. `session_surface` now gives an interview-purpose session `live` with a recorded live segment and `none` without, and no coverage statement (each statement claims the assessment rungs beneath its rung); assessment sessions keep the ladder. The session surface and the session review show it. The interview integrity report sent to Cloud (`alexandria-interview-integrity/1`) does not carry a rung: Cloud refuses unknown fields, so adding one is a coordinated app and Cloud change.
 - Limitation: the rung is a strict ladder and an interview session has no attempt, so `live` evidence in an interview check does not lift that session above `none`. Reaching `live` on a credential needs an attempt and an interview in one session, which no flow creates yet. The interview report sent to Cloud does not carry the verification (its wire struct refuses unknown fields; Cloud is out of scope).
+
+- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.

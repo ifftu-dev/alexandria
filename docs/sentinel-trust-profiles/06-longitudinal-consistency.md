@@ -1,6 +1,6 @@
 # Longitudinal consistency
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: docs/sentinel-trust-profiles-spec.md
 Blocked by: docs/sentinel-trust-profiles/01-scoring-core.md
@@ -21,3 +21,5 @@ Spec: Signals and measurement → longitudinal consistency bullet.
 - The outcome is known only at grading, and grading needs a finished (possibly attested) session. So `longitudinal_divergence` is not written into the commitment chain: both grading paths re-run the fusion with it before issuance, and the status can only move up. This is the one place a finished session is decided again.
 - Divergence is a fusion signal (own `longitudinal` channel, info severity, advisory until certified), not a failed verification.
 - No migration: the result is derived again from the database when needed (ticket 08).
+
+- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.

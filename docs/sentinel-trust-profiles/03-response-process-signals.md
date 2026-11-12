@@ -1,6 +1,6 @@
 # Response-process signals
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: docs/sentinel-trust-profiles-spec.md
 Blocked by: docs/sentinel-trust-profiles/01-scoring-core.md
@@ -33,3 +33,5 @@ Review fix, 2026-11-12: the `process` rung counted summed first visits against i
 - At least one served item must be observed, so a session whose tracker never ran stays at `none`.
 - Answered means a submitted answer with a selection (`submitted_answers_json`), or an adaptive item with a submission (`attempt_items.submission_json`).
 - Review fix: the client cleared the response tracker's window (and every other window accumulator) even when the snapshot submit failed, so those visits never reached the backend. A window is now cleared only after the backend accepted it; otherwise it stays open and goes out with the next one. Native hotkey events drained from the ring are kept the same way.
+
+- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.

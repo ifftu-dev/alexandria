@@ -1,6 +1,6 @@
 # LLM probe policy (enterprise)
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: docs/sentinel-trust-profiles-spec.md
 Blocked by: docs/sentinel-trust-profiles/07-probe-contract.md, docs/sentinel-trust-profiles/08-credential-surface.md
@@ -27,3 +27,5 @@ Spec: Probes → llm bullet; Q3 decisions in the spec's Decisions section.
 - Scoring seam, not wired: the structured-decision provider does not score generated probes. A free-text generated format would need a scorer, and that provider may take the role only through a newly approved task with a held-out evaluation, which does not exist. The seam is the generation `format` field plus the grading branch in `answer_probe_db`; today only `mcq_single` is produced and accepted. Recorded in the module docs of `assessment::llm_probe`.
 - Concurrent starts: two starts racing during generation may both call the model; only the first store wins, the second returns the stored probes.
 - New strings are English-only (`learn.assessment.generatedProbe*`, `learn.assessment.probePreparing`, `dashboard.sponsor.roleModal.generatedProbe*`, `dashboard.sponsor.roles.generatedProbe`), pending translation. The UI never names a provider: the sponsor sees the connection name they chose.
+
+- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.
