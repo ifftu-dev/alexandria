@@ -218,6 +218,7 @@ export interface SentinelStartOptions {
    * consent; voice checks refuse to listen without it.
    */
   microphone?: boolean
+  /**
    * Desktop only: pair the learner's attested phone before the trust
    * profile is chosen, so the session can be `device_attested`. Pairing is
    * the learner's consent; a skipped or failed pairing continues without.
