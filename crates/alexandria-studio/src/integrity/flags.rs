@@ -61,7 +61,8 @@ pub fn severity(flag: &str) -> Severity {
         | "virtual_camera"
         | "spoof_suspected"
         | "unauthorized_process"
-        | "phantom_hotkey" => Severity::Warning,
+        | "phantom_hotkey"
+        | "camera_degraded" => Severity::Warning,
         // Includes the response-process signals (`RESPONSE_PROCESS_SIGNALS`):
         // unmeasured, they reach a decision only through a certified ratio.
         _ => Severity::Info,
@@ -90,6 +91,8 @@ pub fn channel(signal: &str) -> &str {
         "no_face" | "multiple_faces" | "prolonged_absence" | "frequent_absence" => {
             "camera_presence"
         }
+        // The locked profile runs the camera and a window had none.
+        "camera_degraded" => "camera_coverage",
         "face_mismatch" | "virtual_camera" | "spoof_suspected" => "camera_identity",
         // A gaze-down just before a response is gaze evidence, not a second
         // independent channel.

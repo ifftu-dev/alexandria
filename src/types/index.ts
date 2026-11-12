@@ -757,6 +757,7 @@ export type FlagType =
   | 'answer_change_after_idle'
   | 'gaze_down_then_response'
   | 'voice_then_response'
+  | 'camera_degraded'
 
 export interface IntegritySession {
   id: string
@@ -769,6 +770,73 @@ export interface IntegritySession {
   ended_at: string | null
   /** `local`, or `device_attested` once a platform attestation verified. */
   assurance_level: string
+  /** The locked trust profile; null until one is chosen. */
+  trust_profile: TrustProfile | null
+}
+
+/**
+ * Trust profile: the fixed signal set a session runs, chosen by the backend
+ * at session start and locked (`alexandria_studio::integrity::TrustProfile`).
+ */
+export type TrustProfile = 'core' | 'attested' | 'camera' | 'full'
+/** A signal a profile adds to the core set. */
+export type ProfileSignal = 'device_attestation' | 'camera'
+export type ProfileExclusionReason =
+  | 'not_attested'
+  | 'no_camera'
+  | 'camera_not_consented'
+  | 'not_benchmarked'
+  | 'over_budget'
+
+/** One flag per capability: what the device has, or what was consented. */
+export interface SentinelCapabilities {
+  camera: boolean
+  microphone: boolean
+  companion_phone: boolean
+}
+
+/** Request for `integrity_select_profile`. */
+export interface ProfileRequest {
+  capabilities: SentinelCapabilities
+  consent: SentinelCapabilities
+  /** Assessments only: the sponsor role whose policy sets the floor. */
+  role_assessment_id: string | null
+}
+
+export interface ProfileExclusion {
+  profile: TrustProfile
+  reasons: ProfileExclusionReason[]
+}
+
+export interface DeviceBenchmark {
+  detect_ms: number
+  liveness_ms: number
+}
+
+/** A policy floor judged against a session. */
+export interface PolicyFloor {
+  required: TrustProfile | null
+  profile: TrustProfile | null
+  satisfied: boolean
+  missing: ProfileSignal[]
+}
+
+/** Reply of `integrity_select_profile`. */
+export interface SelectedProfile {
+  profile: TrustProfile
+  inputs: {
+    device_attested: boolean
+    capabilities: SentinelCapabilities
+    consent: SentinelCapabilities
+    budget: { camera: boolean; full: boolean } | null
+    floor: TrustProfile | null
+  }
+  excluded: ProfileExclusion[]
+  not_run: ProfileSignal[]
+  benchmark: DeviceBenchmark | null
+  camera_budget: DeviceBenchmark
+  full_budget: DeviceBenchmark
+  policy_floor: PolicyFloor
 }
 
 /** Result of `integrity_attest_session` (mobile device attestation). */
@@ -1796,6 +1864,8 @@ export interface IssuancePolicy {
   min_camera_coverage?: number | null
   /** Probe policy for attempts made for this role; overrides the assessment's unless 'none'. */
   probe_policy?: ProbePolicy | null
+  /** Minimum trust profile, judged at attempt start and again at issuance. */
+  min_trust_profile?: TrustProfile | null
 }
 
 export interface IssueCredentialRequest {
@@ -2344,6 +2414,8 @@ export interface StartedAttempt {
   draft_answers: SubmittedAnswer[]
   /** The sponsor role the attempt is for, when the learner chose one. */
   role?: AttemptRoleTarget | null
+  /** The role's minimum trust profile judged before the first item. */
+  policy_floor: PolicyFloor
 }
 
 /** A published sponsor role a learner can assess a skill for. */

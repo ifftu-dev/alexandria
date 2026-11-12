@@ -18,6 +18,7 @@ use crate::sentinel::scoring::{
     self, decide, derive_window, Decision, FusionSummary, RatioManifest, SessionEvidence,
     SessionStatus, WindowFeatures, DEFAULT_PROFILE,
 };
+use crate::sentinel::trust_profile;
 
 pub(crate) use crate::sentinel::scoring::{severity as flag_severity, Severity};
 
@@ -165,7 +166,13 @@ pub(crate) fn persist_snapshot_with(
         }
     };
     features.validate()?;
-    let assessment = derive_window(features);
+    // The locked profile decides what the window may carry: signals it does
+    // not run are dropped, signals it runs that are missing are flagged.
+    let mut features = features.clone();
+    let profile = trust_profile::session_profile(connection, &req.session_id)?;
+    let degraded = trust_profile::shape_to_profile(profile, &mut features);
+    let mut assessment = derive_window(&features);
+    assessment.flags.extend(degraded);
     let s = &assessment.scores;
     let columns = ScoreColumns {
         typing: Some(s.typing),
@@ -240,11 +247,12 @@ fn commit_window(
     // Accept snapshots for any live session. Once a session is suspended or
     // completed it stops accepting data; review and flagged sessions continue,
     // since neither is a final verdict.
-    let (current_status, ended_at, purpose): (String, Option<String>, String) = conn
+    type SessionRow = (String, Option<String>, String, Option<String>);
+    let (current_status, ended_at, purpose, profile): SessionRow = conn
         .query_row(
-            "SELECT status, ended_at, purpose FROM integrity_sessions WHERE id = ?1",
+            "SELECT status, ended_at, purpose, trust_profile FROM integrity_sessions WHERE id = ?1",
             params![session_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => "session not found".to_string(),
@@ -340,7 +348,9 @@ fn commit_window(
         )?,
         interview: purpose == "interview",
     };
-    let decision = decide(&evidence, manifest, DEFAULT_PROFILE, false);
+    // Sessions without a locked profile are scored as `core`.
+    let profile = profile.as_deref().unwrap_or(DEFAULT_PROFILE);
+    let decision = decide(&evidence, manifest, profile, false);
 
     // Status only moves up (active → review → flagged → suspended). Terminal
     // transitions happen in end_session.

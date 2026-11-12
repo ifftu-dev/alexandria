@@ -40,6 +40,9 @@
 //!   severity, status, and flags the backend records itself
 //! - `corpus_capture` — opt-in capture of committed windows for the
 //!   measurement corpus; off unless a maintainer sets the capture env var
+//! - `trust_profile` — the session's locked trust profile: selection at
+//!   start (attestation, capabilities, benchmark, floor, consent), degradation
+//!   flags, and the policy floor judged before the first item
 //! - `evidence` — learner-consented retention of appeal evidence for
 //!   flagged sessions; nothing is persisted without an explicit yes
 //! - `verification` — verification results (probe outcomes) folded into a
@@ -72,5 +75,6 @@ pub mod prior_blob;
 pub mod processes;
 pub mod scoring;
 pub mod snapshots;
+pub mod trust_profile;
 pub mod types;
 pub mod verification;

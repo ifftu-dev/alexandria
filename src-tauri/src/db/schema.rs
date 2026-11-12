@@ -127,6 +127,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     (34, "probe_contract", include_str!("probe_contract.sql")),
     // How many items each integrity session saw with response timing.
     (35, "integrity_response_items", include_str!("integrity_response_items.sql")),
+    // Sentinel trust profiles: the locked profile per integrity session, the
+    // inputs to its selection, consent per capability, and the policy floor
+    // judged before the first item. See `crate::sentinel::trust_profile`.
+    (36, "trust_profiles", include_str!("trust_profiles.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

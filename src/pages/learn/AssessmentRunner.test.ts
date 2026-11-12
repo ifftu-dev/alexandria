@@ -5,7 +5,7 @@ import type { AttemptRoleTarget, GradeResult, ServedProbe, StartedAttempt, Submi
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
-  start: vi.fn<(enrollment: string | null, camera?: boolean) => Promise<void>>(),
+  start: vi.fn<(enrollment: string | null, camera?: boolean, purpose?: string, options?: { roleAssessmentId?: string | null }) => Promise<void>>(),
   setCameraOptedIn: vi.fn<(on: boolean) => void>(),
   reportCameraDevice: vi.fn<(label: string | null) => void>(),
   openRoles: vi.fn<(skill: string) => Promise<AttemptRoleTarget[]>>(),
@@ -70,6 +70,7 @@ const attempt: StartedAttempt = {
   attempt_id: 'attempt-1', skill_id: 'skill_test', pass_threshold: 0.7,
   questions: [{ id: 'question-1', prompt: 'Question', options: ['One', 'Two'], multiple: true, difficulty: 2 }],
   draft_answers: [],
+  policy_floor: { required: null, profile: 'core', satisfied: true, missing: [] },
 }
 const result: GradeResult = { score: 0.5, passed: false, credential_id: null }
 const mounted: ReturnType<typeof mount>[] = []
@@ -320,7 +321,7 @@ describe('role targeting', () => {
     await wrapper.get('[data-testid="role-role-plain"]').setValue(true)
     await wrapper.get('[data-testid="start-attempt"]').trigger('click')
     await flushPromises()
-    expect(mocks.start).toHaveBeenCalledExactlyOnceWith(null, false)
+    expect(mocks.start).toHaveBeenCalledExactlyOnceWith(null, false, 'assessment', { roleAssessmentId: 'role-plain' })
     expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-plain')
     expect(wrapper.get('[data-testid="role-banner"]').text()).toContain('learn.assessment.roleBanner')
     expect(mocks.setCameraOptedIn).not.toHaveBeenCalled()
@@ -357,7 +358,7 @@ describe('role targeting', () => {
     expect(mocks.setCameraOptedIn).not.toHaveBeenCalled()
     await wrapper.get('[data-testid="start-attempt"]').trigger('click')
     await flushPromises()
-    expect(mocks.start).toHaveBeenCalledExactlyOnceWith(null, true)
+    expect(mocks.start).toHaveBeenCalledExactlyOnceWith(null, true, 'assessment', { roleAssessmentId: 'role-cam' })
     expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-cam')
     expect(mocks.setCameraOptedIn).toHaveBeenCalledWith(true)
     expect(wrapper.find('[data-testid="camera-lost"]').exists()).toBe(false)

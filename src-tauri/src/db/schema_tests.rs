@@ -670,7 +670,8 @@ fn provisional_notifications_upgrade_preserves_data_and_backfills_call_kinds() {
             (32, "subject_field_atlas_slot".into()),
             (33, "anchor_batches".into()),
             (34, "probe_contract".into()),
-            (35, "integrity_response_items".into())
+            (35, "integrity_response_items".into()),
+            (36, "trust_profiles".into())
         ]
     );
     let applied_at: String = db
@@ -718,7 +719,7 @@ fn notifications_migrate_fresh_and_current_main_without_changing_existing_calls(
         }
         assert_eq!(
             super::run_migrations_on_connection(db.conn()).unwrap(),
-            35 - prior_version
+            36 - prior_version
         );
         assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
         db.conn().execute_batch(

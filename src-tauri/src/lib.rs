@@ -1836,6 +1836,7 @@ pub fn run() {
             // Integrity
             commands::integrity::integrity_start_session,
             commands::integrity::integrity_attest_session,
+            commands::integrity::integrity_select_profile,
             commands::integrity::integrity_submit_snapshot,
             commands::integrity::integrity_end_session,
             commands::integrity::integrity_get_session,

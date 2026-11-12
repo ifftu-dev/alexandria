@@ -65,6 +65,12 @@ pub enum PolicyViolation {
     CameraCoverageBelowMinimum { coverage: f64, min: f64 },
     #[error("issuance policy: camera coverage required but session has no snapshots")]
     NoSnapshots,
+    #[error("issuance policy: trust profile '{profile}' does not meet the '{required}' floor")]
+    TrustProfileBelowFloor { profile: String, required: String },
+    #[error(
+        "issuance policy: the '{required}' floor judged before the first item does not match issuance"
+    )]
+    PolicyFloorDisagrees { required: String },
 }
 
 #[derive(Debug, thiserror::Error)]

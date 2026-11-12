@@ -11,6 +11,9 @@
 //! advisory. A single flag puts a session in review; a credential-affecting
 //! outcome needs two independent channels over threshold or a failed
 //! verification. Only backend-recorded tamper flags suspend.
+//!
+//! Each session runs one locked [`TrustProfile`], chosen by
+//! [`select_profile`]; a policy floor is judged by [`evaluate_floor`].
 
 mod consistency;
 mod features;
@@ -18,6 +21,7 @@ mod flags;
 mod fusion;
 pub mod measurement;
 mod response;
+mod profile;
 
 pub use consistency::{
     assess as assess_consistency, Consistency, ConsistencyVerdict, EvidenceSource, History,
@@ -36,4 +40,8 @@ pub use fusion::{
 pub use response::{
     reading_floor_ms, BaselineItem, BaselineSource, InputKind, ItemResponse, ResponseBaseline,
     ResponseFeatures, RESPONSE_PROCESS_SIGNALS,
+};
+pub use profile::{
+    evaluate_floor, exclusion_reasons, select_profile, BudgetFit, Capabilities, Exclusion,
+    ExclusionReason, PolicyFloor, ProfileSelection, ProfileSignal, SelectionInputs, TrustProfile,
 };
