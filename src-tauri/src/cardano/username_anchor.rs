@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cardano::blockfrost::BlockfrostClient;
 use crate::cardano::ledger::Ledger;
+use crate::cardano::reservations::{select_unreserved, ReservedOutpoints, WalletBusy};
 use crate::cardano::submission::{self, Journal, Member, Operation, Submission, SubmissionStatus};
 use crate::cardano::{anchor_tx, tx_builder};
 use crate::domain::username_claim::{CardanoAnchor, UsernameClaim};
@@ -79,31 +80,36 @@ pub fn build_username_anchor_metadata(
 }
 
 /// Build + sign one batch anchor tx. Same mechanics as the credential
-/// anchor (metadata-only, no mint, change back to self).
+/// anchor (metadata-only, no mint, change back to self). The input is the
+/// first sufficient UTxO that no in-flight transaction spends (`reserved`,
+/// read from the journal at `tip_slot`); [`WalletBusy`] when only reserved
+/// UTxOs would do.
 pub async fn build_batch_anchor_tx<L: Ledger>(
     entries: &[(String, String)],
     wallet: &crate::crypto::wallet::Wallet,
     ledger: &L,
+    tip_slot: u64,
+    reserved: &ReservedOutpoints,
 ) -> Result<anchor_tx::AnchorTx, String> {
     use pallas_addresses::Address as PallasAddress;
     use pallas_txbuilder::{BuildConway, Input, Output, StagingTransaction};
 
     use crate::cardano::tx_builder::{MIN_UTXO_LOVELACE, TTL_OFFSET};
 
-    let (utxos_res, params_res, tip_res) = tokio::join!(
+    let (utxos_res, params_res) = tokio::join!(
         ledger.utxos(&wallet.payment_address),
         ledger.protocol_params(),
-        ledger.tip_slot(),
     );
     let utxos = utxos_res.map_err(|e| format!("get_utxos: {e}"))?;
     let params = params_res.map_err(|e| format!("get_protocol_params: {e}"))?;
-    let tip_slot = tip_res.map_err(|e| format!("get_tip_slot: {e}"))?;
 
     if utxos.is_empty() {
         return Err("no UTxOs at payment address".into());
     }
-    let selected = BlockfrostClient::select_utxo(&utxos, MIN_UTXO_LOVELACE)
-        .ok_or_else(|| "no UTxO with sufficient lovelace".to_string())?;
+    let selected = select_unreserved(&utxos, reserved, |utxos| {
+        BlockfrostClient::select_utxo(utxos, MIN_UTXO_LOVELACE)
+    })?
+    .ok_or_else(|| "no UTxO with sufficient lovelace".to_string())?;
 
     let pallas_addr = PallasAddress::from_bech32(&wallet.payment_address)
         .map_err(|e| format!("bad payment address: {e}"))?;
@@ -286,7 +292,18 @@ pub(crate) async fn tick<L: Ledger>(
         .map(|c| (c.username.clone(), claim_digest(c)))
         .collect();
 
-    let tx = build_batch_anchor_tx(&entries, w, ledger).await?;
+    let tip = ledger
+        .tip_slot()
+        .await
+        .map_err(|e| format!("get_tip_slot: {e}"))?;
+    // Read just before selecting: earlier features in this background pass
+    // journal their transactions before sending, so their inputs show here.
+    let reserved = journal
+        .run("username_anchor.reserved", move |database| {
+            submission::reserved_outpoints(database.conn(), tip)
+        })
+        .await?;
+    let tx = build_batch_anchor_tx(&entries, w, ledger, tip, &reserved).await?;
     let context = BatchContext {
         version: 1,
         claims: pending
@@ -560,6 +577,85 @@ mod tests {
         let stored = profile.with_conn(|conn| cached(conn, &original.username));
         assert_eq!(stored.anchor, anchored[0].anchor);
         assert_eq!(ledger.submissions().len(), 1);
+    }
+
+    const TIP: u64 = 120_000_000;
+
+    /// `hash#index` of every input the signed bytes spend.
+    fn spent(bytes: &[u8]) -> Vec<String> {
+        MultiEraTx::decode(bytes)
+            .unwrap()
+            .inputs()
+            .iter()
+            .map(|input| format!("{}#{}", input.hash(), input.index()))
+            .collect()
+    }
+
+    fn outpoint(byte: u8, index: u64) -> String {
+        format!("{}#{index}", format!("{byte:02x}").repeat(32))
+    }
+
+    /// Every username batch in the journal, by operation id.
+    fn batches(profile: &TestProfile) -> Vec<(String, Submission)> {
+        profile.with_conn(|conn| {
+            let mut statement = conn
+                .prepare(
+                    "SELECT operation_id FROM chain_submissions WHERE operation_kind = ?1
+                     ORDER BY created_at, rowid",
+                )
+                .unwrap();
+            let ids: Vec<String> = statement
+                .query_map([OPERATION_KIND], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            ids.into_iter()
+                .map(|id| {
+                    let saved = submission::lookup(
+                        conn,
+                        Operation {
+                            kind: OPERATION_KIND,
+                            id: &id,
+                        },
+                    )
+                    .unwrap()
+                    .unwrap();
+                    (id, saved)
+                })
+                .collect()
+        })
+    }
+
+    #[tokio::test]
+    async fn next_batch_avoids_the_input_an_in_flight_batch_spends() {
+        let profile = TestProfile::migrated();
+        profile.with_conn(|conn| cache(conn, &claim(1, "ada_99")));
+        let wallet = test_chain::wallet();
+        let ledger = FakeLedger::at_tip(TIP);
+        ledger.set_utxos(
+            &wallet.payment_address,
+            vec![ada(0x11, 0, 20_000_000), ada(0x22, 1, 20_000_000)],
+        );
+        let journal = profile.background();
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+
+        // A second claim arrives while the first batch is in flight and the
+        // provider still lists the UTxO that batch spends.
+        profile.with_conn(|conn| cache(conn, &claim(2, "bob_22")));
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+
+        let submissions = ledger.submissions();
+        assert_eq!(submissions.len(), 2);
+        assert_eq!(spent(&submissions[0].1), vec![outpoint(0x11, 0)]);
+        assert_eq!(spent(&submissions[1].1), vec![outpoint(0x22, 1)]);
+        let statuses: Vec<SubmissionStatus> = batches(&profile)
+            .into_iter()
+            .map(|(_, saved)| saved.status)
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![SubmissionStatus::Submitted, SubmissionStatus::Submitted]
+        );
     }
 
     fn claim(seed: u8, name: &str) -> UsernameClaim {
