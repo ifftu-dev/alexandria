@@ -835,8 +835,23 @@ export interface ScoreGazeResponse {
   faceCount: number
   /** Best detection for overlay — present when a face was found. */
   detection?: FaceDetection | null
-  /** Presentation-attack estimate for the detected face (advisory per tick). */
+  /**
+   * Presentation-attack estimate, present only on ticks a trigger ran it
+   * (new face track, confidence drop, slow refresh). Advisory per tick.
+   */
   liveness?: LivenessEstimate | null
+  /** True when the face was tracked from the last detection, not detected. */
+  tracked: boolean
+}
+
+/**
+ * `sentinel_score_gaze` reply: the tick, or `{ dropped: true }` when a newer
+ * frame replaced this one before the inference thread reached it.
+ */
+export type ScoreGazeReply = ScoreGazeResponse | { dropped: true }
+
+export function isDroppedGaze(reply: ScoreGazeReply | null | undefined): reply is { dropped: true } {
+  return typeof reply === 'object' && reply !== null && 'dropped' in reply && reply.dropped === true
 }
 
 export interface LivenessEstimate {

@@ -114,8 +114,10 @@ describe('Sentinel Dev panel', () => {
     await wrapper.findAll('button')[1]!.trigger('click')
     await flushPromises()
     await vi.advanceTimersByTimeAsync(700)
-    expect(mocks.invoke).toHaveBeenCalledWith('sentinel_score_gaze', expect.objectContaining({
-      req: expect.objectContaining({ preview_only: true, user_address: 'stake_test_active', device_fp_prefix: '0123456789abcdef' }),
+    expect(mocks.invoke).toHaveBeenCalledWith('sentinel_score_gaze', expect.any(Uint8Array), expect.objectContaining({
+      'x-sentinel-preview': '1',
+      'x-sentinel-user': 'stake_test_active',
+      'x-sentinel-device': '0123456789abcdef',
     }))
     expect(wrapper.text()).toContain('Face model unavailable')
     expect(mocks.setCameraOptedIn).not.toHaveBeenCalled()

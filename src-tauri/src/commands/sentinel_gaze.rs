@@ -1,119 +1,150 @@
 //! Backend IPC surface for Sentinel gaze / second-device detection.
 //!
-//! The frontend forwards a downscaled camera frame; everything (YuNet
-//! detection, pose extraction, calibration training + scoring) runs in
-//! the Rust backend. Frames are processed in memory and never persisted
-//! — only the derived `GazeEstimate` crosses back over IPC. Mirrors the
-//! storage + command conventions in `sentinel_ml.rs`; the per-user
-//! calibration model reuses the `sentinel_user_models` table under
-//! `model_kind = 'gaze_calib'`.
+//! The frontend forwards a downscaled camera frame as a raw RGBA8 body
+//! (`Uint8Array`), with its size and the caller's identity in request
+//! headers; no frame crosses IPC as a JSON number array. Session and
+//! preview frames go to the camera inference worker
+//! (`sentinel::camera_pipeline`), which detects on a slow cadence, tracks
+//! landmarks in between, runs liveness on trigger and drops a frame that
+//! arrives while the previous one in its lane is still waiting. Frames are
+//! processed in memory and never persisted — only the derived tick crosses
+//! back over IPC. The per-user calibration model reuses the
+//! `sentinel_user_models` table under `model_kind = 'gaze_calib'`.
 
 use crate::profile::scope::ProfileState as State;
 use serde::{Deserialize, Serialize};
+use tauri::http::HeaderMap;
+use tauri::ipc::{InvokeBody, Request};
 
 use crate::commands::sentinel_ml::{load_user_model, save_user_model};
+use crate::sentinel::camera_pipeline::{self, CameraJob, GazeTick, Lane, Outcome};
 use crate::sentinel::face_detect;
 use crate::sentinel::gaze::{self, GazeCalibWeights, GazeCalibrator, GazeFeatures};
-use crate::sentinel::liveness::{self, LivenessEstimate};
-use crate::sentinel::types::{FaceDetection, FaceFrame, GazeCalibSample, GazeEstimate};
+use crate::sentinel::types::{FaceDetection, FaceFrame, GazeCalibSample};
 use crate::AppState;
 
 const GAZE_CALIB_KIND: &str = "gaze_calib";
 
-/// Detect faces in a frame (bbox + 5 landmarks + score). Stateless;
-/// replaces the legacy JS skin-color detector.
+/// Frame width in pixels; the body is `width * height * 4` RGBA bytes.
+pub const FRAME_WIDTH_HEADER: &str = "x-sentinel-frame-width";
+/// Frame height in pixels.
+pub const FRAME_HEIGHT_HEADER: &str = "x-sentinel-frame-height";
+/// Stake address whose calibration model scores the frame.
+pub const USER_HEADER: &str = "x-sentinel-user";
+/// 16-hex device fingerprint prefix the calibration model is keyed by.
+pub const DEVICE_HEADER: &str = "x-sentinel-device";
+/// `1` for a standalone preview that must not supply assessment evidence.
+pub const PREVIEW_HEADER: &str = "x-sentinel-preview";
+
+fn header<'a>(headers: &'a HeaderMap, name: &str) -> Result<&'a str, String> {
+    headers
+        .get(name)
+        .ok_or_else(|| format!("missing {name} header"))?
+        .to_str()
+        .map_err(|_| format!("{name} header is not ASCII"))
+}
+
+fn dimension(headers: &HeaderMap, name: &str) -> Result<u32, String> {
+    header(headers, name)?
+        .parse()
+        .map_err(|_| format!("{name} header is not a pixel count"))
+}
+
+/// Read a frame from a raw IPC body plus its size headers.
+pub fn frame_from_parts(headers: &HeaderMap, body: &InvokeBody) -> Result<FaceFrame, String> {
+    let width = dimension(headers, FRAME_WIDTH_HEADER)?;
+    let height = dimension(headers, FRAME_HEIGHT_HEADER)?;
+    match body {
+        InvokeBody::Raw(bytes) => FaceFrame::from_raw(width, height, bytes.clone()),
+        InvokeBody::Json(_) => Err("camera frames must be sent as a raw byte body".into()),
+    }
+}
+
+fn frame_from_request(request: &Request<'_>) -> Result<FaceFrame, String> {
+    frame_from_parts(request.headers(), request.body())
+}
+
+/// Identity + mode for a scored frame, carried in headers beside the body.
+#[derive(Debug)]
+pub struct ScoreGazeMeta {
+    pub user_address: String,
+    pub device_fp_prefix: String,
+    pub preview_only: bool,
+}
+
+impl ScoreGazeMeta {
+    pub fn from_headers(headers: &HeaderMap) -> Result<Self, String> {
+        Ok(ScoreGazeMeta {
+            user_address: header(headers, USER_HEADER)?.to_string(),
+            device_fp_prefix: header(headers, DEVICE_HEADER)?.to_string(),
+            preview_only: headers
+                .get(PREVIEW_HEADER)
+                .is_some_and(|v| v.as_bytes() == b"1"),
+        })
+    }
+}
+
+/// Detect faces in a frame (bbox + 5 landmarks + score). Stateless: always
+/// a full detection pass, never a tracked one.
 #[tauri::command]
 pub async fn sentinel_detect_face(
     _profile: crate::profile::scope::ProfileLease,
-    frame: FaceFrame,
+    request: Request<'_>,
 ) -> Result<Vec<FaceDetection>, String> {
-    let t0 = std::time::Instant::now();
-    let width = frame.width;
-    let height = frame.height;
-    let dets =
-        tokio::task::spawn_blocking(move || face_detect::detect(&frame).map_err(|e| e.to_string()))
-            .await
-            .map_err(|e| format!("face detection worker failed: {e}"))??;
-    log::trace!(
-        target: "sentinel",
-        "detect_face: {}x{} faces={} total={}ms",
-        width,
-        height,
-        dets.len(),
-        t0.elapsed().as_millis(),
-    );
-    Ok(dets)
+    let frame = frame_from_request(&request)?;
+    tokio::task::spawn_blocking(move || face_detect::detect(&frame).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| format!("face detection worker failed: {e}"))?
 }
 
 /// Extract head-pose + iris features for the highest-confidence face in
 /// a frame. Returns `None` if no usable face. Used by the wizard's
-/// 9-point calibration capture so feature extraction stays in one place
-/// (no frontend re-implementation to drift).
+/// 9-point calibration capture, so it always runs a full detection: a
+/// calibration sample must not come from a tracked estimate.
 #[tauri::command]
 pub async fn sentinel_extract_gaze_features(
     _profile: crate::profile::scope::ProfileLease,
-    frame: FaceFrame,
+    request: Request<'_>,
 ) -> Result<Option<GazeFeatures>, String> {
+    let frame = frame_from_request(&request)?;
     tokio::task::spawn_blocking(move || {
         let dets = face_detect::detect(&frame).map_err(|e| e.to_string())?;
-        Ok::<_, String>(pick_best(&dets).and_then(|best| gaze::extract_features(&frame, best)))
+        Ok::<_, String>(
+            camera_pipeline::best_detection(&dets)
+                .and_then(|best| gaze::extract_features(&frame, best)),
+        )
     })
     .await
     .map_err(|e| format!("gaze feature worker failed: {e}"))?
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ScoreGazeRequest {
-    pub frame: FaceFrame,
-    pub user_address: String,
-    pub device_fp_prefix: String,
-    /// A standalone preview must not supply evidence to an assessment.
-    #[serde(default)]
-    pub preview_only: bool,
-}
-
+/// Reply to a scored frame: the tick, or `{ "dropped": true }` when a newer
+/// frame in the same lane replaced this one before inference reached it.
 #[derive(Debug, Serialize)]
-pub struct ScoreGazeResponse {
-    pub estimate: GazeEstimate,
-    #[serde(rename = "faceCount")]
-    pub face_count: usize,
-    /// Highest-confidence detection (bbox + landmarks) for overlay, so a
-    /// caller needs only this one YuNet pass — no separate detect call.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub detection: Option<FaceDetection>,
-    /// Presentation-attack estimate for `detection`, when a face was
-    /// found and the model ran. Advisory per tick; the frontend flags a
-    /// ratio over the snapshot window.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub liveness: Option<LivenessEstimate>,
+#[serde(untagged)]
+pub enum ScoreGazeReply {
+    Scored(GazeTick),
+    Dropped { dropped: bool },
 }
 
-/// Detect → load per-user calibration (if any) → estimate gaze. The
-/// `face_count` lets the frontend keep emitting the existing
-/// `multiple_faces` / `no_face` flags without a second round-trip.
+/// Submit a frame to the camera worker → gaze estimate, face count, best
+/// (detected or tracked) face, and liveness when a trigger ran it. The
+/// `face_count` lets the frontend keep emitting `multiple_faces` /
+/// `no_face` without a second round-trip; between detections it carries
+/// the last detection's count.
 #[tauri::command]
 pub async fn sentinel_score_gaze(
     state: State<'_, AppState>,
-    req: ScoreGazeRequest,
-) -> Result<ScoreGazeResponse, String> {
+    request: Request<'_>,
+) -> Result<ScoreGazeReply, String> {
     let t0 = std::time::Instant::now();
-    let ScoreGazeRequest {
-        frame,
-        user_address,
-        device_fp_prefix,
-        preview_only,
-    } = req;
-    let (frame, dets) = tokio::task::spawn_blocking(move || {
-        let dets = face_detect::detect(&frame).map_err(|e| e.to_string())?;
-        Ok::<_, String>((frame, dets))
-    })
-    .await
-    .map_err(|e| format!("face detection worker failed: {e}"))??;
+    let meta = ScoreGazeMeta::from_headers(request.headers())?;
+    let frame = frame_from_request(&request)?;
 
     // Park this frame in memory in case the snapshot about to be written turns
     // out to be flagged. Nothing is persisted here, and an unflagged snapshot
     // lets the next frame overwrite it — see `sentinel::evidence`.
-    if !preview_only {
+    if !meta.preview_only {
         state.evidence_staging.remember_frame(
             frame.width,
             frame.height,
@@ -124,47 +155,42 @@ pub async fn sentinel_score_gaze(
 
     let calib = load_user_model::<GazeCalibWeights>(
         &state,
-        &user_address,
-        &device_fp_prefix,
+        &meta.user_address,
+        &meta.device_fp_prefix,
         GAZE_CALIB_KIND,
     )
     .await?;
 
-    let response = tokio::task::spawn_blocking(move || {
-        let calib = calib
-            .as_ref()
-            .map(GazeCalibrator::from_weights)
-            .transpose()
-            .map_err(|e| e.to_string())?;
-        let face_count = dets.len();
-        let detection = pick_best(&dets).cloned();
-        let estimate = gaze::estimate(&frame, detection.as_ref(), calib.as_ref())
-            .map_err(|e| e.to_string())?;
-        // Liveness is best-effort: a scoring error drops the estimate for
-        // this tick rather than failing the gaze read.
-        let liveness = detection.as_ref().and_then(|det| {
-            liveness::score(&frame, det.bbox)
-                .map_err(|e| log::debug!(target: "sentinel", "liveness score failed: {e}"))
-                .ok()
-        });
-        Ok::<_, String>(ScoreGazeResponse {
-            estimate,
-            face_count,
-            detection,
-            liveness,
-        })
-    })
+    let lane = if meta.preview_only {
+        Lane::Preview
+    } else {
+        Lane::Session
+    };
+    let outcome = camera_pipeline::submit(
+        lane,
+        CameraJob {
+            frame,
+            calib,
+            at: std::time::Instant::now(),
+        },
+    )
     .await
-    .map_err(|e| format!("gaze scoring worker failed: {e}"))??;
-    log::trace!(
-        target: "sentinel",
-        "score_gaze: faces={} on_screen={} occluded={} total={}ms",
-        response.face_count,
-        response.estimate.on_screen,
-        response.estimate.occluded,
-        t0.elapsed().as_millis(),
-    );
-    Ok(response)
+    .map_err(|_| "camera inference worker stopped".to_string())?;
+    let reply = match outcome {
+        Outcome::Done(tick) => ScoreGazeReply::Scored(tick?),
+        Outcome::Dropped => ScoreGazeReply::Dropped { dropped: true },
+    };
+    if let ScoreGazeReply::Scored(tick) = &reply {
+        log::trace!(
+            target: "sentinel",
+            "score_gaze: faces={} tracked={} liveness={} total={}ms",
+            tick.face_count,
+            tick.tracked,
+            tick.liveness.is_some(),
+            t0.elapsed().as_millis(),
+        );
+    }
+    Ok(reply)
 }
 
 #[derive(Debug, Deserialize)]
@@ -238,11 +264,56 @@ pub async fn sentinel_frontmost_app(
     crate::sentinel::active_app::frontmost_app()
 }
 
-/// Highest-score detection in the set.
-fn pick_best(dets: &[FaceDetection]) -> Option<&FaceDetection> {
-    dets.iter().max_by(|a, b| {
-        a.score
-            .partial_cmp(&b.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    })
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
+        let mut map = HeaderMap::new();
+        for (k, v) in pairs {
+            map.insert(*k, v.parse().unwrap());
+        }
+        map
+    }
+
+    #[test]
+    fn a_frame_crosses_ipc_as_raw_bytes_with_its_size_in_headers() {
+        let h = headers(&[(FRAME_WIDTH_HEADER, "4"), (FRAME_HEIGHT_HEADER, "2")]);
+        let frame = frame_from_parts(&h, &InvokeBody::Raw(vec![9; 32])).unwrap();
+        assert_eq!((frame.width, frame.height), (4, 2));
+        assert_eq!(frame.rgba, vec![9; 32]);
+    }
+
+    #[test]
+    fn a_json_body_or_missing_size_is_refused() {
+        let h = headers(&[(FRAME_WIDTH_HEADER, "4"), (FRAME_HEIGHT_HEADER, "2")]);
+        let json = InvokeBody::Json(serde_json::json!({ "rgba": [0, 0, 0, 0] }));
+        assert!(frame_from_parts(&h, &json).is_err());
+        let no_height = headers(&[(FRAME_WIDTH_HEADER, "4")]);
+        assert!(frame_from_parts(&no_height, &InvokeBody::Raw(vec![0; 32])).is_err());
+        let bad = headers(&[(FRAME_WIDTH_HEADER, "four"), (FRAME_HEIGHT_HEADER, "2")]);
+        assert!(frame_from_parts(&bad, &InvokeBody::Raw(vec![0; 32])).is_err());
+    }
+
+    #[test]
+    fn score_metadata_reads_identity_and_preview_from_headers() {
+        let h = headers(&[
+            (USER_HEADER, "stake_test1abc"),
+            (DEVICE_HEADER, "0123456789abcdef"),
+            (PREVIEW_HEADER, "1"),
+        ]);
+        let meta = ScoreGazeMeta::from_headers(&h).unwrap();
+        assert_eq!(meta.user_address, "stake_test1abc");
+        assert_eq!(meta.device_fp_prefix, "0123456789abcdef");
+        assert!(meta.preview_only);
+        let session = headers(&[(USER_HEADER, "u"), (DEVICE_HEADER, "d")]);
+        assert!(!ScoreGazeMeta::from_headers(&session).unwrap().preview_only);
+        assert!(ScoreGazeMeta::from_headers(&headers(&[(USER_HEADER, "u")])).is_err());
+    }
+
+    #[test]
+    fn a_dropped_frame_replies_with_only_the_dropped_marker() {
+        let reply = serde_json::to_value(ScoreGazeReply::Dropped { dropped: true }).unwrap();
+        assert_eq!(reply, serde_json::json!({ "dropped": true }));
+    }
 }

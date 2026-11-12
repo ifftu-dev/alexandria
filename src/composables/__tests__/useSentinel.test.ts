@@ -4,7 +4,7 @@ import { ref } from 'vue'
 import type { WindowFeatures } from '@/types'
 
 const mocks = vi.hoisted(() => ({
-  invoke: vi.fn<(command: string, args?: Record<string, unknown>) => Promise<unknown>>(),
+  invoke: vi.fn<(command: string, args?: Record<string, unknown>, options?: { headers?: Record<string, string> }) => Promise<unknown>>(),
   listen: vi.fn(),
   unlisten: vi.fn(),
   stakeAddress: null as string | null,
@@ -187,6 +187,49 @@ describe('Sentinel lifecycle ownership', () => {
     // jsdom queues a storage event when the behavioral profile is persisted.
     await vi.advanceTimersByTimeAsync(0)
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('sends a gaze frame as raw bytes with its size in headers, and does not count a dropped frame', async () => {
+    mocks.stakeAddress = 'gaze-test-user'
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const pixels = new Uint8ClampedArray([10, 20, 30, 255, 40, 50, 60, 255])
+    const context = {
+      drawImage: vi.fn(),
+      getImageData: () => ({ data: pixels, width: 2, height: 1 }),
+    }
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(context as unknown as CanvasRenderingContext2D)
+    const video = document.createElement('video')
+    Object.defineProperties(video, {
+      readyState: { value: 2 }, videoWidth: { value: 2 }, videoHeight: { value: 1 },
+    })
+    const estimate = { yaw: 0, pitch: 0, screenX: 0.5, screenY: 0.5, onScreen: true, occluded: false, confidence: 1 }
+    let reply: unknown = { estimate, faceCount: 1, tracked: false }
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_score_gaze') return reply
+      return fallback(command, args)
+    })
+    const service = (await freshService())()
+    await service.start('original', true)
+
+    expect(await service.scoreGaze(video)).toEqual(estimate)
+    const call = mocks.invoke.mock.calls.find(([name]) => name === 'sentinel_score_gaze')!
+    const [, body, options] = call
+    expect(body).toBeInstanceOf(Uint8Array)
+    expect(Array.from(body as unknown as Uint8Array)).toEqual(Array.from(pixels))
+    expect(options?.headers).toMatchObject({
+      'x-sentinel-frame-width': '2',
+      'x-sentinel-frame-height': '1',
+      'x-sentinel-user': 'gaze-test-user',
+    })
+    expect(options?.headers?.['x-sentinel-device']).toHaveLength(16)
+    expect(options?.headers?.['x-sentinel-preview']).toBeUndefined()
+    expect(service.debug.sessionGazeChecks).toBe(1)
+
+    reply = { dropped: true }
+    expect(await service.scoreGaze(video)).toBeNull()
+    expect(service.debug.sessionGazeChecks).toBe(1)
+    await service.stop()
   })
 
   it('window dimensions never reach the submitted features, and ending sends no scores', async () => {

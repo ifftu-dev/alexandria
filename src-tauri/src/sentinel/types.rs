@@ -39,11 +39,43 @@ pub struct MousePoint {
 /// is held in memory by `sentinel::evidence` so the learner can be offered the
 /// chance to keep it as appeal evidence. It is persisted only if they say yes,
 /// and discarded on decline, on lock, and on exit.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct FaceFrame {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
+}
+
+/// Longest side a forwarded frame may have. The webview sends 224 px; the
+/// cap bounds what a malformed request can make the backend allocate.
+pub const MAX_FRAME_SIDE: u32 = 1280;
+
+impl FaceFrame {
+    /// Build a frame from a raw RGBA8 IPC body. The body must be exactly
+    /// `width * height * 4` bytes; frames cross IPC as bytes, never as a
+    /// JSON number array.
+    pub fn from_raw(width: u32, height: u32, rgba: Vec<u8>) -> Result<Self, String> {
+        if width == 0 || height == 0 {
+            return Err(format!("empty frame {width}x{height}"));
+        }
+        if width > MAX_FRAME_SIDE || height > MAX_FRAME_SIDE {
+            return Err(format!(
+                "frame {width}x{height} exceeds the {MAX_FRAME_SIDE} px cap"
+            ));
+        }
+        let want = width as usize * height as usize * 4;
+        if rgba.len() != want {
+            return Err(format!(
+                "frame body is {} bytes, {width}x{height} RGBA needs {want}",
+                rgba.len()
+            ));
+        }
+        Ok(FaceFrame {
+            width,
+            height,
+            rgba,
+        })
+    }
 }
 
 /// One detected face: bounding box `[x, y, w, h]` and 5 landmarks, all
@@ -114,4 +146,28 @@ pub struct DigraphFeatures {
     pub flight_ms: f32,
     #[serde(rename = "speedRatio")]
     pub speed_ratio: f32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_raw_rgba_body_becomes_a_frame() {
+        let frame = FaceFrame::from_raw(3, 2, vec![7; 3 * 2 * 4]).unwrap();
+        assert_eq!((frame.width, frame.height, frame.rgba.len()), (3, 2, 24));
+    }
+
+    #[test]
+    fn a_body_that_does_not_match_its_dimensions_is_refused() {
+        assert!(FaceFrame::from_raw(3, 2, vec![0; 23]).is_err());
+        assert!(FaceFrame::from_raw(3, 2, vec![0; 25]).is_err());
+    }
+
+    #[test]
+    fn empty_and_oversized_frames_are_refused() {
+        assert!(FaceFrame::from_raw(0, 2, vec![]).is_err());
+        let side = MAX_FRAME_SIDE + 1;
+        assert!(FaceFrame::from_raw(side, 1, vec![0; side as usize * 4]).is_err());
+    }
 }

@@ -18,7 +18,8 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { useSentinel } from '@/composables/useSentinel'
 import { useProfiles } from '@/composables/useProfiles'
-import type { FaceDetection, ScoreGazeResponse } from '@/types'
+import { isDroppedGaze, type FaceDetection, type ScoreGazeReply, type ScoreGazeResponse } from '@/types'
+import { frameHeaders, rgbaBody } from '@/utils/sentinel/frame'
 
 interface Props { initiallyOpen?: boolean }
 const props = withDefaults(defineProps<Props>(), { initiallyOpen: false })
@@ -226,13 +227,15 @@ async function infer() {
     if (!octx) return
     octx.drawImage(v, 0, 0, w, h)
     const img = octx.getImageData(0, 0, w, h)
-    const frame = { width: w, height: h, rgba: Array.from(img.data) }
     const t0 = performance.now()
-    // One YuNet pass — score_gaze returns the best detection for overlay.
-    const gaze = await invoke<ScoreGazeResponse>('sentinel_score_gaze', {
-      req: { frame, user_address: stakeAddress.value, device_fp_prefix: deviceFp, preview_only: true },
-    })
-    if (disposed || generation !== cameraGeneration) return
+    // Preview lane of the camera worker — score_gaze returns the best
+    // (detected or tracked) face for overlay. Raw RGBA body, never JSON.
+    const gaze = await invoke<ScoreGazeReply>(
+      'sentinel_score_gaze',
+      rgbaBody(img),
+      frameHeaders(w, h, { user: stakeAddress.value, device: deviceFp, preview: true }),
+    )
+    if (disposed || generation !== cameraGeneration || isDroppedGaze(gaze)) return
     inferenceError.value = null
     inferMs.value = Math.round(performance.now() - t0)
     lastDetections.value = gaze?.detection ? [gaze.detection] : []

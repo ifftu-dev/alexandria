@@ -10,7 +10,14 @@
 //! - `liveness` — MiniFASNetV2 presentation-attack detector via tract
 //!   (photo / replay / rendered face in front of any camera)
 //! - `mouse_cnn` — reservoir-style trajectory CNN, candle dense head
-//! - `face_detect` — YuNet face detector (5 landmarks) via tract
+//! - `face_detect` — YuNet face detector (5 landmarks) via tract, run at
+//!   the frame's own resolution
+//! - `camera_budget` — per-profile camera budgets and the device
+//!   benchmark that checks them
+//! - `camera_pipeline` — camera tick scheduling: slow-cadence detection,
+//!   landmark tracking in between, liveness on trigger
+//! - `inference_worker` — dedicated inference thread, one pending frame
+//!   per lane, newer frames replace waiting ones
 //! - `gaze` — head-pose / second-device detection + per-user
 //!   calibration MLP (candle)
 //! - `processes` — running-process watchlist (interview-cheat overlays,
@@ -41,6 +48,8 @@
 pub mod active_app;
 pub mod android_environment;
 pub mod attestation;
+pub mod camera_budget;
+pub mod camera_pipeline;
 pub mod display_topology;
 pub mod evidence;
 pub mod face_detect;
@@ -48,6 +57,7 @@ pub mod features;
 pub mod gaze;
 pub mod global_hotkeys;
 pub mod hidden_overlay;
+pub mod inference_worker;
 pub mod keystroke_ae;
 pub mod liveness;
 pub mod mouse_cnn;

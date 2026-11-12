@@ -21,14 +21,20 @@ export function useLocalApi() {
    * Invoke a Tauri command on the Rust backend.
    *
    * @param command - The command name (must match a registered handler)
-   * @param args    - Optional arguments object (serialized to JSON)
+   * @param args    - Optional arguments object (serialized to JSON), or a
+   *                  raw byte body for commands that read one (camera frames)
+   * @param headers - Extra request headers; a raw body's metadata goes here
    * @returns       - The command's return value, deserialized from JSON
    * @throws        - String error message from the Rust side
    */
-  async function invoke<T>(command: TauriCommand, args?: Record<string, unknown>): Promise<T> {
+  async function invoke<T>(
+    command: TauriCommand,
+    args?: Record<string, unknown> | Uint8Array,
+    headers?: Record<string, string>,
+  ): Promise<T> {
     const session = getProfileSessionToken()
     const result = await tauriInvoke<T>(command, args, {
-      headers: session ? { 'x-alexandria-profile-session': session } : {},
+      headers: { ...headers, ...(session ? { 'x-alexandria-profile-session': session } : {}) },
     })
     if (!unscopedCommands.has(command) && session !== getProfileSessionToken()) {
       throw new Error('Profile session changed before the command completed')

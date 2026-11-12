@@ -11,7 +11,8 @@ import {
   type EnrollmentEmbedding,
 } from '@/utils/sentinel/face-embedder'
 import { isVirtualCameraLabel } from '@/utils/sentinel/virtual-camera'
-import { frameSize, type SentinelFrame } from '@/utils/sentinel/frame'
+import { downscaledSize, frameHeaders, frameSize, rgbaBody, type SentinelFrame } from '@/utils/sentinel/frame'
+import { isDroppedGaze } from '@/types'
 import { normaliseWebviewCombo, phantomCombos, type WebviewCombo, type BlurInterval } from '@/utils/sentinel/hotkeys'
 import type {
   WindowFeatures,
@@ -27,7 +28,7 @@ import type {
   TrainKeystrokeAeResponse,
   TrainMouseCnnResponse,
   GazeEstimate,
-  ScoreGazeResponse,
+  ScoreGazeReply,
   GazeFeatures,
   GazeCalibSample,
   TrainGazeCalibResponse,
@@ -1428,12 +1429,9 @@ function createSentinelService() {
     const userId = stakeAddress.value
     if (!userId) return null
     try {
-      // Cap the longest side at 224px — YuNet letterboxes into 640²
-      // internally, so a smaller frame only trims IPC payload, not
-      // detection (the model runs at a fixed input size regardless).
-      const scale = Math.min(1, 224 / Math.max(size.width, size.height))
-      const w = Math.max(1, Math.round(size.width * scale))
-      const h = Math.max(1, Math.round(size.height * scale))
+      // Cap the longest side at 224px — the backend detects at the
+      // frame's own size, so this sets both IPC payload and model cost.
+      const { width: w, height: h } = downscaledSize(size)
       if (!gazeCanvas) gazeCanvas = document.createElement('canvas')
       gazeCanvas.width = w
       gazeCanvas.height = h
@@ -1443,14 +1441,14 @@ function createSentinelService() {
       const img = ctx.getImageData(0, 0, w, h)
       const deviceFp = (await computeDeviceFingerprint()).substring(0, 16)
       if (!isCurrent()) return null
-      const resp = await tauriInvoke<ScoreGazeResponse>('sentinel_score_gaze', {
-        req: {
-          frame: { width: w, height: h, rgba: Array.from(img.data) },
-          user_address: userId,
-          device_fp_prefix: deviceFp,
-        },
-      })
-      if (!isCurrent()) return null
+      // Raw RGBA body, size + identity in headers. The backend may drop
+      // this frame for a newer one; a dropped frame is not a check.
+      const resp = await tauriInvoke<ScoreGazeReply>(
+        'sentinel_score_gaze',
+        rgbaBody(img),
+        frameHeaders(w, h, { user: userId, device: deviceFp }),
+      )
+      if (!isCurrent() || isDroppedGaze(resp)) return null
       const est = resp.estimate
       gazeTotalChecks++
       // Live mirror so the dev PiP shows the real session sampling rate
@@ -1496,11 +1494,10 @@ function createSentinelService() {
     const requireCurrent = profileStateGuard(signal)
     try {
       requireCurrent()
-      const vw = video.videoWidth || 640
-      const vh = video.videoHeight || 480
-      const scale = Math.min(1, 224 / Math.max(vw, vh))
-      const w = Math.max(1, Math.round(vw * scale))
-      const h = Math.max(1, Math.round(vh * scale))
+      const { width: w, height: h } = downscaledSize({
+        width: video.videoWidth || 640,
+        height: video.videoHeight || 480,
+      })
       if (!gazeCanvas) gazeCanvas = document.createElement('canvas')
       gazeCanvas.width = w
       gazeCanvas.height = h
@@ -1508,9 +1505,11 @@ function createSentinelService() {
       if (!ctx) return null
       ctx.drawImage(video, 0, 0, w, h)
       const img = ctx.getImageData(0, 0, w, h)
-      const features = await tauriInvoke<GazeFeatures | null>('sentinel_extract_gaze_features', {
-        frame: { width: w, height: h, rgba: Array.from(img.data) },
-      })
+      const features = await tauriInvoke<GazeFeatures | null>(
+        'sentinel_extract_gaze_features',
+        rgbaBody(img),
+        frameHeaders(w, h),
+      )
       requireCurrent()
       return features
     } catch (err) {
