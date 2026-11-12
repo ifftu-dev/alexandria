@@ -23,6 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cardano::blockfrost::BlockfrostClient;
 use crate::cardano::ledger::Ledger;
+use crate::cardano::reservations::{select_unreserved, ReservedOutpoints, WalletBusy};
 use crate::cardano::submission::{self, Journal, Member, Operation, Submission, SubmissionStatus};
 use crate::cardano::{anchor_tx, tx_builder};
 use crate::domain::username_claim::{CardanoAnchor, UsernameClaim};
@@ -79,31 +80,36 @@ pub fn build_username_anchor_metadata(
 }
 
 /// Build + sign one batch anchor tx. Same mechanics as the credential
-/// anchor (metadata-only, no mint, change back to self).
+/// anchor (metadata-only, no mint, change back to self). The input is the
+/// first sufficient UTxO that no in-flight transaction spends (`reserved`,
+/// read from the journal at `tip_slot`); [`WalletBusy`] when only reserved
+/// UTxOs would do.
 pub async fn build_batch_anchor_tx<L: Ledger>(
     entries: &[(String, String)],
     wallet: &crate::crypto::wallet::Wallet,
     ledger: &L,
+    tip_slot: u64,
+    reserved: &ReservedOutpoints,
 ) -> Result<anchor_tx::AnchorTx, String> {
     use pallas_addresses::Address as PallasAddress;
     use pallas_txbuilder::{BuildConway, Input, Output, StagingTransaction};
 
     use crate::cardano::tx_builder::{MIN_UTXO_LOVELACE, TTL_OFFSET};
 
-    let (utxos_res, params_res, tip_res) = tokio::join!(
+    let (utxos_res, params_res) = tokio::join!(
         ledger.utxos(&wallet.payment_address),
         ledger.protocol_params(),
-        ledger.tip_slot(),
     );
     let utxos = utxos_res.map_err(|e| format!("get_utxos: {e}"))?;
     let params = params_res.map_err(|e| format!("get_protocol_params: {e}"))?;
-    let tip_slot = tip_res.map_err(|e| format!("get_tip_slot: {e}"))?;
 
     if utxos.is_empty() {
         return Err("no UTxOs at payment address".into());
     }
-    let selected = BlockfrostClient::select_utxo(&utxos, MIN_UTXO_LOVELACE)
-        .ok_or_else(|| "no UTxO with sufficient lovelace".to_string())?;
+    let selected = select_unreserved(&utxos, reserved, |utxos| {
+        BlockfrostClient::select_utxo(utxos, MIN_UTXO_LOVELACE)
+    })?
+    .ok_or_else(|| "no UTxO with sufficient lovelace".to_string())?;
 
     let pallas_addr = PallasAddress::from_bech32(&wallet.payment_address)
         .map_err(|e| format!("bad payment address: {e}"))?;
@@ -257,49 +263,49 @@ pub(crate) async fn tick<L: Ledger>(
         return Ok(anchored);
     };
 
-    // Collect unanchored claims (tier < 2).
-    let pending: Vec<UsernameClaim> = journal.run("username_anchor.pending", |database| {
-        let mut stmt = database
-            .conn()
-            .prepare(
-                "SELECT claim_json FROM username_claims WHERE tier < 2 AND NOT EXISTS
-                   (SELECT 1 FROM chain_submission_members m WHERE m.network = 'cardano-preprod'
-                    AND m.member_kind = 'username_claim' AND m.member_id = json_extract(claim_json, '$.sig'))
-                 ORDER BY username LIMIT ?1",
-            )
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map([MAX_BATCH as i64], |r| r.get::<_, String>(0))
-            .map_err(|e| e.to_string())?
-            .filter_map(|r| r.ok())
-            .filter_map(|json| serde_json::from_str::<UsernameClaim>(&json).ok())
-            .filter(|c| c.verify().is_ok() && c.release.is_none())
-            .collect();
-        Ok(rows)
-    }).await?;
-    if pending.is_empty() {
+    let Some(next) = journal
+        .run("username_anchor.next", |database| {
+            next_batch(database.conn())
+        })
+        .await?
+    else {
         return Ok(anchored);
-    }
-
-    let entries: Vec<(String, String)> = pending
+    };
+    let entries: Vec<(String, String)> = next
+        .context
+        .claims
         .iter()
-        .map(|c| (c.username.clone(), claim_digest(c)))
+        .map(|claim| {
+            let digest = blake3::hash(claim.signature.as_bytes())
+                .to_hex()
+                .to_string();
+            (claim.username.clone(), digest)
+        })
         .collect();
 
-    let tx = build_batch_anchor_tx(&entries, w, ledger).await?;
-    let context = BatchContext {
-        version: 1,
-        claims: pending
-            .iter()
-            .map(|claim| BatchMember {
-                username: claim.username.clone(),
-                signature: claim.sig.clone(),
-            })
-            .collect(),
+    let tip = ledger
+        .tip_slot()
+        .await
+        .map_err(|e| format!("get_tip_slot: {e}"))?;
+    // Read just before selecting: earlier features in this background pass
+    // journal their transactions before sending, so their inputs show here.
+    let reserved = journal
+        .run("username_anchor.reserved", move |database| {
+            submission::reserved_outpoints(database.conn(), tip)
+        })
+        .await?;
+    let tx = match build_batch_anchor_tx(&entries, w, ledger, tip, &reserved).await {
+        Ok(tx) => tx,
+        // A wait, not a failure: the claims stay pending for the next pass.
+        Err(error) if WalletBusy::matches(&error) => {
+            log::info!("username anchoring waits: {error}");
+            return Ok(anchored);
+        }
+        Err(error) => return Err(error),
     };
-    let context_json = serde_json::to_string(&context).map_err(|e| e.to_string())?;
-    let batch_id = crate::crypto::hash::entity_id(&[OPERATION_KIND, &context_json]);
-    let members: Vec<Member<'_>> = context
+    let batch_id = next.id;
+    let members: Vec<Member<'_>> = next
+        .context
         .claims
         .iter()
         .map(|claim| Member {
@@ -311,15 +317,27 @@ pub(crate) async fn tick<L: Ledger>(
         kind: OPERATION_KIND,
         id: &batch_id,
     };
-    let submitted = submission::submit_once_with_members(
-        journal,
-        ledger,
-        operation,
-        &tx.signed_cbor,
-        &context_json,
-        &members,
-    )
-    .await?;
+    let submitted = if next.replaces_expired {
+        submission::replace_expired(
+            journal,
+            ledger,
+            operation,
+            &tx.signed_cbor,
+            &next.context_json,
+            &members,
+        )
+        .await?
+    } else {
+        submission::submit_once_with_members(
+            journal,
+            ledger,
+            operation,
+            &tx.signed_cbor,
+            &next.context_json,
+            &members,
+        )
+        .await?
+    };
     // An acknowledgement is not a verified anchor. Recovery attaches it
     // only after a ledger receipt identifies successful execution and slot.
     anchored.extend(
@@ -336,6 +354,81 @@ pub(crate) async fn tick<L: Ledger>(
     Ok(anchored)
 }
 
+/// The claims the next batch carries, under their operation id.
+struct NextBatch {
+    id: String,
+    context: BatchContext,
+    context_json: String,
+    /// The operation's journaled transaction expired; it gets a new one.
+    replaces_expired: bool,
+}
+
+/// An expired batch first: its claims are bound to that operation for good,
+/// so they go out again with exactly the same claims and operation id.
+/// Otherwise up to [`MAX_BATCH`] unanchored claims no batch holds yet.
+fn next_batch(conn: &rusqlite::Connection) -> Result<Option<NextBatch>, String> {
+    let expired: Option<(String, String)> = conn
+        .query_row(
+            "SELECT operation_id, context_json FROM chain_submissions
+             WHERE network = 'cardano-preprod' AND operation_kind = ?1 AND status = 'expired'
+             ORDER BY updated_at, operation_id LIMIT 1",
+            [OPERATION_KIND],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if let Some((id, context_json)) = expired {
+        let context: BatchContext =
+            serde_json::from_str(&context_json).map_err(|e| e.to_string())?;
+        if context.version != 1 {
+            return Err("unsupported username batch recovery version".into());
+        }
+        return Ok(Some(NextBatch {
+            id,
+            context,
+            context_json,
+            replaces_expired: true,
+        }));
+    }
+
+    // Collect unanchored claims (tier < 2).
+    let mut stmt = conn
+        .prepare(
+            "SELECT claim_json FROM username_claims WHERE tier < 2 AND NOT EXISTS
+               (SELECT 1 FROM chain_submission_members m WHERE m.network = 'cardano-preprod'
+                AND m.member_kind = 'username_claim' AND m.member_id = json_extract(claim_json, '$.sig'))
+             ORDER BY username LIMIT ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let pending: Vec<UsernameClaim> = stmt
+        .query_map([MAX_BATCH as i64], |r| r.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .filter_map(|json| serde_json::from_str::<UsernameClaim>(&json).ok())
+        .filter(|c| c.verify().is_ok() && c.release.is_none())
+        .collect();
+    if pending.is_empty() {
+        return Ok(None);
+    }
+    let context = BatchContext {
+        version: 1,
+        claims: pending
+            .iter()
+            .map(|claim| BatchMember {
+                username: claim.username.clone(),
+                signature: claim.sig.clone(),
+            })
+            .collect(),
+    };
+    let context_json = serde_json::to_string(&context).map_err(|e| e.to_string())?;
+    Ok(Some(NextBatch {
+        id: crate::crypto::hash::entity_id(&[OPERATION_KIND, &context_json]),
+        context,
+        context_json,
+        replaces_expired: false,
+    }))
+}
+
 async fn recover_batches<L: Ledger>(
     journal: &Journal,
     ledger: &L,
@@ -345,13 +438,24 @@ async fn recover_batches<L: Ledger>(
             submission::unapplied_operations(database.conn(), OPERATION_KIND, 10)
         })
         .await?;
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Expiry needs a known tip; without one, reconciliation never expires.
+    let tip = match ledger.tip_slot().await {
+        Ok(tip) => Some(tip),
+        Err(error) => {
+            log::debug!("username batch recovery without a tip: {error}");
+            None
+        }
+    };
     let mut anchored = Vec::new();
     for id in ids {
         let operation = Operation {
             kind: OPERATION_KIND,
             id: &id,
         };
-        match submission::reconcile(journal, ledger, operation).await {
+        match submission::reconcile_at(journal, ledger, operation, tip).await {
             Ok(Some(recovered)) => {
                 let id = id.clone();
                 anchored.extend(
@@ -378,6 +482,15 @@ fn project_batch(
     operation: Operation<'_>,
     submitted: &Submission,
 ) -> Result<Vec<UsernameClaim>, String> {
+    if submitted.status == SubmissionStatus::Expired {
+        // Its claims return to pending: the next batch rebuilds it.
+        let tx =
+            rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+                .map_err(|e| e.to_string())?;
+        submission::mark_applied(&tx, operation)?;
+        tx.commit().map_err(|e| e.to_string())?;
+        return Ok(Vec::new());
+    }
     if !matches!(
         submitted.status,
         SubmissionStatus::Confirmed | SubmissionStatus::FailedOnChain
@@ -511,7 +624,9 @@ mod tests {
         assert_eq!(chain.count("POST /tx/submit"), 1);
         assert_eq!(chain.count(&format!("GET /addresses/{address}/utxos")), 1);
         assert_eq!(chain.count(&format!("GET /txs/{}", saved.tx_hash)), 2);
-        assert_eq!(chain.requests().len(), 6);
+        // One tip for the build, then one per recovering pass for expiry.
+        assert_eq!(chain.count("GET /blocks/latest"), 3);
+        assert_eq!(chain.requests().len(), 8);
     }
 
     #[tokio::test]
@@ -560,6 +675,190 @@ mod tests {
         let stored = profile.with_conn(|conn| cached(conn, &original.username));
         assert_eq!(stored.anchor, anchored[0].anchor);
         assert_eq!(ledger.submissions().len(), 1);
+    }
+
+    const TIP: u64 = 120_000_000;
+
+    /// `hash#index` of every input the signed bytes spend.
+    fn spent(bytes: &[u8]) -> Vec<String> {
+        MultiEraTx::decode(bytes)
+            .unwrap()
+            .inputs()
+            .iter()
+            .map(|input| format!("{}#{}", input.hash(), input.index()))
+            .collect()
+    }
+
+    fn outpoint(byte: u8, index: u64) -> String {
+        format!("{}#{index}", format!("{byte:02x}").repeat(32))
+    }
+
+    /// Every username batch in the journal, by operation id.
+    fn batches(profile: &TestProfile) -> Vec<(String, Submission)> {
+        profile.with_conn(|conn| {
+            let mut statement = conn
+                .prepare(
+                    "SELECT operation_id FROM chain_submissions WHERE operation_kind = ?1
+                     ORDER BY created_at, rowid",
+                )
+                .unwrap();
+            let ids: Vec<String> = statement
+                .query_map([OPERATION_KIND], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            ids.into_iter()
+                .map(|id| {
+                    let saved = submission::lookup(
+                        conn,
+                        Operation {
+                            kind: OPERATION_KIND,
+                            id: &id,
+                        },
+                    )
+                    .unwrap()
+                    .unwrap();
+                    (id, saved)
+                })
+                .collect()
+        })
+    }
+
+    #[tokio::test]
+    async fn next_batch_avoids_the_input_an_in_flight_batch_spends() {
+        let profile = TestProfile::migrated();
+        profile.with_conn(|conn| cache(conn, &claim(1, "ada_99")));
+        let wallet = test_chain::wallet();
+        let ledger = FakeLedger::at_tip(TIP);
+        ledger.set_utxos(
+            &wallet.payment_address,
+            vec![ada(0x11, 0, 20_000_000), ada(0x22, 1, 20_000_000)],
+        );
+        let journal = profile.background();
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+
+        // A second claim arrives while the first batch is in flight and the
+        // provider still lists the UTxO that batch spends.
+        profile.with_conn(|conn| cache(conn, &claim(2, "bob_22")));
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+
+        let submissions = ledger.submissions();
+        assert_eq!(submissions.len(), 2);
+        assert_eq!(spent(&submissions[0].1), vec![outpoint(0x11, 0)]);
+        assert_eq!(spent(&submissions[1].1), vec![outpoint(0x22, 1)]);
+        let statuses: Vec<SubmissionStatus> = batches(&profile)
+            .into_iter()
+            .map(|(_, saved)| saved.status)
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![SubmissionStatus::Submitted, SubmissionStatus::Submitted]
+        );
+    }
+
+    #[tokio::test]
+    async fn busy_wallet_waits_for_the_next_pass_without_submitting() {
+        let profile = TestProfile::migrated();
+        profile.with_conn(|conn| cache(conn, &claim(1, "ada_99")));
+        let wallet = test_chain::wallet();
+        let ledger = FakeLedger::at_tip(TIP);
+        ledger.set_utxos(&wallet.payment_address, vec![ada(0x11, 0, 20_000_000)]);
+        let journal = profile.background();
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+        let first = ledger.submissions()[0].0.clone();
+
+        // The only UTxO is spent by the in-flight batch: wait, don't fail.
+        let waiting = claim(2, "bob_22");
+        profile.with_conn(|conn| cache(conn, &waiting));
+        assert!(tick(&journal, Some(&ledger), Some(&wallet))
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(ledger.submissions().len(), 1);
+        assert_eq!(batches(&profile).len(), 1);
+        assert_eq!(
+            profile.with_conn(|conn| cached(conn, &waiting.username)),
+            waiting
+        );
+
+        // Once the first batch lands and the index shows its change, the
+        // waiting claim goes out on that change.
+        ledger.include(&first, TIP + 20);
+        ledger.catch_up();
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+        let submissions = ledger.submissions();
+        assert_eq!(submissions.len(), 2);
+        assert_eq!(spent(&submissions[1].1), vec![format!("{first}#0")]);
+        assert_eq!(batches(&profile)[1].1.status, SubmissionStatus::Submitted);
+    }
+
+    #[tokio::test]
+    async fn expired_batch_is_rebuilt_with_its_claims_and_keeps_the_expired_bytes() {
+        use crate::cardano::tx_builder::TTL_OFFSET;
+
+        let profile = TestProfile::migrated();
+        let original = claim(1, "ada_99");
+        profile.with_conn(|conn| cache(conn, &original));
+        let wallet = test_chain::wallet();
+        let ledger = FakeLedger::at_tip(TIP);
+        ledger.set_utxos(&wallet.payment_address, vec![ada(0x11, 0, 20_000_000)]);
+        let journal = profile.background();
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+        let (dead, dead_bytes) = ledger.submissions()[0].clone();
+        ledger.drop_tx(&dead);
+
+        // Inside the margin the batch is still in flight: no rebuild.
+        let bound = TIP + TTL_OFFSET + submission::EXPIRY_MARGIN_SLOTS;
+        ledger.set_tip(bound);
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+        assert_eq!(ledger.submissions().len(), 1);
+
+        // Past it, the batch expires and the same claims go out again under
+        // the same operation, on the input the dead transaction freed.
+        ledger.set_tip(bound + 1);
+        assert!(tick(&journal, Some(&ledger), Some(&wallet))
+            .await
+            .unwrap()
+            .is_empty());
+        let submissions = ledger.submissions();
+        assert_eq!(submissions.len(), 2);
+        let (rebuilt, rebuilt_bytes) = submissions[1].clone();
+        assert_ne!(rebuilt, dead);
+        assert_eq!(spent(&rebuilt_bytes), vec![outpoint(0x11, 0)]);
+        let journaled = batches(&profile);
+        assert_eq!(journaled.len(), 1);
+        let (batch_id, saved) = &journaled[0];
+        assert_eq!(
+            (saved.tx_hash.as_str(), saved.status),
+            (rebuilt.as_str(), SubmissionStatus::Submitted)
+        );
+        let history = profile.with_conn(|conn| {
+            submission::history(
+                conn,
+                Operation {
+                    kind: OPERATION_KIND,
+                    id: batch_id,
+                },
+            )
+            .unwrap()
+        });
+        assert_eq!(history.len(), 1);
+        assert_eq!(
+            (history[0].tx_hash.as_str(), &history[0].signed_cbor),
+            (dead.as_str(), &dead_bytes)
+        );
+
+        ledger.include(&rebuilt, bound + 30);
+        let anchored = tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+        assert_eq!(anchored.len(), 1);
+        assert_eq!(
+            anchored[0].anchor,
+            Some(CardanoAnchor {
+                tx_hash: rebuilt.clone(),
+                slot: bound + 30
+            })
+        );
+        assert_eq!(ledger.submissions().len(), 2);
     }
 
     fn claim(seed: u8, name: &str) -> UsernameClaim {
