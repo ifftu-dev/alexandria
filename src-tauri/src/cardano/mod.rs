@@ -13,6 +13,7 @@ pub mod ledger;
 pub mod plutus_data;
 pub mod plutus_spend;
 pub mod relay_registry_chain;
+pub mod reservations;
 pub mod script_refs;
 pub mod snapshot_recovery;
 pub mod stake_pubkey;

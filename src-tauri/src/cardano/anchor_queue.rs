@@ -48,10 +48,7 @@ const NETWORK: &str = "cardano-preprod";
 /// needs the user's retry after that.
 pub const MAX_ATTEMPTS: u32 = 5;
 
-/// Slots past a batch's validity interval before a transaction that was
-/// never seen counts as unable to land. Leaves room for the provider to
-/// catch up and for short rollbacks.
-pub const EXPIRY_MARGIN_SLOTS: u64 = 1_800;
+pub use super::submission::EXPIRY_MARGIN_SLOTS;
 
 /// Wait before trying again to build a batch that could not be built or paid
 /// for.

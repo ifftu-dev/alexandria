@@ -17,6 +17,7 @@ use pallas_traverse::MultiEraTx;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use super::reservations::{Outpoint, ReservedOutpoints};
 use super::{blockfrost::TransactionReceipt, ledger::Ledger, tx_builder};
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::db::Database;
@@ -26,6 +27,12 @@ use crate::profile::scope::ProfileLease;
 // preprod. Network identity is not a project/API key or a particular provider.
 const NETWORK: &str = "cardano-preprod";
 const MAX_ERROR_CHARS: usize = 2048;
+
+/// Slots past a transaction's validity upper bound before the journal treats
+/// it as settled: its outpoints are released and, with no receipt, it can be
+/// marked expired. Covers provider catch-up and short rollbacks. The only
+/// expiry margin; every feature uses this one.
+pub const EXPIRY_MARGIN_SLOTS: u64 = 1_800;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Operation<'a> {
@@ -516,6 +523,41 @@ where
             ..original
         }
     }))
+}
+
+/// Outpoints reserved at `tip`: the inputs and collateral inputs of every
+/// journaled transaction on this network whose validity upper bound plus
+/// [`EXPIRY_MARGIN_SLOTS`] is at or after `tip`, whatever its status. Inside
+/// that window a transaction is on chain, so its inputs are spent, or may
+/// still land; after it, the provider's view of them is accurate either way.
+/// Decoded from the stored signed bytes; no network request.
+pub fn reserved_outpoints(conn: &Connection, tip: u64) -> Result<ReservedOutpoints, String> {
+    let mut statement = conn
+        .prepare("SELECT signed_cbor FROM chain_submissions WHERE network = ?1")
+        .map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map(params![NETWORK], |row| row.get::<_, Vec<u8>>(0))
+        .map_err(|e| e.to_string())?;
+    let mut reserved = ReservedOutpoints::default();
+    for bytes in rows {
+        let bytes = bytes.map_err(|e| e.to_string())?;
+        let tx = MultiEraTx::decode(&bytes).map_err(|e| format!("decode journaled tx: {e}"))?;
+        // Bytes journaled before bounds were required may still land at any
+        // time, so they reserve with no end.
+        if tx
+            .ttl()
+            .is_some_and(|ttl| ttl.saturating_add(EXPIRY_MARGIN_SLOTS) < tip)
+        {
+            continue;
+        }
+        for input in tx.inputs().iter().chain(tx.collateral().iter()) {
+            reserved.insert(Outpoint {
+                tx_hash: input.hash().to_string(),
+                index: input.index(),
+            });
+        }
+    }
+    Ok(reserved)
 }
 
 /// The slot from which `signed_cbor` can no longer be included. Every
@@ -1375,5 +1417,123 @@ mod tests {
         assert!(!error.is_retryable());
         assert!(error.to_string().contains("validity upper bound"), "{error}");
         assert!(saved(&profile, OPERATION).is_none());
+    }
+
+    fn outpoint(byte: u8, index: u64) -> Outpoint {
+        Outpoint {
+            tx_hash: format!("{byte:02x}").repeat(32),
+            index,
+        }
+    }
+
+    fn reserved_at(profile: &TestProfile, tip: u64) -> Vec<Outpoint> {
+        let reserved = with_database(&profile.db, |conn| reserved_outpoints(conn, tip)).unwrap();
+        let mut outpoints: Vec<Outpoint> = reserved.iter().cloned().collect();
+        outpoints.sort();
+        outpoints
+    }
+
+    async fn journal_spending(
+        journal: &Journal,
+        id: &'static str,
+        ttl: u64,
+        inputs: &[(u8, u64)],
+        collateral: &[(u8, u64)],
+        accepted: bool,
+    ) -> Submission {
+        let bytes = transaction(200_000, Some(ttl), inputs, collateral);
+        let hash = tx_builder::compute_tx_hash(&bytes).unwrap();
+        let operation = Operation { kind: "test", id };
+        submit_with(journal, operation, &bytes, CONTEXT, |_| async move {
+            if accepted {
+                Ok(hash)
+            } else {
+                Err("BadInputsUTxO".into())
+            }
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn include(journal: &Journal, id: &'static str, valid_contract: bool) -> Submission {
+        reconcile_with(journal, Operation { kind: "test", id }, |hash| async move {
+            Ok(Some(TransactionReceipt {
+                hash,
+                slot: 42,
+                valid_contract,
+                block_time: None,
+            }))
+        })
+        .await
+        .unwrap()
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn every_status_reserves_inputs_and_collateral_until_its_window_ends() {
+        let profile = TestProfile::migrated();
+        let journal = profile.background();
+        let unknown = journal_spending(&journal, "unknown", TTL, &[(1, 0)], &[(2, 1)], false).await;
+        assert_eq!(unknown.status, SubmissionStatus::OutcomeUnknown);
+        let submitted = journal_spending(&journal, "submitted", TTL, &[(3, 0)], &[], true).await;
+        assert_eq!(submitted.status, SubmissionStatus::Submitted);
+        journal_spending(&journal, "confirmed", TTL, &[(4, 0)], &[], true).await;
+        assert_eq!(
+            include(&journal, "confirmed", true).await.status,
+            SubmissionStatus::Confirmed
+        );
+        journal_spending(&journal, "script-failed", TTL, &[(5, 0)], &[(6, 0)], true).await;
+        assert_eq!(
+            include(&journal, "script-failed", false).await.status,
+            SubmissionStatus::FailedOnChain
+        );
+        let later = TTL * 2;
+        journal_spending(&journal, "later", later, &[(7, 2)], &[], true).await;
+
+        let all = vec![
+            outpoint(1, 0),
+            outpoint(2, 1),
+            outpoint(3, 0),
+            outpoint(4, 0),
+            outpoint(5, 0),
+            outpoint(6, 0),
+            outpoint(7, 2),
+        ];
+        assert_eq!(reserved_at(&profile, 0), all);
+        // 1,800 slots past the bound is still inside the window.
+        assert_eq!(reserved_at(&profile, TTL + 1_800), all);
+        assert_eq!(reserved_at(&profile, TTL + 1_801), vec![outpoint(7, 2)]);
+        assert_eq!(reserved_at(&profile, later + 1_801), Vec::new());
+    }
+
+    #[tokio::test]
+    async fn reservations_survive_a_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("profile.db");
+        let key = [9; 32];
+        let database = Database::open_encrypted(&path, &key).unwrap();
+        database.run_migrations().unwrap();
+        let before = TestProfile::new(database);
+        // The node crashes after sending, before any response is recorded.
+        let bytes = transaction(200_000, Some(TTL), &[(1, 0)], &[(2, 0)]);
+        let task_journal = before.background();
+        let (started, sending) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            submit_with(&task_journal, OPERATION, &bytes, CONTEXT, |_| async move {
+                started.send(()).unwrap();
+                std::future::pending::<Result<String, String>>().await
+            })
+            .await
+        });
+        sending.await.unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        drop(before);
+
+        let after = TestProfile::new(Database::open_encrypted(&path, &key).unwrap());
+        assert_eq!(
+            reserved_at(&after, TTL),
+            vec![outpoint(1, 0), outpoint(2, 0)]
+        );
     }
 }
