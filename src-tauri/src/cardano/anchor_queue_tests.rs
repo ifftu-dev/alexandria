@@ -677,6 +677,32 @@ async fn an_issuer_paid_anchor_spends_a_utxo_no_in_flight_transaction_spends() {
     assert_eq!(node.state(&vc).status, AnchorStatus::Submitted, "accepted");
 }
 
+#[tokio::test]
+async fn a_sponsored_anchors_collateral_avoids_an_outpoint_a_pending_mint_spends() {
+    let mut node = Node::new();
+    let profile = sponsor();
+    node.sponsor = Some(profile.clone());
+    let smallest = ada(0x13, 0, 6_000_000);
+    let free = ada(0x14, 0, 20_000_000);
+    node.ledger.set_utxos(
+        &node.wallet.payment_address,
+        vec![smallest.clone(), free.clone()],
+    );
+    node.ledger.set_utxos(
+        &profile.address,
+        vec![sponsor_utxo(0x22, profile.slot_to_posix_ms(TIP) - 1)],
+    );
+    in_flight_spend(&node, &[&smallest], &[], TIP + 3_600).await;
+    let vc = issue(&node.profile, &node.issuer, "a");
+    node.tick(T0_PLUS_7H).await;
+
+    let anchors = anchor_submissions(&node);
+    assert_eq!(anchors.len(), 1);
+    assert_eq!(anchors[0].inputs, vec![("22".repeat(32), 0)], "sponsored");
+    assert_eq!(anchors[0].collateral, vec![(free.tx_hash.clone(), 0)]);
+    assert_eq!(node.state(&vc).status, AnchorStatus::Submitted, "accepted");
+}
+
 /// Live preprod run of the whole anchorer: issue two credentials, flush them
 /// as one batch, wait for confirmation, and check the verifier finds them
 /// anchored. Ignored by default. Uses the network profile's sponsor unless

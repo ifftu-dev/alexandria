@@ -148,8 +148,10 @@ pub async fn build_anchor_tx<L: Ledger>(
             let plan = SponsorPlan::new(profile, utxo, tip_slot)?;
             // The smallest sufficient UTxO: collateral is forfeited whole if
             // the script fails on chain, and no collateral return is set.
-            let collateral = smallest_ada_only(&wallet_utxos, MIN_COLLATERAL_LOVELACE)
-                .ok_or_else(|| {
+            let collateral = select_unreserved(&wallet_utxos, reserved, |u| {
+                smallest_ada_only(u, MIN_COLLATERAL_LOVELACE)
+            })?
+            .ok_or_else(|| {
                     format!(
                         "{NEEDS_FUNDS}: a sponsored anchor needs collateral, an ADA-only UTxO of at least {} lovelace in the wallet",
                         MIN_COLLATERAL_LOVELACE
