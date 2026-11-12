@@ -20,7 +20,14 @@ export const IDLE_MS = 20_000
 /** Inputs this close after an idle stretch are one burst. */
 export const BURST_MS = 2_000
 /** Inputs a burst needs, per input kind: a click carries more than a key. */
-const BURST_INPUTS: Record<ResponseInputKind, number> = { choice: 3, plugin: 3, text: 15 }
+const BURST_INPUTS: Record<ResponseInputKind, number> = {
+  choice: 3,
+  plugin: 3,
+  text: 15,
+  // A spoken answer's inputs are speech onsets; pausing to think and going
+  // on is how people talk, never a burst.
+  voice: Number.POSITIVE_INFINITY,
+}
 /** A response this soon after a cue is counted with it. */
 export const CROSS_MODAL_MS = 3_000
 /** First visits that make an in-attempt baseline. */
@@ -51,13 +58,29 @@ interface Visit {
   burst: { since: number; inputs: number } | null
 }
 
+/** The first response on the latest item, as it happened. */
+export interface LatestResponse {
+  itemId: string
+  /** From presentation to the first input. */
+  latencyMs: number
+  /** Median first-input latency of the baseline items; null until there is a baseline. */
+  baselineMs: number | null
+  /** Cues within the cross-modal window before this response. */
+  cues: ResponseCue[]
+}
+
 export interface ResponseTracker {
-  /** The item is on screen and can be read. Repeats keep the first time. */
-  present(itemId: string, meta: ResponseItemMeta): void
-  /** A response event on the item. Unknown items are ignored. */
-  input(itemId: string, event: { changesAnswer: boolean }): void
-  /** A cross-modal cue: a gaze-down, or a second voice. */
-  cue(kind: ResponseCue): void
+  /**
+   * The item is on screen and can be read (or a spoken question ended).
+   * Repeats keep the first time. `at` defaults to now.
+   */
+  present(itemId: string, meta: ResponseItemMeta, at?: number): void
+  /** A response event on the item, at `at` (default now). Unknown items are ignored. */
+  input(itemId: string, event: { changesAnswer: boolean; at?: number }): void
+  /** A cross-modal cue at `at` (default now): a gaze-down, or a second voice. */
+  cue(kind: ResponseCue, at?: number): void
+  /** The first response on the most recent new item; null before any. Pure. */
+  latest(): LatestResponse | null
   /** Ends the open visit (the attempt is ending). */
   settle(): void
   /** This window's response features, or null when there is nothing. Pure. */
@@ -82,6 +105,7 @@ export function createResponseTracker(now: () => number = () => Date.now()): Res
   let history: ResponseBaselineItem[] = []
   let cues: Record<ResponseCue, number[]> = { gaze_down: [], second_voice: [] }
   let cueResponses: Record<ResponseCue, number> = { gaze_down: 0, second_voice: 0 }
+  let latest: LatestResponse | null = null
 
   const settle = () => {
     const v = open
@@ -115,19 +139,20 @@ export function createResponseTracker(now: () => number = () => Date.now()): Res
   }
 
   return {
-    present(itemId, meta) {
-      if (!presented.has(itemId)) presented.set(itemId, { meta, at: now() })
+    present(itemId, meta, at) {
+      if (!presented.has(itemId)) presented.set(itemId, { meta, at: at ?? now() })
     },
 
-    input(itemId, { changesAnswer }) {
+    input(itemId, { changesAnswer, at }) {
       const item = presented.get(itemId)
       if (!item) return
-      const t = now()
+      const t = at ?? now()
       const firstOfNewItem = open?.itemId !== itemId && !visited.has(itemId)
       // The wait before the first input on a new item is reading, measured
       // as latency; idle is a stretch with nothing new to read.
       const idle = !firstOfNewItem && lastInputAt !== null && t - lastInputAt >= IDLE_MS
-      if (open?.itemId !== itemId) {
+      const opens = open?.itemId !== itemId
+      if (opens) {
         settle()
         visited.add(itemId)
         // Items are read in turn: the next one starts once the learner has
@@ -157,17 +182,32 @@ export function createResponseTracker(now: () => number = () => Date.now()): Res
       }
       v.lastInputAt = t
       lastInputAt = t
+      const before: ResponseCue[] = []
       for (const kind of ['gaze_down', 'second_voice'] as const) {
-        if (cues[kind].some(at => t - at <= CROSS_MODAL_MS)) {
+        if (cues[kind].some(c => c <= t && t - c <= CROSS_MODAL_MS)) {
           cueResponses[kind]++
-          cues[kind] = []
+          cues[kind] = cues[kind].filter(c => c > t)
+          before.push(kind)
+        }
+      }
+      if (opens && !v.revisit) {
+        const base = baseline()
+        latest = {
+          itemId,
+          latencyMs: t - v.startedAt,
+          baselineMs: base ? median(base.items.map(i => i.first_input_ms)) : null,
+          cues: before,
         }
       }
     },
 
-    cue(kind) {
-      const t = now()
-      cues[kind] = [...cues[kind].filter(at => t - at <= CROSS_MODAL_MS), t]
+    cue(kind, at) {
+      const t = at ?? now()
+      cues[kind] = [...cues[kind].filter(c => Math.abs(t - c) <= CROSS_MODAL_MS), t]
+    },
+
+    latest() {
+      return latest ? { ...latest, cues: [...latest.cues] } : null
     },
 
     settle,
@@ -205,6 +245,13 @@ export function createResponseTracker(now: () => number = () => Date.now()): Res
       history = []
       cues = { gaze_down: [], second_voice: [] }
       cueResponses = { gaze_down: 0, second_voice: 0 }
+      latest = null
     },
   }
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!
 }

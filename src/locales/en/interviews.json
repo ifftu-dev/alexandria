@@ -134,7 +134,12 @@
     "cameraSignals": "Camera signals",
     "consented": "Consented",
     "callLost": "This device is no longer in the call. Rejoin to carry on with the interview.",
-    "rejoin": "Rejoin call"
+    "rejoin": "Rejoin call",
+    "askNow": "Ask now",
+    "authoredFollowups": "Follow-ups for this criterion",
+    "addFollowup": "Add a follow-up",
+    "followupPlaceholder": "A question to ask if this criterion needs probing",
+    "removeFollowup": "Remove"
   },
   "review": {
     "back": "Back to interviews",
@@ -230,5 +235,21 @@
       "noFlags": "No flags",
       "caveat": "Reported by the candidate's own app. Treat a flag as a reason to ask, not a verdict."
     }
+  },
+  "signals": {
+    "title": "Live signals",
+    "hint": "From the candidate's app, when they allowed voice checks. A reason to ask, not a verdict.",
+    "empty": "Nothing yet. Signals appear after you mark a question and the candidate answers.",
+    "markQuestion": "Mark question asked",
+    "answer": "Answer started after {latency}",
+    "baseline": "their usual {baseline}",
+    "noBaseline": "no baseline yet",
+    "concern": {
+      "relay_lag": "Much later than usual",
+      "gaze_down": "Looked down just before",
+      "second_voice": "Another voice just before"
+    },
+    "secondVoice": "Another voice was heard",
+    "seconds": "{value} s"
   }
 }

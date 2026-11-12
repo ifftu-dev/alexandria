@@ -46,6 +46,7 @@ use tokio::sync::{broadcast, mpsc, Mutex};
 
 use super::call_kind::{self, CallKind};
 use super::events::{emit, CallEvents};
+use super::interview_signal::{self, InterviewSignal, SignalMessage};
 pub use super::media::DeviceCheckResult;
 #[cfg(not(tutoring_video))]
 use super::media::VIDEO_DISABLED_ERROR;
@@ -57,6 +58,7 @@ use super::media::{
 use super::media::{FrameTuning, OpenedVideo};
 use super::records::SessionRecords;
 use super::tasks::{SessionTasks, TaskHandle};
+use super::voice_tap::{VoiceListener, VoiceTap};
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -379,6 +381,9 @@ struct Core<M: MediaDevices> {
     /// media. Leaving ends the media only if no later session has started
     /// it again, so a slow leave never ends the next call's media.
     generation: Arc<AtomicU64>,
+    /// Voice checks on the microphone stream, off unless the candidate's
+    /// integrity check turned them on.
+    voice: Arc<VoiceListener>,
 }
 
 impl<M: MediaDevices> Clone for Core<M> {
@@ -390,6 +395,7 @@ impl<M: MediaDevices> Clone for Core<M> {
             tasks: self.tasks.clone(),
             inner: self.inner.clone(),
             generation: self.generation.clone(),
+            voice: self.voice.clone(),
         }
     }
 }
@@ -406,11 +412,13 @@ pub struct CallManager<M: MediaDevices> {
 impl<M: MediaDevices> CallManager<M> {
     pub fn new(media: M, events: impl CallEvents) -> Self {
         let profile = media.profile();
+        let events: Arc<dyn CallEvents> = Arc::new(events);
         Self {
             core: Core {
                 media: Arc::new(media),
                 profile,
-                events: Arc::new(events),
+                voice: Arc::new(VoiceListener::new(events.clone())),
+                events,
                 tasks: Arc::new(SessionTasks::default()),
                 inner: Arc::new(Mutex::new(None)),
                 generation: Arc::new(AtomicU64::new(0)),
@@ -791,6 +799,8 @@ impl<M: MediaDevices> CallManager<M> {
             inner.take()
         };
         let ended = session.as_ref().map(|s| s.generation);
+        core.voice.set_listening(false);
+        core.voice.set_muted(false);
         crate::diag::log("leave: session taken, stopping media");
         if let Some(session) = session.as_ref() {
             if let Some(preview) = &session.self_preview_task {
@@ -906,7 +916,10 @@ impl<M: MediaDevices> CallManager<M> {
                     .await
                     .map_err(|e| format!("microphone unavailable: {e}"))?;
                 session.mic_input = Some(mic.clone());
-                let renditions = AudioRenditions::new::<PureOpusEncoder>(mic, [AudioPreset::Hq]);
+                let renditions = AudioRenditions::new::<PureOpusEncoder>(
+                    VoiceTap::new(mic, self.core.voice.clone()),
+                    [AudioPreset::Hq],
+                );
                 session
                     .broadcast
                     .set_audio(Some(renditions))
@@ -920,6 +933,7 @@ impl<M: MediaDevices> CallManager<M> {
             session.broadcast.set_audio_muted(true);
             session.audio_enabled = false;
         }
+        self.core.voice.set_muted(!session.audio_enabled);
 
         Ok(session.audio_enabled)
     }
@@ -1126,6 +1140,35 @@ impl<M: MediaDevices> CallManager<M> {
             .broadcast(Bytes::from(encoded))
             .await
             .map_err(|e| format!("failed to send transcript: {e}"))
+    }
+
+    /// Broadcast an interview signal: a question marker from the panel, or
+    /// the candidate's answer timing or second voice. See
+    /// [`interview_signal`].
+    pub async fn send_interview_signal(&self, signal: InterviewSignal) -> Result<(), String> {
+        let inner = self.core.inner.lock().await;
+        let session = inner.as_ref().ok_or("not in a tutoring session")?;
+        let sender = session.chat_sender.as_ref().ok_or("chat not available")?;
+        let encoded = interview_signal::encode(&SignalMessage {
+            sender: session.our_node_id.clone(),
+            sender_name: Some(session.our_display_name.clone()),
+            signal,
+            timestamp: Self::now_millis(),
+        })?;
+        sender
+            .broadcast(Bytes::from(encoded))
+            .await
+            .map_err(|e| format!("failed to send interview signal: {e}"))
+    }
+
+    /// Turn voice checks on the call's microphone stream on or off. On needs
+    /// a live call; the call ending turns them off.
+    pub async fn set_voice_listening(&self, on: bool) -> Result<(), String> {
+        if on && self.status().await.is_none() {
+            return Err("not in a tutoring session".into());
+        }
+        self.core.voice.set_listening(on);
+        Ok(())
     }
 
     // ── Query ──────────────────────────────────────────────────────
@@ -1402,8 +1445,10 @@ impl<M: MediaDevices> Core<M> {
             match audio.input().await {
                 Ok(mic) => {
                     mic_input = Some(mic.clone());
-                    let renditions =
-                        AudioRenditions::new::<PureOpusEncoder>(mic, [AudioPreset::Hq]);
+                    let renditions = AudioRenditions::new::<PureOpusEncoder>(
+                        VoiceTap::new(mic, self.voice.clone()),
+                        [AudioPreset::Hq],
+                    );
                     broadcast
                         .set_audio(Some(renditions))
                         .map_err(|e| format!("failed to set audio: {e}"))?;
@@ -1727,6 +1772,7 @@ impl<M: MediaDevices> Core<M> {
                         None => break,
                     }
                 };
+                core.voice.set_remote_level(output_level);
                 core.emit(
                     "tutoring:audio-level",
                     AudioLevelEvent {
@@ -1941,6 +1987,16 @@ impl<M: MediaDevices> Core<M> {
                 let iroh_gossip::api::Event::Received(msg) = event else {
                     continue;
                 };
+                if let Some(decoded) = interview_signal::decode(&msg.content) {
+                    match decoded {
+                        Ok(signal) if signal.sender != our_id => {
+                            core.emit("tutoring:interview-signal", signal)
+                        }
+                        Ok(_) => {}
+                        Err(e) => log::warn!("tutoring: refused an interview signal: {e}"),
+                    }
+                    continue;
+                }
                 if let Some(payload) = msg.content.strip_prefix(TRANSCRIPT_PREFIX) {
                     match postcard::from_bytes::<TranscriptMessage>(payload) {
                         Ok(transcript) if transcript.sender != our_id => core.emit(

@@ -679,6 +679,9 @@ pub struct CheckRun {
     pub started_at: String,
     pub ended_at: Option<String>,
     pub commitment_root: Option<String>,
+    /// `local` or `device_attested` (a mobile device's own attestation, or a
+    /// desktop paired with an attested phone).
+    pub assurance_level: String,
     /// Per snapshot: whether the camera was in use, and the flags it raised.
     pub snapshots: Vec<(bool, Vec<String>)>,
 }
@@ -697,8 +700,18 @@ pub fn build_integrity_report(
     run: &CheckRun,
     now: i64,
 ) -> Result<IntegrityReport, String> {
-    if !invite.integrity_check || invite.mode != "alexandria" {
+    if !invite.integrity_check {
         return Err("this interview did not ask for an integrity check".into());
+    }
+    // Sentinel sees only the device it runs on. In a video call, a phone call
+    // or a room, that device is not where the interview happens, so the
+    // check vouches for nothing unless an attested phone was there.
+    if invite.mode != "alexandria" && run.assurance_level != "device_attested" {
+        return Err(
+            "an interview held by video call, phone or in person carries no Sentinel \
+             assurance unless a paired attested phone was present"
+                .into(),
+        );
     }
     if run.purpose != "interview" {
         return Err("that check was not run for an interview".into());
@@ -795,7 +808,8 @@ pub fn sign_integrity_report(
 fn load_check(conn: &rusqlite::Connection, session_id: &str) -> Result<CheckRun, String> {
     let mut run = conn
         .query_row(
-            "SELECT purpose, status, integrity_score, started_at, ended_at, commitment_root
+            "SELECT purpose, status, integrity_score, started_at, ended_at, commitment_root,
+                    assurance_level
              FROM integrity_sessions WHERE id = ?1",
             params![session_id],
             |r| {
@@ -806,6 +820,7 @@ fn load_check(conn: &rusqlite::Connection, session_id: &str) -> Result<CheckRun,
                     started_at: r.get(3)?,
                     ended_at: r.get(4)?,
                     commitment_root: r.get(5)?,
+                    assurance_level: r.get(6)?,
                     snapshots: Vec::new(),
                 })
             },
@@ -1103,6 +1118,7 @@ mod tests {
             started_at: at(created + 3600),
             ended_at: Some(at(created + 5400)),
             commitment_root: Some("ab".repeat(32)),
+            assurance_level: "local".into(),
             snapshots: snapshots
                 .into_iter()
                 .map(|(c, f)| (c, f.into_iter().map(String::from).collect()))
@@ -1360,6 +1376,30 @@ mod tests {
 
         let before = run(asked.created_at - 7200, "completed", vec![]);
         assert!(build_integrity_report(asked, &before, now).is_err());
+    }
+
+    #[test]
+    fn an_interview_held_outside_alexandria_carries_no_assurance_without_an_attested_phone() {
+        let (_, did) = holder();
+        let now = 1_800_000_000;
+        for mode in ["video", "phone", "in_person"] {
+            let elsewhere = InterviewInvite {
+                mode: mode.into(),
+                ..checked(&did, now - 7200)
+            };
+            let local = run(elsewhere.created_at, "completed", vec![]);
+            let refused = build_integrity_report(elsewhere.clone(), &local, now).unwrap_err();
+            assert!(refused.contains("paired attested phone"), "{refused}");
+
+            let attested = CheckRun {
+                assurance_level: "device_attested".into(),
+                ..local
+            };
+            assert!(
+                build_integrity_report(elsewhere, &attested, now).is_ok(),
+                "{mode}"
+            );
+        }
     }
 
     #[test]

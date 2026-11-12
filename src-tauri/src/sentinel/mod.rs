@@ -81,3 +81,4 @@ pub mod surface;
 pub mod trust_profile;
 pub mod types;
 pub mod verification;
+pub mod voice_activity;

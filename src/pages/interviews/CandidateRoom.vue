@@ -37,6 +37,7 @@ const joining = ref(false)
 /** `run`, `skip`, or no answer yet. Nothing is preselected. */
 const checkChoice = ref<'run' | 'skip' | null>(null)
 const checkCamera = ref(false)
+const checkMicrophone = ref(false)
 const shared = ref<SentIntegrityReport[]>([])
 const retrying = ref(false)
 let timer: number | null = null
@@ -92,12 +93,20 @@ async function join() {
     if (!ticket.value || needsChoice.value) return
     runCheck = checkAsked.value && checkChoice.value === 'run'
     if (runCheck) {
-      await interviewCheck.begin({ interviewId: interviewId.value, cloud: cloud.value, camera: checkCamera.value })
+      await interviewCheck.begin({
+        interviewId: interviewId.value,
+        cloud: cloud.value,
+        camera: checkCamera.value,
+        microphone: checkMicrophone.value,
+      })
     }
     const room = await tutoring.joinRoom(ticket.value, undefined, undefined, deviceChoice.camera, deviceChoice.mic, deviceChoice.speaker, {
       kind: 'interview_candidate',
       contextId: interviewId.value,
     })
+    // Voice checks listen to the call's own microphone stream, so they start
+    // once the call is up.
+    if (runCheck) await interviewCheck.listen()
     await router.push(`/interview-call/${room.id}?cloud=${encodeURIComponent(cloud.value)}`)
   } catch (cause) {
     ticket.value = null
@@ -162,6 +171,13 @@ onUnmounted(() => {
             <span>
               {{ $t('tutoring.interviewRoom.check.camera') }}
               <span class="block text-xs text-muted-foreground">{{ $t('tutoring.interviewRoom.check.cameraHint') }}</span>
+            </span>
+          </label>
+          <label v-if="checkChoice === 'run'" class="ml-6 flex items-start gap-2 text-sm text-foreground">
+            <input v-model="checkMicrophone" type="checkbox" class="mt-0.5" data-testid="check-microphone">
+            <span>
+              {{ $t('tutoring.interviewRoom.check.voice') }}
+              <span class="block text-xs text-muted-foreground">{{ $t('tutoring.interviewRoom.check.voiceHint') }}</span>
             </span>
           </label>
           <label class="flex items-center gap-2 text-sm text-foreground">

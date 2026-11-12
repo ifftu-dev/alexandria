@@ -12,6 +12,9 @@ import { useCallDevices } from '@/composables/useCallDevices'
 import { openCameraPreview } from '@/utils/callCamera'
 import CallDevicePicker from '@/components/live/CallDevicePicker.vue'
 import SentinelLiveIndicator from '@/components/integrity/SentinelLiveIndicator.vue'
+import InterviewSignalFeed, { type SignalFeedEntry } from '@/components/integrity/InterviewSignalFeed.vue'
+import { useInterviewSignals } from '@/composables/useInterviewSignals'
+import { answerConcerns } from '@/utils/sentinel/interviewFeed'
 import { LiveDiagnosticsModal, LiveParticipantTile, LiveSessionControls, VideoGrid } from '@/components/live'
 import QrCodeDisplay from '@/components/tutoring/QrCodeDisplay.vue'
 import PanelIntegrity from '@/components/organisations/PanelIntegrity.vue'
@@ -19,8 +22,11 @@ import { AppAlert, AppBadge, AppButton, AppModal, AppTextarea } from '@/componen
 import type {
   DeviceList,
   InterviewConsentRequest,
+  InterviewCriterion,
   InterviewCriterionStatus,
+  InterviewFollowup,
   InterviewParticipant,
+  InterviewSignalMessage,
   TutoringTranscriptMessage,
 } from '@/types'
 import { errorMessage } from '@/utils/errorMessage'
@@ -51,11 +57,22 @@ const {
   recordConsent,
   appendTranscript,
   recommendFollowups,
+  followupsForSignal,
+  setCriterionFollowups,
   setFollowupStatus,
   setCriterion,
   saveNote,
   generateSummary,
 } = useInterviews()
+const signals = useInterviewSignals()
+/** The candidate's live signals, newest first. */
+const signalEntries = ref<SignalFeedEntry[]>([])
+/** The criterion each question marked on this device was about. */
+const questionCriteria = new Map<string, string | null>()
+let stopSignals: (() => void) | null = null
+const followupDrafts = ref<Record<string, string>>({})
+const SIGNAL_ENTRIES = 20
+type AuthoredCriterion = Pick<Readonly<InterviewCriterion>, 'id'> & { follow_ups: readonly string[] }
 const tutoring = useTutoringRoom()
 const callDevices = useCallDevices()
 const deviceChoice = callDevices.choice
@@ -164,6 +181,7 @@ onMounted(async () => {
     selectedSpeakerId.value = bundle.participants.find(item => item.role === 'interviewer')?.id ?? selectedSpeakerId.value
   }
   await tutoring.setupEventListeners()
+  stopSignals = await signals.onSignal(onInterviewSignal)
   await tutoring.refreshStatus()
   if (bundle.session.status === 'live') {
     tutoring.startPolling(2000)
@@ -175,6 +193,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  stopSignals?.()
+  stopSignals = null
   if (panelRefresh) clearInterval(panelRefresh)
   speech.stop()
   stopSelfPreview()
@@ -442,6 +462,57 @@ async function savePrivateNote() {
   await saveNote(interviewId.value, privateNote.value, activeInterview.value?.notes[0]?.id)
 }
 
+/**
+ * A signal from the candidate's app: show it, and when an answer carries a
+ * concern, suggest a follow-up for the criterion its question was about.
+ */
+function onInterviewSignal(message: InterviewSignalMessage) {
+  const signal = message.signal
+  const answer = typeof signal === 'object' && 'answer' in signal ? signal.answer : null
+  if (!answer && signal !== 'second_voice') return
+  const concerns = answer ? answerConcerns(answer) : []
+  signalEntries.value = [
+    {
+      key: `${message.sender}:${message.timestamp}:${signalEntries.value.length}`,
+      at: message.timestamp,
+      sender: message.sender_name ?? message.sender.slice(0, 8),
+      answer,
+      concerns,
+    },
+    ...signalEntries.value,
+  ].slice(0, SIGNAL_ENTRIES)
+  const id = session.value?.id
+  if (!answer || !concerns[0] || !id) return
+  const criterionId = questionCriteria.get(answer.question_id) ?? null
+  followupsForSignal(id, criterionId, concerns[0]).catch(() => undefined)
+}
+
+/** Tell the candidate's app a question is being asked, so it can time the answer. */
+async function askQuestion(questionId: string, criterionId: string | null) {
+  questionCriteria.set(questionId, criterionId)
+  await signals.send({ question: { question_id: questionId } }).catch(() => undefined)
+}
+
+async function askFollowup(followup: InterviewFollowup) {
+  await askQuestion(followup.id, followup.criterion_id)
+  await setFollowupStatus(followup.id, 'asked')
+}
+
+function markQuestion() {
+  void askQuestion(`q${Date.now().toString(36)}`, null)
+}
+
+async function addAuthoredFollowup(criterion: AuthoredCriterion) {
+  const question = followupDrafts.value[criterion.id]?.trim()
+  if (!question) return
+  await setCriterionFollowups(criterion.id, [...criterion.follow_ups, question])
+  followupDrafts.value = { ...followupDrafts.value, [criterion.id]: '' }
+}
+
+async function removeAuthoredFollowup(criterion: AuthoredCriterion, index: number) {
+  await setCriterionFollowups(criterion.id, criterion.follow_ups.filter((_, i) => i !== index))
+}
+
 async function cycleCriterion(id: string, current: InterviewCriterionStatus) {
   const next: InterviewCriterionStatus = current === 'not_covered'
     ? 'partial'
@@ -612,9 +683,22 @@ function formatTime(ms: number) {
               <span class="text-xs text-muted-foreground">{{ $t('interviews.session.criteriaHint') }}</span>
             </div>
             <div class="mt-4 grid gap-2 sm:grid-cols-2">
-              <div v-for="(criterion, index) in criteria" :key="criterion.id" class="flex items-center gap-3 rounded-lg border border-border px-3 py-2.5">
-                <span class="font-mono text-xs text-muted-foreground">{{ String(index + 1).padStart(2, '0') }}</span>
-                <span class="text-sm text-foreground">{{ criterion.label }}</span>
+              <div v-for="(criterion, index) in criteria" :key="criterion.id" class="rounded-lg border border-border px-3 py-2.5">
+                <div class="flex items-center gap-3">
+                  <span class="font-mono text-xs text-muted-foreground">{{ String(index + 1).padStart(2, '0') }}</span>
+                  <span class="text-sm text-foreground">{{ criterion.label }}</span>
+                </div>
+                <p class="mt-2 text-[0.68rem] font-medium text-muted-foreground">{{ $t('interviews.session.authoredFollowups') }}</p>
+                <ul class="mt-1 space-y-1">
+                  <li v-for="(question, i) in criterion.follow_ups" :key="question" class="flex items-start justify-between gap-2 text-xs text-foreground">
+                    <span>{{ question }}</span>
+                    <button class="shrink-0 text-[0.65rem] text-muted-foreground hover:text-destructive" @click="removeAuthoredFollowup(criterion, i)">{{ $t('interviews.session.removeFollowup') }}</button>
+                  </li>
+                </ul>
+                <form class="mt-1.5 flex gap-1.5" @submit.prevent="addAuthoredFollowup(criterion)">
+                  <input v-model="followupDrafts[criterion.id]" class="input min-w-0 flex-1 py-1 text-xs" :placeholder="$t('interviews.session.followupPlaceholder')" maxlength="500">
+                  <AppButton type="submit" size="xs" variant="outline" :disabled="!followupDrafts[criterion.id]?.trim()">{{ $t('interviews.session.addFollowup') }}</AppButton>
+                </form>
               </div>
             </div>
           </div>
@@ -750,6 +834,8 @@ function formatTime(ms: number) {
           <p class="text-[0.68rem] text-muted-foreground">{{ $t('interviews.session.assistantHint') }}</p>
         </div>
         <div class="flex-1 space-y-5 overflow-y-auto p-3">
+          <InterviewSignalFeed :entries="signalEntries" @mark="markQuestion" />
+
           <section>
             <div class="mb-2 flex items-center justify-between"><h3 class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{{ $t('interviews.session.followups') }}</h3><span class="text-[0.65rem] text-muted-foreground">{{ suggestions.length }}</span></div>
             <div class="space-y-2">
@@ -757,7 +843,8 @@ function formatTime(ms: number) {
                 <p class="text-sm font-medium leading-snug text-foreground">{{ suggestion.question }}</p>
                 <p class="mt-1 text-xs leading-relaxed text-muted-foreground">{{ suggestion.reason }}</p>
                 <div class="mt-3 flex gap-2">
-                  <AppButton size="xs" @click="setFollowupStatus(suggestion.id, 'asked')">{{ $t('interviews.session.markAsked') }}</AppButton>
+                  <AppButton size="xs" @click="askFollowup(suggestion)">{{ $t('interviews.session.askNow') }}</AppButton>
+                  <AppButton size="xs" variant="outline" @click="setFollowupStatus(suggestion.id, 'asked')">{{ $t('interviews.session.markAsked') }}</AppButton>
                   <AppButton size="xs" variant="ghost" @click="setFollowupStatus(suggestion.id, 'dismissed')">{{ $t('interviews.session.dismiss') }}</AppButton>
                 </div>
               </article>

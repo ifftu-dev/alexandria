@@ -61,6 +61,9 @@ pub struct InterviewCriterion {
     pub position: i64,
     pub status: String,
     pub notes: Option<String>,
+    /// Follow-up questions authored for this criterion, suggested to the
+    /// interviewer during the interview.
+    pub follow_ups: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,7 +143,71 @@ pub struct CreateInterviewRequest {
     #[serde(default)]
     pub participants: Vec<CreateInterviewParticipant>,
     #[serde(default)]
-    pub criteria: Vec<String>,
+    pub criteria: Vec<CriterionInput>,
+}
+
+/// A criterion as a plan names it: a label, or a label with follow-up
+/// questions authored for it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum CriterionInput {
+    Label(String),
+    Authored {
+        label: String,
+        #[serde(default)]
+        follow_ups: Vec<String>,
+    },
+}
+
+impl CriterionInput {
+    fn label(&self) -> &str {
+        match self {
+            Self::Label(label) | Self::Authored { label, .. } => label,
+        }
+    }
+
+    fn follow_ups(&self) -> &[String] {
+        match self {
+            Self::Label(_) => &[],
+            Self::Authored { follow_ups, .. } => follow_ups,
+        }
+    }
+}
+
+impl From<String> for CriterionInput {
+    fn from(label: String) -> Self {
+        Self::Label(label)
+    }
+}
+
+impl From<&str> for CriterionInput {
+    fn from(label: &str) -> Self {
+        Self::Label(label.into())
+    }
+}
+
+/// Most follow-ups authored for one criterion.
+const MAX_FOLLOW_UPS: usize = 8;
+const MAX_FOLLOW_UP_CHARS: usize = 500;
+
+/// Trimmed follow-ups, refused when empty, too long or too many.
+fn clean_follow_ups(follow_ups: &[String]) -> Result<Vec<String>, String> {
+    if follow_ups.len() > MAX_FOLLOW_UPS {
+        return Err(format!("at most {MAX_FOLLOW_UPS} follow-ups per criterion"));
+    }
+    follow_ups
+        .iter()
+        .map(|question| {
+            let question = question.trim();
+            if question.is_empty() || question.chars().count() > MAX_FOLLOW_UP_CHARS {
+                Err(format!(
+                    "a follow-up needs 1 to {MAX_FOLLOW_UP_CHARS} characters"
+                ))
+            } else {
+                Ok(question.to_string())
+            }
+        })
+        .collect()
 }
 
 #[derive(Debug, Deserialize)]
@@ -308,16 +375,18 @@ pub fn create_interview_impl(
         .map_err(|e| e.to_string())?;
     }
 
-    for (index, label) in req.criteria.iter().enumerate() {
-        let trimmed = label.trim();
+    for (index, criterion) in req.criteria.iter().enumerate() {
+        let trimmed = criterion.label().trim();
         if trimmed.is_empty() {
             continue;
         }
+        let follow_ups = serde_json::to_string(&clean_follow_ups(criterion.follow_ups())?)
+            .map_err(|e| e.to_string())?;
         let criterion_id = entity_id(&[&id, trimmed, &index.to_string()]);
         tx.execute(
-            "INSERT INTO interview_criteria (id, session_id, label, position)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![criterion_id, id, trimmed, index as i64],
+            "INSERT INTO interview_criteria (id, session_id, label, position, follow_ups_json)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![criterion_id, id, trimmed, index as i64, follow_ups],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -363,12 +432,13 @@ fn list_participants(
 fn list_criteria(conn: &Connection, session_id: &str) -> Result<Vec<InterviewCriterion>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, session_id, label, position, status, notes FROM interview_criteria
-             WHERE session_id = ?1 ORDER BY position, id",
+            "SELECT id, session_id, label, position, status, notes, follow_ups_json
+             FROM interview_criteria WHERE session_id = ?1 ORDER BY position, id",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map(params![session_id], |row| {
+            let follow_ups: String = row.get(6)?;
             Ok(InterviewCriterion {
                 id: row.get(0)?,
                 session_id: row.get(1)?,
@@ -376,6 +446,7 @@ fn list_criteria(conn: &Connection, session_id: &str) -> Result<Vec<InterviewCri
                 position: row.get(3)?,
                 status: row.get(4)?,
                 notes: row.get(5)?,
+                follow_ups: serde_json::from_str(&follow_ups).unwrap_or_default(),
             })
         })
         .map_err(|e| e.to_string())?;
@@ -569,6 +640,14 @@ pub fn recommend_followups_impl(
         .or_else(|| transcript.last());
     let criteria = list_criteria(conn, session_id)?;
     let mut candidates: Vec<(String, String, Option<String>)> = Vec::new();
+    // An authored follow-up for the next uncovered criterion comes first.
+    let uncovered = criteria
+        .iter()
+        .find(|criterion| criterion.status == "not_covered");
+    let uncovered_next = match uncovered {
+        Some(criterion) => Some(next_authored(conn, session_id, criterion)?),
+        None => None,
+    };
 
     if let Some(segment) = source {
         let lower = segment.text.to_lowercase();
@@ -620,10 +699,7 @@ pub fn recommend_followups_impl(
         }
     }
 
-    if let Some(criterion) = criteria
-        .iter()
-        .find(|criterion| criterion.status == "not_covered")
-    {
+    if let (Some(criterion), Some(AuthoredNext::Exhausted)) = (uncovered, &uncovered_next) {
         candidates.push((
             format!(
                 "Can you share an example that demonstrates {}?",
@@ -634,7 +710,26 @@ pub fn recommend_followups_impl(
         ));
     }
 
-    for (index, (question, reason, criterion_id)) in candidates.into_iter().take(3).enumerate() {
+    let mut room = 3;
+    if let (Some(criterion), Some(AuthoredNext::Next(question))) = (uncovered, &uncovered_next) {
+        insert_followup(
+            conn,
+            &FollowupRow {
+                id: &authored_followup_id(session_id, &criterion.id, question),
+                session_id,
+                source_segment_id: source.map(|segment| segment.id.as_str()),
+                criterion_id: Some(&criterion.id),
+                question,
+                reason: &format!(
+                    "Authored for {}, which is not covered yet.",
+                    criterion.label
+                ),
+                created_at,
+            },
+        )?;
+        room = 2;
+    }
+    for (index, (question, reason, criterion_id)) in candidates.into_iter().take(room).enumerate() {
         let id = entity_id(&[
             session_id,
             source
@@ -660,6 +755,170 @@ pub fn recommend_followups_impl(
         .map_err(|e| e.to_string())?;
     }
     list_followups(conn, session_id)
+}
+
+/// Where a criterion's authored follow-ups stand.
+enum AuthoredNext {
+    /// One is suggested and not yet asked or dismissed.
+    Pending,
+    /// The next one never suggested.
+    Next(String),
+    /// None authored, or every one already suggested.
+    Exhausted,
+}
+
+fn authored_followup_id(session_id: &str, criterion_id: &str, question: &str) -> String {
+    entity_id(&[session_id, "authored", criterion_id, question])
+}
+
+fn next_authored(
+    conn: &Connection,
+    session_id: &str,
+    criterion: &InterviewCriterion,
+) -> Result<AuthoredNext, String> {
+    let mut next = None;
+    for question in &criterion.follow_ups {
+        let id = authored_followup_id(session_id, &criterion.id, question);
+        let status: Option<String> = conn
+            .query_row(
+                "SELECT status FROM interview_followups WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        match status.as_deref() {
+            Some("suggested") => return Ok(AuthoredNext::Pending),
+            None if next.is_none() => next = Some(question.clone()),
+            _ => {}
+        }
+    }
+    Ok(next.map_or(AuthoredNext::Exhausted, AuthoredNext::Next))
+}
+
+struct FollowupRow<'a> {
+    id: &'a str,
+    session_id: &'a str,
+    source_segment_id: Option<&'a str>,
+    criterion_id: Option<&'a str>,
+    question: &'a str,
+    reason: &'a str,
+    created_at: &'a str,
+}
+
+fn insert_followup(conn: &Connection, row: &FollowupRow<'_>) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR IGNORE INTO interview_followups
+         (id, session_id, source_segment_id, criterion_id, question, reason, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            row.id,
+            row.session_id,
+            row.source_segment_id,
+            row.criterion_id,
+            row.question,
+            row.reason,
+            row.created_at,
+        ],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
+/// Why a live signal on the candidate's answer is worth a follow-up.
+fn signal_reason(signal: &str) -> Result<&'static str, String> {
+    Ok(match signal {
+        "relay_lag" => "The answer started much later than this candidate's own earlier answers.",
+        "gaze_down" => "The candidate looked down just before answering.",
+        "second_voice" => "Another voice was heard just before the answer.",
+        other => return Err(format!("unknown interview signal: {other}")),
+    })
+}
+
+/// A live signal on the candidate's answer (from their app's integrity
+/// check) suggests a follow-up they have not prepared for: the next authored
+/// follow-up for the criterion the question was about (or the first one not
+/// yet covered), else a generic one. Nothing is added while an authored
+/// follow-up for that criterion is still waiting to be asked.
+pub fn followups_for_signal_impl(
+    conn: &Connection,
+    session_id: &str,
+    criterion_id: Option<&str>,
+    signal: &str,
+    created_at: &str,
+) -> Result<Vec<InterviewFollowup>, String> {
+    let why = signal_reason(signal)?;
+    let criteria = list_criteria(conn, session_id)?;
+    let criterion = match criterion_id {
+        Some(id) => Some(
+            criteria
+                .iter()
+                .find(|criterion| criterion.id == id)
+                .ok_or("that criterion is not part of this interview")?,
+        ),
+        None => criteria
+            .iter()
+            .find(|criterion| criterion.status != "covered"),
+    };
+    let reason = format!("{why} Ask a follow-up they have not prepared for.");
+    let next = match criterion {
+        Some(criterion) => next_authored(conn, session_id, criterion)?,
+        None => AuthoredNext::Exhausted,
+    };
+    let criterion_id = criterion.map(|criterion| criterion.id.as_str());
+    match next {
+        AuthoredNext::Pending => {}
+        AuthoredNext::Next(question) => insert_followup(
+            conn,
+            &FollowupRow {
+                id: &authored_followup_id(session_id, criterion_id.unwrap_or(""), &question),
+                session_id,
+                source_segment_id: None,
+                criterion_id,
+                question: &question,
+                reason: &reason,
+                created_at,
+            },
+        )?,
+        AuthoredNext::Exhausted => insert_followup(
+            conn,
+            &FollowupRow {
+                id: &entity_id(&[
+                    session_id,
+                    "signal",
+                    criterion_id.unwrap_or(""),
+                    signal,
+                    created_at,
+                ]),
+                session_id,
+                source_segment_id: None,
+                criterion_id,
+                question: "Could you walk me through how you arrived at that answer, step by step?",
+                reason: &reason,
+                created_at,
+            },
+        )?,
+    }
+    list_followups(conn, session_id)
+}
+
+/// Replace the follow-ups authored for one criterion.
+pub fn set_criterion_followups_impl(
+    conn: &Connection,
+    criterion_id: &str,
+    follow_ups: &[String],
+) -> Result<(), String> {
+    let json = serde_json::to_string(&clean_follow_ups(follow_ups)?).map_err(|e| e.to_string())?;
+    let changed = conn
+        .execute(
+            "UPDATE interview_criteria SET follow_ups_json = ?2 WHERE id = ?1",
+            params![criterion_id, json],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("no such criterion".into());
+    }
+    Ok(())
 }
 
 pub fn generate_summary_impl(conn: &Connection, session_id: &str) -> Result<String, String> {
@@ -874,6 +1133,31 @@ pub async fn interview_set_followup_status(
         )
         .map_err(|e| e.to_string())?;
         Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn interview_followups_for_signal(
+    state: State<'_, AppState>,
+    session_id: String,
+    criterion_id: Option<String>,
+    signal: String,
+) -> Result<Vec<InterviewFollowup>, String> {
+    run_interview_job(&state, "interview.followups-for-signal", move |conn| {
+        followups_for_signal_impl(conn, &session_id, criterion_id.as_deref(), &signal, &now())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn interview_set_criterion_followups(
+    state: State<'_, AppState>,
+    id: String,
+    follow_ups: Vec<String>,
+) -> Result<(), String> {
+    run_interview_job(&state, "interview.set-criterion-followups", move |conn| {
+        set_criterion_followups_impl(conn, &id, &follow_ups)
     })
     .await
 }
@@ -1188,5 +1472,127 @@ mod tests {
         let summary = generate_summary_impl(db.conn(), &bundle.session.id).unwrap();
         assert!(summary.contains("[01:05] Candidate A"));
         assert!(summary.contains("failure path"));
+    }
+
+    fn authored_request() -> CreateInterviewRequest {
+        CreateInterviewRequest {
+            criteria: vec![
+                CriterionInput::Authored {
+                    label: "System design".into(),
+                    follow_ups: vec![
+                        "  What would you change if traffic grew tenfold?  ".into(),
+                        "Which part of that design would fail first?".into(),
+                    ],
+                },
+                "Communication".into(),
+            ],
+            ..request()
+        }
+    }
+
+    #[test]
+    fn criteria_carry_the_follow_ups_authored_for_them() {
+        let db = setup();
+        let bundle = create_interview_impl(db.conn(), &authored_request(), NOW).unwrap();
+        assert_eq!(
+            bundle.criteria[0].follow_ups,
+            [
+                "What would you change if traffic grew tenfold?",
+                "Which part of that design would fail first?"
+            ]
+        );
+        assert!(bundle.criteria[1].follow_ups.is_empty());
+
+        let communication = &bundle.criteria[1].id;
+        set_criterion_followups_impl(
+            db.conn(),
+            communication,
+            &["How would you explain that to a new teammate?".into()],
+        )
+        .unwrap();
+        let bundle = get_interview_impl(db.conn(), &bundle.session.id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(bundle.criteria[1].follow_ups.len(), 1);
+        for bad in [
+            vec![String::new()],
+            vec!["x".repeat(501)],
+            vec!["q".into(); 9],
+        ] {
+            assert!(set_criterion_followups_impl(db.conn(), communication, &bad).is_err());
+        }
+    }
+
+    #[test]
+    fn an_uncovered_criterion_suggests_its_authored_follow_up_before_a_generic_one() {
+        let db = setup();
+        let bundle = create_interview_impl(db.conn(), &authored_request(), NOW).unwrap();
+        let suggestions =
+            recommend_followups_impl(db.conn(), &bundle.session.id, None, NOW).unwrap();
+        let first = &suggestions[0];
+        assert_eq!(
+            first.question,
+            "What would you change if traffic grew tenfold?"
+        );
+        assert_eq!(
+            first.criterion_id.as_deref(),
+            Some(bundle.criteria[0].id.as_str())
+        );
+        assert!(!suggestions
+            .iter()
+            .any(|item| item.question.starts_with("Can you share an example")));
+    }
+
+    #[test]
+    fn a_live_signal_on_an_answer_suggests_the_next_authored_follow_up_for_its_criterion() {
+        let db = setup();
+        let bundle = create_interview_impl(db.conn(), &authored_request(), NOW).unwrap();
+        let session = &bundle.session.id;
+        let design = bundle.criteria[0].id.clone();
+
+        let after_lag =
+            followups_for_signal_impl(db.conn(), session, Some(&design), "relay_lag", NOW).unwrap();
+        let suggested: Vec<_> = after_lag
+            .iter()
+            .filter(|f| f.status == "suggested")
+            .collect();
+        assert_eq!(suggested.len(), 1);
+        assert_eq!(
+            suggested[0].question,
+            "What would you change if traffic grew tenfold?"
+        );
+        assert!(suggested[0].reason.contains("later than"));
+
+        // Once asked, the next signal moves on to the next authored follow-up.
+        db.conn()
+            .execute(
+                "UPDATE interview_followups SET status = 'asked' WHERE id = ?1",
+                params![suggested[0].id],
+            )
+            .unwrap();
+        let after_voice =
+            followups_for_signal_impl(db.conn(), session, Some(&design), "second_voice", NOW)
+                .unwrap();
+        let next = after_voice
+            .iter()
+            .find(|f| f.status == "suggested")
+            .unwrap();
+        assert_eq!(next.question, "Which part of that design would fail first?");
+        assert!(next.reason.contains("Another voice"));
+
+        // With nothing authored left, a generic follow-up on the same answer.
+        db.conn()
+            .execute(
+                "UPDATE interview_followups SET status = 'asked' WHERE id = ?1",
+                params![next.id],
+            )
+            .unwrap();
+        let generic =
+            followups_for_signal_impl(db.conn(), session, Some(&design), "gaze_down", NOW).unwrap();
+        let generic = generic.iter().find(|f| f.status == "suggested").unwrap();
+        assert_eq!(generic.criterion_id.as_deref(), Some(design.as_str()));
+        assert!(generic.reason.contains("looked down"));
+
+        assert!(followups_for_signal_impl(db.conn(), session, None, "telepathy", NOW).is_err());
     }
 }
