@@ -872,6 +872,32 @@ async fn a_busy_sponsor_does_not_hide_a_wallet_that_needs_funds() {
     assert!(state.needs_funds, "{:?}", state.last_error);
 }
 
+#[tokio::test]
+async fn one_anchoring_pass_reads_the_tip_once() {
+    let mut node = Node::new();
+    node.policy.cap = 1;
+    let profile = sponsor();
+    let spendable = profile.slot_to_posix_ms(TIP) - 1;
+    node.ledger.set_utxos(
+        &profile.address,
+        vec![sponsor_utxo(0x21, spendable), sponsor_utxo(0x22, spendable)],
+    );
+    node.sponsor = Some(profile);
+    node.ledger.set_utxos(
+        &node.wallet.payment_address,
+        vec![ada(0x11, 0, 6_000_000), ada(0x12, 0, 7_000_000)],
+    );
+    issue(&node.profile, &node.issuer, "a");
+    issue(&node.profile, &node.issuer, "b");
+    node.tick(T0_PLUS_7H).await;
+
+    // Reconcile the open batch and build a sponsored one in the same pass.
+    let before = node.ledger.tip_reads();
+    node.tick(T0_PLUS_7H).await;
+    assert_eq!(anchor_submissions(&node).len(), 2);
+    assert_eq!(node.ledger.tip_reads() - before, 1);
+}
+
 /// Live preprod run of the whole anchorer: issue two credentials, flush them
 /// as one batch, wait for confirmation, and check the verifier finds them
 /// anchored. Ignored by default. Uses the network profile's sponsor unless

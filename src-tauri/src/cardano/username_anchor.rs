@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cardano::anchor_tx::AnchorBuildError;
 use crate::cardano::blockfrost::BlockfrostClient;
-use crate::cardano::ledger::Ledger;
+use crate::cardano::ledger::{Ledger, PassTip};
 use crate::cardano::reservations::{select_unreserved, ReservedOutpoints};
 use crate::cardano::submission::{self, Journal, Member, Operation, Submission, SubmissionStatus};
 use crate::cardano::{anchor_tx, tx_builder};
@@ -195,7 +195,9 @@ pub(crate) async fn tick<L: Ledger>(
     let Some(ledger) = ledger else {
         return Ok(Vec::new());
     };
-    let mut anchored = recover_batches(journal, ledger).await?;
+    // Recovery and the next build share one tip request.
+    let tip = PassTip::new(ledger);
+    let mut anchored = recover_batches(journal, ledger, &tip).await?;
 
     // Verification pass: claims anchored by OTHER nodes arrive via the
     // DHT with anchor_verified = 0. Confirm their digests on-chain so
@@ -280,10 +282,7 @@ pub(crate) async fn tick<L: Ledger>(
         })
         .collect();
 
-    let tip = ledger
-        .tip_slot()
-        .await
-        .map_err(|e| format!("get_tip_slot: {e}"))?;
+    let tip = tip.get().await.map_err(|e| format!("get_tip_slot: {e}"))?;
     // Read just before selecting: earlier features in this background pass
     // journal their transactions before sending, so their inputs show here.
     let reserved = journal
@@ -429,6 +428,7 @@ fn next_batch(conn: &rusqlite::Connection) -> Result<Option<NextBatch>, String> 
 async fn recover_batches<L: Ledger>(
     journal: &Journal,
     ledger: &L,
+    tip: &PassTip<'_, L>,
 ) -> Result<Vec<UsernameClaim>, String> {
     let ids = journal
         .run("username_anchor.scan", |database| {
@@ -439,7 +439,7 @@ async fn recover_batches<L: Ledger>(
         return Ok(Vec::new());
     }
     // Expiry needs a known tip; without one, reconciliation never expires.
-    let tip = match ledger.tip_slot().await {
+    let tip = match tip.get().await {
         Ok(tip) => Some(tip),
         Err(error) => {
             log::debug!("username batch recovery without a tip: {error}");
@@ -886,6 +886,27 @@ mod tests {
             })
         );
         assert_eq!(ledger.submissions().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn one_username_pass_reads_the_tip_once() {
+        let profile = TestProfile::migrated();
+        profile.with_conn(|conn| cache(conn, &claim(1, "ada_99")));
+        let wallet = test_chain::wallet();
+        let ledger = FakeLedger::at_tip(TIP);
+        ledger.set_utxos(
+            &wallet.payment_address,
+            vec![ada(0x11, 0, 20_000_000), ada(0x22, 0, 20_000_000)],
+        );
+        let journal = profile.background();
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+
+        // Recover the in-flight batch and build the next in the same pass.
+        profile.with_conn(|conn| cache(conn, &claim(2, "bob_22")));
+        let before = ledger.tip_reads();
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+        assert_eq!(ledger.submissions().len(), 2);
+        assert_eq!(ledger.tip_reads() - before, 1);
     }
 
     fn claim(seed: u8, name: &str) -> UsernameClaim {

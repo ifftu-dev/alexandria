@@ -107,22 +107,22 @@ pub struct AnchorTx {
     pub invalid_from_slot: u64,
 }
 
-/// Build and sign the anchor transaction for `record`. Wallet inputs and
-/// collateral are chosen among UTxOs outside `reserved`; when only reserved
-/// ones would do, the error is [`AnchorBuildError::WalletBusy`].
+/// Build and sign the anchor transaction for `record` at `tip_slot`. Wallet
+/// inputs and collateral are chosen among UTxOs outside `reserved`; when only
+/// reserved ones would do, the error is [`AnchorBuildError::WalletBusy`].
 pub async fn build_anchor_tx<L: Ledger>(
     record: &AnchorRecord,
     funding: Funding<'_>,
     wallet: &Wallet,
     ledger: &L,
+    tip_slot: u64,
     reserved: &ReservedOutpoints,
 ) -> Result<AnchorTx, AnchorBuildError> {
-    let (utxos, params, tip_slot) = tokio::join!(
+    let (utxos, params) = tokio::join!(
         ledger.utxos(&wallet.payment_address),
         ledger.protocol_params(),
-        ledger.tip_slot(),
     );
-    let (wallet_utxos, params, tip_slot) = (utxos?, params?, tip_slot?);
+    let (wallet_utxos, params) = (utxos?, params?);
     let metadata = build_anchor_metadata(record);
     let payment_key = tx_builder::extended_private_key(&wallet.payment_key_extended)
         .map_err(|e| format!("payment key: {e}"))?;
@@ -509,9 +509,10 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let outcome = rt.block_on(async {
             let bf = crate::cardano::blockfrost::BlockfrostClient::new(pid).unwrap();
+            let tip = bf.tip_slot().await?;
             let funding = match &sponsor {
                 Some(profile) => {
-                    let (utxos, tip) = (bf.utxos(&profile.address).await?, bf.tip_slot().await?);
+                    let utxos = bf.utxos(&profile.address).await?;
                     let utxo = select_sponsor_utxo(
                         profile,
                         &utxos,
@@ -532,6 +533,7 @@ mod tests {
                     Funding::Sponsor { profile, utxo },
                     &wallet,
                     &bf,
+                    tip,
                     &ReservedOutpoints::default(),
                 )
                 .await
@@ -541,6 +543,7 @@ mod tests {
                     Funding::Issuer,
                     &wallet,
                     &bf,
+                    tip,
                     &ReservedOutpoints::default(),
                 )
                 .await

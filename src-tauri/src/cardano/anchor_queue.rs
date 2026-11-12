@@ -30,7 +30,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::cardano::anchor_tx::{self, AnchorBuildError, AnchorRecord, Funding};
-use crate::cardano::ledger::{self, Ledger};
+use crate::cardano::ledger::{self, Ledger, PassTip};
 use crate::cardano::reservations::ReservedOutpoints;
 use crate::cardano::submission::{
     self, Journal, Operation, Submission, SubmissionStatus, SubmitError,
@@ -109,12 +109,14 @@ pub(crate) async fn tick<L: Ledger>(
         log::debug!("anchor_queue::tick: no ledger, skipping");
         return Ok(0);
     };
+    // Reconciliation and the flush share one tip request.
+    let tip = PassTip::new(ledger);
     let mut changed = journal
         .run("anchor_queue.recover", |db| recover(db.conn()))
         .await?;
-    changed += reconcile_batches(journal, ledger, now).await?;
+    changed += reconcile_batches(journal, ledger, &tip, now).await?;
     if let Some(wallet) = wallet {
-        changed += flush(journal, ledger, wallet, sponsor, policy, now).await?;
+        changed += flush(journal, ledger, &tip, wallet, sponsor, policy, now).await?;
     }
     changed += observe_receipts(journal, ledger, now).await?;
     Ok(changed)
@@ -199,6 +201,7 @@ fn project_new_batch(
 async fn reconcile_batches<L: Ledger>(
     journal: &Journal,
     ledger: &L,
+    tip: &PassTip<'_, L>,
     now: &str,
 ) -> Result<u32, String> {
     let open: Vec<String> = journal
@@ -222,7 +225,7 @@ async fn reconcile_batches<L: Ledger>(
         return Ok(0);
     }
     // Expiry is the journal's call, and only at a known tip.
-    let tip = ledger.tip_slot().await.ok();
+    let tip = tip.get().await.ok();
     let mut changed = 0;
     for batch in open {
         let operation = Operation {
@@ -525,6 +528,7 @@ fn load_queued(
 async fn flush<L: Ledger>(
     journal: &Journal,
     ledger: &L,
+    tip: &PassTip<'_, L>,
     wallet: &Wallet,
     sponsor: Option<&AnchorSponsorProfile>,
     policy: &BatchPolicy,
@@ -543,7 +547,7 @@ async fn flush<L: Ledger>(
         return Ok(0);
     }
     let ids: Vec<String> = queued.iter().map(|q| q.credential_id.clone()).collect();
-    match build_and_submit(journal, ledger, wallet, &issuer, sponsor, &queued).await {
+    match build_and_submit(journal, ledger, tip, wallet, &issuer, sponsor, &queued).await {
         Ok(()) => Ok(1),
         Err(SubmitError::Retryable(error)) => {
             // Nothing was journaled or sent; try again next pass.
@@ -583,6 +587,7 @@ async fn flush<L: Ledger>(
 async fn build_and_submit<L: Ledger>(
     journal: &Journal,
     ledger: &L,
+    tip: &PassTip<'_, L>,
     wallet: &Wallet,
     issuer: &Did,
     sponsor: Option<&AnchorSponsorProfile>,
@@ -602,7 +607,7 @@ async fn build_and_submit<L: Ledger>(
 
     // What this node's in-flight transactions spend, read just before
     // selecting: every earlier writer in the pass has journaled its bytes.
-    let tip = ledger.tip_slot().await.map_err(SubmitError::Failed)?;
+    let tip = tip.get().await.map_err(SubmitError::Failed)?;
     let reserved = journal
         .before_send("anchor_queue.reserved", move |db| {
             submission::reserved_outpoints(db.conn(), tip)
@@ -612,7 +617,7 @@ async fn build_and_submit<L: Ledger>(
     let mut sponsor_error = None;
     let mut built = None;
     if let Some(profile) = sponsor {
-        match sponsored(ledger, profile, &record, wallet, &reserved).await {
+        match sponsored(ledger, profile, &record, wallet, tip, &reserved).await {
             Ok(Some((tx, funding))) => built = Some((tx, funding)),
             Ok(None) => {}
             // Busy only with this node's own in-flight transactions: wait
@@ -629,8 +634,15 @@ async fn build_and_submit<L: Ledger>(
     let (anchor, funding) = match built {
         Some(built) => built,
         None => {
-            match anchor_tx::build_anchor_tx(&record, Funding::Issuer, wallet, ledger, &reserved)
-                .await
+            match anchor_tx::build_anchor_tx(
+                &record,
+                Funding::Issuer,
+                wallet,
+                ledger,
+                tip,
+                &reserved,
+            )
+            .await
             {
                 Ok(tx) => (tx, Funding::Issuer.label()),
                 Err(error) => return Err(SubmitError::Failed(wait_reason(sponsor_error, error))),
@@ -730,10 +742,10 @@ async fn sponsored<L: Ledger>(
     profile: &AnchorSponsorProfile,
     record: &AnchorRecord,
     wallet: &Wallet,
+    tip: u64,
     reserved: &ReservedOutpoints,
 ) -> Result<Option<(anchor_tx::AnchorTx, &'static str)>, AnchorBuildError> {
-    let (utxos, tip) = tokio::join!(ledger.utxos(&profile.address), ledger.tip_slot());
-    let (utxos, tip) = (utxos?, tip?);
+    let utxos = ledger.utxos(&profile.address).await?;
     let utxo =
         match anchor_tx::select_sponsor_utxo(profile, &utxos, tip, &record.issuer_did, reserved) {
             Ok(Some(utxo)) => utxo,
@@ -748,7 +760,7 @@ async fn sponsored<L: Ledger>(
         };
     let funding = Funding::Sponsor { profile, utxo };
     let label = funding.label();
-    anchor_tx::build_anchor_tx(record, funding, wallet, ledger, reserved)
+    anchor_tx::build_anchor_tx(record, funding, wallet, ledger, tip, reserved)
         .await
         .map(|tx| Some((tx, label)))
 }

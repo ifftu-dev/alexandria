@@ -32,6 +32,7 @@ struct State {
     indexed: HashSet<String>,
     reject_submissions: Option<String>,
     evaluations: usize,
+    tip_reads: usize,
 }
 
 /// What signed bytes spend, and until when they can land.
@@ -145,6 +146,11 @@ impl FakeLedger {
         self.state.lock().unwrap().evaluations
     }
 
+    /// How many times the tip was requested.
+    pub(crate) fn tip_reads(&self) -> usize {
+        self.state.lock().unwrap().tip_reads
+    }
+
     /// Include a submitted transaction at `slot`.
     pub(crate) fn include(&self, tx_hash: &str, slot: u64) {
         self.land(tx_hash, slot, true);
@@ -256,7 +262,9 @@ impl Ledger for FakeLedger {
         .map_err(|e| e.to_string())
     }
     async fn tip_slot(&self) -> Result<u64, String> {
-        Ok(self.state.lock().unwrap().tip)
+        let mut state = self.state.lock().unwrap();
+        state.tip_reads += 1;
+        Ok(state.tip)
     }
     async fn evaluate(&self, _tx: &[u8]) -> Result<Vec<(u64, u64)>, String> {
         self.state.lock().unwrap().evaluations += 1;

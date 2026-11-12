@@ -6,6 +6,7 @@
 //! implementation, not changing the anchorer.
 
 use std::future::Future;
+use std::sync::OnceLock;
 
 use alexandria_verify::vc::anchor::IntegrityAnchor;
 use pallas_primitives::Metadatum;
@@ -38,6 +39,32 @@ pub trait Ledger: Sync {
         &self,
         tx_hash: &str,
     ) -> impl Future<Output = Result<Option<Vec<u8>>, String>> + Send;
+}
+
+/// The tip as one background pass sees it: requested from the ledger the
+/// first time a step needs it, then shared by every later step of the pass.
+/// A pass that needs no tip makes no request.
+pub(crate) struct PassTip<'a, L> {
+    ledger: &'a L,
+    slot: OnceLock<Result<u64, String>>,
+}
+
+impl<'a, L: Ledger> PassTip<'a, L> {
+    pub(crate) fn new(ledger: &'a L) -> Self {
+        Self {
+            ledger,
+            slot: OnceLock::new(),
+        }
+    }
+
+    /// The pass's tip, or the error its one request returned.
+    pub(crate) async fn get(&self) -> Result<u64, String> {
+        if let Some(slot) = self.slot.get() {
+            return slot.clone();
+        }
+        let read = self.ledger.tip_slot().await;
+        self.slot.get_or_init(|| read).clone()
+    }
 }
 
 impl Ledger for BlockfrostClient {
