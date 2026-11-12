@@ -86,6 +86,7 @@ fn signed_transaction(fee: u64) -> Vec<u8> {
         .output(Output::new(Address::from_bech32(
             "addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp"
         ).unwrap(), 2_000_000))
+        .invalid_from_slot(10_000)
         .fee(fee).network_id(0).build_conway_raw().unwrap();
     tx_builder::sign_raw_tx(
         &transaction.tx_bytes.0,
