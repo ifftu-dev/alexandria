@@ -589,7 +589,6 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `funding` TEXT NOT NULL
 - `status` TEXT NOT NULL default `'outcome_unknown'`
 - `tx_hash` TEXT NOT NULL
-- `invalid_from_slot` INTEGER NOT NULL
 - `created_at` TEXT NOT NULL default `datetime('now')`
 - `confirmed_at` TEXT
 

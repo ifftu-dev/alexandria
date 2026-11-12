@@ -103,8 +103,6 @@ impl From<String> for AnchorBuildError {
 pub struct AnchorTx {
     pub signed_cbor: Vec<u8>,
     pub tx_hash: String,
-    /// First slot at which the transaction can no longer be included.
-    pub invalid_from_slot: u64,
 }
 
 /// Build and sign the anchor transaction for `record` at `tip_slot`. Wallet
@@ -134,7 +132,7 @@ pub async fn build_anchor_tx<L: Ledger>(
     ));
     let issuer_hash = did_key_hash(wallet);
 
-    let (unsigned, invalid_from_slot) = match funding {
+    let unsigned = match funding {
         Funding::Issuer => {
             let fee = tx_builder::estimate_fee(&params, 1);
             let needed = fee + MIN_UTXO_LOVELACE;
@@ -147,7 +145,6 @@ pub async fn build_anchor_tx<L: Ledger>(
                     })?;
             let address = PallasAddress::from_bech32(&wallet.payment_address)
                 .map_err(|e| format!("bad wallet address: {e}"))?;
-            let invalid_from = tip_slot + TTL_OFFSET;
             let built = StagingTransaction::new()
                 .input(Input::new(
                     parse_hash(&selected.tx_hash)?,
@@ -156,13 +153,13 @@ pub async fn build_anchor_tx<L: Ledger>(
                 .output(Output::new(address, selected.lovelace() - fee))
                 .disclosed_signer(issuer_hash)
                 .fee(fee)
-                .invalid_from_slot(invalid_from)
+                .invalid_from_slot(tip_slot + TTL_OFFSET)
                 .network_id(0)
                 .build_conway_raw()
                 .map_err(|e| format!("build: {e}"))?;
             let (with_metadata, _) = tx_builder::inject_metadata(&built.tx_bytes.0, metadata)
                 .map_err(|e| format!("inject_metadata: {e}"))?;
-            (with_metadata, invalid_from)
+            with_metadata
         }
         Funding::Sponsor { profile, utxo } => {
             let plan = SponsorPlan::new(profile, utxo, tip_slot)?;
@@ -203,7 +200,7 @@ pub async fn build_anchor_tx<L: Ledger>(
                     profile.fee_cap_lovelace
                 )));
             }
-            (build(fee, units)?, plan.invalid_from_slot)
+            build(fee, units)?
         }
     };
 
@@ -213,7 +210,6 @@ pub async fn build_anchor_tx<L: Ledger>(
     Ok(AnchorTx {
         signed_cbor,
         tx_hash,
-        invalid_from_slot,
     })
 }
 

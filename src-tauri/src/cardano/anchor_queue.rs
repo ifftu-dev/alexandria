@@ -84,7 +84,6 @@ struct BatchContext {
     root: String,
     leaf_count: u64,
     funding: String,
-    invalid_from_slot: u64,
     members: Vec<BatchMember>,
 }
 
@@ -171,16 +170,15 @@ fn project_new_batch(
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     tx.execute(
         "INSERT OR IGNORE INTO anchor_batches
-         (id, issuer_did, root, leaf_count, funding, status, tx_hash, invalid_from_slot)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?1, ?7)",
+         (id, issuer_did, root, leaf_count, funding, status, tx_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?1)",
         params![
             tx_hash,
             context.issuer_did,
             context.root,
             context.leaf_count as i64,
             context.funding,
-            status,
-            context.invalid_from_slot as i64
+            status
         ],
     )
     .map_err(|e| format!("project batch: {e}"))?;
@@ -656,7 +654,6 @@ async fn build_and_submit<L: Ledger>(
         root: record.root.clone(),
         leaf_count: record.leaf_count,
         funding: funding.to_owned(),
-        invalid_from_slot: anchor.invalid_from_slot,
         members: queued
             .iter()
             .map(|q| BatchMember {
