@@ -387,11 +387,12 @@ pub(crate) fn decide_with_verification(
     signals: &[String],
     manifest: &RatioManifest,
 ) -> Result<Decision, String> {
-    let (current_status, ended, purpose): (String, bool, String) = conn
+    let (current_status, ended, purpose, profile): (String, bool, String, Option<String>) = conn
         .query_row(
-            "SELECT status, ended_at IS NOT NULL, purpose FROM integrity_sessions WHERE id = ?1",
+            "SELECT status, ended_at IS NOT NULL, purpose, trust_profile
+               FROM integrity_sessions WHERE id = ?1",
             params![session_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => "session not found".to_string(),
@@ -406,7 +407,9 @@ pub(crate) fn decide_with_verification(
         )?,
         interview: purpose == "interview",
     };
-    let decision = decide(&evidence, manifest, DEFAULT_PROFILE, ended);
+    // The session's locked profile, as when its windows were committed.
+    let profile = profile.as_deref().unwrap_or(DEFAULT_PROFILE);
+    let decision = decide(&evidence, manifest, profile, ended);
     let current = SessionStatus::parse(&current_status).unwrap_or(SessionStatus::Active);
     if decision.status > current {
         conn.execute(

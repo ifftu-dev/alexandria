@@ -546,6 +546,24 @@ mod tests {
     }
 
     #[test]
+    fn grading_decides_under_the_locked_profile() {
+        let db = db();
+        recent_practice(&db, 6, false);
+        end_session(&db);
+        // `measured()` certifies `core` only; a session locked to `camera`
+        // is judged on camera ratios, which certify nothing here.
+        db.conn()
+            .execute(
+                "UPDATE integrity_sessions SET trust_profile = 'camera' WHERE id = 'sess'",
+                [],
+            )
+            .unwrap();
+        let result = apply_at_grading(db.conn(), "att", 1.0, &measured()).unwrap();
+        assert_eq!(result.verdict, ConsistencyVerdict::Divergent);
+        assert_eq!(session_status(&db), "completed");
+    }
+
+    #[test]
     fn an_unmeasured_divergence_is_advisory_and_leaves_the_session_alone() {
         let db = db();
         recent_practice(&db, 6, false);
