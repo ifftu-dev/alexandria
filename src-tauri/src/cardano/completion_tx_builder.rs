@@ -192,15 +192,16 @@ pub async fn build_completion_mint_tx<L: Ledger>(
         v.sort_by_key(|u| std::cmp::Reverse(u.lovelace()));
         v
     };
-    let selected = select_unreserved(&pure, reserved, |free| free.first())?
-        .ok_or(TxBuildError::NoUtxos)?;
+    let selected =
+        select_unreserved(&pure, reserved, |free| free.first())?.ok_or(TxBuildError::NoUtxos)?;
     let others: Vec<_> = pure
         .iter()
         .filter(|u| !(u.tx_hash == selected.tx_hash && u.tx_index == selected.tx_index))
         .cloned()
         .collect();
     let collateral = select_unreserved(&others, reserved, |free| {
-        free.iter().find(|u| u.lovelace() >= MIN_COLLATERAL_LOVELACE)
+        free.iter()
+            .find(|u| u.lovelace() >= MIN_COLLATERAL_LOVELACE)
     })?
     .ok_or(TxBuildError::InsufficientFunds {
         needed: MIN_COLLATERAL_LOVELACE,

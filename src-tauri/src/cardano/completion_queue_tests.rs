@@ -421,7 +421,11 @@ async fn mint_waits_while_every_eligible_utxo_is_reserved_then_submits_after_the
 
     // The first mint's input and collateral are the only eligible UTxOs.
     tick(&journal, &ledger, &wallet).await.unwrap();
-    assert_eq!(ledger.submissions().len(), 1, "nothing known to fail is sent");
+    assert_eq!(
+        ledger.submissions().len(),
+        1,
+        "nothing known to fail is sent"
+    );
     let waiting = profile.with_conn(|conn| state(conn, "second").unwrap());
     assert_eq!(waiting.status, WitnessStatus::Pending);
     assert!(waiting.tx_hash.is_none());

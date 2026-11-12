@@ -185,7 +185,10 @@ async fn uncertain_witness_recovers_by_querying_its_original_transaction_only() 
     // original transaction.
     let tip = "GET /blocks/latest".to_owned();
     let query = format!("GET /txs/{}", saved.tx_hash);
-    assert_eq!(chain.requests(), vec![tip.clone(), query.clone(), tip, query]);
+    assert_eq!(
+        chain.requests(),
+        vec![tip.clone(), query.clone(), tip, query]
+    );
 }
 
 #[test]
@@ -395,7 +398,10 @@ async fn double_spent_mint_expires_and_is_replaced_with_identical_evidence() {
     let (replacement_hash, replacement_bytes) = submissions.last().unwrap().clone();
     assert_ne!(replacement_hash, rejected_hash);
     assert_eq!(evidence(&replacement_bytes), evidence(&rejected_bytes));
-    assert_eq!(inputs(&rejected_bytes), vec![format!("{}#0", "11".repeat(32))]);
+    assert_eq!(
+        inputs(&rejected_bytes),
+        vec![format!("{}#0", "11".repeat(32))]
+    );
     assert_eq!(inputs(&replacement_bytes), vec![format!("{foreign}#1")]);
     let replaced = witness(&profile);
     assert_eq!(replaced.status, WitnessStatus::Submitted);
