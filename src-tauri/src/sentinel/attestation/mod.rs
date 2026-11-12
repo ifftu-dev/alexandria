@@ -5,7 +5,9 @@
 //! OS vendor will attest that a genuine, unmodified build of this app on a
 //! genuine device produced a given nonce. Bound to the integrity session,
 //! that turns "the client says so" into "the platform says this client was
-//! ours". Desktop has no equivalent and stays `local`.
+//! ours". Desktop has no equivalent of its own (on macOS App Attest reports
+//! unsupported) and stays `local` unless the learner pairs an attested phone
+//! (`sentinel::companion`).
 //!
 //! Two attestation families, both verified **on the device that issues**
 //! (local-first, no new service):
@@ -121,6 +123,11 @@ pub struct DeviceAttestation {
     pub app_id: String,
     pub payload: AttestationPayload,
     pub captured_at: String,
+    /// Present when a paired phone produced this attestation for a desktop
+    /// session (see `sentinel::companion`). The attested nonce is then the
+    /// companion nonce, bound to the learner and the phone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub companion: Option<crate::sentinel::companion::CompanionBinding>,
 }
 
 /// Play Integrity response keys from the Play Console ("Manage and download
@@ -174,6 +181,9 @@ pub struct SessionAttestationFacts {
     pub stored_assurance_level: String,
     pub attestation_json: Option<String>,
     pub commitment_root: Option<String>,
+    /// The DID of the profile that owns the session. A paired phone's
+    /// attestation is credited only when its binding names this learner.
+    pub learner_did: Option<String>,
 }
 
 /// Decide what a credential may claim for this session. The stored level
@@ -200,7 +210,10 @@ pub fn effective_assurance(
             )
         }
     };
-    let nonce = session_nonce(&facts.session_id, &facts.started_at);
+    let nonce = match expected_nonce(&att, facts) {
+        Ok(nonce) => nonce,
+        Err(why) => return (ASSURANCE_LOCAL.to_string(), Some(why)),
+    };
     match verify(
         &att,
         &nonce,
@@ -211,6 +224,26 @@ pub fn effective_assurance(
         Ok(_) => (ASSURANCE_DEVICE_ATTESTED.to_string(), None),
         Err(why) => (ASSURANCE_LOCAL.to_string(), Some(why)),
     }
+}
+
+/// The nonce a stored record must attest: the session nonce for the
+/// device's own attestation; for a paired phone, the companion nonce, once
+/// the binding's learner signature verifies and the binding names the
+/// profile's learner.
+fn expected_nonce(
+    att: &DeviceAttestation,
+    facts: &SessionAttestationFacts,
+) -> Result<[u8; 32], Unverified> {
+    let nonce = session_nonce(&facts.session_id, &facts.started_at);
+    let Some(binding) = &att.companion else {
+        return Ok(nonce);
+    };
+    if facts.learner_did.as_deref() != Some(binding.learner_did.as_str()) {
+        return Err(Unverified::Failed {
+            reason: "companion attestation is bound to another learner".into(),
+        });
+    }
+    crate::sentinel::companion::bound_nonce(att, binding, &nonce)
 }
 
 /// Why a stored attestation did not raise the session's assurance.
@@ -391,6 +424,7 @@ mod tests {
                 token: "x.y.z.w.v".into(),
             },
             captured_at: "now".into(),
+            companion: None,
         };
         let err = verify(&att, &[1u8; 32], None, &TrustConfig::default(), 0).unwrap_err();
         assert!(matches!(err, Unverified::Failed { .. }));
@@ -407,6 +441,7 @@ mod tests {
                 token: "x.y.z.w.v".into(),
             },
             captured_at: "now".into(),
+            companion: None,
         };
         assert_eq!(
             verify(&att, &nonce, None, &TrustConfig::default(), 0).unwrap_err(),
@@ -425,6 +460,7 @@ mod tests {
                 token: "x.y.z.w.v".into(),
             },
             captured_at: "now".into(),
+            companion: None,
         };
         assert!(matches!(
             verify(&att, &nonce, None, &TrustConfig::default(), 0),
@@ -457,6 +493,7 @@ mod tests {
                 asserted_root: Some(root.into()),
             },
             captured_at: started_at.into(),
+            companion: None,
         };
         let facts = SessionAttestationFacts {
             session_id: session_id.into(),
@@ -464,6 +501,7 @@ mod tests {
             stored_assurance_level: ASSURANCE_DEVICE_ATTESTED.into(),
             attestation_json: Some(serde_json::to_string(&att).unwrap()),
             commitment_root: Some(root.into()),
+            learner_did: None,
         };
         let cfg = TrustConfig {
             apple_root_pem: w.root_pem.clone(),
@@ -513,6 +551,7 @@ mod tests {
                 asserted_root: None,
             },
             captured_at: "2026-10-10T00:00:00Z".into(),
+            companion: None,
         };
         let json = serde_json::to_string(&att).unwrap();
         assert!(json.contains("\"platform\":\"ios\""));

@@ -42,6 +42,7 @@ pub mod identity;
 pub mod import;
 pub mod instructor;
 pub mod integrity;
+pub mod integrity_companion;
 pub mod interview;
 #[cfg(test)]
 mod live_demo;
