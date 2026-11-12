@@ -134,6 +134,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // Follow-up questions authored per interview criterion, suggested to the
     // interviewer during the interview.
     (37, "interview_criterion_followups", include_str!("interview_criterion_followups.sql")),
+    // Generated probes: the learner's consent at attempt start, the `llm`
+    // probe source and each generated probe's record. See
+    // `crate::assessment::llm_probe`.
+    (38, "llm_probes", include_str!("llm_probes.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

@@ -51,6 +51,12 @@ pub struct IssuancePolicy {
     /// one with `min_verification_rung: probed`).
     #[serde(default)]
     pub probe_policy: Option<crate::assessment::probes::ProbePolicy>,
+    /// The model connection that writes generated probes under the `llm`
+    /// policy: a saved model connection on the device that runs the attempt.
+    /// Without one a generated probe is skipped. Ignored by every other
+    /// policy and not judged at issuance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe_connection_id: Option<String>,
     /// Minimum trust profile (the policy floor). Judged at attempt start and
     /// again here; issuance is refused unless the session meets it and the
     /// two judgements agree.
