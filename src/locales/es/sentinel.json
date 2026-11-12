@@ -264,6 +264,10 @@
       "voiceThenResponse": {
         "description": "Otra voz y luego una respuesta",
         "trigger": "Se oyó una segunda voz y siguió una respuesta en pocos segundos (micrófono); orientativo hasta medirse"
+      },
+      "cameraDegraded": {
+        "description": "Las comprobaciones de cámara se detuvieron en una sesión con cámara",
+        "trigger": "El perfil de la sesión usa la cámara, pero una ventana no tuvo comprobaciones de rostro (cámara tapada, permiso retirado o inferencia detenida); la sesión mantiene su perfil y registra la pérdida"
       }
     }
   },

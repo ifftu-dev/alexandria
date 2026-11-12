@@ -264,6 +264,10 @@
       "voiceThenResponse": {
         "description": "Une autre voix, puis une réponse",
         "trigger": "Une seconde voix a été entendue et une réponse a suivi en quelques secondes (micro) ; indicatif tant qu'il n'est pas mesuré"
+      },
+      "cameraDegraded": {
+        "description": "Les vérifications caméra se sont arrêtées dans une session avec caméra",
+        "trigger": "Le profil de la session utilise la caméra, mais une fenêtre n'a eu aucune vérification du visage (caméra masquée, autorisation retirée ou inférence arrêtée) ; la session garde son profil et consigne la perte"
       }
     }
   },

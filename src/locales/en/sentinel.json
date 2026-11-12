@@ -264,6 +264,10 @@
       "voiceThenResponse": {
         "description": "Another voice, then an answer",
         "trigger": "A second voice was heard and an answer followed within a few seconds (microphone); advisory until measured"
+      },
+      "cameraDegraded": {
+        "description": "Camera checks stopped in a camera session",
+        "trigger": "The session's profile runs the camera, but a window had no face checks (camera covered, permission revoked or inference stopped); the session keeps its profile and records the loss"
       }
     }
   },
