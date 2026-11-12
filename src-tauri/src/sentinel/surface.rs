@@ -21,7 +21,10 @@
 //! - `probed`: probe results exist and all of them were satisfied.
 //! - `consistent`: the attempt's outcome agrees with the learner's history
 //!   ([`crate::sentinel::consistency::for_attempt`]).
-//! - `live`: a satisfied [`STEP_INTERVIEW`] verification in the session.
+//! - `live`: a satisfied [`STEP_INTERVIEW`] verification in the session. An
+//!   interview check has nothing to climb the ladder on, so its rung is
+//!   `live` with a live segment and `none` without; assessment sessions keep
+//!   the ladder.
 
 use rusqlite::{params, OptionalExtension};
 
@@ -62,7 +65,7 @@ pub(crate) struct SessionSurface {
     /// Signals the profile runs that do not count towards a policy floor now.
     pub uncredited: Vec<ProfileSignal>,
     pub probe: Option<ProbeOutcome>,
-    /// `None` when the session never chose a profile.
+    /// `None` when the session never chose a profile, and for an interview.
     pub coverage: Option<CoverageStatement>,
 }
 
@@ -168,7 +171,20 @@ pub(crate) fn session_surface(
         consistent,
         live,
     };
-    let rung = verification_rung(&evidence);
+    // An interview has no attempt, probes or history, so the ladder below
+    // `live` can never hold for it: its rung is the live segment alone. Its
+    // coverage statement is left out, since every statement for a rung also
+    // claims the assessment rungs beneath it.
+    let interview = purpose == "interview";
+    let rung = if interview {
+        if live {
+            VerificationRung::Live
+        } else {
+            VerificationRung::None
+        }
+    } else {
+        verification_rung(&evidence)
+    };
 
     Ok(SessionSurface {
         trust_profile: profile,
@@ -179,7 +195,9 @@ pub(crate) fn session_surface(
         signals_not_run,
         uncredited,
         probe,
-        coverage: profile.map(|p| coverage_statement(p, rung, certification)),
+        coverage: profile
+            .filter(|_| !interview)
+            .map(|p| coverage_statement(p, rung, certification)),
     })
 }
 

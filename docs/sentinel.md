@@ -304,7 +304,7 @@ Before the first item the standalone runner shows `TrustProfileNotice`: the chos
 
 ## Verification rungs
 
-The verification rung is positive evidence that the learner did the work, independent of the device (`alexandria_studio::integrity::verification_rung`). It is a strict ladder: a session stands on the highest rung whose evidence holds along with every rung below it. Missing or skipped evidence leaves the session a rung lower and never counts against the learner. A failed probe is a failed verification and raises the session to `flagged`.
+The verification rung is positive evidence that the learner did the work, independent of the device (`alexandria_studio::integrity::verification_rung`). For an assessment session it is a strict ladder: a session stands on the highest rung whose evidence holds along with every rung below it. Missing or skipped evidence leaves the session a rung lower and never counts against the learner. An interview check has no attempt, probes or history to climb on, so its rung is `live` when a live segment was recorded and `none` otherwise; its surface carries no coverage statement, since each statement also claims the assessment rungs beneath its rung. A failed probe is a failed verification and raises the session to `flagged`.
 
 | Rung | Evidence |
 |---|---|

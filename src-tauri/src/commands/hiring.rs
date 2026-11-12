@@ -1654,6 +1654,26 @@ mod tests {
     }
 
     #[test]
+    fn an_interview_check_with_a_live_segment_stands_on_the_live_rung() {
+        use crate::sentinel::scoring::{RatioManifest, VerificationRung};
+        use crate::sentinel::surface::{session_review, session_surface};
+        let manifest = RatioManifest::uncertified();
+        let rung = |db: &Database| {
+            let surface = session_surface(db.conn(), "s1", false, &manifest, None).unwrap();
+            let review = session_review(db.conn(), "s1", &manifest, None).unwrap();
+            assert_eq!(surface.rung, review.rung);
+            surface.rung
+        };
+        let (_, did) = holder();
+        let invite = checked(&did, 1_800_000_000);
+        let db = accepted(&invite, "interview");
+        // An interview has no attempt, probes or history to climb on.
+        assert_eq!(rung(&db), VerificationRung::None);
+        record_live_segment(db.conn(), &live_segment(&invite.id)).unwrap();
+        assert_eq!(rung(&db), VerificationRung::Live);
+    }
+
+    #[test]
     fn only_an_interview_held_in_alexandria_can_carry_a_live_segment() {
         let (_, did) = holder();
         let video = InterviewInvite {
