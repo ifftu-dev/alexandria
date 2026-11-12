@@ -17,6 +17,7 @@ mod features;
 mod flags;
 mod fusion;
 pub mod measurement;
+mod response;
 
 pub use consistency::{
     assess as assess_consistency, Consistency, ConsistencyVerdict, EvidenceSource, History,
@@ -31,4 +32,8 @@ pub use flags::{channel, is_tamper_flag, severity, Severity, TAMPER_FLAGS};
 pub use fusion::{
     decide, ChannelEvidence, Decision, FusionSummary, ProfileRatios, RatioManifest,
     SessionEvidence, SessionStatus, DEFAULT_PROFILE, UNCERTIFIED_MANIFEST_VERSION,
+};
+pub use response::{
+    reading_floor_ms, BaselineItem, BaselineSource, InputKind, ItemResponse, ResponseBaseline,
+    ResponseFeatures, RESPONSE_PROCESS_SIGNALS,
 };

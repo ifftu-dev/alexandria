@@ -7,6 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::response::ResponseFeatures;
+
 // Thresholds carried over from the retired client scorer (docs/sentinel.md
 // §Flagging Logic). They are unmeasured; the measurement corpus replaces them.
 const GAZE_WANDER_RATIO: f64 = 0.30;
@@ -46,6 +48,8 @@ pub struct WindowFeatures {
     /// Camera tallies; present only while the learner has opted in.
     pub camera: Option<CameraFeatures>,
     pub models: ModelFeatures,
+    /// Response-process timing per item; `None` where nothing is answered.
+    pub response: Option<ResponseFeatures>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -253,6 +257,9 @@ impl WindowFeatures {
         }
         if subsets.into_iter().any(|(part, whole)| part > whole) {
             return Err("window counts are inconsistent".into());
+        }
+        if let Some(response) = &self.response {
+            response.validate()?;
         }
         Ok(())
     }
@@ -481,6 +488,9 @@ pub fn derive_window(f: &WindowFeatures) -> WindowAssessment {
     }
     if f.focus.app_switches > 0 {
         flags.push("app_switch");
+    }
+    if let Some(response) = &f.response {
+        flags.extend(response.flags());
     }
 
     let mut distinct: Vec<String> = Vec::with_capacity(flags.len());

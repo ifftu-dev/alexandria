@@ -751,6 +751,12 @@ export type FlagType =
   | 'foreign_accessibility_service'
   | 'debug_bridge_enabled'
   | 'obscured_touch'
+  | 'response_below_reading_floor'
+  | 'response_relay_lag'
+  | 'response_idle_burst'
+  | 'answer_change_after_idle'
+  | 'gaze_down_then_response'
+  | 'voice_then_response'
 
 export interface IntegritySession {
   id: string
@@ -1044,6 +1050,53 @@ export interface WindowFeatures {
     advisory_enabled: boolean
     paste_classifier_enabled: boolean
   }
+  /** Response-process timing per item; null where nothing is answered. */
+  response: ResponseFeatures | null
+}
+
+/** How a learner answers an item: the timing features are the same for each. */
+export type ResponseInputKind = 'choice' | 'text' | 'plugin'
+
+/**
+ * Mirrors `alexandria_studio::integrity::ResponseFeatures`: per-visit
+ * aggregates only; the input timeline stays on the client.
+ */
+export interface ResponseFeatures {
+  /** Item visits that ended in this window. */
+  items: ItemResponse[]
+  baseline: ResponseBaseline | null
+  /** Response events that followed a gaze-down within a few seconds. */
+  gaze_down_then_response: number
+  /** Response events that followed a second-voice event within a few seconds. */
+  voice_then_response: number
+}
+
+export interface ItemResponse {
+  item_id: string
+  input: ResponseInputKind
+  /** Characters to read: prompt plus options. */
+  chars: number
+  /** Bank difficulty 1 to 5, or null. */
+  difficulty: number | null
+  /** A return to an item already visited; never judged against the floor. */
+  revisit: boolean
+  first_input_ms: number
+  commit_ms: number
+  revisions: number
+  idle_bursts: number
+  changes_after_idle: number
+}
+
+/** First-visit timings from earlier sessions (`history`) or this attempt. */
+export interface ResponseBaseline {
+  source: 'attempt' | 'history'
+  items: ResponseBaselineItem[]
+}
+
+export interface ResponseBaselineItem {
+  chars: number
+  difficulty: number | null
+  first_input_ms: number
 }
 
 /** Native display arrangement reported by `sentinel_display_topology`. */
@@ -1132,6 +1185,8 @@ export interface BehavioralProfile {
     sampleCount: number
   }
   lastUpdated: number
+  /** Recent first-visit response timings: the learner's response baseline. */
+  responsePattern?: { recent: ResponseBaselineItem[] }
   aiModels?: {
     faceEnrollment?: {
       vector: number[]
@@ -2277,6 +2332,8 @@ export interface ServedQuestion {
   options: string[]
   /** More than one option may be correct; otherwise exactly one must be chosen. */
   multiple: boolean
+  /** Bank difficulty, 1 to 5; with the item's length it sets the reading floor. */
+  difficulty: number
 }
 
 export interface StartedAttempt {

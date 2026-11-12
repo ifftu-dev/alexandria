@@ -240,6 +240,30 @@
       "mcpCallDuringAttempt": {
         "description": "Un asistente externo conectado pidió datos durante el intento",
         "trigger": "Un asistente con acceso a este perfil hizo una solicitud mientras el intento estaba abierto"
+      },
+      "responseBelowReadingFloor": {
+        "description": "Respondió antes de poder leer el ítem",
+        "trigger": "La primera respuesta llegó antes de lo que permiten la longitud y la dificultad del ítem; orientativo hasta medirse"
+      },
+      "responseRelayLag": {
+        "description": "Las respuestas llegan con un retraso extra constante",
+        "trigger": "Varios ítems tardaron casi el mismo tiempo extra sobre el ritmo habitual del estudiante; orientativo hasta medirse"
+      },
+      "responseIdleBurst": {
+        "description": "Inactividad y luego la respuesta de golpe",
+        "trigger": "Una pausa larga sin escribir nada y después una ráfaga rápida que completó la respuesta; orientativo hasta medirse"
+      },
+      "answerChangeAfterIdle": {
+        "description": "Una respuesta cambió tras una pausa",
+        "trigger": "Se cambió una respuesta ya dada justo después de un largo periodo inactivo; orientativo hasta medirse"
+      },
+      "gazeDownThenResponse": {
+        "description": "Miró hacia abajo y luego respondió",
+        "trigger": "Una mirada hacia abajo fue seguida de una respuesta en pocos segundos (cámara); orientativo hasta medirse"
+      },
+      "voiceThenResponse": {
+        "description": "Otra voz y luego una respuesta",
+        "trigger": "Se oyó una segunda voz y siguió una respuesta en pocos segundos (micrófono); orientativo hasta medirse"
       }
     }
   },

@@ -240,6 +240,30 @@
       "mcpCallDuringAttempt": {
         "description": "作答期间，一个已连接的外部助手请求了数据",
         "trigger": "作答进行中时，一个可以访问此个人资料的助手发出了请求"
+      },
+      "responseBelowReadingFloor": {
+        "description": "在读完题目之前就作答了",
+        "trigger": "首次作答早于题目长度和难度所允许的时间；在完成测量前仅供参考"
+      },
+      "responseRelayLag": {
+        "description": "作答总带有一段稳定的额外延迟",
+        "trigger": "多道题都比学习者平时的节奏多出几乎相同的时间；在完成测量前仅供参考"
+      },
+      "responseIdleBurst": {
+        "description": "长时间无操作后一次性作答",
+        "trigger": "长时间没有任何输入，随后快速连续操作完成了作答；在完成测量前仅供参考"
+      },
+      "answerChangeAfterIdle": {
+        "description": "停顿后更改了答案",
+        "trigger": "在长时间无操作后立即更改了已给出的答案；在完成测量前仅供参考"
+      },
+      "gazeDownThenResponse": {
+        "description": "低头之后作答",
+        "trigger": "向下看之后几秒内即作答（摄像头）；在完成测量前仅供参考"
+      },
+      "voiceThenResponse": {
+        "description": "出现另一个声音后作答",
+        "trigger": "听到第二个人的声音后几秒内即作答（麦克风）；在完成测量前仅供参考"
       }
     }
   },

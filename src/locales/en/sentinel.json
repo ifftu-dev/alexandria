@@ -240,6 +240,30 @@
       "mcpCallDuringAttempt": {
         "description": "A connected external assistant asked for data during the attempt",
         "trigger": "An assistant with access to this profile made a request while the attempt was open"
+      },
+      "responseBelowReadingFloor": {
+        "description": "Answered before the item could be read",
+        "trigger": "The first answer came sooner than the item's length and difficulty allow; advisory until measured"
+      },
+      "responseRelayLag": {
+        "description": "Answers arrive with a steady extra delay",
+        "trigger": "Several items each took about the same extra time over the learner's usual pace; advisory until measured"
+      },
+      "responseIdleBurst": {
+        "description": "Idle, then the answer all at once",
+        "trigger": "A long pause with nothing entered, followed by a quick burst that completed the answer; advisory until measured"
+      },
+      "answerChangeAfterIdle": {
+        "description": "An answer changed after a pause",
+        "trigger": "An answer already given was changed straight after a long idle stretch; advisory until measured"
+      },
+      "gazeDownThenResponse": {
+        "description": "Looked down, then answered",
+        "trigger": "A downward glance was followed within a few seconds by an answer (camera); advisory until measured"
+      },
+      "voiceThenResponse": {
+        "description": "Another voice, then an answer",
+        "trigger": "A second voice was heard and an answer followed within a few seconds (microphone); advisory until measured"
       }
     }
   },

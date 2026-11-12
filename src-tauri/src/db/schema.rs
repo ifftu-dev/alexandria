@@ -125,6 +125,8 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // variants, served probes, and verification results in the commitment
     // chain. See `crate::assessment::probes`.
     (34, "probe_contract", include_str!("probe_contract.sql")),
+    // How many items each integrity session saw with response timing.
+    (35, "integrity_response_items", include_str!("integrity_response_items.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

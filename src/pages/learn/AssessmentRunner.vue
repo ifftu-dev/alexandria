@@ -125,7 +125,15 @@ async function begin(roleAssessmentId: string | null) {
     if (disposed) return
     attempt.value = started
     choosing.value = false
-    for (const q of attempt.value.questions) selected.value[q.id] = new Set()
+    for (const q of attempt.value.questions) {
+      selected.value[q.id] = new Set()
+      // Response-process timing: each item is readable from here on.
+      sentinel.responses.present(q.id, {
+        chars: q.prompt.length + q.options.reduce((sum, option) => sum + option.length, 0),
+        difficulty: q.difficulty,
+        input: 'choice',
+      })
+    }
     for (const answer of attempt.value.draft_answers) {
       selected.value[answer.question_id] = new Set(answer.selected)
     }
@@ -185,6 +193,10 @@ onUnmounted(() => {
 
 function toggle(qid: string, pos: number, multiple: boolean) {
   if (submitted.value || grading.value) return
+  const previous = selected.value[qid] ?? new Set<number>()
+  // A change is a different single answer, or taking back a picked option.
+  const changesAnswer = multiple ? previous.has(pos) : previous.size > 0 && !previous.has(pos)
+  sentinel.responses.input(qid, { changesAnswer })
   if (!multiple) {
     // A single-answer item scores zero with more than one selection.
     selected.value = { ...selected.value, [qid]: new Set([pos]) }
