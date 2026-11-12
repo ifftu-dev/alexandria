@@ -2,8 +2,21 @@
 //!
 //! A draw picks a stratified subset of a bank's questions and, for each
 //! selected question, a shuffled option order — both deterministic in the
-//! attempt `seed`. Because every attempt uses a fresh seed, no two attempts
-//! present the same questions in the same order.
+//! attempt `seed` and the learner's [`DrawContext`]. Because every attempt
+//! uses a fresh seed, no two attempts present the same questions in the same
+//! order.
+//!
+//! # Adapted to the learner
+//!
+//! The draw also protects the bank and follows the learner (see
+//! `ai-chat-spec.md` §13A, item-bank protection):
+//!
+//! * items this profile was served before are skipped while unseen ones
+//!   remain, then reused least-exposed first;
+//! * every transfer item (same skill, different surface form) is served on
+//!   top of the standard draw;
+//! * the standard draw centres on the [`DifficultyBand`] the learner's
+//!   earlier answers suggest.
 //!
 //! # Two axes, not one
 //!
@@ -23,8 +36,9 @@
 //! those back rather than re-deriving them from the seed. So the algorithm
 //! here can change without invalidating attempts already in flight.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
+use super::irt::{estimate_theta_eap, ItemParams};
 use super::{shuffle, SplitMix64};
 use crate::domain::bloom::BloomLevel;
 
@@ -38,6 +52,10 @@ pub struct QuestionMeta {
     /// [`BloomLevel::Apply`], which puts them all in one row — the previous
     /// behaviour.
     pub bloom: BloomLevel,
+    /// A transfer item: same skill, different surface form. Every draw
+    /// serves all of a bank's transfer items in addition to `count`
+    /// standard items, whatever their exposure or difficulty.
+    pub transfer: bool,
 }
 
 /// The result of a draw: which questions (in served order) and, per question,
@@ -49,17 +67,128 @@ pub struct Draw {
     pub option_orders: Vec<Vec<usize>>,
 }
 
+/// What a draw knows about the learner beyond the bank itself.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DrawContext {
+    /// How many earlier attempts by this profile served each item. An item
+    /// absent from the map has never been served.
+    pub exposure: HashMap<String, u32>,
+    /// The difficulty band the learner's earlier answers point to, or `None`
+    /// with no graded history, in which case the draw spans every difficulty.
+    pub band: Option<DifficultyBand>,
+}
+
+impl DrawContext {
+    fn exposure_of(&self, id: &str) -> u32 {
+        self.exposure.get(id).copied().unwrap_or(0)
+    }
+
+    fn in_band(&self, difficulty: u8) -> bool {
+        self.band
+            .is_none_or(|b| (b.low..=b.high).contains(&difficulty))
+    }
+}
+
+/// An inclusive range of the 1–5 item difficulty scale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DifficultyBand {
+    pub low: u8,
+    pub high: u8,
+}
+
+impl DifficultyBand {
+    /// The band suggested by earlier answers, given as `(difficulty, score)`
+    /// pairs with a score of at least 0.5 counting as correct.
+    ///
+    /// Ability is estimated with the same 2PL model adaptive delivery uses
+    /// ([`estimate_theta_eap`] over [`ItemParams::from_difficulty`]); the band
+    /// is the difficulty whose item is 50/50 nearest that ability, plus one
+    /// level either side. `None` when there is no history.
+    pub fn from_prior(prior: &[(u8, f64)]) -> Option<Self> {
+        if prior.is_empty() {
+            return None;
+        }
+        let responses: Vec<(ItemParams, bool)> = prior
+            .iter()
+            .map(|&(d, score)| (ItemParams::from_difficulty(d), score >= 0.5))
+            .collect();
+        let theta = estimate_theta_eap(&responses).theta;
+        let centre = (1..=5u8)
+            .min_by(|&a, &b| {
+                let da = (ItemParams::from_difficulty(a).b - theta).abs();
+                let db = (ItemParams::from_difficulty(b).b - theta).abs();
+                da.total_cmp(&db)
+            })
+            .unwrap_or(3);
+        Some(Self {
+            low: centre.saturating_sub(1).max(1),
+            high: (centre + 1).min(5),
+        })
+    }
+}
+
 /// Draw up to `count` questions, stratified across a (Bloom level,
 /// difficulty) grid so the set spans both axes rather than clustering, then
-/// shuffle each question's options. Deterministic in `seed`.
-pub fn draw(questions: &[QuestionMeta], count: usize, seed: u64) -> Draw {
+/// shuffle each question's options. Deterministic in `seed` and `ctx`.
+///
+/// Every transfer item is served on top of the `count` standard items.
+/// Standard items the profile has never been served are drawn first; only
+/// when they run out does the draw fall back to served items, least exposed
+/// first. Within each exposure level, items inside `ctx.band` come before
+/// items outside it: exposure protects the bank, the band only sharpens
+/// measurement, so exposure wins.
+pub fn draw(questions: &[QuestionMeta], count: usize, seed: u64, ctx: &DrawContext) -> Draw {
     let mut rng = SplitMix64(seed);
+    let (transfers, standard): (Vec<&QuestionMeta>, Vec<&QuestionMeta>) =
+        questions.iter().partition(|q| q.transfer);
+    let want = count.min(standard.len());
 
+    // Tiers keyed (exposure, outside band): least exposed first, in-band
+    // before out-of-band. BTreeMap keeps the order fixed.
+    let mut tiers: BTreeMap<(u32, bool), Vec<&QuestionMeta>> = BTreeMap::new();
+    for q in standard {
+        let key = (ctx.exposure_of(&q.id), !ctx.in_band(q.difficulty));
+        tiers.entry(key).or_default().push(q);
+    }
+    let mut selected: Vec<&QuestionMeta> = Vec::with_capacity(want + transfers.len());
+    for tier in tiers.into_values() {
+        if selected.len() >= want {
+            break;
+        }
+        let needed = want - selected.len();
+        selected.extend(stratified(tier, needed, &mut rng));
+    }
+    selected.extend(transfers);
+
+    // Shuffle the final served order too (so difficulty isn't monotonic).
+    shuffle(&mut selected, &mut rng);
+
+    let mut question_ids = Vec::with_capacity(selected.len());
+    let mut option_orders = Vec::with_capacity(selected.len());
+    for q in selected {
+        question_ids.push(q.id.clone());
+        let mut order: Vec<usize> = (0..q.option_count).collect();
+        shuffle(&mut order, &mut rng);
+        option_orders.push(order);
+    }
+    Draw {
+        question_ids,
+        option_orders,
+    }
+}
+
+/// Pick up to `want` items from `pool`, spread across the (Bloom level,
+/// difficulty) grid.
+fn stratified<'a>(
+    pool: Vec<&'a QuestionMeta>,
+    want: usize,
+    rng: &mut SplitMix64,
+) -> Vec<&'a QuestionMeta> {
     // Group into Bloom rows, each row holding its difficulty buckets.
     // BTreeMaps throughout: iteration order must be fixed or the draw stops
     // being reproducible for a seed.
     let mut rows: BTreeMap<u8, BTreeMap<u8, Vec<&QuestionMeta>>> = BTreeMap::new();
-    for q in questions {
+    for q in pool {
         rows.entry(q.bloom.rank())
             .or_default()
             .entry(q.difficulty.min(5))
@@ -68,7 +197,7 @@ pub fn draw(questions: &[QuestionMeta], count: usize, seed: u64) -> Draw {
     }
     for row in rows.values_mut() {
         for bucket in row.values_mut() {
-            shuffle(bucket, &mut rng);
+            shuffle(bucket, rng);
         }
     }
 
@@ -83,7 +212,6 @@ pub fn draw(questions: &[QuestionMeta], count: usize, seed: u64) -> Draw {
     // inside each row.
     let mut cursors: BTreeMap<u8, usize> = rows.keys().map(|&b| (b, 0usize)).collect();
     let mut selected: Vec<&QuestionMeta> = Vec::new();
-    let want = count.min(questions.len());
     let mut progress = true;
 
     while selected.len() < want && progress {
@@ -110,22 +238,7 @@ pub fn draw(questions: &[QuestionMeta], count: usize, seed: u64) -> Draw {
             }
         }
     }
-
-    // Shuffle the final served order too (so difficulty isn't monotonic).
-    shuffle(&mut selected, &mut rng);
-
-    let mut question_ids = Vec::with_capacity(selected.len());
-    let mut option_orders = Vec::with_capacity(selected.len());
-    for q in selected {
-        question_ids.push(q.id.clone());
-        let mut order: Vec<usize> = (0..q.option_count).collect();
-        shuffle(&mut order, &mut rng);
-        option_orders.push(order);
-    }
-    Draw {
-        question_ids,
-        option_orders,
-    }
+    selected
 }
 
 #[cfg(test)]
@@ -140,6 +253,7 @@ mod tests {
                 difficulty: (i % 5 + 1) as u8,
                 option_count: 4,
                 bloom: BloomLevel::Apply,
+                transfer: false,
             })
             .collect()
     }
@@ -153,6 +267,7 @@ mod tests {
                 difficulty: (i % 5 + 1) as u8,
                 option_count: 4,
                 bloom: BloomLevel::ALL[i % BloomLevel::ALL.len()],
+                transfer: false,
             })
             .collect()
     }
@@ -164,14 +279,17 @@ mod tests {
     #[test]
     fn draw_is_deterministic_for_a_seed() {
         let qs = bank(20);
-        assert_eq!(draw(&qs, 5, 42), draw(&qs, 5, 42));
+        assert_eq!(
+            draw(&qs, 5, 42, &DrawContext::default()),
+            draw(&qs, 5, 42, &DrawContext::default())
+        );
     }
 
     #[test]
     fn different_seeds_generally_differ() {
         let qs = bank(20);
-        let a = draw(&qs, 5, 1);
-        let b = draw(&qs, 5, 2);
+        let a = draw(&qs, 5, 1, &DrawContext::default());
+        let b = draw(&qs, 5, 2, &DrawContext::default());
         assert!(
             a != b,
             "distinct seeds should (almost always) draw differently"
@@ -181,7 +299,7 @@ mod tests {
     #[test]
     fn draws_requested_count_and_valid_ids() {
         let qs = bank(20);
-        let d = draw(&qs, 5, 7);
+        let d = draw(&qs, 5, 7, &DrawContext::default());
         assert_eq!(d.question_ids.len(), 5);
         assert_eq!(d.option_orders.len(), 5);
         // no duplicate questions
@@ -200,7 +318,7 @@ mod tests {
     #[test]
     fn count_capped_at_available() {
         let qs = bank(3);
-        let d = draw(&qs, 10, 1);
+        let d = draw(&qs, 10, 1, &DrawContext::default());
         assert_eq!(d.question_ids.len(), 3);
     }
 
@@ -209,7 +327,7 @@ mod tests {
         // 5 buckets, draw 5 → should hit multiple difficulty levels, not all
         // from one bucket.
         let qs = bank(25);
-        let d = draw(&qs, 5, 99);
+        let d = draw(&qs, 5, 99, &DrawContext::default());
         let diffs: std::collections::HashSet<u8> = d
             .question_ids
             .iter()
@@ -229,7 +347,7 @@ mod tests {
         // The reason the second axis exists: an attempt must not be drawable
         // entirely from the `remember` row.
         let qs = graded_bank(36);
-        let d = draw(&qs, 6, 99);
+        let d = draw(&qs, 6, 99, &DrawContext::default());
         let levels: std::collections::HashSet<BloomLevel> =
             d.question_ids.iter().map(|id| bloom_of(id, &qs)).collect();
         assert!(
@@ -241,7 +359,7 @@ mod tests {
     #[test]
     fn spans_both_axes_at_once() {
         let qs = graded_bank(36);
-        let d = draw(&qs, 6, 5);
+        let d = draw(&qs, 6, 5, &DrawContext::default());
         let cells: std::collections::HashSet<(BloomLevel, u8)> = d
             .question_ids
             .iter()
@@ -262,7 +380,7 @@ mod tests {
         // With one Bloom level the grid collapses to a single row, and the
         // draw must behave exactly as difficulty-only stratification did.
         let qs = bank(25);
-        let d = draw(&qs, 5, 99);
+        let d = draw(&qs, 5, 99, &DrawContext::default());
         let diffs: std::collections::HashSet<u8> = d
             .question_ids
             .iter()
@@ -277,13 +395,16 @@ mod tests {
     #[test]
     fn bloom_axis_does_not_break_determinism() {
         let qs = graded_bank(30);
-        assert_eq!(draw(&qs, 7, 1234), draw(&qs, 7, 1234));
+        assert_eq!(
+            draw(&qs, 7, 1234, &DrawContext::default()),
+            draw(&qs, 7, 1234, &DrawContext::default())
+        );
     }
 
     #[test]
     fn draws_without_duplicates_across_the_grid() {
         let qs = graded_bank(30);
-        let d = draw(&qs, 12, 3);
+        let d = draw(&qs, 12, 3, &DrawContext::default());
         let mut ids = d.question_ids.clone();
         ids.sort();
         ids.dedup();
