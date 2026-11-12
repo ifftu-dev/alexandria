@@ -23,7 +23,7 @@ Spec: Implementation Decisions → Vocabulary (trust profile), Profile selection
 - The floor is the new `IssuancePolicy.min_trust_profile`. `min_camera_coverage` is unchanged; folding it into the camera profiles is ticket 08.
 - An unmet floor at attempt start refuses the attempt (no attempt is consumed) as well as returning the judgement. Issuance refuses unless its own judgement (attestation credited only if it verifies then) equals the recorded one.
 - Interview invitations carry no floor (signed wire struct shared with Cloud), so interview-check acceptance records an empty floor.
-- Budgets are named constants in `sentinel::trust_profile` (camera 250/60 ms, full 150/40 ms, detect/liveness), matching ticket 11; the benchmark here times one detection and one liveness pass. Use ticket 11's benchmark once both land.
+- Budgets and the benchmark are ticket 11's (`sentinel::camera_budget`: camera 250/60/15 ms, full 150/40/10 ms, detect/liveness/track, median of three passes); the selection record stores the measured result and both budgets.
 - Degradation covers the camera only (`camera_degraded`, warning). Under profiles without the camera, camera features are dropped as not run. Attestation loss surfaces at issuance, not per window.
 - Sessions that never selected a profile (older rows, tests) are scored as `core`, keep windows as sent, and never meet a floor.
 - Microphone and companion-phone consent are recorded; no profile needs them yet.

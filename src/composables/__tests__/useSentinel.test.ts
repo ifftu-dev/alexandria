@@ -913,8 +913,8 @@ describe('Sentinel trust profile', () => {
     excluded: [],
     not_run: profile === 'camera' ? ['device_attestation'] : ['device_attestation', 'camera'],
     benchmark: null,
-    camera_budget: { detect_ms: 250, liveness_ms: 60 },
-    full_budget: { detect_ms: 150, liveness_ms: 40 },
+    camera_budget: { detect_ms: 250, liveness_ms: 60, track_ms: 15, detect_interval: 3000 },
+    full_budget: { detect_ms: 150, liveness_ms: 40, track_ms: 10, detect_interval: 3000 },
     policy_floor: { required: null, profile, satisfied: true, missing: [] },
   })
 

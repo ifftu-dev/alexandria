@@ -808,9 +808,20 @@ export interface ProfileExclusion {
   reasons: ProfileExclusionReason[]
 }
 
+/** One device's camera benchmark, per pass (`sentinel::camera_budget`). */
 export interface DeviceBenchmark {
   detect_ms: number
   liveness_ms: number
+  track_ms: number
+}
+
+/** The most a camera profile may spend per pass, and its detection cadence. */
+export interface CameraBudget {
+  detect_ms: number
+  liveness_ms: number
+  track_ms: number
+  /** Longest gap between detector runs while a face is tracked, in ms. */
+  detect_interval: number
 }
 
 /** A policy floor judged against a session. */
@@ -834,8 +845,8 @@ export interface SelectedProfile {
   excluded: ProfileExclusion[]
   not_run: ProfileSignal[]
   benchmark: DeviceBenchmark | null
-  camera_budget: DeviceBenchmark
-  full_budget: DeviceBenchmark
+  camera_budget: CameraBudget
+  full_budget: CameraBudget
   policy_floor: PolicyFloor
 }
 

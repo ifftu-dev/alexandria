@@ -22,11 +22,12 @@
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::camera_pipeline::{CameraPipeline, FaceModels, PipelineConfig};
 use super::face_detect;
 use super::liveness::{self, LivenessEstimate};
+use super::scoring::BudgetFit;
 use super::types::{FaceDetection, FaceFrame};
 
 /// Frame size the webview sends (longest side 224) and the benchmark uses.
@@ -36,7 +37,7 @@ pub const REFERENCE_FRAME: (u32, u32) = (224, 168);
 const PASSES: usize = 3;
 
 /// One device's benchmark, per pass.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct BenchmarkResult {
     pub detect_ms: f32,
     pub liveness_ms: f32,
@@ -44,18 +45,22 @@ pub struct BenchmarkResult {
 }
 
 /// The most a camera profile may spend per pass, and its detection cadence.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct CameraBudget {
     pub detect_ms: f32,
     pub liveness_ms: f32,
     pub track_ms: f32,
     /// Longest gap between detector runs while a face is tracked.
-    #[serde(serialize_with = "millis")]
+    #[serde(serialize_with = "millis", deserialize_with = "from_millis")]
     pub detect_interval: Duration,
 }
 
 fn millis<S: serde::Serializer>(d: &Duration, s: S) -> Result<S::Ok, S::Error> {
     s.serialize_u64(d.as_millis() as u64)
+}
+
+fn from_millis<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
+    u64::deserialize(d).map(Duration::from_millis)
 }
 
 /// Budget for the `camera` profile.
@@ -90,6 +95,16 @@ impl CameraBudget {
         PipelineConfig {
             detect_interval: self.detect_interval,
             ..PipelineConfig::default()
+        }
+    }
+}
+
+impl BenchmarkResult {
+    /// Which camera profiles this device can sustain.
+    pub fn fit(&self) -> BudgetFit {
+        BudgetFit {
+            camera: CAMERA_PROFILE_BUDGET.admits(self),
+            full: FULL_PROFILE_BUDGET.admits(self),
         }
     }
 }

@@ -220,11 +220,11 @@ pub async fn integrity_select_profile(
     session_id: String,
     request: crate::sentinel::trust_profile::ProfileRequest,
 ) -> Result<crate::sentinel::trust_profile::SelectedProfile, String> {
-    use crate::sentinel::trust_profile::{run_benchmark, select_for_session};
+    use crate::sentinel::trust_profile::select_for_session;
     let benchmark = if request.needs_benchmark() {
         // A benchmark that fails is not a pass: the camera profiles are then
         // excluded as not benchmarked.
-        tokio::task::spawn_blocking(run_benchmark)
+        tokio::task::spawn_blocking(crate::sentinel::camera_budget::benchmark)
             .await
             .map_err(|e| format!("benchmark worker failed: {e}"))?
             .map_err(|e| log::warn!(target: "sentinel", "device benchmark failed: {e}"))

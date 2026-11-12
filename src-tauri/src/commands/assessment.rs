@@ -2386,7 +2386,7 @@ mod role_target_tests {
     use crate::credentials::IssuancePolicy;
     use crate::db::Database;
     use crate::sentinel::trust_profile::{
-        select_for_session, Capabilities, DeviceBenchmark, ProfileRequest, TrustProfile,
+        select_for_session, BenchmarkResult, Capabilities, ProfileRequest, TrustProfile,
     };
 
     const NOW: &str = "2026-10-09T00:00:00Z";
@@ -2683,9 +2683,10 @@ mod role_target_tests {
         let db = setup();
         let org = create_organization_impl(db.conn(), "Acme", "stake_owner", None, NOW).unwrap();
         let camera_role = floor_role(db.conn(), &org.id, TrustProfile::Camera);
-        let fast = DeviceBenchmark {
+        let fast = BenchmarkResult {
             detect_ms: 10.0,
             liveness_ms: 5.0,
+            track_ms: 1.0,
         };
         select_for_session(
             db.conn(),

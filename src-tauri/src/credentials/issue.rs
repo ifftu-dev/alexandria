@@ -497,7 +497,7 @@ mod tests {
         floor: Option<crate::sentinel::scoring::TrustProfile>,
     ) {
         use crate::sentinel::trust_profile::{
-            record_policy_floor, select_for_session, Capabilities, DeviceBenchmark, ProfileRequest,
+            record_policy_floor, select_for_session, BenchmarkResult, Capabilities, ProfileRequest,
         };
         conn.execute(
             "INSERT INTO integrity_sessions (id, status, assurance_level, started_at)
@@ -514,9 +514,10 @@ mod tests {
             consent: caps,
             role_assessment_id: None,
         };
-        let fast = DeviceBenchmark {
+        let fast = BenchmarkResult {
             detect_ms: 9.0,
             liveness_ms: 7.0,
+            track_ms: 1.0,
         };
         select_for_session(conn, id, &request, Some(&fast)).unwrap();
         record_policy_floor(conn, id, floor).unwrap();

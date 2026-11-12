@@ -14,12 +14,12 @@
 //! more at issuance, which refuses unless the last recorded judgement and
 //! its own agree.
 
-use std::time::Instant;
-
-use anyhow::Result as AnyResult;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+pub use crate::sentinel::camera_budget::{
+    benchmark, BenchmarkResult, CameraBudget, CAMERA_PROFILE_BUDGET, FULL_PROFILE_BUDGET,
+};
 pub use crate::sentinel::scoring::{
     evaluate_floor, select_profile, BudgetFit, Capabilities, PolicyFloor, ProfileSelection,
     ProfileSignal, SelectionInputs, TrustProfile, WindowFeatures,
@@ -29,89 +29,6 @@ pub use crate::sentinel::scoring::{
 /// the window has no camera checks (camera covered or revoked, inference
 /// stopped). Never a downgrade: the profile stands and the flag is counted.
 pub const CAMERA_DEGRADED: &str = "camera_degraded";
-
-/// Per-pass budget a camera profile allows, in milliseconds, for the
-/// benchmark's synthetic frame. `core` and `attested` run no model
-/// inference and have none.
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct ProfileBudget {
-    pub detect_ms: f32,
-    pub liveness_ms: f32,
-}
-
-/// Budget for `camera`: a mid-range phone must fit it.
-pub const CAMERA_PROFILE_BUDGET: ProfileBudget = ProfileBudget {
-    detect_ms: 250.0,
-    liveness_ms: 60.0,
-};
-
-/// Budget for `full`: the same camera work beside every other signal, so it
-/// keeps more headroom.
-pub const FULL_PROFILE_BUDGET: ProfileBudget = ProfileBudget {
-    detect_ms: 150.0,
-    liveness_ms: 40.0,
-};
-
-/// One device's benchmark: a face-detection pass and a liveness pass on a
-/// synthetic frame, each timed after a warm-up pass.
-#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct DeviceBenchmark {
-    pub detect_ms: f32,
-    pub liveness_ms: f32,
-}
-
-impl ProfileBudget {
-    /// Every stage must fit; a non-finite measurement never does.
-    pub fn admits(&self, result: &DeviceBenchmark) -> bool {
-        let fits = |got: f32, max: f32| got.is_finite() && got <= max;
-        fits(result.detect_ms, self.detect_ms) && fits(result.liveness_ms, self.liveness_ms)
-    }
-}
-
-impl DeviceBenchmark {
-    pub fn fit(&self) -> BudgetFit {
-        BudgetFit {
-            camera: CAMERA_PROFILE_BUDGET.admits(self),
-            full: FULL_PROFILE_BUDGET.admits(self),
-        }
-    }
-}
-
-/// Frame size the webview sends (longest side 224).
-const BENCH_FRAME: (u32, u32) = (224, 168);
-
-/// Run the benchmark. Blocking (the first call loads both models), so call
-/// it off the async runtime.
-pub fn run_benchmark() -> AnyResult<DeviceBenchmark> {
-    use crate::sentinel::{face_detect, liveness, types::FaceFrame};
-    let (width, height) = BENCH_FRAME;
-    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
-    for y in 0..height {
-        for x in 0..width {
-            let v = (x.wrapping_mul(2_654_435_761) ^ y.wrapping_mul(40_503)) >> 7;
-            rgba.extend_from_slice(&[v as u8, (v >> 8) as u8, (v >> 16) as u8, 255]);
-        }
-    }
-    let frame = FaceFrame {
-        width,
-        height,
-        rgba,
-    };
-    let face = [82.0, 45.0, 60.0, 75.0];
-    // Warm-up: model load and plan compilation are one-off, not per pass.
-    face_detect::detect(&frame)?;
-    liveness::score(&frame, face)?;
-    let started = Instant::now();
-    face_detect::detect(&frame)?;
-    let detect_ms = started.elapsed().as_secs_f32() * 1000.0;
-    let started = Instant::now();
-    liveness::score(&frame, face)?;
-    let liveness_ms = started.elapsed().as_secs_f32() * 1000.0;
-    Ok(DeviceBenchmark {
-        detect_ms,
-        liveness_ms,
-    })
-}
 
 /// What the client reports when asking for a profile.
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
@@ -140,9 +57,9 @@ impl ProfileRequest {
 pub struct SelectionRecord {
     #[serde(flatten)]
     pub selection: ProfileSelection,
-    pub benchmark: Option<DeviceBenchmark>,
-    pub camera_budget: ProfileBudget,
-    pub full_budget: ProfileBudget,
+    pub benchmark: Option<BenchmarkResult>,
+    pub camera_budget: CameraBudget,
+    pub full_budget: CameraBudget,
 }
 
 /// The reply to the client: the recorded selection plus the policy floor as
@@ -182,7 +99,7 @@ pub(crate) fn select_for_session(
     connection: &rusqlite::Connection,
     session_id: &str,
     req: &ProfileRequest,
-    benchmark: Option<&DeviceBenchmark>,
+    benchmark: Option<&BenchmarkResult>,
 ) -> Result<SelectedProfile, String> {
     let tx =
         rusqlite::Transaction::new_unchecked(connection, rusqlite::TransactionBehavior::Immediate)
@@ -226,7 +143,7 @@ pub(crate) fn select_for_session(
         device_attested,
         capabilities: req.capabilities,
         consent: req.consent,
-        budget: benchmark.map(DeviceBenchmark::fit),
+        budget: benchmark.map(BenchmarkResult::fit),
         floor,
     };
     let record = SelectionRecord {
@@ -400,9 +317,10 @@ mod tests {
             },
             role_assessment_id: None,
         };
-        let fast = DeviceBenchmark {
+        let fast = BenchmarkResult {
             detect_ms: 1.0,
             liveness_ms: 1.0,
+            track_ms: 1.0,
         };
         assert!(select_for_session(db.conn(), "s", &camera, Some(&fast))
             .unwrap_err()
@@ -413,18 +331,21 @@ mod tests {
         );
     }
 
-    const FAST: DeviceBenchmark = DeviceBenchmark {
+    const FAST: BenchmarkResult = BenchmarkResult {
         detect_ms: 9.0,
         liveness_ms: 7.0,
+        track_ms: 1.0,
     };
     /// Fits `camera` but not `full`.
-    const MID: DeviceBenchmark = DeviceBenchmark {
+    const MID: BenchmarkResult = BenchmarkResult {
         detect_ms: 200.0,
         liveness_ms: 30.0,
+        track_ms: 1.0,
     };
-    const SLOW: DeviceBenchmark = DeviceBenchmark {
+    const SLOW: BenchmarkResult = BenchmarkResult {
         detect_ms: 900.0,
         liveness_ms: 300.0,
+        track_ms: 1.0,
     };
 
     fn camera_consented() -> ProfileRequest {
