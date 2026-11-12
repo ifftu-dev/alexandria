@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { useLocalApi } from './useLocalApi'
 import { announceCredentialsChanged } from './credentialEvents'
 import type {
+  CoverageStatement,
   CreatePresentationRequest,
   CredentialAnchorState,
   CredentialBundle,
@@ -127,6 +128,17 @@ export function useCredentials() {
     )
   }
 
+  /**
+   * The coverage statement a credential's integrity assertion names by
+   * digest, from the statements bundled with the app; `null` when this build
+   * does not carry it.
+   */
+  async function coverageStatement(digest: string) {
+    return run(() =>
+      invoke<CoverageStatement | null>('integrity_coverage_statement', { digest }),
+    )
+  }
+
   /** Returns the JCS-canonical bundle string, ready to write to disk. */
   async function exportBundle() {
     return run(() => invoke<string>('export_credentials_bundle'))
@@ -222,6 +234,7 @@ export function useCredentials() {
     verify,
     trust,
     exportBundle,
+    coverageStatement,
 
     // integrity anchors
     listAnchors,

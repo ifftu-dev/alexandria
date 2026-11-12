@@ -921,6 +921,125 @@ pub fn sent_integrity_reports(
         .collect()
 }
 
+/// Verification policy recorded for a live segment: the panel's own mark.
+pub const LIVE_SEGMENT_POLICY: &str = "panel";
+
+/// A panelist marked an unscripted live segment of the interview as done,
+/// while the candidate's integrity check `session_id` was running.
+#[derive(Debug, Clone)]
+pub struct LiveSegment<'a> {
+    pub session_id: &'a str,
+    pub interview_id: &'a str,
+    /// The panel's id for the segment; a segment is recorded once.
+    pub segment_id: &'a str,
+    /// The call participant whose mark arrived, as the call reported them.
+    pub marked_by: &'a str,
+    pub marked_by_name: Option<&'a str>,
+}
+
+/// Record a live segment as a satisfied `interview` verification in the
+/// candidate's integrity check, which is the `live` verification rung's
+/// evidence. Only an accepted interview held in Alexandria qualifies: in a
+/// video call, a phone call or a room, Sentinel is not where the interview
+/// happens. Like every result in the check, it is the candidate's app's own
+/// record, folded into the session's commitment chain.
+pub fn record_live_segment(
+    conn: &rusqlite::Connection,
+    segment: &LiveSegment<'_>,
+) -> Result<crate::sentinel::verification::VerificationResult, String> {
+    use crate::sentinel::verification::{
+        record_verification, session_verification_summary, NewVerification, VerificationOutcome,
+        STEP_INTERVIEW,
+    };
+    let (_, invite) = accepted_invite(conn, segment.interview_id)?;
+    if invite.mode != "alexandria" {
+        return Err("only an interview held in Alexandria carries a live segment".into());
+    }
+    if !invite.integrity_check {
+        return Err("this interview did not ask for an integrity check".into());
+    }
+    let purpose: String = conn
+        .query_row(
+            "SELECT purpose FROM integrity_sessions WHERE id = ?1",
+            params![segment.session_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => "no such integrity check".to_string(),
+            other => other.to_string(),
+        })?;
+    if purpose != "interview" {
+        return Err("that check was not run for an interview".into());
+    }
+    let token = |s: &str| {
+        !s.is_empty()
+            && s.len() <= 128
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    };
+    if !token(segment.segment_id) {
+        return Err("a segment id is a short token".into());
+    }
+    if let Some(existing) = session_verification_summary(conn, segment.session_id)?
+        .results
+        .into_iter()
+        .find(|r| r.step == STEP_INTERVIEW && r.subject_ref.as_deref() == Some(segment.segment_id))
+    {
+        return Ok(existing);
+    }
+    record_verification(
+        conn,
+        &NewVerification {
+            session_id: segment.session_id,
+            attempt_id: None,
+            step: STEP_INTERVIEW,
+            policy: LIVE_SEGMENT_POLICY,
+            outcome: VerificationOutcome::Satisfied,
+            reason: None,
+            subject_ref: Some(segment.segment_id),
+            detail: serde_json::json!({
+                "interview_id": segment.interview_id,
+                "segment_id": segment.segment_id,
+                "marked_by": segment.marked_by,
+                "marked_by_name": segment.marked_by_name,
+            }),
+        },
+    )
+}
+
+/// The panel marked a live segment done during the interview: record it in
+/// the candidate's running integrity check.
+#[tauri::command]
+pub async fn hiring_interview_live_segment(
+    state: State<'_, AppState>,
+    interview_id: String,
+    integrity_session_id: String,
+    segment_id: String,
+    marked_by: String,
+    marked_by_name: Option<String>,
+) -> Result<crate::sentinel::verification::VerificationResult, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "hiring.live-segment",
+            move |db| {
+                record_live_segment(
+                    db.conn(),
+                    &LiveSegment {
+                        session_id: &integrity_session_id,
+                        interview_id: &interview_id,
+                        segment_id: &segment_id,
+                        marked_by: &marked_by,
+                        marked_by_name: marked_by_name.as_deref(),
+                    },
+                )
+            },
+        )
+        .await
+}
+
 /// Send the organisation the result of the integrity check the learner ran
 /// during an interview held in Alexandria, and keep a copy. A check already
 /// sent is not sent again.
@@ -1448,6 +1567,123 @@ mod tests {
         assert!(sent_integrity_reports(db.conn(), "other")
             .unwrap()
             .is_empty());
+    }
+
+    /// A database where the learner accepted `invite` and runs a live
+    /// integrity check `s1` with purpose `purpose`.
+    fn accepted(invite: &InterviewInvite, purpose: &str) -> Database {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let (key, did) = holder();
+        let signed = sign_interview_response(
+            invite.clone(),
+            "accept",
+            Some(invite.proposed_slots[0]),
+            None,
+            &key,
+            &did,
+            invite.created_at + 60,
+        )
+        .unwrap();
+        store_record(
+            db.conn(),
+            &HiringRecord {
+                id: invite.id.clone(),
+                kind: "interview".into(),
+                directory_url: "https://cloud.test".into(),
+                organization: invite.organization.clone(),
+                role_label: invite.role_label.clone(),
+                decision: "accept".into(),
+                chosen_slot: signed.response.chosen_slot,
+                meeting_url: None,
+                responded_at: "2026-11-12T10:00:00Z".into(),
+                payload_json: serde_json::to_string(&signed).unwrap(),
+            },
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO integrity_sessions (id, status, purpose) VALUES ('s1', 'active', ?1)",
+                params![purpose],
+            )
+            .unwrap();
+        db
+    }
+
+    fn live_segment(interview_id: &str) -> LiveSegment<'_> {
+        LiveSegment {
+            session_id: "s1",
+            interview_id,
+            segment_id: "live-1",
+            marked_by: "panelist-node",
+            marked_by_name: Some("Panelist"),
+        }
+    }
+
+    fn live_evidence(db: &Database) -> bool {
+        crate::sentinel::surface::session_surface(
+            db.conn(),
+            "s1",
+            false,
+            &crate::sentinel::scoring::RatioManifest::uncertified(),
+            None,
+        )
+        .unwrap()
+        .evidence
+        .live
+    }
+
+    #[test]
+    fn a_live_segment_the_panel_marks_counts_as_live_evidence() {
+        let (_, did) = holder();
+        let invite = checked(&did, 1_800_000_000);
+        let db = accepted(&invite, "interview");
+        assert!(!live_evidence(&db));
+
+        let recorded = record_live_segment(db.conn(), &live_segment(&invite.id)).unwrap();
+        assert_eq!(recorded.step, "interview");
+        assert_eq!(recorded.outcome.as_str(), "satisfied");
+        assert!(live_evidence(&db));
+
+        // The same segment marked twice is one result.
+        let again = record_live_segment(db.conn(), &live_segment(&invite.id)).unwrap();
+        assert_eq!(again.id, recorded.id);
+        let summary =
+            crate::sentinel::verification::session_verification_summary(db.conn(), "s1").unwrap();
+        assert_eq!(summary.satisfied, 1);
+    }
+
+    #[test]
+    fn only_an_interview_held_in_alexandria_can_carry_a_live_segment() {
+        let (_, did) = holder();
+        let video = InterviewInvite {
+            integrity_check: true,
+            ..invite(&did, 1_800_000_000)
+        };
+        let db = accepted(&video, "interview");
+        let refused = record_live_segment(db.conn(), &live_segment(&video.id)).unwrap_err();
+        assert!(refused.contains("held in Alexandria"), "{refused}");
+        assert!(!live_evidence(&db));
+
+        // Not an interview the learner accepted.
+        let checked = checked(&did, 1_800_000_000);
+        let db = accepted(&checked, "interview");
+        assert!(record_live_segment(db.conn(), &live_segment("someone-else")).is_err());
+
+        // An assessment session is not an interview check.
+        let db = accepted(&checked, "assessment");
+        assert!(record_live_segment(db.conn(), &live_segment(&checked.id)).is_err());
+
+        // A check that has ended takes no more results.
+        let db = accepted(&checked, "interview");
+        db.conn()
+            .execute(
+                "UPDATE integrity_sessions SET ended_at = datetime('now') WHERE id = 's1'",
+                [],
+            )
+            .unwrap();
+        assert!(record_live_segment(db.conn(), &live_segment(&checked.id)).is_err());
+        assert!(!live_evidence(&db));
     }
 
     #[test]

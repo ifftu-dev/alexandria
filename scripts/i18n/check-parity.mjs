@@ -95,10 +95,6 @@ const PENDING_TRANSLATION = [
   // the next translation pass; consent copy should be prioritised in that pass.
   'interviews.',
   'tutoring.captions.',
-  // Voice checks in the candidate's integrity check (trust profiles ticket
-  // 10). English-only until the next translation pass; a consent surface, so
-  // prioritise it there.
-  'tutoring.interviewRoom.check.voice',
   'nav.primary.interviews',
   // Not-found page for stale deep links, added when retired route redirects
   // were deleted. English-only pending a translate pass; renders in English

@@ -576,5 +576,84 @@
     "joined": "Associé à la session de votre ordinateur. Gardez Alexandria ouverte sur ce téléphone jusqu'à la fin de la tentative.",
     "leave": "Quitter",
     "unsupported": "Seul un iPhone ou un téléphone Android peut être associé."
+  },
+  "trust": {
+    "profile": {
+      "core": "Base",
+      "attested": "Appareil attesté",
+      "camera": "Caméra",
+      "full": "Appareil attesté et caméra"
+    },
+    "profileHint": {
+      "core": "Vérifications de la saisie, du pointeur, du focus et de l'écran dans la fenêtre d'évaluation. Pas de caméra, et les chiffres de l'appareil sont son propre rapport.",
+      "attested": "Vérifications de base sur un appareil dont la plateforme prouve qu'il exécute une copie authentique et non modifiée de l'application.",
+      "camera": "Vérifications de base, plus la présence du visage, la vivacité et le regard via la caméra, sur un appareil assez rapide pour les exécuter.",
+      "full": "Vérifications de base avec à la fois l'attestation de l'appareil et la caméra."
+    },
+    "rung": {
+      "none": "Aucun",
+      "process": "Processus de réponse",
+      "probed": "Questions de suivi",
+      "consistent": "Cohérent avec l'historique",
+      "live": "Entretien en direct"
+    },
+    "rungHint": {
+      "none": "Aucune vérification au-delà de la surveillance.",
+      "process": "Le rythme de réponse à chaque question a été observé et n'a montré aucune anomalie mesurée.",
+      "probed": "Aussi de courtes questions de suivi sur les propres réponses de l'apprenant, toutes réussies.",
+      "consistent": "Aussi la cohérence avec la pratique, les leçons et les tentatives précédentes de l'apprenant sur la compétence.",
+      "live": "Aussi un segment en direct non scénarisé lors d'un entretien tenu dans Alexandria."
+    },
+    "signal": {
+      "core": "Vérifications de base",
+      "device_attestation": "Attestation de l'appareil",
+      "camera": "Vérifications par caméra"
+    },
+    "reason": {
+      "not_attested": "cet appareil n'a pas pu prouver qu'il exécute une application authentique et non modifiée",
+      "no_camera": "aucune caméra n'a été trouvée",
+      "camera_not_consented": "la caméra n'a pas été activée",
+      "not_benchmarked": "le test de l'appareil pour la caméra n'a pas abouti",
+      "over_budget": "cet appareil ne peut pas exécuter les vérifications par caméra de façon fluide"
+    },
+    "raise": {
+      "pair_phone": "Associez votre téléphone avant de commencer.",
+      "attested_device": "Utilisez un téléphone ou une tablette qui réussit l'attestation de l'appareil.",
+      "connect_camera": "Branchez une caméra.",
+      "allow_camera": "Activez la caméra avant de commencer.",
+      "faster_device": "Utilisez un appareil plus rapide, ou fermez d'abord les autres applications."
+    },
+    "probePolicy": {
+      "none": "Aucune",
+      "reseed": "Même question avec de nouvelles valeurs",
+      "authored": "Questions de suivi rédigées par l'enseignant",
+      "plugin": "Créées par le correcteur de la question"
+    },
+    "notice": {
+      "title": "Cette tentative se déroule sous le profil {profile}",
+      "notRun": "{signal} non exécuté : {reason}.",
+      "floorMet": "Atteint le minimum du sponsor : {required}.",
+      "floorUnmet": "N'atteint pas le minimum du sponsor : {required}. La tentative ne peut pas commencer avec cette configuration.",
+      "raiseTitle": "Pour relever le profil la prochaine fois",
+      "tryAgain": "Modifier la configuration et réessayer",
+      "monitoringLimit": "La surveillance ne peut voir ni une deuxième personne ni un deuxième appareil, quel que soit le profil."
+    },
+    "coverage": {
+      "title": "Ce que cela couvre",
+      "checked": "Vérifié",
+      "notChecked": "Non vérifié",
+      "ceilings": "Limites de la plateforme",
+      "measurement": "Mesure",
+      "certified": "Taux certifiés de la version {version} ({date})",
+      "rates": "{signal} : précision {precision}, rappel {recall}",
+      "unresolved": "Cette déclaration de couverture n'est pas incluse dans cette version de l'application.",
+      "digest": "Empreinte de la déclaration",
+      "quoted": "Citée exactement telle que la certification la nomme."
+    },
+    "live": {
+      "mark": "Segment en direct terminé",
+      "hint": "Après une série de questions non scénarisées, marquez-la comme terminée. La vérification d'intégrité du candidat l'enregistre comme une vérification en direct.",
+      "marked": "Marqué terminé à {time}"
+    }
   }
 }

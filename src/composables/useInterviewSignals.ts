@@ -32,3 +32,8 @@ export function useInterviewSignals() {
 export function markedQuestion(signal: InterviewSignal): string | null {
   return typeof signal === 'object' && 'question' in signal ? signal.question.question_id : null
 }
+
+/** The segment id in a panel's live-segment mark, or null for any other signal. */
+export function liveSegment(signal: InterviewSignal): string | null {
+  return typeof signal === 'object' && 'live_segment' in signal ? signal.live_segment.segment_id : null
+}

@@ -1838,6 +1838,7 @@ pub fn run() {
             commands::integrity::integrity_attest_session,
             commands::integrity::integrity_select_profile,
             commands::integrity::integrity_coverage_statement,
+            commands::integrity::integrity_coverage_statements,
             commands::integrity_companion::integrity_companion_offer,
             commands::integrity_companion::integrity_companion_await,
             commands::integrity_companion::integrity_companion_cancel,
@@ -1857,6 +1858,7 @@ pub fn run() {
             commands::role_assessment::set_role_assessment_status,
             commands::role_assessment::issue_role_credential,
             commands::role_assessment::list_role_attempts,
+            commands::role_assessment::list_role_session_reviews,
             // Local-first interview assistant (tutoring media + private record)
             commands::interview::interview_create,
             commands::interview::interview_list,
@@ -1999,6 +2001,7 @@ pub fn run() {
             commands::interview_panel::interview_panel_scorecard,
             commands::hiring::hiring_interview_room,
             commands::hiring::hiring_interview_integrity_send,
+            commands::hiring::hiring_interview_live_segment,
             commands::hiring::hiring_interview_integrity_sent,
             commands::organisations::org_cloud,
             commands::holder_release::holder_contestable_runs,
