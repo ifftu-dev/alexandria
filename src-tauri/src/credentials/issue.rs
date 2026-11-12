@@ -247,6 +247,11 @@ pub(crate) fn build_integrity_assertion(
         stored_assurance_level,
         attestation_json,
         commitment_root: commitment_root.clone(),
+        learner_did: Some(crate::settings::SettingsStore::get(
+            conn,
+            crate::settings::registry::keys::IDENTITY_LOCAL_DID,
+        ))
+        .filter(|did| !did.is_empty()),
     };
     let (assurance_level, unverified) =
         effective_assurance(&facts, trust, chrono::Utc::now().timestamp());

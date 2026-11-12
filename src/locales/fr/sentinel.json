@@ -558,5 +558,23 @@
     "noticeOpen": "See what they have",
     "noticeLater": "Not now",
     "liveSuspended": "Session suspendue"
+  },
+  "companion": {
+    "pairToggle": "Associer d'abord mon téléphone, pour que cette tentative soit attestée par l'appareil",
+    "offerTitle": "Associer votre téléphone",
+    "offerBody": "Sur votre téléphone, ouvrez Alexandria avec votre compte, allez dans Sentinel, choisissez Rejoindre depuis le téléphone et collez ce code. Il ne sert qu'une fois et expire dans cinq minutes.",
+    "copy": "Copier le code",
+    "copied": "Copié",
+    "waiting": "En attente de votre téléphone…",
+    "skip": "Continuer sans le téléphone",
+    "failed": "Votre téléphone n'a pas pu s'associer : {reason}",
+    "joinTitle": "Rejoindre depuis le téléphone",
+    "cardDescription": "Prêtez l'attestation de ce téléphone à une évaluation passée sur votre ordinateur.",
+    "joinBody": "Collez le code affiché par votre ordinateur. Ce téléphone atteste qu'il est une application Alexandria authentique connectée à votre compte ; il n'accepte que les codes de vos propres sessions.",
+    "joinPlaceholder": "Code d'association",
+    "join": "Rejoindre",
+    "joined": "Associé à la session de votre ordinateur. Gardez Alexandria ouverte sur ce téléphone jusqu'à la fin de la tentative.",
+    "leave": "Quitter",
+    "unsupported": "Seul un iPhone ou un téléphone Android peut être associé."
   }
 }

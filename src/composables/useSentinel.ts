@@ -15,6 +15,8 @@ import { downscaledSize, frameHeaders, frameSize, rgbaBody, type SentinelFrame }
 import { isDroppedGaze } from '@/types'
 import { normaliseWebviewCombo, phantomCombos, type WebviewCombo, type BlurInterval } from '@/utils/sentinel/hotkeys'
 import { createResponseTracker } from '@/utils/sentinel/responseProcess'
+import { useCompanionPhone } from './useCompanionPhone'
+import { isMobilePlatform } from './usePlatform'
 import type {
   WindowFeatures,
   BehavioralProfile,
@@ -216,6 +218,11 @@ export interface SentinelStartOptions {
    * consent; voice checks refuse to listen without it.
    */
   microphone?: boolean
+   * Desktop only: pair the learner's attested phone before the trust
+   * profile is chosen, so the session can be `device_attested`. Pairing is
+   * the learner's consent; a skipped or failed pairing continues without.
+   */
+  companionPhone?: boolean
 }
 
 // AI scoring is advisory until validated with labeled data (see
@@ -1239,11 +1246,17 @@ function createSentinelService() {
         sentinelDebug.attestation = 'error'
       }
       if (generation !== lifecycleGeneration) return
+      // Desktops have no attestation of their own; a paired phone lends its.
+      const companion = options.companionPhone && !isMobilePlatform
+        ? await useCompanionPhone().pairPhone(response.session_id)
+        : null
+      if (companion) sentinelDebug.attestation = `${companion.assurance_level} (phone)`
+      if (generation !== lifecycleGeneration) return
       // The backend chooses the trust profile from the attestation result,
       // this report, a device benchmark, the role's floor and the consent,
       // and locks it before the first snapshot. The camera runs only when
       // the chosen profile includes it.
-      trustProfile.value = await selectProfile(response.session_id, optInCamera, options)
+      trustProfile.value = await selectProfile(response.session_id, optInCamera, options, companion !== null)
       if (generation !== lifecycleGeneration) return
       if (optInCamera && trustProfile.value?.not_run.includes('camera')) setCameraOptedIn(false)
       // A queued stop owns cleanup of an already-created backend session.
@@ -1691,7 +1704,8 @@ function createSentinelService() {
 
   /**
    * Ask the backend to choose and lock the session's trust profile. A camera
-   * stream the learner turned on is both the capability and the consent.
+   * stream the learner turned on is both the capability and the consent;
+   * so is a phone the learner paired.
    * Null when the choice failed: the session then has no profile, and a
    * role floor fails closed at attempt start.
    */
@@ -1699,8 +1713,13 @@ function createSentinelService() {
     id: string,
     camera: boolean,
     options: SentinelStartOptions,
+    companionPhone = false,
   ): Promise<SelectedProfile | null> => {
-    const capabilities = { camera, microphone: options.microphone === true, companion_phone: false }
+    const capabilities = {
+      camera,
+      microphone: options.microphone === true,
+      companion_phone: companionPhone,
+    }
     const request: ProfileRequest = {
       capabilities,
       consent: capabilities,
@@ -1726,6 +1745,8 @@ function createSentinelService() {
 
   const stop = () => {
     lifecycleGeneration++
+    // A start still waiting for a paired phone must not hold the stop.
+    void useCompanionPhone().skip().catch((err: unknown) => console.warn('[sentinel] companion cancel failed', err))
     return serializeTransition(stopSession)
   }
 

@@ -900,6 +900,30 @@ export interface AttestSessionResponse {
   unverified?: { outcome: 'no_trust_material' } | { outcome: 'failed'; reason: string } | null
 }
 
+/** Window camera scores; what a paired phone sends when it is the camera. */
+export type CameraFeatures = NonNullable<WindowFeatures['camera']>
+
+/** Desktop: the one-time code a paired phone joins with. */
+export interface CompanionOfferResponse {
+  code: string
+  /** Unix seconds. */
+  expires_at: number
+}
+
+/** Desktop: a phone joined the session and its attestation was stored. */
+export interface CompanionPaired {
+  assurance_level: string
+  camera: boolean
+  unverified?: AttestSessionResponse['unverified']
+}
+
+/** Phone: this phone joined a desktop session. */
+export interface CompanionJoined {
+  session_id: string
+  assurance_level: string
+  camera: boolean
+}
+
 // ---------------------------------------------------------------------------
 // Sentinel backend ML (Rust: tract + candle). Mirrors the structs in
 // `src-tauri/src/sentinel/types.rs` + `src-tauri/src/commands/sentinel_ml.rs`.

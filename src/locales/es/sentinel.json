@@ -558,5 +558,23 @@
     "noticeOpen": "See what they have",
     "noticeLater": "Not now",
     "liveSuspended": "Sesión suspendida"
+  },
+  "companion": {
+    "pairToggle": "Vincular primero mi teléfono para que este intento quede atestiguado por el dispositivo",
+    "offerTitle": "Vincula tu teléfono",
+    "offerBody": "En tu teléfono, abre Alexandria con tu sesión, ve a Sentinel, elige Unirse desde el teléfono y pega este código. Funciona una sola vez y caduca en cinco minutos.",
+    "copy": "Copiar código",
+    "copied": "Copiado",
+    "waiting": "Esperando a tu teléfono…",
+    "skip": "Continuar sin el teléfono",
+    "failed": "Tu teléfono no pudo vincularse: {reason}",
+    "joinTitle": "Unirse desde el teléfono",
+    "cardDescription": "Presta la atestación de este teléfono a una evaluación que haces en tu ordenador.",
+    "joinBody": "Pega el código que muestra tu ordenador. Este teléfono atestigua que es una app de Alexandria auténtica con tu sesión; solo acepta códigos de tus propias sesiones.",
+    "joinPlaceholder": "Código de vinculación",
+    "join": "Unirse",
+    "joined": "Vinculado a la sesión de tu ordenador. Mantén Alexandria abierta en este teléfono hasta que termine el intento.",
+    "leave": "Salir",
+    "unsupported": "Solo un iPhone o un teléfono Android puede vincularse."
   }
 }

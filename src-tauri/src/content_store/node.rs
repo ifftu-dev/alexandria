@@ -11,6 +11,7 @@
 //!   Endpoint (QUIC + relay) → BlobsProtocol (iroh-blobs)
 //!                            → Gossip (iroh-gossip, for room peer discovery)
 //!                            → MoQ (iroh-moq, for media streaming)
+//!                            → Sentinel companion (paired phone)
 //!                            → Router (accept loop)
 //!                                    ↕
 //!                              FsStore (redb on disk)
@@ -125,6 +126,8 @@ pub struct ContentNode {
     /// AES-256-GCM key for transparent content encryption.
     /// Set after vault unlock via `set_content_key()`.
     content_key: Arc<Mutex<Option<[u8; 32]>>>,
+    /// Paired-phone protocol state; its handler is on the router.
+    companion: crate::sentinel::companion::transport::CompanionHub,
 }
 
 impl ContentNode {
@@ -136,7 +139,13 @@ impl ContentNode {
             inner: Arc::new(Mutex::new(None)),
             data_dir: Arc::new(Mutex::new(data_dir.to_path_buf())),
             content_key: Arc::new(Mutex::new(None)),
+            companion: Default::default(),
         }
+    }
+
+    /// Both ends of the Sentinel companion protocol (paired phone).
+    pub fn companion(&self) -> crate::sentinel::companion::transport::CompanionHub {
+        self.companion.clone()
     }
 
     /// Replace the blob-store directory for the next `start()`.
@@ -278,10 +287,11 @@ impl ContentNode {
             .accept(iroh_blobs::ALPN, blobs)
             .accept(iroh_gossip::ALPN, gossip.clone())
             .accept(live::ALPN, live.protocol_handler())
+            .accept(crate::sentinel::companion::ALPN, self.companion.protocol())
             .spawn();
         crate::diag::log("node.start: router spawned OK");
 
-        log::info!("iroh router started, accepting blobs + gossip + moq connections");
+        log::info!("iroh router started, accepting blobs + gossip + moq + companion connections");
 
         *inner = Some(RunningNode {
             router,

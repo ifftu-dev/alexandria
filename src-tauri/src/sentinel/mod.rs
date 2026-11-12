@@ -28,6 +28,9 @@
 //!   digraphs, camera frames) mirrored from the legacy TS structs
 //! - `attestation` — device attestation (App Attest / Play Integrity) capture
 //!   and on-device verification behind the `device_attested` assurance rung
+//! - `companion` — a desktop session paired with the learner's attested
+//!   phone over iroh: DID- and nonce-bound pairing, verified like a phone's
+//!   own attestation; the phone can be the session's camera (scores only)
 //! - `android_environment` — Android assessment shield (FLAG_SECURE +
 //!   hide-overlay-windows), obscured-touch counter, accessibility / ADB report
 //! - `display_topology` — monitor count, external / mirrored display,
@@ -59,6 +62,7 @@ pub mod android_environment;
 pub mod attestation;
 pub mod camera_budget;
 pub mod camera_pipeline;
+pub mod companion;
 pub mod consistency;
 pub mod corpus_capture;
 pub mod display_topology;

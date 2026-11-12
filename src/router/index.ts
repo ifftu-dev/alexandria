@@ -375,6 +375,12 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
     {
+      path: '/dashboard/sentinel/companion',
+      name: 'dashboard-sentinel-companion',
+      component: () => import('@/pages/dashboard/sentinel/CompanionJoin.vue'),
+      meta: { layout: 'app' },
+    },
+    {
       path: '/dashboard/sentinel/cheat-test',
       name: 'dashboard-sentinel-cheat-test',
       component: () => import('@/pages/dashboard/sentinel/CheatTest.vue'),

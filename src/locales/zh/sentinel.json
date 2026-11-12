@@ -558,5 +558,23 @@
     "noticeOpen": "See what they have",
     "noticeLater": "Not now",
     "liveSuspended": "会话已暂停"
+  },
+  "companion": {
+    "pairToggle": "先配对我的手机，让这次尝试获得设备认证",
+    "offerTitle": "配对你的手机",
+    "offerBody": "在手机上以你的身份打开 Alexandria，进入 Sentinel，选择“从手机加入”并粘贴此代码。代码只能使用一次，五分钟后失效。",
+    "copy": "复制代码",
+    "copied": "已复制",
+    "waiting": "正在等待你的手机…",
+    "skip": "不使用手机继续",
+    "failed": "你的手机无法配对：{reason}",
+    "joinTitle": "从手机加入",
+    "cardDescription": "把这部手机的设备认证借给你在电脑上进行的测评。",
+    "joinBody": "粘贴电脑上显示的代码。这部手机会证明它是以你的身份登录的正版 Alexandria 应用；它只接受你自己会话的代码。",
+    "joinPlaceholder": "配对代码",
+    "join": "加入",
+    "joined": "已与电脑上的会话配对。在尝试结束前，请让 Alexandria 在这部手机上保持打开。",
+    "leave": "离开",
+    "unsupported": "只有 iPhone 或 Android 手机可以配对。"
   }
 }

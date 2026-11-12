@@ -111,13 +111,24 @@ pub(crate) fn select_for_session(
         Option<String>,
         String,
         String,
+        Option<String>,
     );
-    let (ended_at, locked, root, assurance, purpose): SessionRow = conn
+    let (ended_at, locked, root, assurance, purpose, attestation): SessionRow = conn
         .query_row(
-            "SELECT ended_at, trust_profile, commitment_root, assurance_level, purpose
+            "SELECT ended_at, trust_profile, commitment_root, assurance_level, purpose,
+                    attestation_json
                FROM integrity_sessions WHERE id = ?1",
             params![session_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
         )
         .optional()
         .map_err(|e| e.to_string())?
@@ -138,7 +149,23 @@ pub(crate) fn select_for_session(
         (Some(role), _) => role_floor(conn, role)?,
         (None, _) => None,
     };
-    let device_attested = assurance == crate::sentinel::attestation::ASSURANCE_DEVICE_ATTESTED;
+    // A paired phone's attestation counts only with companion consent.
+    let paired =
+        crate::sentinel::companion::session::stored_binding(attestation.as_deref()).is_some();
+    if paired && !req.consent.companion_phone {
+        // Unconsented, the pairing is not used: nothing may claim it later.
+        conn.execute(
+            "UPDATE integrity_sessions SET attestation_json = NULL, assurance_level = ?2
+              WHERE id = ?1",
+            params![session_id, crate::sentinel::attestation::ASSURANCE_LOCAL],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    let companion = attestation
+        .as_deref()
+        .filter(|_| paired && req.consent.companion_phone);
+    let device_attested = assurance == crate::sentinel::attestation::ASSURANCE_DEVICE_ATTESTED
+        && (!paired || req.consent.companion_phone);
     let inputs = SelectionInputs {
         device_attested,
         capabilities: req.capabilities,
@@ -157,7 +184,16 @@ pub(crate) fn select_for_session(
     // Tagged so the selection never collides with a snapshot's canonical
     // form; it covers every persisted field of the choice.
     let canonical = format!("trust_profile|{session_id}|{record_json}");
-    let root = crate::domain::integrity_commitment::fold_commitment("", canonical.as_bytes());
+    // A paired phone's attestation is the link before the selection.
+    let first = companion
+        .map(|json| {
+            crate::domain::integrity_commitment::fold_commitment(
+                "",
+                crate::sentinel::companion::session::chain_link(session_id, json).as_bytes(),
+            )
+        })
+        .unwrap_or_default();
+    let root = crate::domain::integrity_commitment::fold_commitment(&first, canonical.as_bytes());
     let policy_floor = evaluate_floor(
         Some(profile),
         floor,

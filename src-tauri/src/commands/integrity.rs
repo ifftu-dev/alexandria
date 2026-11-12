@@ -169,6 +169,7 @@ pub async fn integrity_attest_session(
         app_id: captured.app_id,
         payload: captured.payload,
         captured_at: crate::clock::now_rfc3339(),
+        companion: None,
     };
     // Verify what we just captured (the end-of-session assertion is not
     // required yet: no commitment root exists).
@@ -221,7 +222,16 @@ pub async fn integrity_select_profile(
     request: crate::sentinel::trust_profile::ProfileRequest,
 ) -> Result<crate::sentinel::trust_profile::SelectedProfile, String> {
     use crate::sentinel::trust_profile::select_for_session;
-    let benchmark = if request.needs_benchmark() {
+    // When a paired phone is the camera, its benchmark is the one that
+    // matters; the desktop's own camera is not used.
+    let phone = state
+        .content_node
+        .companion()
+        .role(&session_id)
+        .filter(|role| role.camera);
+    let benchmark = if let Some(role) = phone {
+        role.benchmark.filter(|_| request.needs_benchmark())
+    } else if request.needs_benchmark() {
         // A benchmark that fails is not a pass: the camera profiles are then
         // excluded as not benchmarked.
         tokio::task::spawn_blocking(crate::sentinel::camera_budget::benchmark)
@@ -264,11 +274,37 @@ fn assert_commitment_for(
     attestation_json: Option<&str>,
     commitment_root: Option<&str>,
 ) -> Option<String> {
-    use crate::sentinel::attestation::{native, AttestationPayload, DeviceAttestation};
+    let (key_id, root) = needs_assertion(attestation_json, commitment_root)?;
+    let assertion = crate::sentinel::attestation::native::assert_commitment(&key_id, &root)
+        .map_err(|e| log::warn!(target: "sentinel", "app attest assertion failed: {e}"))
+        .ok()??;
+    with_assertion(attestation_json, &root, assertion)
+}
+
+/// The App Attest key id and root to assert, when a stored record has no
+/// assertion yet and the session has a root.
+fn needs_assertion(
+    attestation_json: Option<&str>,
+    commitment_root: Option<&str>,
+) -> Option<(String, String)> {
+    use crate::sentinel::attestation::{AttestationPayload, DeviceAttestation};
     let root = commitment_root?;
+    let record: DeviceAttestation = serde_json::from_str(attestation_json?).ok()?;
+    match record.payload {
+        AttestationPayload::AppAttest {
+            key_id_b64,
+            assertion_b64: None,
+            ..
+        } => Some((key_id_b64, root.to_string())),
+        _ => None,
+    }
+}
+
+/// The stored record extended with `assertion` over `root`.
+fn with_assertion(attestation_json: Option<&str>, root: &str, assertion: String) -> Option<String> {
+    use crate::sentinel::attestation::{AttestationPayload, DeviceAttestation};
     let mut record: DeviceAttestation = serde_json::from_str(attestation_json?).ok()?;
     let AttestationPayload::AppAttest {
-        key_id_b64,
         assertion_b64,
         asserted_root,
         ..
@@ -276,12 +312,6 @@ fn assert_commitment_for(
     else {
         return None;
     };
-    if assertion_b64.is_some() {
-        return None;
-    }
-    let assertion = native::assert_commitment(key_id_b64, root)
-        .map_err(|e| log::warn!(target: "sentinel", "app attest assertion failed: {e}"))
-        .ok()??;
     *assertion_b64 = Some(assertion);
     *asserted_root = Some(root.to_string());
     serde_json::to_string(&record).ok()
@@ -294,6 +324,18 @@ pub async fn integrity_submit_snapshot(
     req: SubmitSnapshotRequest,
 ) -> Result<IntegritySnapshot, String> {
     let staging_session_id = req.session_id.clone();
+    // A paired phone that is the camera supplies the window's camera
+    // scores; the desktop client's camera group is not used.
+    let mut req = req;
+    let companion = state.content_node.companion();
+    if companion
+        .role(&req.session_id)
+        .is_some_and(|role| role.camera)
+    {
+        if let Some(features) = req.features.as_mut() {
+            features.camera = companion.take_camera_window(&req.session_id);
+        }
+    }
     let (snapshot, purpose) = state
         .db_executor
         .execute(
@@ -359,7 +401,24 @@ pub async fn integrity_end_session(
             },
         )
         .await?;
+    let companion = state.content_node.companion();
     let asserted = match pending {
+        // A paired phone signs the desktop's root with its attested key.
+        Some((json, root))
+            if crate::sentinel::companion::session::stored_binding(json.as_deref()).is_some() =>
+        {
+            match needs_assertion(json.as_deref(), root.as_deref()) {
+                Some((_, root)) => match companion.request_assertion(&session_id, &root).await {
+                    Ok(Some(assertion)) => with_assertion(json.as_deref(), &root, assertion),
+                    Ok(None) => None,
+                    Err(e) => {
+                        log::warn!(target: "sentinel", "companion assertion failed: {e}");
+                        None
+                    }
+                },
+                None => None,
+            }
+        }
         Some((json, root)) => tokio::task::spawn_blocking(move || {
             assert_commitment_for(json.as_deref(), root.as_deref())
         })
@@ -367,6 +426,7 @@ pub async fn integrity_end_session(
         .map_err(|e| format!("attestation worker failed: {e}"))?,
         None => None,
     };
+    let closing = session_id.clone();
     state
         .db_executor
         .execute(
@@ -387,6 +447,7 @@ pub async fn integrity_end_session(
             },
         )
         .await
+        .inspect(|_| companion.close(&closing))
 }
 
 fn finish_session(
