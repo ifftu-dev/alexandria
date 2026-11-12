@@ -29,9 +29,9 @@ use alexandria_verify::StoreLookup;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::cardano::anchor_tx::{self, AnchorRecord, Funding};
+use crate::cardano::anchor_tx::{self, AnchorBuildError, AnchorRecord, Funding};
 use crate::cardano::ledger::{self, Ledger};
-use crate::cardano::reservations::{ReservedOutpoints, WalletBusy};
+use crate::cardano::reservations::ReservedOutpoints;
 use crate::cardano::submission::{
     self, Journal, Operation, Submission, SubmissionStatus, SubmitError,
 };
@@ -628,16 +628,7 @@ async fn build_and_submit<L: Ledger>(
                 .await
             {
                 Ok(tx) => (tx, Funding::Issuer.label()),
-                Err(error) => {
-                    // A busy wallet is the whole reason to wait: the
-                    // sponsor's own error was logged above.
-                    return Err(SubmitError::Failed(match sponsor_error {
-                        Some(sponsor) if !WalletBusy::matches(&error) => {
-                            format!("{sponsor}; {error}")
-                        }
-                        _ => error,
-                    }));
-                }
+                Err(error) => return Err(SubmitError::Failed(wait_reason(sponsor_error, error))),
             }
         }
     };
@@ -713,6 +704,19 @@ async fn build_and_submit<L: Ledger>(
     Ok(())
 }
 
+/// Why a batch waits once neither the sponsor nor the issuer's wallet could
+/// pay. A wallet that needs funds says so, whichever way found it. Otherwise a
+/// busy issuer wallet is the whole reason to wait (the sponsor's own error was
+/// logged), and anything else names both failures.
+fn wait_reason(sponsor: Option<AnchorBuildError>, issuer: AnchorBuildError) -> String {
+    match (sponsor, issuer) {
+        (Some(sponsor @ AnchorBuildError::NeedsFunds(_)), issuer) => format!("{sponsor}; {issuer}"),
+        (_, issuer @ AnchorBuildError::WalletBusy(_)) => issuer.to_string(),
+        (Some(sponsor), issuer) => format!("{sponsor}; {issuer}"),
+        (None, issuer) => issuer.to_string(),
+    }
+}
+
 /// Build a sponsored anchor when a sponsor UTxO is spendable now, with its
 /// funding label. `Ok(None)` when none is.
 async fn sponsored<L: Ledger>(
@@ -721,7 +725,7 @@ async fn sponsored<L: Ledger>(
     record: &AnchorRecord,
     wallet: &Wallet,
     reserved: &ReservedOutpoints,
-) -> Result<Option<(anchor_tx::AnchorTx, &'static str)>, String> {
+) -> Result<Option<(anchor_tx::AnchorTx, &'static str)>, AnchorBuildError> {
     let (utxos, tip) = tokio::join!(ledger.utxos(&profile.address), ledger.tip_slot());
     let (utxos, tip) = (utxos?, tip?);
     let Some(utxo) =

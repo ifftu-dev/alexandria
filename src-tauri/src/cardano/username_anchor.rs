@@ -21,9 +21,10 @@ use pallas_primitives::{Metadatum, MetadatumLabel};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
+use crate::cardano::anchor_tx::AnchorBuildError;
 use crate::cardano::blockfrost::BlockfrostClient;
 use crate::cardano::ledger::Ledger;
-use crate::cardano::reservations::{select_unreserved, ReservedOutpoints, WalletBusy};
+use crate::cardano::reservations::{select_unreserved, ReservedOutpoints};
 use crate::cardano::submission::{self, Journal, Member, Operation, Submission, SubmissionStatus};
 use crate::cardano::{anchor_tx, tx_builder};
 use crate::domain::username_claim::{CardanoAnchor, UsernameClaim};
@@ -82,15 +83,15 @@ pub fn build_username_anchor_metadata(
 /// Build + sign one batch anchor tx. Same mechanics as the credential
 /// anchor (metadata-only, no mint, change back to self). The input is the
 /// first sufficient UTxO that no in-flight transaction spends (`reserved`,
-/// read from the journal at `tip_slot`); [`WalletBusy`] when only reserved
-/// UTxOs would do.
+/// read from the journal at `tip_slot`); [`AnchorBuildError::WalletBusy`]
+/// when only reserved UTxOs would do.
 pub async fn build_batch_anchor_tx<L: Ledger>(
     entries: &[(String, String)],
     wallet: &crate::crypto::wallet::Wallet,
     ledger: &L,
     tip_slot: u64,
     reserved: &ReservedOutpoints,
-) -> Result<anchor_tx::AnchorTx, String> {
+) -> Result<anchor_tx::AnchorTx, AnchorBuildError> {
     use pallas_addresses::Address as PallasAddress;
     use pallas_txbuilder::{BuildConway, Input, Output, StagingTransaction};
 
@@ -104,7 +105,9 @@ pub async fn build_batch_anchor_tx<L: Ledger>(
     let params = params_res.map_err(|e| format!("get_protocol_params: {e}"))?;
 
     if utxos.is_empty() {
-        return Err("no UTxOs at payment address".into());
+        return Err(AnchorBuildError::NeedsFunds(
+            "no UTxOs at payment address".into(),
+        ));
     }
     // The input pays the fee and leaves a change output above the minimum.
     let fee = tx_builder::estimate_fee(&params, 1);
@@ -112,7 +115,7 @@ pub async fn build_batch_anchor_tx<L: Ledger>(
     let selected = select_unreserved(&utxos, reserved, |utxos| {
         BlockfrostClient::select_utxo(utxos, needed)
     })?
-    .ok_or_else(|| format!("insufficient funds: no UTxO holds {needed} lovelace"))?;
+    .ok_or_else(|| AnchorBuildError::NeedsFunds(format!("no UTxO holds {needed} lovelace")))?;
 
     let pallas_addr = PallasAddress::from_bech32(&wallet.payment_address)
         .map_err(|e| format!("bad payment address: {e}"))?;
@@ -291,11 +294,11 @@ pub(crate) async fn tick<L: Ledger>(
     let tx = match build_batch_anchor_tx(&entries, w, ledger, tip, &reserved).await {
         Ok(tx) => tx,
         // A wait, not a failure: the claims stay pending for the next pass.
-        Err(error) if WalletBusy::matches(&error) => {
-            log::info!("username anchoring waits: {error}");
+        Err(busy @ AnchorBuildError::WalletBusy(_)) => {
+            log::info!("username anchoring waits: {busy}");
             return Ok(anchored);
         }
-        Err(error) => return Err(error),
+        Err(error) => return Err(error.to_string()),
     };
     let batch_id = next.id;
     let members: Vec<Member<'_>> = next

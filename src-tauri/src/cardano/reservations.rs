@@ -57,19 +57,6 @@ impl ReservedOutpoints {
 #[error("wallet busy: inputs reserved by in-flight transactions")]
 pub struct WalletBusy;
 
-impl WalletBusy {
-    /// Whether a builder's string error is this one.
-    pub fn matches(error: &str) -> bool {
-        error.starts_with(&WalletBusy.to_string())
-    }
-}
-
-impl From<WalletBusy> for String {
-    fn from(busy: WalletBusy) -> Self {
-        busy.to_string()
-    }
-}
-
 /// Apply a coin-selection policy to the UTxOs no in-flight transaction
 /// spends. Every builder that spends the node wallet selects through this.
 ///
@@ -173,9 +160,6 @@ mod tests {
             busy.to_string(),
             "wallet busy: inputs reserved by in-flight transactions"
         );
-        let message: String = busy.into();
-        assert!(WalletBusy::matches(&message));
-        assert!(!WalletBusy::matches("insufficient funds"));
         // Too little ADA is not a busy wallet, reserved or not.
         let poor = [ada(3, 0, 1_000_000)];
         assert_eq!(

@@ -797,6 +797,45 @@ async fn with_every_eligible_utxo_reserved_the_anchor_waits_without_spending_an_
     assert_eq!(state.last_error, None);
 }
 
+/// A node whose sponsor pool holds one spendable UTxO, anchoring one
+/// credential per batch.
+fn one_sponsor_utxo_node() -> Node {
+    let mut node = Node::new();
+    node.policy.cap = 1;
+    let profile = sponsor();
+    node.ledger.set_utxos(
+        &profile.address,
+        vec![sponsor_utxo(0x21, profile.slot_to_posix_ms(TIP) - 1)],
+    );
+    node.sponsor = Some(profile);
+    node
+}
+
+#[tokio::test]
+async fn a_busy_sponsor_does_not_hide_a_wallet_that_needs_funds() {
+    let node = one_sponsor_utxo_node();
+    node.ledger
+        .set_utxos(&node.wallet.payment_address, vec![ada(0x11, 0, 6_000_000)]);
+    let a = issue(&node.profile, &node.issuer, "a");
+    let b = issue(&node.profile, &node.issuer, "b");
+    node.tick(T0_PLUS_7H).await;
+    assert_eq!(anchor_submissions(&node).len(), 1);
+    let waiting = if node.state(&a).status == AnchorStatus::Pending {
+        a
+    } else {
+        b
+    };
+
+    // The wallet is emptied: with the sponsor UTxO free the anchor still
+    // could not pledge collateral, so the reason is funds, not a busy wallet.
+    node.ledger.set_utxos(&node.wallet.payment_address, vec![]);
+    node.tick(T0_PLUS_7H).await;
+    assert_eq!(anchor_submissions(&node).len(), 1);
+    let state = node.state(&waiting);
+    assert_eq!((state.status, state.attempts), (AnchorStatus::Pending, 0));
+    assert!(state.needs_funds, "{:?}", state.last_error);
+}
+
 /// Live preprod run of the whole anchorer: issue two credentials, flush them
 /// as one batch, wait for confirmation, and check the verifier finds them
 /// anchored. Ignored by default. Uses the network profile's sponsor unless
