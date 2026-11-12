@@ -380,7 +380,9 @@ pub(crate) fn decide_with_verification(
     windows.push(signals.to_vec());
     let evidence = SessionEvidence {
         windows,
-        verification_failed: false,
+        verification_failed: crate::sentinel::verification::has_failed_verification(
+            conn, session_id,
+        )?,
         interview: purpose == "interview",
     };
     let decision = decide(&evidence, manifest, DEFAULT_PROFILE, ended);

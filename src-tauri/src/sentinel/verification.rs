@@ -411,6 +411,26 @@ mod tests {
     }
 
     #[test]
+    fn grading_time_decisions_keep_a_failed_verification() {
+        let db = db_with_session();
+        record_verification(db.conn(), &result(VerificationOutcome::Failed, "reseed")).unwrap();
+        // Grading re-runs the decision rule on the stored chain; a failed
+        // verification must still flag it, whatever the extra signals say.
+        db.conn()
+            .execute("UPDATE integrity_sessions SET status = 'active'", [])
+            .unwrap();
+        let decision = crate::sentinel::snapshots::decide_with_verification(
+            db.conn(),
+            "s1",
+            &[],
+            &crate::sentinel::scoring::active_manifest(),
+        )
+        .unwrap();
+        assert_eq!(decision.status.as_str(), "flagged");
+        assert_eq!(status(&db), "flagged");
+    }
+
+    #[test]
     fn an_ended_session_takes_no_more_results() {
         let db = db_with_session();
         db.conn()
