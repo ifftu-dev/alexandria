@@ -627,7 +627,8 @@
       "none": "Ninguna",
       "reseed": "La misma pregunta con valores nuevos",
       "authored": "Preguntas de seguimiento escritas por el instructor",
-      "plugin": "Creadas por el corrector de la pregunta"
+      "plugin": "Creadas por el corrector de la pregunta",
+      "llm": "Escritas por la conexión de modelo del puesto"
     },
     "notice": {
       "title": "Este intento se realiza con el perfil {profile}",

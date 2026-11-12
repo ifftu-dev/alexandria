@@ -176,7 +176,11 @@
       "minRung": "Échelon de vérification minimum",
       "probePolicy": "Questions de suivi",
       "noMinimum": "Pas de minimum",
-      "coverageTitle": "Ce que couvre une certification émise selon cette politique"
+      "coverageTitle": "Ce que couvre une certification émise selon cette politique",
+      "generatedProbeLabel": "Connexion de modèle",
+      "generatedProbeOff": "Désactivées",
+      "generatedProbeNone": "Aucune connexion de modèle n'est configurée sur cet appareil.",
+      "generatedProbeNote": "Une connexion de modèle enregistrée rédige de courtes questions de suivi à partir des réponses choisies par chaque candidat et de la description de la compétence. Les candidats sont d'abord sollicités ; sans leur consentement, ou si le modèle est indisponible, la question de suivi est ignorée."
     },
     "actions": {
       "create": "Créer"

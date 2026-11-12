@@ -176,7 +176,11 @@
       "minRung": "最低验证等级",
       "probePolicy": "追问",
       "noMinimum": "无最低要求",
-      "coverageTitle": "按此政策签发的凭证涵盖什么"
+      "coverageTitle": "按此政策签发的凭证涵盖什么",
+      "generatedProbeLabel": "模型连接",
+      "generatedProbeOff": "关闭",
+      "generatedProbeNone": "此设备上尚未设置模型连接。",
+      "generatedProbeNote": "已保存的模型连接会根据每位候选人所选的答案和技能描述编写简短追问。会先征求候选人同意；未获同意或模型不可用时，将跳过追问。"
     },
     "actions": {
       "create": "创建"

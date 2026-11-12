@@ -27,7 +27,10 @@
     "chooseOne": "Elige una respuesta.",
     "chooseAll": "Elige todas las que correspondan.",
     "integritySuspended": "Las comprobaciones de integridad suspendieron este intento.",
-    "integritySuspendedNote": "No se harán más comprobaciones. Aún puedes enviar; el resultado registrará que la sesión fue suspendida."
+    "integritySuspendedNote": "No se harán más comprobaciones. Aún puedes enviar; el resultado registrará que la sesión fue suspendida.",
+    "generatedProbeConsent": "Permitir que la conexión de modelo de este puesto escriba mis preguntas de seguimiento",
+    "generatedProbeConsentNote": "Al enviar, las opciones que elegiste y la descripción de la habilidad se envían a la conexión de modelo que el patrocinador configuró para este puesto, que escribe hasta dos preguntas de seguimiento breves. Las preguntas de la evaluación no se envían. Si lo dejas desactivado, las preguntas de seguimiento se omiten y eso no cuenta en tu contra.",
+    "probePreparing": "Preparando las preguntas de seguimiento…"
   },
   "player": {
     "courseFallback": "Curso",

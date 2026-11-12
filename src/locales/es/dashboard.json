@@ -176,7 +176,11 @@
       "minRung": "Nivel de verificación mínimo",
       "probePolicy": "Preguntas de seguimiento",
       "noMinimum": "Sin mínimo",
-      "coverageTitle": "Qué cubre una credencial emitida con esta política"
+      "coverageTitle": "Qué cubre una credencial emitida con esta política",
+      "generatedProbeLabel": "Conexión de modelo",
+      "generatedProbeOff": "Desactivadas",
+      "generatedProbeNone": "No hay conexiones de modelo configuradas en este dispositivo.",
+      "generatedProbeNote": "Una conexión de modelo guardada escribe preguntas de seguimiento breves a partir de las respuestas elegidas por cada candidato y la descripción de la habilidad. Primero se pide permiso a los candidatos; sin su consentimiento, o si el modelo no está disponible, la pregunta de seguimiento se omite."
     },
     "actions": {
       "create": "Crear"

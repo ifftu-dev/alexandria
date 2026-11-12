@@ -627,7 +627,8 @@
       "none": "Aucune",
       "reseed": "Même question avec de nouvelles valeurs",
       "authored": "Questions de suivi rédigées par l'enseignant",
-      "plugin": "Créées par le correcteur de la question"
+      "plugin": "Créées par le correcteur de la question",
+      "llm": "Rédigées par la connexion de modèle du poste"
     },
     "notice": {
       "title": "Cette tentative se déroule sous le profil {profile}",

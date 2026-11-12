@@ -27,7 +27,10 @@
     "chooseOne": "Choisissez une réponse.",
     "chooseAll": "Choisissez toutes les réponses qui s'appliquent.",
     "integritySuspended": "Les contrôles d'intégrité ont suspendu cette tentative.",
-    "integritySuspendedNote": "Plus aucun contrôle n'est effectué. Vous pouvez encore soumettre ; le résultat indiquera que la session a été suspendue."
+    "integritySuspendedNote": "Plus aucun contrôle n'est effectué. Vous pouvez encore soumettre ; le résultat indiquera que la session a été suspendue.",
+    "generatedProbeConsent": "Autoriser la connexion de modèle de ce poste à rédiger mes questions de suivi",
+    "generatedProbeConsentNote": "Après l'envoi, les options que vous avez choisies et la description de la compétence sont transmises à la connexion de modèle configurée par le sponsor pour ce poste, qui rédige jusqu'à deux courtes questions de suivi. Les questions de l'évaluation ne sont pas transmises. Si vous laissez cette option désactivée, les questions de suivi sont ignorées et cela ne compte pas contre vous.",
+    "probePreparing": "Préparation des questions de suivi…"
   },
   "player": {
     "courseFallback": "Cours",
