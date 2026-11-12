@@ -121,6 +121,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // Batched credential anchors: Merkle-root batches, per-credential
     // receipts, and cached ledger observations of anchor transactions.
     (33, "anchor_batches", include_str!("anchor_batches.sql")),
+    // Sentinel probes: per-assessment probe policy, authored follow-ups and
+    // variants, served probes, and verification results in the commitment
+    // chain. See `crate::assessment::probes`.
+    (34, "probe_contract", include_str!("probe_contract.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

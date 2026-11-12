@@ -41,7 +41,7 @@ DOMAINS = [
     ("Guardianship", r"^guardian_"),
     ("Taxonomy", r"^(subject_fields|subjects|skills|skill_prerequisites|skill_relations|taxonomy_versions)$"),
     ("Courses and learning", r"^(courses|course_chapters|course_elements|element_skill_tags|enrollments|element_progress|course_notes|video_chapters|catalog)$"),
-    ("Assessments", r"^(question_banks|assessment_items|assessment_item_skills|assessment_attempts|attempt_items)$"),
+    ("Assessments", r"^(question_banks|assessment_items|assessment_item_skills|assessment_item_probes|assessment_attempts|assessment_probes|attempt_items)$"),
     ("Goals", r"^goal_template"),
     ("Community plugins", r"^(plugin_|element_submissions$)"),
     ("Verifiable credentials", r"^(key_registry|credentials|credential_status_lists|credential_anchors|anchor_batches|anchor_receipts|anchor_observations|credentials_pending_verification|credential_allowlist|presentations_seen|pinboard_observations)$"),

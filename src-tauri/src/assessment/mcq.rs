@@ -156,6 +156,102 @@ fn record(score: f64, details: ScoreDetails) -> ScoreRecord {
     }
 }
 
+/// Content half of an MCQ probe input. Like [`McqContent`], plus the prompt
+/// the probe repeats. Mirrors `ProbeContent` in the wasm grader.
+#[derive(Debug, Clone, Deserialize)]
+struct ProbeContent {
+    kind: String,
+    #[serde(default)]
+    prompt: String,
+    #[serde(default)]
+    options: Vec<String>,
+    #[serde(default)]
+    correct_indices: Vec<u32>,
+}
+
+/// Fixed-shape probe output, field for field what the wasm grader emits.
+#[derive(Debug, Clone, Serialize)]
+struct ProbeOutput {
+    version: &'static str,
+    question: Option<ProbeQuestion>,
+    expectation: Option<ProbeExpectation>,
+    time_box_ms: u64,
+    pass_score: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProbeQuestion {
+    kind: String,
+    prompt: String,
+    options: Vec<String>,
+    /// Tells the renderer which instruction to show: "select every option
+    /// that is not a correct answer".
+    probe: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProbeExpectation {
+    correct_indices: Vec<u32>,
+}
+
+/// Generate a probe for an MCQ: the same options, asking for every option
+/// that is *not* correct. The expectation is the complement of the key, so
+/// the response grades through [`score`] unchanged. The host reshuffles the
+/// options when it serves the probe, so a remembered position does not
+/// answer it.
+///
+/// Never fails: content without a usable key, or where every option is
+/// correct, yields a declined probe (`question: null`), as the wasm grader
+/// does. `submission` and `seed` are part of the contract; the complement
+/// probe needs neither.
+pub fn probe(
+    content: &serde_json::Value,
+    _submission: &serde_json::Value,
+    _seed: u64,
+) -> crate::plugins::grade_contract::ProbeRecord {
+    let output = serde_json::from_value::<ProbeContent>(content.clone())
+        .ok()
+        .and_then(|c| complement_probe(&c))
+        .unwrap_or(ProbeOutput {
+            version: "1",
+            question: None,
+            expectation: None,
+            time_box_ms: 0,
+            pass_score: 1.0,
+        });
+    serde_json::from_value(serde_json::to_value(output).expect("ProbeOutput serializes"))
+        .expect("ProbeOutput is a ProbeRecord")
+}
+
+fn complement_probe(content: &ProbeContent) -> Option<ProbeOutput> {
+    if content.kind != "single" && content.kind != "multi" {
+        return None;
+    }
+    let n = content.options.len() as u32;
+    if content.correct_indices.is_empty() || content.correct_indices.iter().any(|&i| i >= n) {
+        return None;
+    }
+    let correct: BTreeSet<u32> = content.correct_indices.iter().copied().collect();
+    let wrong: Vec<u32> = (0..n).filter(|i| !correct.contains(i)).collect();
+    if wrong.is_empty() {
+        return None;
+    }
+    Some(ProbeOutput {
+        version: "1",
+        question: Some(ProbeQuestion {
+            kind: if wrong.len() == 1 { "single" } else { "multi" }.to_string(),
+            prompt: content.prompt.clone(),
+            options: content.options.clone(),
+            probe: "complement",
+        }),
+        expectation: Some(ProbeExpectation {
+            correct_indices: wrong,
+        }),
+        time_box_ms: (15_000 + 5_000 * u64::from(n)).min(60_000),
+        pass_score: 1.0,
+    })
+}
+
 /// Zero score, reason stashed in `details.kind` — the wasm grader's
 /// convention, kept identical so the two cannot be told apart.
 fn error_record(err: String) -> ScoreRecord {
@@ -174,6 +270,7 @@ fn error_record(err: String) -> ScoreRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugins::grade_contract::ProbeRecord;
 
     fn content(kind: &str, options: usize, correct: &[u32]) -> serde_json::Value {
         let opts: Vec<String> = (0..options).map(|i| format!("opt{i}")).collect();
@@ -242,6 +339,51 @@ mod tests {
         let r = score(&c, &submitted(&[9]));
         assert_eq!(r.score, 0.0);
         assert!(r.details["kind"].as_str().unwrap().contains("out of range"));
+    }
+
+    /// Grade a probe response the way the host does: the probe's question
+    /// and expectation merged, expectation winning, through the same scorer.
+    fn grade_probe(probe: &ProbeRecord, selected: &[u32]) -> f64 {
+        let mut content = probe.question.clone();
+        for (k, v) in probe.expectation.as_object().unwrap() {
+            content[k] = v.clone();
+        }
+        score(&content, &submitted(selected)).score
+    }
+
+    #[test]
+    fn probe_asks_for_every_option_that_is_not_correct() {
+        let mut c = content("single", 4, &[2]);
+        c["prompt"] = "Which keyword declares a function in Rust?".into();
+        let probe = probe(&c, &submitted(&[2]), 7);
+        assert_eq!(probe.question["prompt"], c["prompt"]);
+        assert_eq!(probe.question["probe"], "complement");
+        assert_eq!(probe.question["kind"], "multi");
+        assert!(
+            probe.question.get("correct_indices").is_none(),
+            "the probe question must not carry its key"
+        );
+        // Knowing the answer means rejecting the other three.
+        assert_eq!(grade_probe(&probe, &[0, 1, 3]), 1.0);
+        assert!(grade_probe(&probe, &[0, 1]) < probe.pass_score);
+        assert_eq!(grade_probe(&probe, &[2]), 0.0);
+        assert!(probe.time_box_ms >= 5_000 && probe.time_box_ms <= 60_000);
+    }
+
+    #[test]
+    fn probe_with_one_wrong_option_is_single_answer() {
+        let probe = probe(&content("multi", 3, &[0, 1]), &submitted(&[0, 1]), 1);
+        assert_eq!(probe.question["kind"], "single");
+        assert_eq!(grade_probe(&probe, &[2]), 1.0);
+    }
+
+    #[test]
+    fn no_probe_when_every_option_is_correct_or_content_is_broken() {
+        assert!(probe(&content("multi", 2, &[0, 1]), &submitted(&[0]), 1)
+            .question
+            .is_null());
+        let broken = serde_json::json!({ "kind": "essay", "correct_indices": [0] });
+        assert!(probe(&broken, &submitted(&[0]), 1).question.is_null());
     }
 
     #[test]
@@ -360,6 +502,82 @@ mod equivalence {
                     "kind": kind, "options": opts, "correct_indices": correct,
                 });
                 assert_same(&runtime, &content, &pick(&mut rng));
+            }
+        }
+    }
+
+    fn wasm_probe(
+        runtime: &GraderRuntime,
+        content: &serde_json::Value,
+        selected: &[u32],
+    ) -> Option<crate::plugins::grade_contract::ProbeRecord> {
+        let input = serde_json::to_vec(&serde_json::json!({
+            "version": "1",
+            "content": content,
+            "submission": { "selected_indices": selected },
+            "seed": 42u64,
+        }))
+        .unwrap();
+        let cid = blake3::hash(MCQ_GRADER_WASM).to_hex().to_string();
+        runtime
+            .probe(
+                &cid,
+                MCQ_GRADER_WASM,
+                None,
+                &input,
+                GraderBudgets::default(),
+            )
+            .expect("wasm probe runs")
+    }
+
+    #[test]
+    fn probe_matches_wasm() {
+        // The native probe is what a phone serves; the wasm probe is what the
+        // desktop serves. A learner must get the same follow-up either way.
+        let runtime = GraderRuntime::new().expect("runtime");
+        let mut cases = vec![
+            serde_json::json!({ "kind": "essay", "options": ["a"], "correct_indices": [0] }),
+            serde_json::json!({ "kind": "single", "options": ["a","b"], "correct_indices": [] }),
+            serde_json::json!({ "kind": "single", "options": ["a","b"], "correct_indices": [7] }),
+            serde_json::json!({ "kind": "multi", "options": [], "correct_indices": [0,1] }),
+        ];
+        for options in 1..=5usize {
+            let opts: Vec<String> = (0..options).map(|i| format!("opt{i}")).collect();
+            for correct in subsets(options).into_iter().filter(|s| !s.is_empty()) {
+                let kind = if correct.len() == 1 {
+                    "single"
+                } else {
+                    "multi"
+                };
+                cases.push(serde_json::json!({
+                    "kind": kind, "prompt": "Pick", "options": opts, "correct_indices": correct,
+                }));
+            }
+        }
+        for content in cases {
+            let submission = serde_json::json!({ "selected_indices": [0] });
+            let native = probe(&content, &submission, 42).validated().unwrap();
+            let wasm = wasm_probe(&runtime, &content, &[0]);
+            match (native, wasm) {
+                (None, None) => {}
+                (Some(n), Some(w)) => {
+                    assert_eq!(n.question, w.question, "question differs for {content}");
+                    assert_eq!(
+                        n.expectation, w.expectation,
+                        "expectation differs for {content}"
+                    );
+                    assert_eq!(
+                        n.time_box_ms, w.time_box_ms,
+                        "time box differs for {content}"
+                    );
+                    assert_eq!(
+                        n.pass_score, w.pass_score,
+                        "pass score differs for {content}"
+                    );
+                }
+                (n, w) => {
+                    panic!("native {n:?} and wasm {w:?} disagree on whether {content} has a probe")
+                }
             }
         }
     }

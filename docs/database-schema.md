@@ -9,8 +9,8 @@ Status: live
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 33 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 133 tables, 130 indexes, 1 view, 6 triggers.
+**Schema**: 34 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 136 tables, 132 indexes, 1 view, 6 triggers.
 
 ---
 
@@ -56,6 +56,7 @@ and requires a database's history to be an exact prefix of this list:
 31. `push_error_codes`
 32. `subject_field_atlas_slot`
 33. `anchor_batches`
+34. `probe_contract`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -373,7 +374,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `position` INTEGER NOT NULL default `0`
 - `created_at` TEXT NOT NULL default `datetime('now')`
 
-### Assessments (5)
+### Assessments (7)
 
 #### `assessment_attempts`
 
@@ -402,6 +403,17 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `pass_threshold_snapshot` REAL
 - `role_assessment_id` TEXT → `role_assessments.id`
 
+#### `assessment_item_probes`
+
+- `id` TEXT PK
+- `item_id` TEXT NOT NULL → `assessment_items.id`
+- `probe_kind` TEXT NOT NULL
+- `content_public` TEXT NOT NULL
+- `grader_private` TEXT
+- `time_box_ms` INTEGER
+- `author_did` TEXT NOT NULL
+- `created_at` TEXT NOT NULL default `datetime('now')`
+
 #### `assessment_item_skills`
 
 - `item_id` TEXT PK → `assessment_items.id`
@@ -424,6 +436,32 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `taxonomy_version` TEXT
 - `ratified` INTEGER NOT NULL default `0`
 - `created_at` TEXT NOT NULL default `datetime('now')`
+
+#### `assessment_probes`
+
+- `id` TEXT PK
+- `attempt_id` TEXT NOT NULL → `assessment_attempts.id`
+- `ordinal` INTEGER NOT NULL
+- `item_id` TEXT NOT NULL
+- `policy` TEXT NOT NULL
+- `source` TEXT NOT NULL
+- `source_id` TEXT
+- `item_kind` TEXT NOT NULL
+- `plugin_cid` TEXT
+- `question_json` TEXT NOT NULL
+- `expectation_json` TEXT
+- `option_order` TEXT
+- `time_box_ms` INTEGER NOT NULL
+- `pass_score` REAL NOT NULL
+- `rendered_at_ms` INTEGER
+- `answered_at_ms` INTEGER
+- `first_input_ms` INTEGER
+- `response_json` TEXT
+- `score` REAL
+- `grader_cid` TEXT
+- `content_cid` TEXT
+- `submission_cid` TEXT
+- `outcome` TEXT
 
 #### `attempt_items`
 
@@ -461,6 +499,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `adaptive_se_target` REAL NOT NULL default `0.3`
 - `adaptive_min_items` INTEGER NOT NULL default `5`
 - `adaptive_max_items` INTEGER NOT NULL default `20`
+- `probe_policy` TEXT NOT NULL default `'none'`
 
 ### Goals (2)
 
@@ -956,7 +995,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `computation_spec` TEXT
 - `credential_id` TEXT → `credentials.id`
 
-### Integrity (Sentinel) (8)
+### Integrity (Sentinel) (9)
 
 #### `integrity_evidence`
 
@@ -1027,6 +1066,20 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `ai_paste_anomaly` REAL
 - `gaze_offscreen_ratio` REAL
 - `commitment_hash` TEXT
+
+#### `integrity_verifications`
+
+- `id` TEXT PK
+- `session_id` TEXT NOT NULL → `integrity_sessions.id`
+- `attempt_id` TEXT
+- `step` TEXT NOT NULL
+- `policy` TEXT NOT NULL
+- `outcome` TEXT NOT NULL
+- `reason` TEXT
+- `subject_ref` TEXT
+- `detail_json` TEXT NOT NULL default `'{}'`
+- `commitment_hash` TEXT NOT NULL
+- `recorded_at` TEXT NOT NULL default `datetime('now')`
 
 #### `sentinel_holdout_refs`
 
@@ -1699,8 +1752,10 @@ Every foreign key in the baseline, parent to child.
 erDiagram
     role_assessments ||--o{ assessment_attempts : role_assessment_id
     question_banks ||--o{ assessment_attempts : bank_id
+    assessment_items ||--o{ assessment_item_probes : item_id
     assessment_items ||--o{ assessment_item_skills : item_id
     question_banks ||--o{ assessment_items : bank_id
+    assessment_attempts ||--o{ assessment_probes : attempt_id
     assessment_attempts ||--o{ attempt_items : attempt_id
     chain_submissions ||--o{ chain_submission_members : network
     chain_submissions ||--o{ chain_submission_members : operation_kind
@@ -1759,6 +1814,7 @@ erDiagram
     integrity_sessions ||--o{ integrity_evidence_consent : session_id
     enrollments ||--o{ integrity_sessions : enrollment_id
     integrity_sessions ||--o{ integrity_snapshots : session_id
+    integrity_sessions ||--o{ integrity_verifications : session_id
     interview_sessions ||--o{ interview_criteria : session_id
     interview_criteria ||--o{ interview_followups : criterion_id
     interview_transcript_segments ||--o{ interview_followups : source_segment_id

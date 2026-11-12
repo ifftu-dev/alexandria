@@ -130,6 +130,101 @@ pub extern "C" fn alex_grade(ptr: i32, len: i32) -> i64 {
     pack_output(bytes)
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct ProbeInput {
+    version: String,
+    content: ProbeContent,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ProbeContent {
+    kind: String,
+    #[serde(default)]
+    prompt: String,
+    #[serde(default)]
+    options: Vec<String>,
+    #[serde(default)]
+    correct_indices: Vec<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProbeOutput {
+    version: &'static str,
+    question: Option<ProbeQuestion>,
+    expectation: Option<ProbeExpectation>,
+    time_box_ms: u64,
+    pass_score: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProbeQuestion {
+    kind: String,
+    prompt: String,
+    options: Vec<String>,
+    probe: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProbeExpectation {
+    correct_indices: Vec<u32>,
+}
+
+/// Optional probe entry point. Same calling convention as `alex_grade`.
+///
+/// Input: `{"version":"1","content":<as for grading>,"submission":<...>,
+/// "seed":<u64>}`. Output: a probe asking for every option that is NOT
+/// correct; the expectation (`correct_indices` = the complement of the key)
+/// is graded by `alex_grade` like any MCQ. A `null` question declines: the
+/// key is unusable or every option is correct.
+#[no_mangle]
+pub extern "C" fn alex_probe(ptr: i32, len: i32) -> i64 {
+    let input = unsafe { read_input(ptr, len) };
+    let output = serde_json::from_slice::<ProbeInput>(&input)
+        .ok()
+        .filter(|i| i.version == "1")
+        .and_then(|i| complement_probe(&i.content))
+        .unwrap_or(ProbeOutput {
+            version: "1",
+            question: None,
+            expectation: None,
+            time_box_ms: 0,
+            pass_score: 1.0,
+        });
+    let bytes = serde_json::to_vec(&output).expect("ProbeOutput must serialize");
+    pack_output(bytes)
+}
+
+fn complement_probe(content: &ProbeContent) -> Option<ProbeOutput> {
+    if content.kind != "single" && content.kind != "multi" {
+        return None;
+    }
+    let n = content.options.len() as u32;
+    if content.correct_indices.is_empty() || content.correct_indices.iter().any(|&i| i >= n) {
+        return None;
+    }
+    let correct: BTreeSet<u32> = content.correct_indices.iter().copied().collect();
+    let wrong: Vec<u32> = (0..n).filter(|i| !correct.contains(i)).collect();
+    if wrong.is_empty() {
+        return None;
+    }
+    let kind = if wrong.len() == 1 { "single" } else { "multi" };
+    let time_box_ms = 15_000 + 5_000 * u64::from(n);
+    Some(ProbeOutput {
+        version: "1",
+        question: Some(ProbeQuestion {
+            kind: kind.to_string(),
+            prompt: content.prompt.clone(),
+            options: content.options.clone(),
+            probe: "complement",
+        }),
+        expectation: Some(ProbeExpectation {
+            correct_indices: wrong,
+        }),
+        time_box_ms: if time_box_ms > 60_000 { 60_000 } else { time_box_ms },
+        pass_score: 1.0,
+    })
+}
+
 unsafe fn read_input(ptr: i32, len: i32) -> Vec<u8> {
     if ptr <= 0 || len <= 0 {
         return Vec::new();

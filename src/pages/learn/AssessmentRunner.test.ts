@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import AssessmentRunner from './AssessmentRunner.vue'
-import type { AttemptRoleTarget, GradeResult, StartedAttempt, SubmittedAnswer } from '@/types'
+import type { AttemptRoleTarget, GradeResult, ServedProbe, StartedAttempt, SubmittedAnswer } from '@/types'
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -14,6 +14,10 @@ const mocks = vi.hoisted(() => ({
   submitAnswers: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<void>>(),
   saveDraft: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<void>>(),
   grade: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<GradeResult>>(),
+  startProbes: vi.fn<(attempt: string) => Promise<ServedProbe[]>>(),
+  renderProbe: vi.fn<(probe: string) => Promise<ServedProbe>>(),
+  answerProbe: vi.fn(),
+  finishProbes: vi.fn(),
   active: { value: false },
   suspended: { value: false },
   push: vi.fn(),
@@ -41,7 +45,10 @@ vi.mock('@/composables/useSentinel', () => ({
   }),
 }))
 vi.mock('@/composables/useAssessment', () => ({
-  useAssessment: () => ({ openRoles: mocks.openRoles, startAttempt: mocks.startAttempt, saveDraft: mocks.saveDraft, submitAnswers: mocks.submitAnswers, grade: mocks.grade }),
+  useAssessment: () => ({
+    openRoles: mocks.openRoles, startAttempt: mocks.startAttempt, saveDraft: mocks.saveDraft, submitAnswers: mocks.submitAnswers, grade: mocks.grade,
+    startProbes: mocks.startProbes, renderProbe: mocks.renderProbe, answerProbe: mocks.answerProbe, finishProbes: mocks.finishProbes,
+  }),
 }))
 vi.mock('@/composables/useDiagnostics', () => ({
   useDiagnostics: () => ({ registerEntryPreparation: () => () => undefined }),
@@ -80,6 +87,8 @@ beforeEach(() => {
   mocks.openRoles.mockReset().mockResolvedValue([])
   mocks.startAttempt.mockReset().mockResolvedValue(attempt)
   mocks.grade.mockReset().mockResolvedValue(result)
+  mocks.startProbes.mockReset().mockResolvedValue([])
+  mocks.finishProbes.mockReset().mockResolvedValue({})
 })
 
 afterEach(async () => {
@@ -96,6 +105,29 @@ describe('standalone assessment monitoring', () => {
     expect(wrapper.text()).toContain('learn.assessment.passed')
     expect(mocks.start).not.toHaveBeenCalled()
     expect(mocks.startAttempt).not.toHaveBeenCalled()
+  })
+
+  it('runs follow-up probes after submission and before monitoring stops', async () => {
+    const order: string[] = []
+    mocks.submitAnswers.mockImplementation(async () => { order.push('submit') })
+    mocks.startProbes.mockImplementation(async () => {
+      order.push(`probes:${mocks.active.value ? 'monitored' : 'unmonitored'}`)
+      return [{ id: 'probe-1', item_kind: 'mcq', content: { kind: 'single', prompt: 'Follow-up', options: ['x', 'y'] }, time_box_ms: 30_000, remaining_ms: null }]
+    })
+    mocks.renderProbe.mockImplementation(async () => ({ id: 'probe-1', item_kind: 'mcq', content: { kind: 'single', prompt: 'Follow-up', options: ['x', 'y'] }, time_box_ms: 30_000, remaining_ms: 30_000 }))
+    mocks.answerProbe.mockImplementation(async () => { order.push('answer'); return { in_time: true } })
+    mocks.finishProbes.mockImplementation(async () => { order.push('finish'); return {} })
+    mocks.stop.mockImplementation(async () => { order.push('stop'); mocks.active.value = false; return 'session-1' })
+    mocks.grade.mockImplementation(async () => { order.push('grade'); return result })
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'learn.assessment.submit')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Follow-up')
+    await wrapper.findAll('button').find(button => button.text() === 'learn.assessment.probeAnswer')!.trigger('click')
+    await flushPromises()
+    expect(order).toEqual(['submit', 'probes:monitored', 'answer', 'finish', 'stop', 'grade'])
+    expect(wrapper.text()).toContain('learn.assessment.notPassedYet')
   })
 
   it('keeps frozen answers on grading failure and retries without reopening monitoring', async () => {

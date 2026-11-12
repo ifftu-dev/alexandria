@@ -314,7 +314,9 @@ fn commit_window(
 
     let evidence = SessionEvidence {
         windows: committed_flags(conn, session_id)?,
-        verification_failed: false,
+        verification_failed: crate::sentinel::verification::has_failed_verification(
+            conn, session_id,
+        )?,
         interview: purpose == "interview",
     };
     let decision = decide(&evidence, manifest, DEFAULT_PROFILE, false);

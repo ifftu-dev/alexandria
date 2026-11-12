@@ -48,7 +48,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::db::Database;
-use crate::plugins::grade_contract::ScoreRecord;
+use crate::plugins::grade_contract::{ProbeRecord, ScoreRecord};
 use crate::plugins::registry;
 
 #[cfg(desktop)]
@@ -326,6 +326,77 @@ pub fn grade_item(
         content_cid,
         submission_cid,
     })
+}
+
+/// Ask an item's own grader for a probe generated from the learner's
+/// submission (the `plugin` probe policy). The submission is normalised
+/// exactly as for grading, so the grader sees original option indices.
+///
+/// `Ok(None)` when the grader has no probe export or declines this
+/// submission. An `Err` (grader unavailable on this platform, broken
+/// grader) is the caller's to treat as "provider unavailable".
+pub fn probe_item(
+    db: &Database,
+    engine: &GradeEngine<'_>,
+    item: &AssessmentItem,
+    submission: &serde_json::Value,
+    option_order: Option<&[usize]>,
+    seed: u64,
+) -> Result<Option<ProbeRecord>, String> {
+    let resolved = resolve_grader(db, item)?;
+    let submission = normalize_submission(item, submission, option_order)?;
+    let content = grade_content(item);
+    run_prober(engine, &resolved, item, &content, &submission, seed)
+}
+
+/// Desktop: the grader's optional `alex_probe` export.
+#[cfg(desktop)]
+fn run_prober(
+    engine: &GradeEngine<'_>,
+    resolved: &ResolvedGrader,
+    item: &AssessmentItem,
+    content: &serde_json::Value,
+    submission: &serde_json::Value,
+    seed: u64,
+) -> Result<Option<ProbeRecord>, String> {
+    use std::path::Path;
+
+    let wasm_path = Path::new(&resolved.install_path).join(registry::GRADER_FILENAME);
+    let cwasm_path = Path::new(&resolved.install_path).join(registry::grader_cwasm_filename());
+    let wasm_bytes = std::fs::read(&wasm_path)
+        .map_err(|e| format!("failed to read grader.wasm for item {}: {e}", item.id))?;
+    let envelope = crate::plugins::grade_contract::ProbeInput {
+        version: crate::plugins::grade_contract::PROBE_ENVELOPE_VERSION.to_string(),
+        content: content.clone(),
+        submission: submission.clone(),
+        seed,
+    };
+    let envelope_bytes = serde_json::to_vec(&envelope).map_err(|e| e.to_string())?;
+    // `probe` binds the bytes to the declared CID before running them.
+    engine.runtime.probe(
+        &resolved.cid,
+        &wasm_bytes,
+        Some(&cwasm_path),
+        &envelope_bytes,
+        engine.budgets,
+    )
+}
+
+/// Mobile: MCQ probes natively ([`crate::assessment::mcq::probe`] is held
+/// equal to the wasm export); plugin graders cannot run here.
+#[cfg(not(desktop))]
+fn run_prober(
+    _engine: &GradeEngine<'_>,
+    _resolved: &ResolvedGrader,
+    item: &AssessmentItem,
+    content: &serde_json::Value,
+    submission: &serde_json::Value,
+    seed: u64,
+) -> Result<Option<ProbeRecord>, String> {
+    match item.item_kind {
+        ItemKind::Mcq => crate::assessment::mcq::probe(content, submission, seed).validated(),
+        ItemKind::Plugin => Err("GraderUnavailable: plugin graders run on the desktop app".into()),
+    }
 }
 
 /// Desktop: run the published wasm artifact.

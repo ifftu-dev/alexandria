@@ -17,6 +17,12 @@ credential-bearing path end-to-end.
 `alex_grade` returns `(out_ptr << 32) | out_len` — the host reads
 `out_len` bytes at `out_ptr` and parses as a JSON `ScoreRecord`.
 
+The grader also exports the optional `alex_probe` (same signature). Given
+the grade envelope plus a `seed`, it returns a follow-up probe asking for
+every option that is not correct; the probe's expectation is graded by
+`alex_grade` like any MCQ. The host's native MCQ probe in
+`src-tauri/src/assessment/mcq.rs` must match it, and a test checks that.
+
 ## Build
 
 ```bash

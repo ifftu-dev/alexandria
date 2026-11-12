@@ -10,6 +10,9 @@
 // requires camera coverage has the camera turned on first, so the
 // requirement applies from the first question instead of surfacing as a
 // refusal at issuance.
+//
+// After submission, any follow-up probes the assessment or role asks for run
+// while monitoring is still on (AssessmentProbes); grading follows.
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSentinel } from '@/composables/useSentinel'
@@ -20,6 +23,7 @@ import { useCameraPresence } from '@/composables/useCameraPresence'
 import { useSentinelView } from '@/composables/useSentinelView'
 import { useDiagnostics } from '@/composables/useDiagnostics'
 import { AppButton } from '@/components/ui'
+import AssessmentProbes from './AssessmentProbes.vue'
 import type { AttemptRoleTarget, StartedAttempt, GradeResult, SkillDetail } from '@/types'
 
 const route = useRoute()
@@ -191,6 +195,22 @@ function toggle(qid: string, pos: number, multiple: boolean) {
   selected.value = { ...selected.value, [qid]: set }
 }
 
+// The probe step after submission: AssessmentProbes shows any probes and
+// emits `done` when the step is closed, whatever happened inside it.
+const probing = ref(false)
+let probesDone: (() => void) | null = null
+
+function runProbes(): Promise<void> {
+  probing.value = true
+  return new Promise(resolve => { probesDone = resolve })
+}
+
+function onProbesDone() {
+  probing.value = false
+  probesDone?.()
+  probesDone = null
+}
+
 async function submit() {
   if (!attempt.value || grading.value || result.value || disposed) return
   grading.value = true
@@ -199,6 +219,9 @@ async function submit() {
     const answers = currentAnswers()
     await submitAnswers(attempt.value.attempt_id, answers)
     submitted.value = true
+    // Follow-up probes run inside the monitoring session, so before it ends.
+    if (!monitoringClosed) await runProbes()
+    if (disposed) return
     await stopMonitoring()
     if (disposed) return
     if (cleanupError.value) throw new Error(cleanupError.value)
@@ -307,6 +330,9 @@ async function submit() {
         <AppButton v-if="!result.passed" variant="outline" :disabled="closing || !!cleanupError" @click="router.go(0)">{{ $t('learn.assessment.retake') }}</AppButton>
       </div>
     </div>
+
+    <!-- Follow-up probes, after submission and before monitoring ends -->
+    <AssessmentProbes v-else-if="attempt && probing" :attempt-id="attempt.attempt_id" @done="onProbesDone" />
 
     <!-- Questions -->
     <template v-else-if="attempt">

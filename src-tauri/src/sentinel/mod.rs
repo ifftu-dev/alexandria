@@ -31,6 +31,8 @@
 //!   severity, status, and flags the backend records itself
 //! - `evidence` — learner-consented retention of appeal evidence for
 //!   flagged sessions; nothing is persisted without an explicit yes
+//! - `verification` — verification results (probe outcomes) folded into a
+//!   session's commitment chain, and the summary the credential reads
 //!
 //! Replaces `src/utils/sentinel/*.ts`. The frontend now buffers raw
 //! events and sends them across IPC; everything else runs in this
@@ -55,3 +57,4 @@ pub mod processes;
 pub mod scoring;
 pub mod snapshots;
 pub mod types;
+pub mod verification;
