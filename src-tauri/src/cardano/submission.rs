@@ -278,9 +278,7 @@ pub fn mark_applied(
         .map_err(|e| e.to_string())?
         != 1
     {
-        return Err(
-            "cannot finish projection before a verified ledger receipt or expiry".into(),
-        );
+        return Err("cannot finish projection before a verified ledger receipt or expiry".into());
     }
     Ok(())
 }
@@ -1699,7 +1697,10 @@ mod tests {
         .await
         .unwrap_err();
         assert!(!error.is_retryable());
-        assert!(error.to_string().contains("validity upper bound"), "{error}");
+        assert!(
+            error.to_string().contains("validity upper bound"),
+            "{error}"
+        );
         assert!(saved(&profile, OPERATION).is_none());
     }
 
@@ -1840,7 +1841,10 @@ mod tests {
                 .unwrap();
             assert_eq!(pending.status, SubmissionStatus::OutcomeUnknown, "{tip:?}");
         }
-        assert_eq!(reserved_at(&profile, TTL), vec![outpoint(1, 0), outpoint(2, 0)]);
+        assert_eq!(
+            reserved_at(&profile, TTL),
+            vec![outpoint(1, 0), outpoint(2, 0)]
+        );
 
         let expired = reconcile_at(
             &journal,
@@ -1916,12 +1920,11 @@ mod tests {
         let profile = TestProfile::migrated();
         let journal = profile.background();
         uncertain(&journal).await;
-        let expired = reconcile_at_with(&journal, OPERATION, Some(TTL * 10), |_| async {
-            Ok(None)
-        })
-        .await
-        .unwrap()
-        .unwrap();
+        let expired =
+            reconcile_at_with(&journal, OPERATION, Some(TTL * 10), |_| async { Ok(None) })
+                .await
+                .unwrap()
+                .unwrap();
         assert_eq!(expired.status, SubmissionStatus::Expired);
         let unapplied = |profile: &TestProfile| {
             with_database(&profile.db, |conn| {
@@ -1955,12 +1958,10 @@ mod tests {
         })
         .await
         .unwrap();
-        let expired = reconcile_at_with(journal, OPERATION, Some(TTL * 10), |_| async {
-            Ok(None)
-        })
-        .await
-        .unwrap()
-        .unwrap();
+        let expired = reconcile_at_with(journal, OPERATION, Some(TTL * 10), |_| async { Ok(None) })
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(expired.status, SubmissionStatus::Expired);
         expired
     }
@@ -1975,16 +1976,9 @@ mod tests {
         let ledger = FakeLedger::at_tip(TTL * 10);
         let new_ttl = TTL * 20;
         let new_bytes = transaction(200_000, Some(new_ttl), &[(3, 0)], &[(4, 0)]);
-        let replaced = replace_expired(
-            &journal,
-            &ledger,
-            OPERATION,
-            &new_bytes,
-            CONTEXT,
-            &[CLAIM],
-        )
-        .await
-        .unwrap();
+        let replaced = replace_expired(&journal, &ledger, OPERATION, &new_bytes, CONTEXT, &[CLAIM])
+            .await
+            .unwrap();
         assert_eq!(replaced.status, SubmissionStatus::Submitted);
         assert_eq!(
             replaced.tx_hash,
@@ -2004,7 +1998,10 @@ mod tests {
             }]
         );
         // The replacement reserves its own outpoints; the expired ones stay free.
-        assert_eq!(reserved_at(&profile, TTL), vec![outpoint(3, 0), outpoint(4, 0)]);
+        assert_eq!(
+            reserved_at(&profile, TTL),
+            vec![outpoint(3, 0), outpoint(4, 0)]
+        );
         // Its member stays bound to the operation.
         let other = Operation {
             id: "other-batch",
@@ -2041,24 +2038,27 @@ mod tests {
             "no journaled transaction",
         );
         let old_bytes = transaction(200_000, Some(TTL), &[(1, 0)], &[]);
-        let pending =
-            submit_members_with(&journal, OPERATION, &old_bytes, CONTEXT, &[CLAIM], |_| async {
-                Err("response lost".into())
-            })
-            .await
-            .unwrap();
+        let pending = submit_members_with(
+            &journal,
+            OPERATION,
+            &old_bytes,
+            CONTEXT,
+            &[CLAIM],
+            |_| async { Err("response lost".into()) },
+        )
+        .await
+        .unwrap();
         refused(
             replace_expired(&journal, &ledger, OPERATION, &new_bytes, CONTEXT, &[CLAIM]).await,
             "has not expired",
         );
         assert_eq!(saved(&profile, OPERATION), Some(pending));
 
-        let expired = reconcile_at_with(&journal, OPERATION, Some(TTL * 10), |_| async {
-            Ok(None)
-        })
-        .await
-        .unwrap()
-        .unwrap();
+        let expired =
+            reconcile_at_with(&journal, OPERATION, Some(TTL * 10), |_| async { Ok(None) })
+                .await
+                .unwrap()
+                .unwrap();
         refused(
             replace_expired(
                 &journal,

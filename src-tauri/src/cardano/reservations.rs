@@ -143,7 +143,11 @@ mod tests {
 
     #[test]
     fn selection_applies_its_policy_to_unreserved_utxos_only() {
-        let wallet = [ada(1, 0, 50_000_000), ada(2, 0, 20_000_000), ada(3, 0, 1_000_000)];
+        let wallet = [
+            ada(1, 0, 50_000_000),
+            ada(2, 0, 20_000_000),
+            ada(3, 0, 1_000_000),
+        ];
         let none = ReservedOutpoints::default();
         assert_eq!(
             picked(select_unreserved(&wallet, &none, largest)),
@@ -158,7 +162,11 @@ mod tests {
 
     #[test]
     fn wallet_is_busy_only_when_reservations_hide_every_eligible_utxo() {
-        let wallet = [ada(1, 0, 50_000_000), ada(2, 0, 20_000_000), ada(3, 0, 1_000_000)];
+        let wallet = [
+            ada(1, 0, 50_000_000),
+            ada(2, 0, 20_000_000),
+            ada(3, 0, 1_000_000),
+        ];
         let eligible_taken = reserving(&[&wallet[0], &wallet[1]]);
         let busy = select_unreserved(&wallet, &eligible_taken, largest).unwrap_err();
         assert_eq!(
