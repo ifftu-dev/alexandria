@@ -259,6 +259,18 @@ pub(crate) async fn tick<L: Ledger>(
     }
     let result = async {
         let treasury = super::treasury::TreasuryPayer::from_env();
+        // Read reservations just before selecting: every earlier build in
+        // this pass journaled its transaction before sending it.
+        let tip = ledger
+            .tip_slot()
+            .await
+            .map_err(|e| SubmitError::Failed(format!("ledger error: {e}")))?;
+        let reserved = journal
+            .run("completion_queue.reserved", move |db| {
+                submission::reserved_outpoints(db.conn(), tip)
+            })
+            .await
+            .map_err(SubmitError::Retryable)?;
         let built = super::completion_tx_builder::build_completion_mint_tx(
             ledger,
             &wallet.payment_address,
@@ -269,6 +281,8 @@ pub(crate) async fn tick<L: Ledger>(
             &context.leaves,
             &context.root,
             context.timestamp_ms,
+            tip,
+            &reserved,
             treasury.as_ref(),
         )
         .await

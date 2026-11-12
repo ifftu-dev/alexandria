@@ -330,3 +330,61 @@ async fn tick_mints_through_the_ledger_port_with_largest_input_and_separate_coll
     assert_eq!(witness.status, WitnessStatus::Submitted);
     assert_eq!(witness.tx_hash.as_deref(), Some(tx_hash.as_str()));
 }
+
+fn context_for(course: &str) -> CompletionContext {
+    CompletionContext {
+        course_id: course.into(),
+        ..context()
+    }
+}
+
+fn outpoint(byte: u8, index: u64) -> String {
+    format!("{}#{index}", format!("{byte:02x}").repeat(32))
+}
+
+/// `(inputs, collateral)` the signed bytes spend.
+fn spent_by(bytes: &[u8]) -> (Vec<String>, Vec<String>) {
+    let tx = MultiEraTx::decode(bytes).unwrap();
+    (outpoints(tx.inputs()), outpoints(tx.collateral()))
+}
+
+#[tokio::test]
+async fn mints_built_in_one_pass_behind_a_lagging_index_spend_different_utxos() {
+    let db = test_db();
+    for (claim_id, course) in [("first", "course-a"), ("second", "course-b")] {
+        claim(db.conn(), claim_id);
+        enqueue(db.conn(), claim_id, &context_for(course)).unwrap();
+    }
+    let profile = TestProfile::new(db);
+    let wallet = wallet();
+    let ledger = FakeLedger::at_tip(TIP);
+    ledger.set_utxos(
+        &wallet.payment_address,
+        vec![
+            ada(0x11, 0, 40_000_000),
+            ada(0x22, 0, 30_000_000),
+            ada(0x33, 0, 20_000_000),
+            ada(0x44, 0, 10_000_000),
+        ],
+    );
+
+    // One background pass: the index still lists everything the first mint
+    // spent when the second is built.
+    tick(&profile.background(), &ledger, &wallet).await.unwrap();
+    tick(&profile.background(), &ledger, &wallet).await.unwrap();
+
+    let submissions = ledger.submissions();
+    assert_eq!(submissions.len(), 2);
+    assert_eq!(
+        spent_by(&submissions[0].1),
+        (vec![outpoint(0x11, 0)], vec![outpoint(0x22, 0)])
+    );
+    assert_eq!(
+        spent_by(&submissions[1].1),
+        (vec![outpoint(0x33, 0)], vec![outpoint(0x44, 0)])
+    );
+    for claim_id in ["first", "second"] {
+        let witness = profile.with_conn(|conn| state(conn, claim_id).unwrap());
+        assert_eq!(witness.status, WitnessStatus::Submitted, "{claim_id}");
+    }
+}
