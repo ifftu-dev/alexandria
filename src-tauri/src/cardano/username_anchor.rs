@@ -22,6 +22,7 @@ use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 
 use crate::cardano::blockfrost::BlockfrostClient;
+use crate::cardano::ledger::Ledger;
 use crate::cardano::submission::{self, Journal, Member, Operation, Submission, SubmissionStatus};
 use crate::cardano::{anchor_tx, tx_builder};
 use crate::domain::username_claim::{CardanoAnchor, UsernameClaim};
@@ -79,10 +80,10 @@ pub fn build_username_anchor_metadata(
 
 /// Build + sign one batch anchor tx. Same mechanics as the credential
 /// anchor (metadata-only, no mint, change back to self).
-pub async fn build_batch_anchor_tx(
+pub async fn build_batch_anchor_tx<L: Ledger>(
     entries: &[(String, String)],
     wallet: &crate::crypto::wallet::Wallet,
-    blockfrost: &BlockfrostClient,
+    ledger: &L,
 ) -> Result<anchor_tx::AnchorTx, String> {
     use pallas_addresses::Address as PallasAddress;
     use pallas_txbuilder::{BuildConway, Input, Output, StagingTransaction};
@@ -90,9 +91,9 @@ pub async fn build_batch_anchor_tx(
     use crate::cardano::tx_builder::{MIN_UTXO_LOVELACE, TTL_OFFSET};
 
     let (utxos_res, params_res, tip_res) = tokio::join!(
-        blockfrost.get_utxos(&wallet.payment_address),
-        blockfrost.get_protocol_params(),
-        blockfrost.get_tip_slot(),
+        ledger.utxos(&wallet.payment_address),
+        ledger.protocol_params(),
+        ledger.tip_slot(),
     );
     let utxos = utxos_res.map_err(|e| format!("get_utxos: {e}"))?;
     let params = params_res.map_err(|e| format!("get_protocol_params: {e}"))?;
@@ -155,27 +156,22 @@ pub async fn build_batch_anchor_tx(
 /// as a text metadatum, so a byte-substring check on the tx CBOR is
 /// sufficient (the digest is collision-resistant; a tx containing it
 /// under any encoding anchors this exact claim).
-pub async fn verify_anchor(
-    blockfrost: &BlockfrostClient,
+pub async fn verify_anchor<L: Ledger>(
+    ledger: &L,
     claim: &UsernameClaim,
 ) -> Result<Option<bool>, String> {
     let Some(ref anchor) = claim.anchor else {
         return Ok(Some(false));
     };
-    let Some(receipt) = blockfrost
-        .get_transaction_receipt(&anchor.tx_hash)
-        .await
-        .map_err(|e| e.to_string())?
-    else {
+    let Some(receipt) = ledger.receipt(&anchor.tx_hash).await? else {
         return Ok(None);
     };
     if !receipt.valid_contract || receipt.slot != anchor.slot {
         return Ok(Some(false));
     }
-    let cbor = blockfrost
-        .get_tx_cbor(&anchor.tx_hash)
-        .await
-        .map_err(|e| e.to_string())?;
+    let Some(cbor) = ledger.tx_cbor(&anchor.tx_hash).await? else {
+        return Ok(None);
+    };
     if tx_builder::compute_tx_hash(&cbor).map_err(|e| e.to_string())? != anchor.tx_hash {
         return Ok(Some(false));
     }
@@ -188,15 +184,15 @@ pub async fn verify_anchor(
 /// Batch-anchor every unanchored claim in the local cache. Returns the
 /// number of claims anchored. The enriched claims republish to the DHT
 /// through the caller (claims are keyed per-username there).
-pub(crate) async fn tick(
+pub(crate) async fn tick<L: Ledger>(
     journal: &Journal,
-    blockfrost: &Option<BlockfrostClient>,
-    wallet: &Option<crate::crypto::wallet::Wallet>,
+    ledger: Option<&L>,
+    wallet: Option<&crate::crypto::wallet::Wallet>,
 ) -> Result<Vec<UsernameClaim>, String> {
-    let Some(bf) = blockfrost else {
+    let Some(ledger) = ledger else {
         return Ok(Vec::new());
     };
-    let mut anchored = recover_batches(journal, bf).await?;
+    let mut anchored = recover_batches(journal, ledger).await?;
 
     // Verification pass: claims anchored by OTHER nodes arrive via the
     // DHT with anchor_verified = 0. Confirm their digests on-chain so
@@ -224,7 +220,7 @@ pub(crate) async fn tick(
         })
         .await?;
     for (original_json, claim) in unverified {
-        let ok = match verify_anchor(bf, &claim).await {
+        let ok = match verify_anchor(ledger, &claim).await {
             Ok(Some(ok)) => ok,
             Ok(None) => continue,
             Err(error) => {
@@ -290,7 +286,7 @@ pub(crate) async fn tick(
         .map(|c| (c.username.clone(), claim_digest(c)))
         .collect();
 
-    let tx = build_batch_anchor_tx(&entries, w, bf).await?;
+    let tx = build_batch_anchor_tx(&entries, w, ledger).await?;
     let context = BatchContext {
         version: 1,
         claims: pending
@@ -317,7 +313,7 @@ pub(crate) async fn tick(
     };
     let submitted = submission::submit_once_with_members(
         journal,
-        bf,
+        ledger,
         operation,
         &tx.signed_cbor,
         &context_json,
@@ -340,9 +336,9 @@ pub(crate) async fn tick(
     Ok(anchored)
 }
 
-async fn recover_batches(
+async fn recover_batches<L: Ledger>(
     journal: &Journal,
-    bf: &BlockfrostClient,
+    ledger: &L,
 ) -> Result<Vec<UsernameClaim>, String> {
     let ids = journal
         .run("username_anchor.scan", |database| {
@@ -355,7 +351,7 @@ async fn recover_batches(
             kind: OPERATION_KIND,
             id: &id,
         };
-        match submission::reconcile(journal, bf, operation).await {
+        match submission::reconcile(journal, ledger, operation).await {
             Ok(Some(recovered)) => {
                 let id = id.clone();
                 anchored.extend(
@@ -451,7 +447,10 @@ fn project_batch(
 mod tests {
     use std::sync::atomic::Ordering;
 
+    use pallas_traverse::MultiEraTx;
+
     use super::*;
+    use crate::cardano::fake_ledger::{ada, FakeLedger};
     use crate::cardano::test_chain::{self, FakeChain, TestProfile, SHORT_LIMITS};
     use crate::crypto::did::derive_did_key;
     use crate::db::Database;
@@ -468,7 +467,10 @@ mod tests {
         let journal = profile.background();
 
         // The POST reaches the provider, then the client deadline expires.
-        assert!(tick(&journal, &client, &wallet).await.unwrap().is_empty());
+        assert!(tick(&journal, client.as_ref(), wallet.as_ref())
+            .await
+            .unwrap()
+            .is_empty());
         let batch = profile
             .with_conn(|conn| submission::unapplied_operations(conn, OPERATION_KIND, 10).unwrap());
         assert_eq!(batch.len(), 1);
@@ -486,14 +488,19 @@ mod tests {
         assert_eq!(saved.status, SubmissionStatus::OutcomeUnknown);
 
         // "Not found" neither anchors nor frees the reserved claim for a new batch.
-        assert!(tick(&journal, &client, &wallet).await.unwrap().is_empty());
+        assert!(tick(&journal, client.as_ref(), wallet.as_ref())
+            .await
+            .unwrap()
+            .is_empty());
         assert_eq!(
             profile.with_conn(|conn| cached(conn, &original.username)),
             original
         );
 
         included.store(true, Ordering::Release);
-        let anchored = tick(&journal, &client, &wallet).await.unwrap();
+        let anchored = tick(&journal, client.as_ref(), wallet.as_ref())
+            .await
+            .unwrap();
         assert_eq!(anchored.len(), 1);
         let anchor = anchored[0].anchor.as_ref().unwrap();
         assert_eq!(
@@ -505,6 +512,54 @@ mod tests {
         assert_eq!(chain.count(&format!("GET /addresses/{address}/utxos")), 1);
         assert_eq!(chain.count(&format!("GET /txs/{}", saved.tx_hash)), 2);
         assert_eq!(chain.requests().len(), 6);
+    }
+
+    #[tokio::test]
+    async fn tick_anchors_pending_claims_through_the_ledger_port() {
+        let profile = TestProfile::migrated();
+        let original = claim(1, "ada_99");
+        profile.with_conn(|conn| cache(conn, &original));
+        let wallet = test_chain::wallet();
+        let ledger = FakeLedger::at_tip(120_000_000);
+        ledger.set_utxos(
+            &wallet.payment_address,
+            vec![ada(0x22, 0, 1_000_000), ada(0x11, 3, 20_000_000)],
+        );
+        let journal = profile.background();
+
+        assert!(tick(&journal, Some(&ledger), Some(&wallet))
+            .await
+            .unwrap()
+            .is_empty());
+        let submissions = ledger.submissions();
+        assert_eq!(submissions.len(), 1);
+        let (tx_hash, bytes) = &submissions[0];
+        let spent: Vec<String> = MultiEraTx::decode(bytes)
+            .unwrap()
+            .inputs()
+            .iter()
+            .map(|input| format!("{}#{}", input.hash(), input.index()))
+            .collect();
+        assert_eq!(spent, vec![format!("{}#3", "11".repeat(32))]);
+
+        // Submitted claims are not rebatched while the batch is unconfirmed.
+        assert!(tick(&journal, Some(&ledger), Some(&wallet))
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(ledger.submissions().len(), 1);
+
+        ledger.include(tx_hash, 120_000_042);
+        let anchored = tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+        assert_eq!(anchored.len(), 1);
+        let anchor = anchored[0].anchor.as_ref().unwrap();
+        assert_eq!(
+            (anchor.tx_hash.as_str(), anchor.slot),
+            (tx_hash.as_str(), 120_000_042)
+        );
+        let stored = profile.with_conn(|conn| cached(conn, &original.username));
+        assert_eq!(stored.anchor, anchored[0].anchor);
+        assert_eq!(ledger.submissions().len(), 1);
     }
 
     fn claim(seed: u8, name: &str) -> UsernameClaim {

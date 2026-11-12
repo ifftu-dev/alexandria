@@ -1021,8 +1021,12 @@ pub fn run() {
                                 // Username claim batch anchoring (registry phase 3):
                                 // one metadata tx (label 1698) anchors up to 80
                                 // unanchored claims. Silent no-op without chain creds.
-                                match cardano::username_anchor::tick(&chain_journal, &bf, &wallet)
-                                    .await
+                                match cardano::username_anchor::tick(
+                                    &chain_journal,
+                                    bf.as_ref(),
+                                    wallet.as_ref(),
+                                )
+                                .await
                                 {
                                     Ok(anchored) if !anchored.is_empty() => {
                                         log::info!(
