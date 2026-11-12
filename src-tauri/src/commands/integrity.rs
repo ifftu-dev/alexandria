@@ -243,6 +243,19 @@ pub async fn integrity_select_profile(
         .await
 }
 
+/// The coverage statement a credential's integrity assertion names by
+/// digest, resolved offline from the statements bundled with the app.
+/// `None` when no bundled statement has that digest (another version, or a
+/// certification this build does not carry).
+#[tauri::command]
+pub async fn integrity_coverage_statement(
+    digest: String,
+) -> Result<Option<crate::sentinel::scoring::CoverageStatement>, String> {
+    Ok(crate::sentinel::scoring::resolve_coverage_statement(
+        &digest,
+    ))
+}
+
 /// iOS: extend a stored App Attest record with an assertion over the
 /// terminal commitment root, so the attested key vouches for the snapshot
 /// stream as well as the start nonce. Best effort; returns the JSON to

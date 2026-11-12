@@ -103,6 +103,8 @@ const FLAG_CATALOG: ReadonlyArray<{ type: FlagType; key: string; severity: FlagS
   { type: 'answer_change_after_idle', key: 'answerChangeAfterIdle', severity: 'info' },
   { type: 'gaze_down_then_response', key: 'gazeDownThenResponse', severity: 'info' },
   { type: 'voice_then_response', key: 'voiceThenResponse', severity: 'info' },
+  // Trust-profile degradation: a signal the locked profile runs was lost.
+  { type: 'camera_degraded', key: 'cameraDegraded', severity: 'warning' },
 ]
 const anomalyFlagTypes = computed(() => FLAG_CATALOG.map(f => ({
   type: f.type,

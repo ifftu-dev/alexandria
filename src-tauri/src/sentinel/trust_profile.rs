@@ -158,7 +158,11 @@ pub(crate) fn select_for_session(
     // form; it covers every persisted field of the choice.
     let canonical = format!("trust_profile|{session_id}|{record_json}");
     let root = crate::domain::integrity_commitment::fold_commitment("", canonical.as_bytes());
-    let policy_floor = evaluate_floor(Some(profile), floor, device_attested);
+    let policy_floor = evaluate_floor(
+        Some(profile),
+        floor,
+        &attestation_uncredited(device_attested),
+    );
     let floor_json = serde_json::to_string(&policy_floor).map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE integrity_sessions SET trust_profile = ?2, profile_selection_json = ?3,
@@ -218,10 +222,14 @@ pub(crate) fn record_policy_floor(
             |r| r.get(0),
         )
         .map_err(|e| e.to_string())?;
+    // Nothing is committed yet at attempt start, so the camera still counts;
+    // issuance judges it again against the committed windows.
     let result = evaluate_floor(
         profile,
         floor,
-        assurance == crate::sentinel::attestation::ASSURANCE_DEVICE_ATTESTED,
+        &attestation_uncredited(
+            assurance == crate::sentinel::attestation::ASSURANCE_DEVICE_ATTESTED,
+        ),
     );
     let json = serde_json::to_string(&result).map_err(|e| e.to_string())?;
     conn.execute(
@@ -230,6 +238,15 @@ pub(crate) fn record_policy_floor(
     )
     .map_err(|e| e.to_string())?;
     Ok(result)
+}
+
+/// The signals that do not count when the attestation is or is not credited.
+pub(crate) fn attestation_uncredited(credited: bool) -> Vec<ProfileSignal> {
+    if credited {
+        Vec::new()
+    } else {
+        vec![ProfileSignal::DeviceAttestation]
+    }
 }
 
 /// The policy floor last recorded for the session, if any.

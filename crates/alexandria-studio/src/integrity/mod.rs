@@ -13,19 +13,27 @@
 //! verification. Only backend-recorded tamper flags suspend.
 //!
 //! Each session runs one locked [`TrustProfile`], chosen by
-//! [`select_profile`]; a policy floor is judged by [`evaluate_floor`].
+//! [`select_profile`]; a policy floor is judged by [`evaluate_floor`]. The
+//! verification axis is a [`VerificationRung`], and each profile and rung has
+//! a content-addressed [`CoverageStatement`].
 
 mod consistency;
+mod coverage;
 mod features;
 mod flags;
 mod fusion;
 pub mod measurement;
 mod profile;
 mod response;
+mod rung;
 
 pub use consistency::{
     assess as assess_consistency, Consistency, ConsistencyVerdict, EvidenceSource, History,
     Observation, DIVERGENCE_SIGNAL, LOOKBACK_HOURS,
+};
+pub use coverage::{
+    coverage_statement, coverage_statements, resolve_coverage, CertificationRef, CoverageStatement,
+    COVERAGE_FORMAT, COVERAGE_VERSION,
 };
 pub use features::{
     derive_window, AndroidFeatures, BehaviouralBaseline, CameraFeatures, ClipboardFeatures,
@@ -40,8 +48,10 @@ pub use fusion::{
 pub use profile::{
     evaluate_floor, exclusion_reasons, select_profile, BudgetFit, Capabilities, Exclusion,
     ExclusionReason, PolicyFloor, ProfileSelection, ProfileSignal, SelectionInputs, TrustProfile,
+    MIN_CAMERA_COVERAGE,
 };
 pub use response::{
     reading_floor_ms, BaselineItem, BaselineSource, InputKind, ItemResponse, ResponseBaseline,
     ResponseFeatures, RESPONSE_PROCESS_SIGNALS,
 };
+pub use rung::{verification_rung, RungEvidence, VerificationRung};

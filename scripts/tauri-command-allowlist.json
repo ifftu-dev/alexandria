@@ -52,5 +52,6 @@
   "assessment_item_probes_list": "instructor probe authoring (sentinel trust profiles ticket 07); authoring UI pending",
   "assessment_item_probe_save": "instructor probe authoring (sentinel trust profiles ticket 07); authoring UI pending",
   "assessment_item_probe_delete": "instructor probe authoring (sentinel trust profiles ticket 07); authoring UI pending",
-  "integrity_verification_summary": "verification read path; credential and sponsor surfaces (tickets 08, 09) pending"
+  "integrity_verification_summary": "verification read path; credential and sponsor surfaces (tickets 08, 09) pending",
+  "integrity_coverage_statement": "coverage statement resolution by digest (ticket 08); credential detail and sponsor UI (ticket 09) pending"
 }

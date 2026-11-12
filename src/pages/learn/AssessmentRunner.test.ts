@@ -283,7 +283,7 @@ describe('role targeting', () => {
     role_assessment_id: 'role-plain', role_title: 'Analyst', org_name: 'Acme', camera_required: false,
   }
   const cameraRole: AttemptRoleTarget = {
-    role_assessment_id: 'role-cam', role_title: 'SRE', org_name: 'Acme', camera_required: true, min_camera_coverage: 0.9,
+    role_assessment_id: 'role-cam', role_title: 'SRE', org_name: 'Acme', camera_required: true,
   }
 
   function mockCamera(impl: () => Promise<MediaStream>) {

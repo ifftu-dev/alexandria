@@ -783,6 +783,46 @@ export interface IntegritySession {
 export type TrustProfile = 'core' | 'attested' | 'camera' | 'full'
 /** A signal a profile adds to the core set. */
 export type ProfileSignal = 'device_attestation' | 'camera'
+
+/**
+ * Verification rung: positive evidence that the learner did the work,
+ * independent of the device (`alexandria_studio::integrity::VerificationRung`).
+ * A ladder: each rung needs every rung below it.
+ */
+export type VerificationRung = 'none' | 'process' | 'probed' | 'consistent' | 'live'
+
+/** A signal's certified rates (`measurement::CertifiedSignal`). */
+export interface CertifiedSignal {
+  llr: number
+  precision: number
+  recall: number
+}
+
+/** The certification a coverage statement's rates come from. */
+export interface CoverageCertificationRef {
+  version: string
+  date: string
+  digest: string
+  corpus_digest: string
+}
+
+/**
+ * What a session under a trust profile and verification rung checked and did
+ * not check. Content-addressed: credentials carry its digest, resolved offline
+ * by `integrity_coverage_statement`.
+ */
+export interface CoverageStatement {
+  format: number
+  version: string
+  profile: TrustProfile
+  rung: VerificationRung
+  checked: string[]
+  not_checked: string[]
+  platform_ceilings: string[]
+  measurement: string
+  certification: CoverageCertificationRef | null
+  certified_signals: Record<string, CertifiedSignal>
+}
 export type ProfileExclusionReason =
   | 'not_attested'
   | 'no_camera'
@@ -1847,6 +1887,29 @@ export interface IntegrityAssertion {
   /** Anchor reference (DHT/chain) for the commitment root, if anchored. */
   anchorRef?: string | null
   generatedAt: string
+  /** Locked trust profile; absent when the session never chose one. */
+  trustProfile?: TrustProfile | null
+  /** Verification rung, separate from the device axis (`assuranceLevel`). */
+  verificationRung?: VerificationRung | null
+  /** Digest of the coverage statement for this profile and rung. */
+  coverageStatementDigest?: string | null
+  /** Signal sets the profile ran: 'core', 'device_attestation', 'camera'. */
+  signalsRun?: string[]
+  /** Signals the profile ran that were lost or stopped counting. */
+  signalsDegraded?: string[]
+  /** Signals the profile does not include. */
+  signalsNotRun?: string[]
+  /** Outcome of the follow-up probes, when any probe step ran. */
+  probe?: IntegrityProbeSummary | null
+}
+
+/** The probe step of an integrity session, as a credential states it. */
+export interface IntegrityProbeSummary {
+  outcome: VerificationOutcome
+  policies: ProbePolicy[]
+  satisfied: number
+  failed: number
+  skipped: number
 }
 
 export interface VerifiableCredential {
@@ -1873,12 +1936,19 @@ export interface IssuancePolicy {
   max_warning?: number | null
   require_clean?: boolean
   required_assurance_level?: string | null
-  /** Minimum fraction of snapshots captured with the camera opted in. */
-  min_camera_coverage?: number | null
-  /** Probe policy for attempts made for this role; overrides the assessment's unless 'none'. */
+  /**
+   * Probe policy for attempts made for this role; overrides the assessment's
+   * unless 'none'. At issuance anything but 'none' requires the probe step to
+   * have run under it with no failed probe.
+   */
   probe_policy?: ProbePolicy | null
-  /** Minimum trust profile, judged at attempt start and again at issuance. */
+  /**
+   * Minimum trust profile, judged at attempt start and again at issuance. The
+   * camera profiles carry their own camera coverage minimum.
+   */
   min_trust_profile?: TrustProfile | null
+  /** Minimum verification rung, judged at issuance. */
+  min_verification_rung?: VerificationRung | null
 }
 
 export interface IssueCredentialRequest {
@@ -2436,9 +2506,8 @@ export interface AttemptRoleTarget {
   role_assessment_id: string
   role_title: string
   org_name: string
-  /** The role's policy sets `min_camera_coverage > 0`: camera on for the whole attempt. */
+  /** The role's minimum trust profile runs the camera. */
   camera_required: boolean
-  min_camera_coverage?: number | null
 }
 
 /** One submitted answer: the served option positions the learner selected. */

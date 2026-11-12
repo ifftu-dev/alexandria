@@ -127,7 +127,6 @@
       "emptyBody": "کسی ادارے کے لیے ایک بنائیں۔",
       "requiresClean": "ایک صاف سیشن درکار ہے",
       "minIntegrity": "کم از کم سالمیت {value}",
-      "minCameraCoverage": "کم از کم کیمرہ کوریج {value}",
       "publish": "شائع کریں",
       "archive": "محفوظ خانہ"
     },
@@ -167,7 +166,6 @@
       "minIntegrity": "کم از کم سالمیت",
       "maxCritical": "زیادہ سے زیادہ سنگین",
       "maxWarning": "زیادہ سے زیادہ انتباہ",
-      "minCameraCoverage": "کم از کم کیمرہ کوریج (0–1)",
       "requireClean": "ایک صاف سیشن درکار ہے",
       "assuranceLabel": "درکار یقین دہانی کی سطح",
       "assuranceNone": "(کوئی نہیں)"

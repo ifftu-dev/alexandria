@@ -51,6 +51,10 @@ impl VerificationOutcome {
 /// Step name for probe results.
 pub const STEP_PROBE: &str = "probe";
 
+/// Step name for an unscripted live segment in an Alexandria-hosted
+/// interview. A satisfied one is the `live` verification rung.
+pub const STEP_INTERVIEW: &str = "interview";
+
 /// A result about to be recorded.
 #[derive(Debug, Clone)]
 pub struct NewVerification<'a> {

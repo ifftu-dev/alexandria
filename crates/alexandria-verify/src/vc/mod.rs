@@ -395,6 +395,45 @@ pub struct IntegrityAssertion {
     pub anchor_ref: Option<String>,
     /// RFC3339 timestamp the assertion was generated (issuance time).
     pub generated_at: String,
+    /// Trust profile the session was locked to: `core`, `attested`,
+    /// `camera` or `full`. Absent when the session never chose one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trust_profile: Option<String>,
+    /// Verification rung reached: `none`, `process`, `probed`, `consistent`
+    /// or `live`. Independent of the device axis (`assurance_level`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_rung: Option<String>,
+    /// Digest of the coverage statement for this profile and rung: what was
+    /// checked, what was not, and the certified error rates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coverage_statement_digest: Option<String>,
+    /// Signal sets the profile ran (`core`, `device_attestation`, `camera`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signals_run: Vec<String>,
+    /// Signals the profile ran that were lost or stopped counting during the
+    /// session, so a clean score on a degraded session reads as such.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signals_degraded: Vec<String>,
+    /// Signals the profile does not include.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub signals_not_run: Vec<String>,
+    /// Outcome of the follow-up probes, when any probe step ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe: Option<ProbeSummary>,
+}
+
+/// What the probe step of an integrity session concluded.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProbeSummary {
+    /// `failed` if any probe failed, else `satisfied` if any was satisfied,
+    /// else `skipped`.
+    pub outcome: String,
+    /// Probe policies the results were produced under.
+    pub policies: Vec<String>,
+    pub satisfied: u32,
+    pub failed: u32,
+    pub skipped: u32,
 }
 
 /// The signed credential envelope. Serialises to W3C VC v2 JSON-LD.
