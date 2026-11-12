@@ -106,23 +106,17 @@ pub async fn build_batch_anchor_tx<L: Ledger>(
     if utxos.is_empty() {
         return Err("no UTxOs at payment address".into());
     }
+    // The input pays the fee and leaves a change output above the minimum.
+    let fee = tx_builder::estimate_fee(&params, 1);
+    let needed = fee + MIN_UTXO_LOVELACE;
     let selected = select_unreserved(&utxos, reserved, |utxos| {
-        BlockfrostClient::select_utxo(utxos, MIN_UTXO_LOVELACE)
+        BlockfrostClient::select_utxo(utxos, needed)
     })?
-    .ok_or_else(|| "no UTxO with sufficient lovelace".to_string())?;
+    .ok_or_else(|| format!("insufficient funds: no UTxO holds {needed} lovelace"))?;
 
     let pallas_addr = PallasAddress::from_bech32(&wallet.payment_address)
         .map_err(|e| format!("bad payment address: {e}"))?;
-    let input_lovelace = selected.lovelace();
-    let fee = tx_builder::estimate_fee(&params, 1);
-    if input_lovelace < fee + MIN_UTXO_LOVELACE {
-        return Err(format!(
-            "insufficient funds: need {} lovelace, have {}",
-            fee + MIN_UTXO_LOVELACE,
-            input_lovelace
-        ));
-    }
-    let change = input_lovelace - fee;
+    let change = selected.lovelace() - fee;
     let input_tx_hash =
         tx_builder::parse_tx_hash(&selected.tx_hash).map_err(|e| format!("parse tx hash: {e}"))?;
 
@@ -790,6 +784,36 @@ mod tests {
         assert_eq!(submissions.len(), 2);
         assert_eq!(spent(&submissions[1].1), vec![format!("{first}#0")]);
         assert_eq!(batches(&profile)[1].1.status, SubmissionStatus::Submitted);
+    }
+
+    #[tokio::test]
+    async fn busy_wallet_waits_when_the_only_free_utxo_cannot_pay_for_the_batch() {
+        let profile = TestProfile::migrated();
+        profile.with_conn(|conn| cache(conn, &claim(1, "ada_99")));
+        let wallet = test_chain::wallet();
+        let ledger = FakeLedger::at_tip(TIP);
+        // The free UTxO clears the minimum output but not the fee on top.
+        ledger.set_utxos(
+            &wallet.payment_address,
+            vec![ada(0x11, 0, 20_000_000), ada(0x22, 0, 5_000_000)],
+        );
+        let journal = profile.background();
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+        assert_eq!(spent(&ledger.submissions()[0].1), vec![outpoint(0x11, 0)]);
+
+        // Only the in-flight batch's UTxO could pay: a wait, not an error.
+        let waiting = claim(2, "bob_22");
+        profile.with_conn(|conn| cache(conn, &waiting));
+        assert!(tick(&journal, Some(&ledger), Some(&wallet))
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(ledger.submissions().len(), 1);
+        assert_eq!(batches(&profile).len(), 1);
+        assert_eq!(
+            profile.with_conn(|conn| cached(conn, &waiting.username)),
+            waiting
+        );
     }
 
     #[tokio::test]

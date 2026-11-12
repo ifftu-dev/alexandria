@@ -173,12 +173,23 @@ pub async fn build_completion_mint_tx<L: Ledger>(
 
     // 4. UTxO selection. The spend input funds the mint; collateral MUST
     //    be a *distinct* pure-ADA UTxO (a UTxO cannot be both a regular
-    //    input and collateral). Pick the largest as the spend input and a
+    //    input and collateral). Pick the largest as the spend input, as
+    //    long as it pays the token output plus the estimated fee, and a
     //    separate ≥5-ADA UTxO as collateral. Only ADA-only UTxOs qualify:
     //    change is lovelace-only, so consuming a UTxO that carries other
     //    assets (treasury rep tokens, prior completion NFTs) would strand
     //    them — and reference-script UTxOs must never be spent.
     //    Both skip outpoints reserved by in-flight transactions.
+    const EST_MEM: u64 = 2_000_000;
+    const EST_STEPS: u64 = 700_000_000;
+    let est_fee = plutus_fee(
+        params.min_fee_a,
+        params.min_fee_b,
+        2_000,
+        EST_MEM,
+        EST_STEPS,
+    );
+    let needed = MIN_COMPLETION_UTXO_LOVELACE + est_fee;
     let pure: Vec<_> = {
         let mut v: Vec<_> = utxos
             .iter()
@@ -192,8 +203,13 @@ pub async fn build_completion_mint_tx<L: Ledger>(
         v.sort_by_key(|u| std::cmp::Reverse(u.lovelace()));
         v
     };
-    let selected =
-        select_unreserved(&pure, reserved, |free| free.first())?.ok_or(TxBuildError::NoUtxos)?;
+    let selected = select_unreserved(&pure, reserved, |free| {
+        free.first().filter(|u| u.lovelace() >= needed)
+    })?
+    .ok_or(TxBuildError::InsufficientFunds {
+        needed,
+        available: pure.first().map(|u| u.lovelace()).unwrap_or(0),
+    })?;
     let others: Vec<_> = pure
         .iter()
         .filter(|u| !(u.tx_hash == selected.tx_hash && u.tx_index == selected.tx_index))
@@ -258,15 +274,6 @@ pub async fn build_completion_mint_tx<L: Ledger>(
     };
 
     // 5. Pass 1 — generous estimate so evaluate_tx can run.
-    const EST_MEM: u64 = 2_000_000;
-    const EST_STEPS: u64 = 700_000_000;
-    let est_fee = plutus_fee(
-        params.min_fee_a,
-        params.min_fee_b,
-        2_000,
-        EST_MEM,
-        EST_STEPS,
-    );
     let draft = build(
         est_fee,
         ExUnits {
