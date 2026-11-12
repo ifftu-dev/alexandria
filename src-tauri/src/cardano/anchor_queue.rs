@@ -49,8 +49,6 @@ const NETWORK: &str = "cardano-preprod";
 /// needs the user's retry after that.
 pub const MAX_ATTEMPTS: u32 = 5;
 
-pub use super::submission::EXPIRY_MARGIN_SLOTS;
-
 /// Wait before trying again to build a batch that could not be built or paid
 /// for.
 const UNBUILT_RETRY_MINUTES: i64 = 30;
@@ -198,32 +196,22 @@ fn project_new_batch(
 
 // -- 2. reconciliation --------------------------------------------------------
 
-struct OpenBatch {
-    id: String,
-    invalid_from_slot: u64,
-}
-
 async fn reconcile_batches<L: Ledger>(
     journal: &Journal,
     ledger: &L,
     now: &str,
 ) -> Result<u32, String> {
-    let open = journal
+    let open: Vec<String> = journal
         .run("anchor_queue.open-batches", |db| {
             let mut stmt = db
                 .conn()
                 .prepare(
-                    "SELECT id, invalid_from_slot FROM anchor_batches
+                    "SELECT id FROM anchor_batches
                      WHERE status IN ('outcome_unknown', 'submitted') ORDER BY created_at, id",
                 )
                 .map_err(|e| e.to_string())?;
             let rows = stmt
-                .query_map([], |r| {
-                    Ok(OpenBatch {
-                        id: r.get(0)?,
-                        invalid_from_slot: r.get::<_, i64>(1)? as u64,
-                    })
-                })
+                .query_map([], |r| r.get(0))
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string());
@@ -233,23 +221,23 @@ async fn reconcile_batches<L: Ledger>(
     if open.is_empty() {
         return Ok(0);
     }
+    // Expiry is the journal's call, and only at a known tip.
     let tip = ledger.tip_slot().await.ok();
     let mut changed = 0;
     for batch in open {
         let operation = Operation {
             kind: BATCH_KIND,
-            id: &batch.id,
+            id: &batch,
         };
-        let submission = match submission::reconcile(journal, ledger, operation).await {
+        let submission = match submission::reconcile_at(journal, ledger, operation, tip).await {
             Ok(Some(submission)) => submission,
-            Ok(None) => return Err(format!("anchor batch {} has no journal entry", batch.id)),
+            Ok(None) => return Err(format!("anchor batch {batch} has no journal entry")),
             Err(error) => {
-                log::debug!("anchor batch {} reconciliation: {error}", batch.id);
+                log::debug!("anchor batch {batch} reconciliation: {error}");
                 continue;
             }
         };
-        let expired = tip.is_some_and(|tip| tip > batch.invalid_from_slot + EXPIRY_MARGIN_SLOTS);
-        let (id, now) = (batch.id.clone(), now.to_owned());
+        let (id, now) = (batch, now.to_owned());
         let outcome = match submission.status {
             SubmissionStatus::Confirmed if submission.confirmed_slot.is_some() => {
                 journal
@@ -267,12 +255,11 @@ async fn reconcile_batches<L: Ledger>(
                             "failed",
                             "the anchor transaction failed on chain",
                             &now,
-                            Some(&submission),
                         )
                     })
                     .await
             }
-            SubmissionStatus::OutcomeUnknown | SubmissionStatus::Submitted if expired => {
+            SubmissionStatus::Expired => {
                 journal
                     .run("anchor_queue.expire", move |db| {
                         release_batch(
@@ -281,7 +268,6 @@ async fn reconcile_batches<L: Ledger>(
                             "expired",
                             "the anchor transaction expired before it was included",
                             &now,
-                            None,
                         )
                     })
                     .await
@@ -399,15 +385,15 @@ fn confirm_batch(
     tx.commit().map_err(|e| e.to_string())
 }
 
-/// The batch will never anchor its credentials: put them back in the queue
-/// for a new batch, counting the attempt.
+/// The batch will never anchor its credentials (its journal entry failed on
+/// chain or expired): put them back in the queue for a new batch, counting
+/// the attempt.
 fn release_batch(
     conn: &Connection,
     batch_id: &str,
     batch_status: &str,
     reason: &str,
     now: &str,
-    final_submission: Option<&Submission>,
 ) -> Result<(), String> {
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     tx.execute(
@@ -435,15 +421,13 @@ fn release_batch(
     for id in members {
         record_failure(&tx, &id, reason, now)?;
     }
-    if final_submission.is_some() {
-        submission::mark_applied(
-            &tx,
-            Operation {
-                kind: BATCH_KIND,
-                id: batch_id,
-            },
-        )?;
-    }
+    submission::mark_applied(
+        &tx,
+        Operation {
+            kind: BATCH_KIND,
+            id: batch_id,
+        },
+    )?;
     tx.commit().map_err(|e| e.to_string())
 }
 

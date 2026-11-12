@@ -6,6 +6,7 @@ use pallas_traverse::MultiEraTx;
 
 use super::*;
 use crate::cardano::fake_ledger::{ada, FakeLedger};
+use crate::cardano::submission::EXPIRY_MARGIN_SLOTS;
 use crate::cardano::test_chain::{self, TestProfile};
 use crate::cardano::types::UTxO;
 use crate::credentials::{issue::IssueCredentialRequest, Issuer};
@@ -453,7 +454,8 @@ async fn an_expired_batch_releases_its_credentials_into_a_new_batch() {
     node.tick(T0_PLUS_7H).await;
     assert_eq!(node.ledger.submissions().len(), 1);
 
-    // Long past it and never included: it can no longer land.
+    // Long past it and never included: the journal proves it can no longer
+    // land, and the batch is released by that status.
     node.ledger
         .set_tip(TIP + crate::cardano::tx_builder::TTL_OFFSET + EXPIRY_MARGIN_SLOTS + 1);
     node.tick(T0_PLUS_7H).await;
@@ -461,6 +463,21 @@ async fn an_expired_batch_releases_its_credentials_into_a_new_batch() {
     assert_eq!(state.status, AnchorStatus::Pending);
     assert_eq!(state.tx_hash, None);
     assert_eq!(state.attempts, 1);
+    let journaled = node.profile.with_conn(|conn| {
+        let operation = Operation {
+            kind: BATCH_KIND,
+            id: &first,
+        };
+        (
+            submission::lookup(conn, operation).unwrap().unwrap().status,
+            submission::unapplied_operations(conn, BATCH_KIND, 10).unwrap(),
+        )
+    });
+    assert_eq!(
+        journaled,
+        (SubmissionStatus::Expired, vec![]),
+        "expired in the journal, and the release finished its projection"
+    );
 
     let ledger_ok = FakeLedger::at_tip(TIP + 10_000);
     funded(&ledger_ok, &node.wallet);
