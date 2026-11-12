@@ -666,7 +666,8 @@
       "none": "None",
       "reseed": "Same item with new values",
       "authored": "Instructor-written follow-ups",
-      "plugin": "Made by the item's grader"
+      "plugin": "Made by the item's grader",
+      "llm": "Written by the role's model connection"
     },
     "notice": {
       "title": "This attempt runs under the {profile} profile",

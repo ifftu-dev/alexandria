@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import RoleIntegrityPolicy from './RoleIntegrityPolicy.vue'
-import { type RoleIntegrityChoice, integrityPolicyFields } from '@/utils/sentinel/rolePolicy'
+import { type RoleIntegrityChoice, integrityChoiceReady, integrityPolicyFields, noIntegrityMinimums } from '@/utils/sentinel/rolePolicy'
 import type { CoverageStatement, TrustProfile, VerificationRung } from '@/types'
 
 // The sponsor's three integrity minimums for a role, each with plain
@@ -19,7 +19,7 @@ function statement(profile: TrustProfile, rung: VerificationRung): CoverageState
   }
 }
 
-const empty: RoleIntegrityChoice = { min_trust_profile: '', min_verification_rung: '', probe_policy: '' }
+const empty: RoleIntegrityChoice = noIntegrityMinimums()
 
 function render(modelValue: RoleIntegrityChoice) {
   return mount(RoleIntegrityPolicy, {
@@ -29,9 +29,12 @@ function render(modelValue: RoleIntegrityChoice) {
 }
 
 beforeEach(() => {
-  mocks.invoke.mockReset().mockResolvedValue([
-    statement('core', 'none'), statement('camera', 'none'), statement('camera', 'probed'),
-  ])
+  mocks.invoke.mockReset().mockImplementation(async (command: string) => {
+    if (command === 'studio_list_connections') {
+      return [{ value: { id: 'conn-1', name: 'Team model', enabled: true, capability: 'text' } }]
+    }
+    return [statement('core', 'none'), statement('camera', 'none'), statement('camera', 'probed')]
+  })
 })
 
 describe('RoleIntegrityPolicy', () => {
@@ -59,7 +62,26 @@ describe('RoleIntegrityPolicy', () => {
 
   it('turns the choice into issuance policy fields, leaving out what is unset', () => {
     expect(integrityPolicyFields(empty)).toEqual({})
-    expect(integrityPolicyFields({ min_trust_profile: 'full', min_verification_rung: 'consistent', probe_policy: 'authored' }))
+    expect(integrityPolicyFields({ ...empty, min_trust_profile: 'full', min_verification_rung: 'consistent', probe_policy: 'authored' }))
       .toEqual({ min_trust_profile: 'full', min_verification_rung: 'consistent', probe_policy: 'authored' })
+    expect(integrityPolicyFields({ ...empty, probe_policy: 'llm', probe_connection_id: 'conn-1' }))
+      .toEqual({ probe_policy: 'llm', probe_connection_id: 'conn-1' })
+  })
+
+  it('asks for a model connection only for generated follow-ups', async () => {
+    const wrapper = render(empty)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="generated-probe-connection"]').exists()).toBe(false)
+    expect(integrityChoiceReady({ ...empty, probe_policy: 'llm' })).toBe(false)
+
+    await wrapper.setProps({ modelValue: { ...empty, probe_policy: 'llm' } })
+    await flushPromises()
+    await wrapper.get('[data-testid="generated-probe-connection"] select').setValue('conn-1')
+    const emitted = () => wrapper.emitted('update:modelValue') ?? []
+    expect(emitted()[emitted().length - 1]).toEqual([{ ...empty, probe_policy: 'llm', probe_connection_id: 'conn-1' }])
+
+    await wrapper.setProps({ modelValue: { ...empty, probe_policy: 'llm', probe_connection_id: 'conn-1' } })
+    await wrapper.get('[data-testid="policy-probe"]').setValue('reseed')
+    expect(emitted()[emitted().length - 1]).toEqual([{ ...empty, probe_policy: 'reseed' }])
   })
 })

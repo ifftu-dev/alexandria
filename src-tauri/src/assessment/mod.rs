@@ -10,6 +10,7 @@ pub mod goal_plan;
 pub mod grader;
 pub mod irt;
 pub mod items;
+pub mod llm_probe;
 pub mod mcq;
 pub mod policy;
 pub mod probes;

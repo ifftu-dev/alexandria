@@ -176,7 +176,11 @@
       "minRung": "Minimum verification rung",
       "probePolicy": "Follow-up questions",
       "noMinimum": "No minimum",
-      "coverageTitle": "What a credential under this policy covers"
+      "coverageTitle": "What a credential under this policy covers",
+      "generatedProbeLabel": "Model connection",
+      "generatedProbeOff": "Off",
+      "generatedProbeNone": "No model connections are set up on this device.",
+      "generatedProbeNote": "A saved model connection writes short follow-ups from each candidate's chosen answers and the skill description. Candidates are asked first; without their consent, or when the model is unavailable, the follow-up is skipped."
     },
     "actions": {
       "create": "Create"

@@ -2,9 +2,11 @@
 // A sponsor role's integrity minimums: trust profile, verification rung and
 // follow-up questions, each with plain language beside it, and below them
 // the coverage statement a credential issued under these minimums names.
+// `llm` follow-ups also name the saved model connection that writes them.
 import { computed, onMounted, ref } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
 import CoverageStatementView from './CoverageStatementView.vue'
+import GeneratedProbeConnectionField from './GeneratedProbeConnectionField.vue'
 import { PROBE_POLICIES, TRUST_PROFILES, VERIFICATION_RUNGS, type RoleIntegrityChoice } from '@/utils/sentinel/rolePolicy'
 import type { CoverageStatement } from '@/types'
 
@@ -22,6 +24,20 @@ const coverage = computed(() =>
 
 function set<K extends keyof RoleIntegrityChoice>(key: K, value: RoleIntegrityChoice[K]) {
   emit('update:modelValue', { ...props.modelValue, [key]: value })
+}
+
+/** A new follow-up policy; only `llm` keeps a model connection. */
+function setProbePolicy(policy: RoleIntegrityChoice['probe_policy']) {
+  emit('update:modelValue', {
+    ...props.modelValue,
+    probe_policy: policy,
+    probe_connection_id: policy === 'llm' ? props.modelValue.probe_connection_id : '',
+  })
+}
+
+/** Turning the connection off turns generated follow-ups off. */
+function setConnection(id: string) {
+  emit('update:modelValue', { ...props.modelValue, probe_connection_id: id, probe_policy: id ? 'llm' : '' })
 }
 
 function selected(event: Event) {
@@ -68,12 +84,17 @@ onMounted(async () => {
         :value="modelValue.probe_policy"
         class="mt-1 w-full rounded-md border border-border bg-background p-2 text-sm"
         data-testid="policy-probe"
-        @change="set('probe_policy', selected($event) as RoleIntegrityChoice['probe_policy'])"
+        @change="setProbePolicy(selected($event) as RoleIntegrityChoice['probe_policy'])"
       >
         <option value="">{{ $t('sentinel.trust.probePolicy.none') }}</option>
         <option v-for="p in PROBE_POLICIES" :key="p" :value="p">{{ $t(`sentinel.trust.probePolicy.${p}`) }}</option>
       </select>
     </label>
+    <GeneratedProbeConnectionField
+      v-if="modelValue.probe_policy === 'llm'"
+      :model-value="modelValue.probe_connection_id"
+      @update:model-value="setConnection"
+    />
     <details class="rounded-md border border-border/70 p-3" open>
       <summary class="cursor-pointer text-xs font-medium text-foreground">{{ $t('dashboard.sponsor.roleModal.coverageTitle') }}</summary>
       <CoverageStatementView class="mt-2" :statement="coverage" />

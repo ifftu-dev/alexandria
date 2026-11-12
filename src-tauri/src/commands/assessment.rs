@@ -75,6 +75,10 @@ pub struct AttemptRoleTarget {
     pub org_name: String,
     /// True when the role's minimum trust profile runs the camera.
     pub camera_required: bool,
+    /// True when the role's follow-up probes are written by its model
+    /// connection (`llm` probe policy). The learner is asked before the
+    /// attempt whether their chosen answers may leave the device for that.
+    pub generated_probes: bool,
 }
 
 /// `(id, question_ids, option_orders, draft_answers_json, role_assessment_id)`
@@ -107,7 +111,9 @@ fn map_role_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleRow> {
             })
         })
         .transpose()?;
-    let floor = policy.and_then(|p| p.min_trust_profile);
+    let floor = policy.as_ref().and_then(|p| p.min_trust_profile);
+    let generated_probes = policy.as_ref().and_then(|p| p.probe_policy)
+        == Some(crate::assessment::probes::ProbePolicy::Llm);
     Ok(RoleRow {
         target: AttemptRoleTarget {
             role_assessment_id: r.get(0)?,
@@ -115,6 +121,7 @@ fn map_role_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleRow> {
             org_name: r.get(2)?,
             camera_required: floor
                 .is_some_and(|f| f.includes(crate::sentinel::scoring::ProfileSignal::Camera)),
+            generated_probes,
         },
         status: r.get(4)?,
         skill_ids: r
@@ -433,6 +440,7 @@ pub async fn assessment_start_attempt(
     skill_id: String,
     integrity_session_id: Option<String>,
     role_assessment_id: Option<String>,
+    llm_probe_consent: Option<bool>,
 ) -> Result<StartedAttempt, String> {
     let seed: u64 = rand::random();
     let attempt_id = crate::clock::now_rfc3339() + "-" + &seed.to_string();
@@ -444,7 +452,7 @@ pub async fn assessment_start_attempt(
             state.profile_lease(),
             "assessment.start_attempt",
             move |db| {
-                start_attempt_db(
+                start_attempt_with_consent_db(
                     db,
                     skill_id,
                     integrity_session_id,
@@ -452,6 +460,7 @@ pub async fn assessment_start_attempt(
                     seed,
                     attempt_id,
                     now,
+                    llm_probe_consent.unwrap_or(false),
                 )
             },
         )
@@ -506,6 +515,33 @@ pub(crate) fn start_attempt_db(
     seed: u64,
     attempt_id: String,
     now: String,
+) -> Result<StartedAttempt, String> {
+    start_attempt_with_consent_db(
+        db,
+        skill_id,
+        integrity_session_id,
+        role_assessment_id,
+        seed,
+        attempt_id,
+        now,
+        false,
+    )
+}
+
+/// [`start_attempt_db`] with the learner's answer to the generated-probe
+/// consent (`llm` probe policy): whether their chosen answers and the skill
+/// description may leave the device after submission. Recorded when the
+/// attempt is first started; a resumed attempt keeps the first answer.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn start_attempt_with_consent_db(
+    db: &crate::db::Database,
+    skill_id: String,
+    integrity_session_id: Option<String>,
+    role_assessment_id: Option<String>,
+    seed: u64,
+    attempt_id: String,
+    now: String,
+    llm_probe_consent: bool,
 ) -> Result<StartedAttempt, String> {
     if crate::commands::diagnostics::is_enabled() {
         return Err("exit diagnostics before starting an assessment".into());
@@ -730,8 +766,9 @@ pub(crate) fn start_attempt_db(
             "INSERT INTO assessment_attempts \
              (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
               integrity_session_id, started_at, attempt_ordinal, role_assessment_id, \
-              assessed_bloom_level, pass_threshold_snapshot, item_fingerprints) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+              assessed_bloom_level, pass_threshold_snapshot, item_fingerprints, \
+              llm_probe_consent) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 attempt_id,
                 subject_did,
@@ -747,6 +784,7 @@ pub(crate) fn start_attempt_db(
                 assessed_bloom,
                 pass_threshold,
                 serde_json::to_string(&fingerprints).map_err(|e| e.to_string())?,
+                llm_probe_consent,
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -2741,6 +2779,62 @@ mod role_target_tests {
         assert!(started.policy_floor.satisfied);
         assert_eq!(started.policy_floor.required, None);
         assert_eq!(started.policy_floor.profile, Some(TrustProfile::Core));
+    }
+
+    #[test]
+    fn a_generated_probe_role_is_announced_and_the_first_starts_consent_is_kept() {
+        use crate::assessment::probes::ProbePolicy;
+        let db = setup();
+        let org = create_organization_impl(db.conn(), "Acme", "stake_owner", None, NOW).unwrap();
+        let req = CreateRoleAssessmentRequest {
+            org_id: org.id.clone(),
+            role_title: "Generated follow-ups".into(),
+            job_description: None,
+            course_id: None,
+            skill_ids: vec!["skill_rust".into()],
+            issuance_policy: Some(IssuancePolicy {
+                probe_policy: Some(ProbePolicy::Llm),
+                probe_connection_id: Some("conn".into()),
+                ..Default::default()
+            }),
+            required_assurance_level: None,
+        };
+        let role = create_role_assessment_impl(db.conn(), &req, NOW)
+            .unwrap()
+            .id;
+        set_role_assessment_status_impl(db.conn(), &role, "published", NOW).unwrap();
+        let open = open_roles_for_skill(db.conn(), "skill_rust").unwrap();
+        assert!(open
+            .iter()
+            .any(|r| r.role_assessment_id == role && r.generated_probes));
+
+        let consent = || -> bool {
+            db.conn()
+                .query_row(
+                    "SELECT llm_probe_consent FROM assessment_attempts WHERE id = 'att_1'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        let start = |id: &str, consent: bool| {
+            start_attempt_with_consent_db(
+                &db,
+                "skill_rust".into(),
+                Some("isess_live".into()),
+                Some(role.clone()),
+                7,
+                id.into(),
+                NOW.into(),
+                consent,
+            )
+            .unwrap()
+        };
+        assert!(start("att_1", true).role.unwrap().generated_probes);
+        assert!(consent());
+        // A retry resumes the same attempt and keeps the first answer.
+        assert_eq!(start("att_2", false).attempt_id, "att_1");
+        assert!(consent());
     }
 
     #[test]

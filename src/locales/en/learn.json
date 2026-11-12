@@ -34,7 +34,10 @@
     "probeComplement": "Select every option that is not a correct answer.",
     "probeTimeLeft": "{seconds}s left",
     "probeAnswer": "Answer",
-    "probeSkip": "Skip"
+    "probeSkip": "Skip",
+    "generatedProbeConsent": "Let this role's model connection write my follow-up questions",
+    "generatedProbeConsentNote": "After you submit, the options you chose and the skill description are sent to the model connection the sponsor set up for this role, which writes up to two short follow-up questions. The assessment questions are not sent. If you leave this off, the follow-ups are skipped and that does not count against you.",
+    "probePreparing": "Preparing follow-up questions…"
   },
   "player": {
     "courseFallback": "Course",

@@ -20,6 +20,8 @@ const index = ref(0)
 const selected = ref<Set<number>>(new Set())
 const remainingMs = ref<number | null>(null)
 const busy = ref(false)
+/** Probes are being prepared; a generated one waits on a model. */
+const starting = ref(true)
 let shownAt = 0
 let deadline = 0
 let firstInputMs: number | null = null
@@ -123,6 +125,7 @@ onMounted(async () => {
     console.warn('Starting probes failed', e)
     probes.value = []
   }
+  starting.value = false
   if (disposed) return
   if (probes.value.length === 0) {
     finished = true
@@ -179,4 +182,7 @@ onUnmounted(() => {
       </div>
     </div>
   </div>
+  <p v-else-if="starting" class="text-sm text-muted-foreground" role="status" data-testid="probes-preparing">
+    {{ $t('learn.assessment.probePreparing') }}
+  </p>
 </template>

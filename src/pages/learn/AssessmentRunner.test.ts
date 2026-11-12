@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
   reportCameraDevice: vi.fn<(label: string | null) => void>(),
   openRoles: vi.fn<(skill: string) => Promise<AttemptRoleTarget[]>>(),
   stop: vi.fn<() => Promise<string | undefined>>(),
-  startAttempt: vi.fn<(skill: string, session: string, role: string | null) => Promise<StartedAttempt>>(),
+  startAttempt: vi.fn<(skill: string, session: string, role: string | null, llmProbeConsent: boolean) => Promise<StartedAttempt>>(),
   submitAnswers: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<void>>(),
   saveDraft: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<void>>(),
   grade: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<GradeResult>>(),
@@ -150,7 +150,7 @@ describe('standalone assessment monitoring', () => {
     expect((wrapper.get('input').element as HTMLInputElement).checked).toBe(true)
     await wrapper.findAll('button').find(button => button.text() === 'learn.assessment.submit')!.trigger('click')
     await flushPromises()
-    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', null)
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', null, false)
     expect(mocks.grade.mock.calls).toEqual([
       ['attempt-1', [{ question_id: 'question-1', selected: [0] }]],
       ['attempt-1', [{ question_id: 'question-1', selected: [0] }]],
@@ -283,10 +283,10 @@ describe('standalone assessment monitoring', () => {
 
 describe('role targeting', () => {
   const plainRole: AttemptRoleTarget = {
-    role_assessment_id: 'role-plain', role_title: 'Analyst', org_name: 'Acme', camera_required: false,
+    role_assessment_id: 'role-plain', role_title: 'Analyst', org_name: 'Acme', camera_required: false, generated_probes: false,
   }
   const cameraRole: AttemptRoleTarget = {
-    role_assessment_id: 'role-cam', role_title: 'SRE', org_name: 'Acme', camera_required: true,
+    role_assessment_id: 'role-cam', role_title: 'SRE', org_name: 'Acme', camera_required: true, generated_probes: false,
   }
 
   function mockCamera(impl: () => Promise<MediaStream>) {
@@ -310,7 +310,7 @@ describe('role targeting', () => {
     const wrapper = render()
     await flushPromises()
     expect(wrapper.find('[data-testid="role-chooser"]').exists()).toBe(false)
-    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', null)
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', null, false)
   })
 
   it('waits for a role choice and passes the chosen role to the attempt', async () => {
@@ -325,7 +325,7 @@ describe('role targeting', () => {
     await wrapper.get('[data-testid="start-attempt"]').trigger('click')
     await flushPromises()
     expect(mocks.start).toHaveBeenCalledExactlyOnceWith(null, false, 'assessment', { roleAssessmentId: 'role-plain', companionPhone: false })
-    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-plain')
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-plain', false)
     expect(wrapper.get('[data-testid="role-banner"]').text()).toContain('learn.assessment.roleBanner')
     expect(mocks.setCameraOptedIn).not.toHaveBeenCalled()
   })
@@ -395,6 +395,22 @@ describe('role targeting', () => {
     expect(mocks.go).toHaveBeenCalledWith(0)
   })
 
+  it('asks before generated follow-ups may use the learner answers', async () => {
+    const generatedRole: AttemptRoleTarget = { ...plainRole, role_assessment_id: 'role-gen', generated_probes: true }
+    mocks.openRoles.mockResolvedValue([plainRole, generatedRole])
+    mocks.startAttempt.mockResolvedValue({ ...attempt, role: generatedRole })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="generated-probe-consent"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="role-role-gen"]').setValue(true)
+    const consent = wrapper.get('[data-testid="generated-probe-consent"] input')
+    expect((consent.element as HTMLInputElement).checked).toBe(false)
+    await consent.setValue(true)
+    await wrapper.get('[data-testid="start-attempt"]').trigger('click')
+    await flushPromises()
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-gen', true)
+  })
+
   it('lets the learner decline a role and starts without one', async () => {
     mocks.openRoles.mockResolvedValue([plainRole])
     const wrapper = render()
@@ -402,7 +418,7 @@ describe('role targeting', () => {
     await wrapper.get('[data-testid="role-none"]').setValue(true)
     await wrapper.get('[data-testid="start-attempt"]').trigger('click')
     await flushPromises()
-    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', null)
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', null, false)
   })
 
   it('blocks a camera-required role until the camera is on, then opts the session in', async () => {
@@ -427,7 +443,7 @@ describe('role targeting', () => {
     await wrapper.get('[data-testid="start-attempt"]').trigger('click')
     await flushPromises()
     expect(mocks.start).toHaveBeenCalledExactlyOnceWith(null, true, 'assessment', { roleAssessmentId: 'role-cam', companionPhone: false })
-    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-cam')
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-cam', false)
     expect(mocks.setCameraOptedIn).toHaveBeenCalledWith(true)
     expect(wrapper.find('[data-testid="camera-lost"]').exists()).toBe(false)
     wrapper.unmount()

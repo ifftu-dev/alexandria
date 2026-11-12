@@ -17,7 +17,7 @@ import { useSponsor } from '@/composables/useSponsor'
 import { useAuth } from '@/composables/useAuth'
 import RoleIntegrityPolicy from '@/components/integrity/RoleIntegrityPolicy.vue'
 import SessionReviewList from '@/components/integrity/SessionReviewList.vue'
-import { integrityPolicyFields, type RoleIntegrityChoice } from '@/utils/sentinel/rolePolicy'
+import { integrityChoiceReady, integrityPolicyFields, noIntegrityMinimums, type RoleIntegrityChoice } from '@/utils/sentinel/rolePolicy'
 import type { IssuancePolicy, RoleAttemptSummary, RoleSessionReview, VerifiableCredential } from '@/types'
 
 const { t } = useI18n()
@@ -66,7 +66,6 @@ const roleForm = ref({
   required_assurance_level: '',
 })
 const roleBusy = ref(false)
-const noIntegrityMinimums = (): RoleIntegrityChoice => ({ min_trust_profile: '', min_verification_rung: '', probe_policy: '' })
 const roleIntegrity = ref<RoleIntegrityChoice>(noIntegrityMinimums())
 
 function openRoleModal() {
@@ -351,7 +350,7 @@ onMounted(async () => {
         <RoleIntegrityPolicy v-model="roleIntegrity" />
         <div class="flex justify-end gap-2">
           <AppButton variant="ghost" size="sm" @click="roleModalOpen = false">{{ $t('common.actions.cancel') }}</AppButton>
-          <AppButton variant="primary" size="sm" :disabled="roleBusy || !roleForm.role_title.trim() || !roleForm.org_id" @click="createRole">{{ $t('dashboard.sponsor.actions.create') }}</AppButton>
+          <AppButton variant="primary" size="sm" :disabled="roleBusy || !roleForm.role_title.trim() || !roleForm.org_id || !integrityChoiceReady(roleIntegrity)" @click="createRole">{{ $t('dashboard.sponsor.actions.create') }}</AppButton>
         </div>
       </div>
     </AppModal>

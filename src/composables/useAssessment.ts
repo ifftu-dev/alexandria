@@ -24,15 +24,20 @@ export function useAssessment() {
     return invoke<AttemptRoleTarget[]>('assessment_open_roles', { skillId })
   }
 
+  /** `llmProbeConsent`: the learner agreed that, for a role whose
+   *  follow-ups are generated, their chosen answers and the skill description
+   *  may leave the device after submission. Recorded on the first start. */
   function startAttempt(
     skillId: string,
     integritySessionId: string,
     roleAssessmentId: string | null = null,
+    llmProbeConsent = false,
   ): Promise<StartedAttempt> {
     return invoke<StartedAttempt>('assessment_start_attempt', {
       skillId,
       integritySessionId,
       roleAssessmentId,
+      llmProbeConsent,
     })
   }
 

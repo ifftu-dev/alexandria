@@ -17,7 +17,11 @@
 //!   service that is not a model connection (Optional AI checks).
 //! * [`no_attempt_in_progress`]: every AI surface refuses while an
 //!   assessment attempt or interview check runs; chat and the tutor record
-//!   the refusal as an integrity flag (see [`Surface`]).
+//!   the refusal as an integrity flag (see [`Surface`]). The one model call
+//!   made during a live session is the generated-probe run
+//!   (`crate::assessment::llm_probe`), a separate one-shot run type for the
+//!   attempt's own follow-ups that never goes through chat; it still asks
+//!   [`may_use`].
 //! * [`visible_lesson`]: which lesson a model may see (text lessons only).
 //! * Guardian approvals, ward side: [`request_approval`], [`approvals`],
 //!   [`pending_approvals`] for the guardian sync, and [`record_decision`]
