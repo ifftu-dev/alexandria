@@ -21,6 +21,7 @@ use super::cost_models::PLUTUS_V3_COST_MODEL;
 use super::gov_tx_builder::{self, GovTxResult};
 use super::ledger::Ledger;
 use super::plutus_data;
+use super::reservations::{select_unreserved, ReservedOutpoints};
 use super::script_refs;
 use super::tx_builder::{
     extended_private_key, parse_tx_hash, sign_raw_tx, TxBuildError, MIN_NFT_LOVELACE, TTL_OFFSET,
@@ -104,6 +105,12 @@ pub fn completion_asset_name(
 ///     derived the root from a trusted course template.
 ///   * `timestamp_ms` — learner-supplied POSIX milliseconds; the
 ///     validator requires it to fall inside the tx validity window.
+///   * `tip_slot` — current tip; the validity upper bound is
+///     `tip_slot + TTL_OFFSET`.
+///   * `reserved` — outpoints this node's in-flight transactions spend,
+///     read from the submission journal at `tip_slot`. Neither the input
+///     nor the collateral is taken from them; when only reserved UTxOs
+///     qualify the build fails with [`TxBuildError::WalletBusy`].
 ///   * `treasury` — optional treasury payer. When present, spend input,
 ///     collateral, and change all come from / return to the treasury
 ///     wallet and the tx carries both the treasury's and the learner's
@@ -124,6 +131,8 @@ pub async fn build_completion_mint_tx<L: Ledger>(
     element_leaves: &[[u8; 32]],
     completion_root: &[u8; 32],
     timestamp_ms: i64,
+    tip_slot: u64,
+    reserved: &ReservedOutpoints,
     treasury: Option<&crate::cardano::treasury::TreasuryPayer>,
 ) -> Result<GovTxResult, TxBuildError> {
     if !script_refs::completion_ref_deployed() {
@@ -153,14 +162,10 @@ pub async fn build_completion_mint_tx<L: Ledger>(
     let funding_address = treasury
         .map(|t| t.address.as_str())
         .unwrap_or(payment_address);
-    let (utxos_res, params_res, tip_res) = tokio::join!(
-        ledger.utxos(funding_address),
-        ledger.protocol_params(),
-        ledger.tip_slot(),
-    );
+    let (utxos_res, params_res) =
+        tokio::join!(ledger.utxos(funding_address), ledger.protocol_params());
     let utxos = utxos_res.map_err(TxBuildError::Ledger)?;
     let params = params_res.map_err(TxBuildError::Ledger)?;
-    let tip_slot = tip_res.map_err(TxBuildError::Ledger)?;
 
     if utxos.is_empty() {
         return Err(TxBuildError::NoUtxos);
@@ -173,7 +178,8 @@ pub async fn build_completion_mint_tx<L: Ledger>(
     //    change is lovelace-only, so consuming a UTxO that carries other
     //    assets (treasury rep tokens, prior completion NFTs) would strand
     //    them — and reference-script UTxOs must never be spent.
-    let pure: Vec<&_> = {
+    //    Both skip outpoints reserved by in-flight transactions.
+    let pure: Vec<_> = {
         let mut v: Vec<_> = utxos
             .iter()
             .filter(|u| {
@@ -181,20 +187,26 @@ pub async fn build_completion_mint_tx<L: Ledger>(
                     && !u.has_reference_script()
                     && u.amount.iter().all(|a| a.unit == "lovelace")
             })
+            .cloned()
             .collect();
         v.sort_by_key(|u| std::cmp::Reverse(u.lovelace()));
         v
     };
-    let selected = *pure.first().ok_or(TxBuildError::NoUtxos)?;
-    let collateral = pure
+    let selected =
+        select_unreserved(&pure, reserved, |free| free.first())?.ok_or(TxBuildError::NoUtxos)?;
+    let others: Vec<_> = pure
         .iter()
-        .skip(1)
-        .find(|u| u.lovelace() >= MIN_COLLATERAL_LOVELACE)
-        .copied()
-        .ok_or(TxBuildError::InsufficientFunds {
-            needed: MIN_COLLATERAL_LOVELACE,
-            available: pure.iter().skip(1).map(|u| u.lovelace()).max().unwrap_or(0),
-        })?;
+        .filter(|u| !(u.tx_hash == selected.tx_hash && u.tx_index == selected.tx_index))
+        .cloned()
+        .collect();
+    let collateral = select_unreserved(&others, reserved, |free| {
+        free.iter()
+            .find(|u| u.lovelace() >= MIN_COLLATERAL_LOVELACE)
+    })?
+    .ok_or(TxBuildError::InsufficientFunds {
+        needed: MIN_COLLATERAL_LOVELACE,
+        available: others.iter().map(|u| u.lovelace()).max().unwrap_or(0),
+    })?;
 
     let pallas_addr = PallasAddress::from_bech32(payment_address)
         .map_err(|e| TxBuildError::AddressParse(e.to_string()))?;
@@ -368,6 +380,8 @@ mod tests {
                 &[[0u8; 32]],
                 &[0u8; 32],
                 1_700_000_000_000,
+                0,
+                &ReservedOutpoints::default(),
                 None,
             )
             .await
@@ -420,6 +434,7 @@ mod tests {
             // Exercises the treasury-payer path when ALEXANDRIA_TREASURY_*
             // env config is present, else the learner-funded path.
             let treasury = crate::cardano::treasury::TreasuryPayer::from_env();
+            let tip = bf.get_tip_slot().await.map_err(|e| format!("tip: {e}"))?;
             let built = build_completion_mint_tx(
                 &bf,
                 &wallet.payment_address,
@@ -430,6 +445,8 @@ mod tests {
                 &leaves,
                 &root,
                 ts_ms,
+                tip,
+                &ReservedOutpoints::default(),
                 treasury.as_ref(),
             )
             .await
