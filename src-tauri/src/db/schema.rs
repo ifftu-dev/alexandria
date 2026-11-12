@@ -334,6 +334,22 @@ CREATE TABLE catalog (
     kind TEXT NOT NULL DEFAULT 'course'
 );
 
+-- Expired transactions an operation had before replace-expired gave it new
+-- bytes. History only: nothing here reserves outpoints or is reconciled.
+CREATE TABLE chain_submission_history (
+    network TEXT NOT NULL,
+    operation_kind TEXT NOT NULL,
+    operation_id TEXT NOT NULL,
+    tx_hash TEXT NOT NULL CHECK (length(tx_hash) = 64),
+    signed_cbor BLOB NOT NULL CHECK (length(signed_cbor) > 0),
+    status TEXT NOT NULL CHECK (status = 'expired'),
+    last_error TEXT,
+    submitted_at TEXT NOT NULL,
+    replaced_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (network, tx_hash),
+    FOREIGN KEY (network, operation_kind, operation_id) REFERENCES chain_submissions(network, operation_kind, operation_id)
+);
+
 CREATE TABLE chain_submission_members (
     network TEXT NOT NULL,
     member_kind TEXT NOT NULL CHECK (length(member_kind) > 0),
@@ -1372,6 +1388,7 @@ CREATE INDEX idx_attempt_items_item ON attempt_items(item_id);
 CREATE INDEX idx_calls_classroom ON classroom_calls(classroom_id, status);
 CREATE INDEX idx_catalog_author ON catalog(author_address);
 CREATE INDEX idx_catalog_kind ON catalog(kind);
+CREATE INDEX idx_chain_submission_history_operation ON chain_submission_history(network, operation_kind, operation_id);
 CREATE INDEX idx_chain_submissions_recovery ON chain_submissions(network, operation_kind, applied_at, updated_at);
 CREATE INDEX idx_chain_submissions_status ON chain_submissions(network, status);
 CREATE INDEX idx_channels_classroom ON classroom_channels(classroom_id, position);
