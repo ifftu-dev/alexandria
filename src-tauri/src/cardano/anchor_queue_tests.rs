@@ -703,6 +703,45 @@ async fn a_sponsored_anchors_collateral_avoids_an_outpoint_a_pending_mint_spends
     assert_eq!(node.state(&vc).status, AnchorStatus::Submitted, "accepted");
 }
 
+#[tokio::test]
+async fn the_sponsor_pool_pick_skips_a_sponsor_utxo_this_nodes_pending_anchor_spends() {
+    let mut node = Node::new();
+    node.policy.cap = 1;
+    let profile = sponsor();
+    node.sponsor = Some(profile.clone());
+    node.ledger.set_utxos(
+        &node.wallet.payment_address,
+        vec![
+            ada(0x11, 0, 6_000_000),
+            ada(0x12, 0, 7_000_000),
+            ada(0x13, 0, 8_000_000),
+        ],
+    );
+    let spendable = profile.slot_to_posix_ms(TIP) - 1;
+    node.ledger.set_utxos(
+        &profile.address,
+        vec![sponsor_utxo(0x21, spendable), sponsor_utxo(0x22, spendable)],
+    );
+    let a = issue(&node.profile, &node.issuer, "a");
+    let b = issue(&node.profile, &node.issuer, "b");
+    // Two batches at the same tip: the issuer-and-tip hash alone would pick
+    // the same sponsor UTxO twice.
+    node.tick(T0_PLUS_7H).await;
+    node.tick(T0_PLUS_7H).await;
+
+    let anchors = anchor_submissions(&node);
+    assert_eq!(anchors.len(), 2);
+    let mut sponsor_inputs: Vec<_> = anchors.iter().flat_map(|tx| tx.inputs.clone()).collect();
+    sponsor_inputs.sort();
+    assert_eq!(
+        sponsor_inputs,
+        vec![("21".repeat(32), 0), ("22".repeat(32), 0)]
+    );
+    for vc in [&a, &b] {
+        assert_eq!(node.state(vc).status, AnchorStatus::Submitted, "accepted");
+    }
+}
+
 /// Live preprod run of the whole anchorer: issue two credentials, flush them
 /// as one batch, wait for confirmation, and check the verifier finds them
 /// anchored. Ignored by default. Uses the network profile's sponsor unless

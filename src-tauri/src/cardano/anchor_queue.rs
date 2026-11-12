@@ -736,7 +736,8 @@ async fn sponsored<L: Ledger>(
 ) -> Result<Option<(anchor_tx::AnchorTx, &'static str)>, String> {
     let (utxos, tip) = tokio::join!(ledger.utxos(&profile.address), ledger.tip_slot());
     let (utxos, tip) = (utxos?, tip?);
-    let Some(utxo) = anchor_tx::select_sponsor_utxo(profile, &utxos, tip, &record.issuer_did)
+    let Some(utxo) =
+        anchor_tx::select_sponsor_utxo(profile, &utxos, tip, &record.issuer_did, reserved)
     else {
         return Ok(None);
     };

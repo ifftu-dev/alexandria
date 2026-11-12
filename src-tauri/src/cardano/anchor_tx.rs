@@ -307,16 +307,19 @@ pub fn sponsor_utxo_is_spendable(
 
 /// Pick a spendable sponsor UTxO. Nodes choose by a hash of their issuer and
 /// the tip, so concurrent nodes spread across the pool instead of racing for
-/// the first entry.
+/// the first entry. UTxOs this node's own in-flight transactions spend
+/// (`reserved`) are left out before the pick; with none left, the caller
+/// falls back to the issuer's wallet as when nothing is spendable.
 pub fn select_sponsor_utxo<'a>(
     profile: &AnchorSponsorProfile,
     utxos: &'a [UTxO],
     tip_slot: u64,
     issuer: &Did,
+    reserved: &ReservedOutpoints,
 ) -> Option<&'a UTxO> {
     let mut eligible: Vec<&UTxO> = utxos
         .iter()
-        .filter(|u| sponsor_utxo_is_spendable(profile, u, tip_slot))
+        .filter(|u| !reserved.contains(u) && sponsor_utxo_is_spendable(profile, u, tip_slot))
         .collect();
     if eligible.is_empty() {
         return None;
@@ -467,9 +470,15 @@ mod tests {
             let funding = match &sponsor {
                 Some(profile) => {
                     let (utxos, tip) = (bf.utxos(&profile.address).await?, bf.tip_slot().await?);
-                    let utxo = select_sponsor_utxo(profile, &utxos, tip, &record.issuer_did)
-                        .ok_or("no spendable sponsor UTxO")?
-                        .clone();
+                    let utxo = select_sponsor_utxo(
+                        profile,
+                        &utxos,
+                        tip,
+                        &record.issuer_did,
+                        &ReservedOutpoints::default(),
+                    )
+                    .ok_or("no spendable sponsor UTxO")?
+                    .clone();
                     Some((profile, utxo))
                 }
                 None => None,
