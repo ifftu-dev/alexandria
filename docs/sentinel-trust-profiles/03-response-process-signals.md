@@ -27,8 +27,9 @@ Spec: Signals and measurement → response-process bullet and cross-modal bullet
 
 Review fix, 2026-11-12: the `process` rung counted summed first visits against items served, so a repeated or unserved id could fill the count and a resumed attempt could fall short. Migration 39 adds `integrity_observed_items` (session, item id): every visit the tracker reports, first or return, is recorded once per id, and `response_items` is now the count of those rows. The rule:
 
-- An item counts as observed when the tracker reported a visit to it or the submitted attempt holds an answer for it. The tracker records a visit only on input, so an answer restored on resume and left alone is covered by the answer.
+- Every served item with a submitted answer must appear in `integrity_observed_items`: the tracker reported a visit to it in this or an earlier window of the same session. The table persists across a reload, so an answer restored on resume and left alone counts when it was worked through before the reload. An answered item the tracker never observed keeps the rung at `none`: answers alone do not show that response-process signals ran.
 - Ids the attempt never served are ignored.
 - An item left unanswered and never visited is left out of the requirement: it carries no response and scores nothing, so it cannot be counted against the learner.
-- These cover every served item, so what the rung asks of coverage is that the tracker reported at least one served item. A session whose tracker never ran stays at `none`.
+- At least one served item must be observed, so a session whose tracker never ran stays at `none`.
+- Answered means a submitted answer with a selection (`submitted_answers_json`), or an adaptive item with a submission (`attempt_items.submission_json`).
 - Review fix: the client cleared the response tracker's window (and every other window accumulator) even when the snapshot submit failed, so those visits never reached the backend. A window is now cleared only after the backend accepted it; otherwise it stays open and goes out with the next one. Native hotkey events drained from the ring are kept the same way.

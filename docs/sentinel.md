@@ -309,7 +309,7 @@ The verification rung is positive evidence that the learner did the work, indepe
 | Rung | Evidence |
 |---|---|
 | `none` | — |
-| `process` | Every served item was observed and the `response_process` channel is not over threshold. An item is observed when the response tracker reported a visit to it (`integrity_observed_items`, each id once, ids the attempt never served ignored) or the submitted attempt holds an answer for it, which covers answers restored on resume and left alone. An item left blank and never visited is left out. The tracker must have reported at least one served item. Every attempt is drawn by the backend's adaptive, exposure-weighted draw (see [skills-and-reputation.md](skills-and-reputation.md) §6.2), so that half needs no separate record |
+| `process` | Every served item with a submitted answer was observed by the response tracker, in this or an earlier window of the same session (`integrity_observed_items`, each id once, ids the attempt never served ignored), and the `response_process` channel is not over threshold. An answer restored on resume counts when it was worked through before the reload; an answer the tracker never observed keeps the rung at `none`. An item left blank and never visited is left out. At least one served item must be observed. Every attempt is drawn by the backend's adaptive, exposure-weighted draw (see [skills-and-reputation.md](skills-and-reputation.md) §6.2), so that half needs no separate record |
 | `probed` | The probe step ran and every probe result is satisfied |
 | `consistent` | Longitudinal consistency is satisfied for the attempt |
 | `live` | A satisfied live segment (verification step `interview`) in the same session |

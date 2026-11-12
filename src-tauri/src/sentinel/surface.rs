@@ -6,18 +6,16 @@
 //! Nothing here is copied from client text. The rung's evidence is read from
 //! the session and its attempt:
 //!
-//! - `process`: every served item was observed, the response tracker ran,
-//!   the session's `response_process` channel is not over threshold, and the
-//!   attempt's items came from the backend's draw (every attempt's are). An
-//!   item is observed when the tracker reported a visit to it
+//! - `process`: every served item with a submitted answer was observed by
+//!   the response tracker, in this or an earlier window of the same session
 //!   (`integrity_observed_items`, once per id, ids the attempt never served
-//!   ignored) or the submitted attempt holds an answer for it: an answer
-//!   restored on resume and left alone is never visited again. An item left
-//!   unanswered and never visited carries no response and scores nothing, so
-//!   it is left out rather than counted against the learner. Together these
-//!   cover every served item, so what the rung asks of coverage is that the
-//!   tracker reported at least one served item: a session whose tracker never
-//!   ran has no response process to vouch for.
+//!   ignored), so an answer restored on resume counts when it was worked
+//!   through before the reload. An answer the tracker never observed keeps
+//!   the rung at `none`: answers alone do not show a response process. An
+//!   item left blank and never visited carries no response and is left out.
+//!   At least one served item must be observed, the session's
+//!   `response_process` channel must not be over threshold, and the
+//!   attempt's items come from the backend's draw (every attempt's do).
 //! - `probed`: probe results exist and all of them were satisfied.
 //! - `consistent`: the attempt's outcome agrees with the learner's history
 //!   ([`crate::sentinel::consistency::for_attempt`]).
@@ -147,7 +145,7 @@ pub(crate) fn session_surface(
                 .channels
                 .iter()
                 .any(|c| c.channel == RESPONSE_PROCESS_CHANNEL && c.over_threshold);
-            a.tracked > 0 && !anomalous
+            a.tracked > 0 && a.answered_unobserved == 0 && !anomalous
         }
         None => false,
     };
@@ -315,6 +313,8 @@ struct Attempt {
     id: String,
     /// Distinct served items the response tracker reported a visit to.
     tracked: i64,
+    /// Answered items the response tracker never reported in the session.
+    answered_unobserved: i64,
     score: Option<f64>,
 }
 
@@ -333,6 +333,19 @@ fn session_attempt(
                     AND (o.item_id IN (SELECT value FROM json_each(a.question_ids))
                          OR o.item_id IN (SELECT i.item_id FROM attempt_items i
                                            WHERE i.attempt_id = a.id))),
+                (SELECT COUNT(*) FROM (
+                    SELECT json_extract(s.value, '$.question_id') AS item_id
+                      FROM json_each(COALESCE(a.submitted_answers_json, '[]')) s
+                     WHERE json_array_length(json_extract(s.value, '$.selected')) > 0
+                    UNION
+                    SELECT i.item_id FROM attempt_items i
+                     WHERE i.attempt_id = a.id AND i.submission_json IS NOT NULL
+                       AND COALESCE(json_array_length(
+                               json_extract(i.submission_json, '$.selected_positions')), 1) > 0
+                  ) answered
+                  WHERE answered.item_id NOT IN (
+                      SELECT o.item_id FROM integrity_observed_items o
+                       WHERE o.session_id = a.integrity_session_id)),
                 a.score
            FROM assessment_attempts a
           WHERE a.integrity_session_id = ?1
@@ -342,7 +355,8 @@ fn session_attempt(
             Ok(Attempt {
                 id: r.get(0)?,
                 tracked: r.get(1)?,
-                score: r.get(2)?,
+                answered_unobserved: r.get(2)?,
+                score: r.get(3)?,
             })
         },
     )
@@ -532,11 +546,22 @@ mod tests {
 
     #[test]
     fn answers_restored_on_resume_and_items_left_blank_keep_an_honest_attempt_on_process() {
-        // q1 and q2 were worked through before the app restarted; q3's answer
-        // was restored on resume and never touched again; q4 was left blank.
+        // q1 to q3 were worked through and committed before the app
+        // restarted; after the reload q3's restored answer is never touched
+        // again and only q2 is revisited; q4 was left blank and never seen.
         let db = live_attempt(&["q1", "q2", "q3", "q4"], &["q1", "q2", "q3"]);
-        tracked(&db, &["q1", "q2"]);
+        tracked(&db, &["q1", "q2", "q3"]);
+        tracked(&db, &["q2"]);
         assert_eq!(rung(&db), VerificationRung::Process);
+    }
+
+    #[test]
+    fn an_answer_the_tracker_never_observed_keeps_the_session_off_the_process_rung() {
+        // q3 holds a submitted answer, but no window ever reported working
+        // on it: answers alone do not show a response process.
+        let db = live_attempt(&["q1", "q2", "q3"], &["q1", "q2", "q3"]);
+        tracked(&db, &["q1", "q2"]);
+        assert_eq!(rung(&db), VerificationRung::None);
     }
 
     #[test]
