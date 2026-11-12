@@ -8,7 +8,7 @@
 //! integrity commands and the AI access policy ([`crate::ai_access`]) write
 //! flags through one path.
 
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::hash::entity_id;
@@ -102,42 +102,107 @@ pub(crate) fn record_backend_flag(
 ) -> Result<usize, String> {
     let sessions = alexandria_studio::gate::live_session_ids(conn).map_err(|e| e.to_string())?;
     let needle = format!("%\"{flag}\"%");
-    let manifest = scoring::active_manifest();
     let mut flagged = 0;
     for session_id in sessions {
-        let (already, score): (bool, Option<f64>) = conn
+        let (already, chain_started): (bool, bool) = conn
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM integrity_snapshots WHERE session_id = ?1 AND anomaly_flags LIKE ?2),
-                        (SELECT integrity_score FROM integrity_sessions WHERE id = ?1)",
-                params![session_id, needle],
+                "SELECT EXISTS(SELECT 1 FROM integrity_snapshots WHERE session_id = ?1 AND anomaly_flags LIKE ?2)
+                        OR EXISTS(SELECT 1 FROM integrity_sessions s, json_each(s.pending_backend_flags) p
+                                   WHERE s.id = ?1 AND p.value = ?3),
+                        (SELECT commitment_root IS NOT NULL FROM integrity_sessions WHERE id = ?1)",
+                params![session_id, needle, flag],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .map_err(|e| e.to_string())?;
         if already {
             continue;
         }
-        let composite = score.unwrap_or(1.0).clamp(0.0, 1.0);
-        let flags = [flag.to_string()];
-        // A session that stopped accepting snapshots is already final.
-        if let Ok(snapshot) = commit_window(
-            conn,
-            &session_id,
-            "alexandria",
-            composite,
-            &ScoreColumns::default(),
-            &flags,
-            &[],
-            &manifest,
-        ) {
-            corpus_capture::capture(&session_id, || CorpusWindow {
-                features: None,
-                backend_flags: flags.to_vec(),
-                snapshot: serde_json::to_value(&snapshot).ok(),
-            });
+        // Before the chain's first link (the profile selection, or a phone
+        // pairing ahead of it) the flag waits: committing it now would take
+        // that place and block the selection.
+        if !chain_started {
+            flagged += conn
+                .execute(
+                    "UPDATE integrity_sessions
+                        SET pending_backend_flags = json_insert(pending_backend_flags, '$[#]', ?2)
+                      WHERE id = ?1 AND ended_at IS NULL",
+                    params![session_id, flag],
+                )
+                .map_err(|e| e.to_string())?;
+            continue;
+        }
+        if commit_backend_flag(conn, &session_id, flag) {
             flagged += 1;
         }
     }
     Ok(flagged)
+}
+
+/// Commit `flag` as its own window in the session's chain, carrying the
+/// session's current score so its average is unchanged. False when the
+/// session stopped accepting snapshots: it is already final.
+fn commit_backend_flag(conn: &rusqlite::Connection, session_id: &str, flag: &str) -> bool {
+    let score: Option<f64> = conn
+        .query_row(
+            "SELECT integrity_score FROM integrity_sessions WHERE id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+    let composite = score.unwrap_or(1.0).clamp(0.0, 1.0);
+    let flags = [flag.to_string()];
+    let Ok(snapshot) = commit_window(
+        conn,
+        session_id,
+        "alexandria",
+        composite,
+        &ScoreColumns::default(),
+        &flags,
+        &[],
+        &scoring::active_manifest(),
+    ) else {
+        return false;
+    };
+    corpus_capture::capture(session_id, || CorpusWindow {
+        features: None,
+        backend_flags: flags.to_vec(),
+        snapshot: serde_json::to_value(&snapshot).ok(),
+    });
+    true
+}
+
+/// Commit the backend flags that waited for the session's chain to start,
+/// in the order they were raised. Called right after the profile selection,
+/// ahead of the first client window, and before the session ends, so the
+/// chain shows the selection (or that window) first and every flag after.
+pub(crate) fn flush_pending_flags(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+) -> Result<(), String> {
+    let pending: Option<String> = conn
+        .query_row(
+            "SELECT pending_backend_flags FROM integrity_sessions WHERE id = ?1",
+            params![session_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let flags: Vec<String> = pending
+        .and_then(|json| serde_json::from_str(&json).ok())
+        .unwrap_or_default();
+    if flags.is_empty() {
+        return Ok(());
+    }
+    conn.execute(
+        "UPDATE integrity_sessions SET pending_backend_flags = '[]' WHERE id = ?1",
+        params![session_id],
+    )
+    .map_err(|e| e.to_string())?;
+    for flag in flags {
+        commit_backend_flag(conn, session_id, &flag);
+    }
+    Ok(())
 }
 
 pub(crate) fn persist_snapshot(
@@ -166,6 +231,8 @@ pub(crate) fn persist_snapshot_with(
         }
     };
     features.validate()?;
+    // Flags that waited for the chain to start go in ahead of this window.
+    flush_pending_flags(connection, &req.session_id)?;
     // The locked profile decides what the window may carry: signals it does
     // not run are dropped, signals it runs that are missing are flagged.
     let mut features = features.clone();
@@ -495,6 +562,9 @@ mod tests {
             [],
         )
         .unwrap();
+        // The chain has started: the profile is chosen.
+        crate::sentinel::trust_profile::select_for_session(conn, "live", &Default::default(), None)
+            .unwrap();
         assert_eq!(
             record_backend_flag(conn, "mcp_call_during_attempt").unwrap(),
             1

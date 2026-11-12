@@ -9,7 +9,7 @@ Status: live
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 39 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Schema**: 40 migrations from a baseline, family `alexandria.profile`, epoch 1.
 **Objects**: 137 tables, 132 indexes, 1 view, 6 triggers.
 
 ---
@@ -62,6 +62,7 @@ and requires a database's history to be an exact prefix of this list:
 37. `interview_criterion_followups`
 38. `llm_probes`
 39. `integrity_observed_items`
+40. `integrity_pending_flags`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -1067,6 +1068,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `consent_microphone` INTEGER NOT NULL default `0`
 - `consent_companion_phone` INTEGER NOT NULL default `0`
 - `policy_floor_json` TEXT
+- `pending_backend_flags` TEXT NOT NULL default `'[]'`
 
 #### `integrity_snapshots`
 

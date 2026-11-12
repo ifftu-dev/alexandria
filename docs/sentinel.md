@@ -545,7 +545,7 @@ A statement is content-addressed: its digest is `blake3:` over its compact JSON 
 
 ### Commitment chain
 
-Every link folds into a running hash (`fold_commitment`, `domain::integrity_commitment`): `root_n = blake2b(tag | root_{n-1} | canonical(link_n))`. The links, in order: a companion phone pairing when there is one (`companion|…`), the trust profile selection (`trust_profile|…`), then each committed snapshot, with each verification result (`verification|…`, probes and live segments) folded in as it is recorded. Changing or reordering any link changes the terminal `commitment_root`. Per-snapshot hashes persist on `integrity_snapshots.commitment_hash`, per-verification hashes on `integrity_verifications.commitment_hash`, the running root on `integrity_sessions.commitment_root`, and the signed `integrity` block carries it as `commitmentRoot`. It is local tamper evidence, not an independent witness. `longitudinal_divergence` is the one input decided after the session ends, so it is not in the chain; it is derived again from the database whenever it is needed.
+Every link folds into a running hash (`fold_commitment`, `domain::integrity_commitment`): `root_n = blake2b(tag | root_{n-1} | canonical(link_n))`. The links, in order: a companion phone pairing when there is one (`companion|…`), the trust profile selection (`trust_profile|…`), then each committed snapshot, with each verification result (`verification|…`, probes and live segments) folded in as it is recorded. A backend flag (an AI surface reached during an attempt) raised before the chain's first link waits on `integrity_sessions.pending_backend_flags` and is committed, in order, right after the selection, or ahead of the first window or the session's end when no profile is chosen, so it never blocks the selection or a pairing. Changing or reordering any link changes the terminal `commitment_root`. Per-snapshot hashes persist on `integrity_snapshots.commitment_hash`, per-verification hashes on `integrity_verifications.commitment_hash`, the running root on `integrity_sessions.commitment_root`, and the signed `integrity` block carries it as `commitmentRoot`. It is local tamper evidence, not an independent witness. `longitudinal_divergence` is the one input decided after the session ends, so it is not in the chain; it is derived again from the database whenever it is needed.
 
 ### Device attestation (`device_attested`)
 
@@ -581,7 +581,8 @@ The unverified anchor setter (`integrity_set_anchor`), which let any caller mark
 integrity_sessions       -- One per monitored session; status, assurance_level, commitment_root,
                          --   attestation_json (incl. companion binding), purpose=assessment|interview,
                          --   trust_profile, profile_selection_json, policy_floor_json,
-                         --   consent_camera|consent_microphone|consent_companion_phone, response_items
+                         --   consent_camera|consent_microphone|consent_companion_phone, response_items,
+                         --   pending_backend_flags
   ├── integrity_observed_items -- Item ids the response tracker reported, once per session
   ├── integrity_snapshots      -- Committed windows: derived scores, anomaly_flags, ai_paste_anomaly,
   │                            --   gaze_offscreen_ratio, commitment_hash

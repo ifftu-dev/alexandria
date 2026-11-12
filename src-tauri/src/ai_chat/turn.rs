@@ -997,6 +997,9 @@ pub(crate) mod fixtures {
         .unwrap();
         conn.execute("INSERT INTO integrity_sessions(id) VALUES (?1)", [id])
             .unwrap();
+        // An attempt starts once the session's profile is chosen.
+        crate::sentinel::trust_profile::select_for_session(conn, id, &Default::default(), None)
+            .unwrap();
     }
 
     /// Whether attempt `id` carries the in-app assistant flag.
@@ -1227,8 +1230,7 @@ mod tests {
         let conn = db();
         thread(&conn);
         let prepared = prepare(&conn, "Hello").unwrap();
-        conn.execute("INSERT INTO integrity_sessions(id) VALUES ('attempt')", [])
-            .unwrap();
+        attempt(&conn, "attempt");
         assert!(prepare(&conn, "Hello")
             .unwrap_err()
             .starts_with("assessment_active"));

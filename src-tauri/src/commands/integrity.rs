@@ -468,6 +468,9 @@ fn finish_session(
     connection: &rusqlite::Connection,
     session_id: &str,
 ) -> Result<IntegritySession, String> {
+    // Backend flags still waiting for the chain to start are committed
+    // before the session closes.
+    crate::sentinel::snapshots::flush_pending_flags(connection, session_id)?;
     let tx =
         rusqlite::Transaction::new_unchecked(connection, rusqlite::TransactionBehavior::Immediate)
             .map_err(|e| e.to_string())?;
@@ -864,6 +867,13 @@ mod tests {
         db.conn()
             .execute("UPDATE integrity_sessions SET purpose = 'interview'", [])
             .unwrap();
+        crate::sentinel::trust_profile::select_for_session(
+            db.conn(),
+            "snapshot-session",
+            &Default::default(),
+            None,
+        )
+        .unwrap();
         assert_eq!(
             record_backend_flag(db.conn(), "mcp_call_during_attempt").unwrap(),
             1

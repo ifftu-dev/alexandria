@@ -218,6 +218,8 @@ pub(crate) fn select_for_session(
     )
     .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
+    // Backend flags raised before the choice follow it in the chain.
+    crate::sentinel::snapshots::flush_pending_flags(connection, session_id)?;
     Ok(SelectedProfile {
         record,
         policy_floor,
@@ -566,6 +568,82 @@ mod tests {
                 .contains("before the first snapshot")
         );
         assert_eq!(session_profile(db.conn(), "s").unwrap(), None);
+    }
+
+    /// Every committed window's flags, in chain order.
+    fn committed(db: &Database) -> Vec<String> {
+        let mut stmt = db
+            .conn()
+            .prepare(
+                "SELECT anomaly_flags FROM integrity_snapshots WHERE session_id = 's'
+                 ORDER BY captured_at, rowid",
+            )
+            .unwrap();
+        stmt.query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    #[test]
+    fn a_backend_flag_raised_before_the_profile_is_chosen_is_committed_right_after_the_choice() {
+        use crate::domain::integrity_commitment::fold_commitment;
+        use crate::sentinel::snapshots::record_backend_flag;
+        let db = session_db("assessment");
+        assert_eq!(
+            record_backend_flag(db.conn(), "mcp_call_during_attempt").unwrap(),
+            1
+        );
+        assert_eq!(
+            record_backend_flag(db.conn(), "mcp_call_during_attempt").unwrap(),
+            0,
+            "once per session, queued or committed"
+        );
+        // A phone may still pair, and the profile is still chosen.
+        crate::sentinel::companion::session::pairable_started_at(db.conn(), "s").unwrap();
+        select_for_session(db.conn(), "s", &ProfileRequest::default(), None).unwrap();
+        assert_eq!(committed(&db), [r#"["mcp_call_during_attempt"]"#]);
+
+        // The chain proves the order: the selection link, then the flag.
+        let (selection, root): (String, String) = db
+            .conn()
+            .query_row(
+                "SELECT profile_selection_json, commitment_root FROM integrity_sessions",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        let (id, composite, flags): (String, f64, String) = db
+            .conn()
+            .query_row(
+                "SELECT id, composite_score, anomaly_flags FROM integrity_snapshots",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        let after_selection =
+            fold_commitment("", format!("trust_profile|s|{selection}").as_bytes());
+        assert_eq!(
+            root,
+            fold_commitment(
+                &after_selection,
+                format!("{id}|{composite}|{flags}").as_bytes()
+            )
+        );
+        assert_eq!(
+            record_backend_flag(db.conn(), "mcp_call_during_attempt").unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn a_queued_backend_flag_goes_out_ahead_of_the_first_window_when_no_profile_is_chosen() {
+        // An interview check is flagged, not suspended, so it keeps taking windows.
+        let db = session_db("interview");
+        crate::sentinel::snapshots::record_backend_flag(db.conn(), "mcp_call_during_attempt")
+            .unwrap();
+        submit(&db, WindowFeatures::default());
+        assert_eq!(committed(&db), [r#"["mcp_call_during_attempt"]"#, "[]"]);
     }
 
     fn submit(

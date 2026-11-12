@@ -141,6 +141,9 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // The item ids each integrity session's response tracker reported, so
     // the `process` rung counts served items, not visits.
     (39, "integrity_observed_items", include_str!("integrity_observed_items.sql")),
+    // Backend flags raised before a session's chain starts, committed after
+    // the trust profile selection. See `crate::sentinel::snapshots`.
+    (40, "integrity_pending_flags", include_str!("integrity_pending_flags.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"
