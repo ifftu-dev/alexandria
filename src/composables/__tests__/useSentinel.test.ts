@@ -861,3 +861,54 @@ describe('Phantom hotkey signal', () => {
     expect(calls('sentinel_hotkeys_stop')).toHaveLength(0)
   })
 })
+
+describe('Sentinel trust profile', () => {
+  const caps = (camera: boolean) => ({ camera, microphone: false, companion_phone: false })
+  const selected = (profile: string) => ({
+    profile,
+    inputs: { device_attested: false, capabilities: caps(true), consent: caps(true), budget: null, floor: null },
+    excluded: [],
+    not_run: profile === 'camera' ? ['device_attestation'] : ['device_attestation', 'camera'],
+    benchmark: null,
+    camera_budget: { detect_ms: 250, liveness_ms: 60 },
+    full_budget: { detect_ms: 150, liveness_ms: 40 },
+    policy_floor: { required: null, profile, satisfied: true, missing: [] },
+  })
+
+  function withProfile(profile: string) {
+    const order: string[] = []
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      order.push(command)
+      if (command === 'integrity_attest_session') return { supported: false, stored: false, assurance_level: 'local' }
+      if (command === 'integrity_select_profile') return selected(profile)
+      return fallback(command, args)
+    })
+    return order
+  }
+
+  it('asks the backend for the profile once attestation settles, with consent and role', async () => {
+    const order = withProfile('camera')
+    const service = (await freshService())()
+    await service.start(null, true, 'assessment', { roleAssessmentId: 'role-1' })
+    const call = mocks.invoke.mock.calls.find(([name]) => name === 'integrity_select_profile')
+    expect(call?.[1]).toEqual({
+      sessionId: 'session-1',
+      request: { capabilities: caps(true), consent: caps(true), role_assessment_id: 'role-1' },
+    })
+    expect(order.indexOf('integrity_attest_session')).toBeLessThan(order.indexOf('integrity_select_profile'))
+    expect(service.trustProfile.value?.profile).toBe('camera')
+    expect(service.cameraOptedIn.value).toBe(true)
+    await service.stop()
+    expect(service.trustProfile.value).toBeNull()
+  })
+
+  it('does not run the camera when the chosen profile does not include it', async () => {
+    withProfile('core')
+    const service = (await freshService())()
+    await service.start(null, true)
+    expect(service.trustProfile.value?.profile).toBe('core')
+    expect(service.cameraOptedIn.value).toBe(false)
+    await service.stop()
+  })
+})

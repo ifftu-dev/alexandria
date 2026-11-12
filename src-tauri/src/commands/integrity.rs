@@ -28,6 +28,8 @@ pub struct IntegritySession {
     /// `local`, or `device_attested` once the platform attestation stored
     /// for this session verified. Re-verified at issuance.
     pub assurance_level: String,
+    /// The locked trust profile; `None` until one is chosen.
+    pub trust_profile: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -200,6 +202,43 @@ pub async fn integrity_attest_session(
         assurance_level: level,
         unverified,
     })
+}
+
+/// Choose and lock the session's trust profile.
+///
+/// Called once, after `integrity_attest_session` has settled and before the
+/// first snapshot. The backend decides: the stored attestation result, the
+/// reported capabilities, the device benchmark (run here only when a camera
+/// was reported and consented), the role's policy floor and the consent. The
+/// reply carries the floor as judged now, so the learner is told before the
+/// first item.
+#[tauri::command]
+pub async fn integrity_select_profile(
+    state: State<'_, AppState>,
+    session_id: String,
+    request: crate::sentinel::trust_profile::ProfileRequest,
+) -> Result<crate::sentinel::trust_profile::SelectedProfile, String> {
+    use crate::sentinel::trust_profile::{run_benchmark, select_for_session};
+    let benchmark = if request.needs_benchmark() {
+        // A benchmark that fails is not a pass: the camera profiles are then
+        // excluded as not benchmarked.
+        tokio::task::spawn_blocking(run_benchmark)
+            .await
+            .map_err(|e| format!("benchmark worker failed: {e}"))?
+            .map_err(|e| log::warn!(target: "sentinel", "device benchmark failed: {e}"))
+            .ok()
+    } else {
+        None
+    };
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "integrity.select-profile",
+            move |db| select_for_session(db.conn(), &session_id, &request, benchmark.as_ref()),
+        )
+        .await
 }
 
 /// iOS: extend a stored App Attest record with an assertion over the
@@ -463,7 +502,7 @@ pub async fn integrity_list_snapshots(
 /// The columns `map_session` reads, in order. Every session query selects
 /// exactly these, so a field added to one cannot be missing from another.
 const SESSION_COLUMNS: &str = "id, enrollment_id, status, integrity_score, critical_count, \
-     warning_count, started_at, ended_at, assurance_level";
+     warning_count, started_at, ended_at, assurance_level, trust_profile";
 
 fn map_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySession> {
     Ok(IntegritySession {
@@ -476,6 +515,7 @@ fn map_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySession> {
         started_at: row.get(6)?,
         ended_at: row.get(7)?,
         assurance_level: row.get(8)?,
+        trust_profile: row.get(9)?,
     })
 }
 

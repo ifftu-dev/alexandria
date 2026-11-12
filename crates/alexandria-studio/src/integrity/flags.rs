@@ -61,7 +61,8 @@ pub fn severity(flag: &str) -> Severity {
         | "virtual_camera"
         | "spoof_suspected"
         | "unauthorized_process"
-        | "phantom_hotkey" => Severity::Warning,
+        | "phantom_hotkey"
+        | "camera_degraded" => Severity::Warning,
         _ => Severity::Info,
     }
 }
@@ -88,6 +89,8 @@ pub fn channel(signal: &str) -> &str {
         "no_face" | "multiple_faces" | "prolonged_absence" | "frequent_absence" => {
             "camera_presence"
         }
+        // The locked profile runs the camera and a window had none.
+        "camera_degraded" => "camera_coverage",
         "face_mismatch" | "virtual_camera" | "spoof_suspected" => "camera_identity",
         "device_glance" | "gaze_wander" | "gaze_occluded" => "gaze",
         // Derived from the other scores, so never independent of them.

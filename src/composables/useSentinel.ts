@@ -18,6 +18,8 @@ import type {
   BehavioralProfile,
   StartSessionResponse,
   AttestSessionResponse,
+  ProfileRequest,
+  SelectedProfile,
   KeystrokeEvent,
   MousePoint,
   DigraphFeatures,
@@ -194,6 +196,19 @@ let liveTimer: ReturnType<typeof setInterval> | null = null
  */
 const pendingEvidenceConsent = ref<{ sessionId: string; reasons: string[] } | null>(null)
 const cameraOptedIn = ref(false)
+
+/**
+ * The trust profile the backend chose for the live session (locked for the
+ * session), with the inputs it judged and the policy floor result. Null
+ * when no session is live or the choice failed.
+ */
+const trustProfile = ref<SelectedProfile | null>(null)
+
+/** Options for `start` beyond the enrollment, camera and purpose. */
+export interface SentinelStartOptions {
+  /** Assessments only: the sponsor role whose policy floor applies. */
+  roleAssessmentId?: string | null
+}
 
 // AI scoring is advisory until validated with labeled data (see
 // docs/sentinel.md §AI Models). Off by default; can be toggled per profile
@@ -1164,6 +1179,7 @@ function createSentinelService() {
     optInCamera: boolean,
     purpose: SentinelSessionPurpose,
     generation: number,
+    options: SentinelStartOptions,
   ) => {
     if (isActive.value || generation !== lifecycleGeneration) return
     if (sessionId.value) throw new Error('Finish closing the previous Sentinel session before starting another')
@@ -1190,11 +1206,23 @@ function createSentinelService() {
       Object.assign(sentinelDebug, emptySentinelDebug(), { cameraDeviceLabel, cameraDeviceVirtual })
       isActive.value = true
       // Device attestation (iOS App Attest / Android Play Integrity) binds
-      // the platform's word to this session's nonce. Fire-and-forget: the
-      // backend records the outcome and desktop reports unsupported.
-      void invoke<AttestSessionResponse>('integrity_attest_session', { sessionId: response.session_id })
-        .then(r => { sentinelDebug.attestation = r.supported ? (r.stored ? r.assurance_level : 'unavailable') : 'unsupported' })
-        .catch(err => { console.warn('[sentinel] device attestation failed', err); sentinelDebug.attestation = 'error' })
+      // the platform's word to this session's nonce. The backend records the
+      // outcome and desktop reports unsupported; a failure leaves it local.
+      try {
+        const r = await invoke<AttestSessionResponse>('integrity_attest_session', { sessionId: response.session_id })
+        sentinelDebug.attestation = r.supported ? (r.stored ? r.assurance_level : 'unavailable') : 'unsupported'
+      } catch (err) {
+        console.warn('[sentinel] device attestation failed', err)
+        sentinelDebug.attestation = 'error'
+      }
+      if (generation !== lifecycleGeneration) return
+      // The backend chooses the trust profile from the attestation result,
+      // this report, a device benchmark, the role's floor and the consent,
+      // and locks it before the first snapshot. The camera runs only when
+      // the chosen profile includes it.
+      trustProfile.value = await selectProfile(response.session_id, optInCamera, options)
+      if (generation !== lifecycleGeneration) return
+      if (optInCamera && trustProfile.value?.not_run.includes('camera')) setCameraOptedIn(false)
       // A queued stop owns cleanup of an already-created backend session.
       // Do not attach new listeners while that cleanup is pending.
       if (generation !== lifecycleGeneration) return
@@ -1606,6 +1634,7 @@ function createSentinelService() {
 
     const currentSessionId = sessionId.value
     sessionId.value = null
+    trustProfile.value = null
     cameraOptedIn.value = false
     sentinelDebug.cameraOptedIn = false
     keystrokeBuffer = []
@@ -1636,13 +1665,39 @@ function createSentinelService() {
     return currentSessionId
   }
 
+  /**
+   * Ask the backend to choose and lock the session's trust profile. A camera
+   * stream the learner turned on is both the capability and the consent.
+   * Null when the choice failed: the session then has no profile, and a
+   * role floor fails closed at attempt start.
+   */
+  const selectProfile = async (
+    id: string,
+    camera: boolean,
+    options: SentinelStartOptions,
+  ): Promise<SelectedProfile | null> => {
+    const capabilities = { camera, microphone: false, companion_phone: false }
+    const request: ProfileRequest = {
+      capabilities,
+      consent: capabilities,
+      role_assessment_id: options.roleAssessmentId ?? null,
+    }
+    try {
+      return (await invoke<SelectedProfile | null>('integrity_select_profile', { sessionId: id, request })) ?? null
+    } catch (err) {
+      console.warn('[sentinel] trust profile selection failed', err)
+      return null
+    }
+  }
+
   const start = (
     enrollmentId: string | null,
     optInCamera = false,
     purpose: SentinelSessionPurpose = 'assessment',
+    options: SentinelStartOptions = {},
   ) => {
     const generation = lifecycleGeneration
-    return serializeTransition(() => startSession(enrollmentId, optInCamera, purpose, generation))
+    return serializeTransition(() => startSession(enrollmentId, optInCamera, purpose, generation, options))
   }
 
   const stop = () => {
@@ -2263,6 +2318,7 @@ function createSentinelService() {
     integrityScore: readonly(integrityScore),
     consistencyScore: readonly(consistencyScore),
     cameraOptedIn: readonly(cameraOptedIn),
+    trustProfile: readonly(trustProfile),
     aiScoringEnabled: readonly(aiScoringEnabled),
     pasteClassifierEnabled: readonly(pasteClassifierEnabled),
     keystrokeAeStatus: readonly(keystrokeAeStatus),

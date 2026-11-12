@@ -111,7 +111,8 @@ async function begin(roleAssessmentId: string | null) {
   try {
     // Auto-activate Sentinel for the assessment (standalone, no enrollment).
     // A camera the learner already turned on is opted in from the start.
-    await sentinel.start(null, cameraStream.value !== null)
+    // The role's policy floor guides the backend's trust profile choice.
+    await sentinel.start(null, cameraStream.value !== null, 'assessment', { roleAssessmentId })
     if (disposed) return
     const sessionId = sentinel.getSessionId()
     if (!sessionId || !sentinel.isActive.value) throw new Error('Assessment monitoring is not active')

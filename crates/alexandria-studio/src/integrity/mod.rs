@@ -11,10 +11,14 @@
 //! advisory. A single flag puts a session in review; a credential-affecting
 //! outcome needs two independent channels over threshold or a failed
 //! verification. Only backend-recorded tamper flags suspend.
+//!
+//! Each session runs one locked [`TrustProfile`], chosen by
+//! [`select_profile`]; a policy floor is judged by [`evaluate_floor`].
 
 mod features;
 mod flags;
 mod fusion;
+mod profile;
 
 pub use features::{
     derive_window, AndroidFeatures, BehaviouralBaseline, CameraFeatures, ClipboardFeatures,
@@ -25,4 +29,8 @@ pub use flags::{channel, is_tamper_flag, severity, Severity, TAMPER_FLAGS};
 pub use fusion::{
     decide, ChannelEvidence, Decision, FusionSummary, ProfileRatios, RatioManifest,
     SessionEvidence, SessionStatus, DEFAULT_PROFILE, UNCERTIFIED_MANIFEST_VERSION,
+};
+pub use profile::{
+    evaluate_floor, exclusion_reasons, select_profile, BudgetFit, Capabilities, Exclusion,
+    ExclusionReason, PolicyFloor, ProfileSelection, ProfileSignal, SelectionInputs, TrustProfile,
 };

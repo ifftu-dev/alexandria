@@ -50,6 +50,11 @@ pub struct IssuancePolicy {
     /// schema is unchanged.
     #[serde(default)]
     pub min_camera_coverage: Option<f64>,
+    /// Minimum trust profile (the policy floor). Judged at attempt start and
+    /// again here; issuance is refused unless the session meets it and the
+    /// two judgements agree.
+    #[serde(default)]
+    pub min_trust_profile: Option<crate::sentinel::scoring::TrustProfile>,
 }
 
 impl IssuancePolicy {
@@ -104,6 +109,30 @@ impl IssuancePolicy {
                 None => return Err(PolicyViolation::NoSnapshots),
             }
         }
+        if let Some(floor) = self.min_trust_profile {
+            use crate::sentinel::scoring::evaluate_floor;
+            // Judged again from the session as it stands: the attestation
+            // counts only if it verifies now.
+            let credited =
+                a.assurance_level == crate::sentinel::attestation::ASSURANCE_DEVICE_ATTESTED;
+            let now = evaluate_floor(facts.trust_profile, Some(floor), credited);
+            if !now.satisfied {
+                return Err(PolicyViolation::TrustProfileBelowFloor {
+                    profile: facts
+                        .trust_profile
+                        .map_or("none", |p| p.as_str())
+                        .to_string(),
+                    required: floor.as_str().to_string(),
+                });
+            }
+            // The learner was told the attempt-start judgement; issuance must
+            // agree with it or refuse.
+            if facts.recorded_floor.as_ref() != Some(&now) {
+                return Err(PolicyViolation::PolicyFloorDisagrees {
+                    required: floor.as_str().to_string(),
+                });
+            }
+        }
         Ok(())
     }
 }
@@ -114,6 +143,11 @@ impl IssuancePolicy {
 pub struct SessionFacts {
     /// `camera snapshots / all snapshots`, or `None` without snapshots.
     pub camera_coverage: Option<f64>,
+    /// The session's locked trust profile, if one was chosen.
+    pub trust_profile: Option<crate::sentinel::scoring::TrustProfile>,
+    /// The policy floor as judged at attempt start or interview-check
+    /// acceptance.
+    pub recorded_floor: Option<crate::sentinel::scoring::PolicyFloor>,
 }
 
 impl SessionFacts {
@@ -125,8 +159,19 @@ impl SessionFacts {
             params![session_id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
+        let (profile, floor): (Option<String>, Option<String>) = conn.query_row(
+            "SELECT trust_profile, policy_floor_json FROM integrity_sessions WHERE id = ?1",
+            params![session_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
         Ok(Self {
             camera_coverage: (total > 0).then(|| with_camera as f64 / total as f64),
+            // The column's CHECK admits only known profiles.
+            trust_profile: profile
+                .as_deref()
+                .and_then(crate::sentinel::scoring::TrustProfile::parse),
+            // An unreadable judgement is no judgement: issuance then refuses.
+            recorded_floor: floor.and_then(|j| serde_json::from_str(&j).ok()),
         })
     }
 }
@@ -435,6 +480,100 @@ mod tests {
             params![id, session, camera, NOW],
         )
         .unwrap();
+    }
+
+    /// A live session that selected `profile` (with the camera benchmark
+    /// passing), then judged `floor` at attempt start and ended clean.
+    fn session_on_profile(
+        conn: &Connection,
+        id: &str,
+        attested: bool,
+        camera: bool,
+        floor: Option<crate::sentinel::scoring::TrustProfile>,
+    ) {
+        use crate::sentinel::trust_profile::{
+            record_policy_floor, select_for_session, Capabilities, DeviceBenchmark, ProfileRequest,
+        };
+        conn.execute(
+            "INSERT INTO integrity_sessions (id, status, assurance_level, started_at)
+             VALUES (?1, 'active', ?2, ?3)",
+            params![id, if attested { "device_attested" } else { "local" }, NOW],
+        )
+        .unwrap();
+        let caps = Capabilities {
+            camera,
+            ..Default::default()
+        };
+        let request = ProfileRequest {
+            capabilities: caps,
+            consent: caps,
+            role_assessment_id: None,
+        };
+        let fast = DeviceBenchmark {
+            detect_ms: 9.0,
+            liveness_ms: 7.0,
+        };
+        select_for_session(conn, id, &request, Some(&fast)).unwrap();
+        record_policy_floor(conn, id, floor).unwrap();
+        conn.execute(
+            "UPDATE integrity_sessions SET status = 'completed', ended_at = ?2 WHERE id = ?1",
+            params![id, NOW],
+        )
+        .unwrap();
+    }
+
+    fn floor_policy(floor: crate::sentinel::scoring::TrustProfile) -> IssuancePolicy {
+        IssuancePolicy {
+            min_trust_profile: Some(floor),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn issuance_judges_the_policy_floor_again_and_needs_the_attempt_start_judgement() {
+        use crate::sentinel::scoring::TrustProfile;
+        let (db, key, _, subject) = setup();
+        let mut req = sample_request(subject);
+        req.integrity_policy = Some(floor_policy(TrustProfile::Camera));
+
+        // Judged at attempt start, met, and met again now.
+        session_on_profile(db.conn(), "met", false, true, Some(TrustProfile::Camera));
+        req.integrity_session_id = Some("met".into());
+        assert!(issue(db.conn(), &key, &req, NOW).is_ok());
+
+        // Never judged at attempt start: fail closed even though the session
+        // runs the camera.
+        session_on_profile(db.conn(), "unjudged", false, true, None);
+        req.integrity_session_id = Some("unjudged".into());
+        assert!(matches!(
+            issue(db.conn(), &key, &req, NOW).unwrap_err(),
+            CredentialError::Policy(PolicyViolation::PolicyFloorDisagrees { .. })
+        ));
+
+        // A session whose profile does not run the camera does not meet it.
+        session_on_profile(db.conn(), "core", false, false, Some(TrustProfile::Camera));
+        req.integrity_session_id = Some("core".into());
+        assert!(matches!(
+            issue(db.conn(), &key, &req, NOW).unwrap_err(),
+            CredentialError::Policy(PolicyViolation::TrustProfileBelowFloor { .. })
+        ));
+    }
+
+    #[test]
+    fn an_attestation_that_no_longer_verifies_at_issuance_fails_an_attested_floor() {
+        use crate::sentinel::scoring::TrustProfile;
+        let (db, key, _, subject) = setup();
+        // The session was attested when the profile was chosen and the floor
+        // judged; at issuance the stored attestation does not verify (there
+        // is none), so the two judgements disagree.
+        session_on_profile(db.conn(), "att", true, false, Some(TrustProfile::Attested));
+        let mut req = sample_request(subject);
+        req.integrity_session_id = Some("att".into());
+        req.integrity_policy = Some(floor_policy(TrustProfile::Attested));
+        assert!(matches!(
+            issue(db.conn(), &key, &req, NOW).unwrap_err(),
+            CredentialError::Policy(PolicyViolation::TrustProfileBelowFloor { .. })
+        ));
     }
 
     #[test]

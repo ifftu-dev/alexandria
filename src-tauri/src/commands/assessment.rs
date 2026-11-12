@@ -27,6 +27,7 @@ use crate::assessment::policy::{
 use crate::assessment::randomizer::{draw, DifficultyBand, DrawContext, QuestionMeta};
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
+use crate::sentinel::trust_profile::{self, PolicyFloor};
 use crate::settings::{registry::keys, SettingsStore};
 use crate::AppState;
 
@@ -55,6 +56,10 @@ pub struct StartedAttempt {
     /// Fixed at the first start; a resumed attempt reports the stored role
     /// regardless of what the retry asked for.
     pub role: Option<AttemptRoleTarget>,
+    /// The role's minimum trust profile judged against the session, before
+    /// the first item. An attempt is only started when it is satisfied;
+    /// issuance judges it again and must agree.
+    pub policy_floor: PolicyFloor,
 }
 
 /// A published sponsor role a learner can assess for. Chosen before the
@@ -643,7 +648,7 @@ pub(crate) fn start_attempt_db(
         .optional()
         .map_err(|e| e.to_string())?;
 
-    let (attempt_id, drawn, draft_answers, role, is_resumed) = if let Some((
+    let (attempt_id, drawn, draft_answers, role, policy_floor, is_resumed) = if let Some((
         existing_id,
         question_ids_json,
         option_orders_json,
@@ -651,6 +656,9 @@ pub(crate) fn start_attempt_db(
         stored_role_id,
     )) = resumed
     {
+        let role = stored_role_target(conn, stored_role_id.as_deref())?;
+        // Judged again: the session may have lost what the floor needs.
+        let policy_floor = require_policy_floor(conn, &integrity_session_id, role.as_ref())?;
         (
             existing_id,
             crate::assessment::randomizer::Draw {
@@ -661,7 +669,8 @@ pub(crate) fn start_attempt_db(
                 .as_deref()
                 .map(parse_json_vec)
                 .unwrap_or_default(),
-            stored_role_target(conn, stored_role_id.as_deref())?,
+            role,
+            policy_floor,
             true,
         )
     } else {
@@ -671,12 +680,15 @@ pub(crate) fn start_attempt_db(
             .as_deref()
             .map(|id| resolve_role_target(conn, &skill_id, id))
             .transpose()?;
+        // Judge the floor before anything is drawn, for the same reason.
+        let policy_floor = require_policy_floor(conn, &integrity_session_id, role.as_ref())?;
         let ctx = load_draw_context(conn, &subject_did, &skill_id)?;
         (
             attempt_id,
             draw(&metas, draw_count.max(1) as usize, seed, &ctx),
             Vec::new(),
             role,
+            policy_floor,
             false,
         )
     };
@@ -744,7 +756,33 @@ pub(crate) fn start_attempt_db(
         questions: served,
         draft_answers,
         role,
+        policy_floor,
     })
+}
+
+/// Judge the role's policy floor against the monitoring session, record the
+/// judgement on the session for issuance to compare with, and refuse when
+/// the session does not meet it.
+fn require_policy_floor(
+    conn: &rusqlite::Connection,
+    integrity_session_id: &str,
+    role: Option<&AttemptRoleTarget>,
+) -> Result<PolicyFloor, String> {
+    let floor = match role {
+        Some(role) => trust_profile::role_floor(conn, &role.role_assessment_id)?,
+        None => None,
+    };
+    let judged = trust_profile::record_policy_floor(conn, integrity_session_id, floor)?;
+    if judged.satisfied {
+        return Ok(judged);
+    }
+    let missing: Vec<&str> = judged.missing.iter().map(|s| s.as_str()).collect();
+    Err(format!(
+        "policy floor not met: the role requires the '{}' trust profile, this session runs '{}' (missing: {})",
+        judged.required.map_or("none", |p| p.as_str()),
+        judged.profile.map_or("none", |p| p.as_str()),
+        if missing.is_empty() { "a selected profile".to_string() } else { missing.join(", ") },
+    ))
 }
 
 /// What the draw needs to know about this learner's history on `skill_id`:
@@ -2237,6 +2275,9 @@ mod role_target_tests {
     };
     use crate::credentials::IssuancePolicy;
     use crate::db::Database;
+    use crate::sentinel::trust_profile::{
+        select_for_session, Capabilities, DeviceBenchmark, ProfileRequest, TrustProfile,
+    };
 
     const NOW: &str = "2026-10-09T00:00:00Z";
 
@@ -2444,6 +2485,121 @@ mod role_target_tests {
         .unwrap();
         assert!(started.role.is_none());
     }
+
+    fn floor_role(conn: &rusqlite::Connection, org_id: &str, floor: TrustProfile) -> String {
+        let req = CreateRoleAssessmentRequest {
+            org_id: org_id.into(),
+            role_title: format!("{} floor", floor.as_str()),
+            job_description: None,
+            course_id: None,
+            skill_ids: vec!["skill_rust".into()],
+            issuance_policy: Some(IssuancePolicy {
+                min_trust_profile: Some(floor),
+                ..Default::default()
+            }),
+            required_assurance_level: None,
+        };
+        let ra = create_role_assessment_impl(conn, &req, NOW).unwrap();
+        set_role_assessment_status_impl(conn, &ra.id, "published", NOW).unwrap();
+        ra.id
+    }
+
+    fn camera_request(role: Option<String>) -> ProfileRequest {
+        let camera = Capabilities {
+            camera: true,
+            ..Default::default()
+        };
+        ProfileRequest {
+            capabilities: camera,
+            consent: camera,
+            role_assessment_id: role,
+        }
+    }
+
+    #[test]
+    fn a_policy_floor_the_session_misses_refuses_the_attempt_before_any_item() {
+        let db = setup();
+        let org = create_organization_impl(db.conn(), "Acme", "stake_owner", None, NOW).unwrap();
+        let camera_role = floor_role(db.conn(), &org.id, TrustProfile::Camera);
+        // No camera consent: the session runs `core`.
+        let chosen = select_for_session(
+            db.conn(),
+            "isess_live",
+            &ProfileRequest {
+                role_assessment_id: Some(camera_role.clone()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(chosen.record.selection.profile, TrustProfile::Core);
+        assert!(!chosen.policy_floor.satisfied, "told at selection");
+
+        let err = start_attempt_db(
+            &db,
+            "skill_rust".into(),
+            Some("isess_live".into()),
+            Some(camera_role),
+            7,
+            "att_1".into(),
+            NOW.into(),
+        )
+        .unwrap_err();
+        assert!(err.contains("policy floor"), "{err}");
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM assessment_attempts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "a refused floor costs no attempt");
+
+        // Without a role there is no floor to miss.
+        let started = start_attempt_db(
+            &db,
+            "skill_rust".into(),
+            Some("isess_live".into()),
+            None,
+            7,
+            "att_1".into(),
+            NOW.into(),
+        )
+        .unwrap();
+        assert!(started.policy_floor.satisfied);
+        assert_eq!(started.policy_floor.required, None);
+        assert_eq!(started.policy_floor.profile, Some(TrustProfile::Core));
+    }
+
+    #[test]
+    fn a_session_running_the_camera_meets_a_camera_floor_at_attempt_start() {
+        let db = setup();
+        let org = create_organization_impl(db.conn(), "Acme", "stake_owner", None, NOW).unwrap();
+        let camera_role = floor_role(db.conn(), &org.id, TrustProfile::Camera);
+        let fast = DeviceBenchmark {
+            detect_ms: 10.0,
+            liveness_ms: 5.0,
+        };
+        select_for_session(
+            db.conn(),
+            "isess_live",
+            &camera_request(Some(camera_role.clone())),
+            Some(&fast),
+        )
+        .unwrap();
+        let started = start_attempt_db(
+            &db,
+            "skill_rust".into(),
+            Some("isess_live".into()),
+            Some(camera_role),
+            7,
+            "att_1".into(),
+            NOW.into(),
+        )
+        .unwrap();
+        assert!(started.policy_floor.satisfied);
+        assert_eq!(started.policy_floor.required, Some(TrustProfile::Camera));
+        // Unattested, so `full` is out and `camera` is the highest permitted.
+        assert_eq!(started.policy_floor.profile, Some(TrustProfile::Camera));
+    }
+
     #[test]
     fn served_questions_say_whether_several_answers_count() {
         let db = setup();

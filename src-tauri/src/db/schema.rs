@@ -121,6 +121,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // Batched credential anchors: Merkle-root batches, per-credential
     // receipts, and cached ledger observations of anchor transactions.
     (33, "anchor_batches", include_str!("anchor_batches.sql")),
+    // Sentinel trust profiles: the locked profile per integrity session, the
+    // inputs to its selection, consent per capability, and the policy floor
+    // judged before the first item. See `crate::sentinel::trust_profile`.
+    (34, "trust_profiles", include_str!("trust_profiles.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

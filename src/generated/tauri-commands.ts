@@ -224,6 +224,7 @@ export const TAURI_COMMANDS = [
   "integrity_get_session",
   "integrity_list_sessions",
   "integrity_list_snapshots",
+  "integrity_select_profile",
   "integrity_start_session",
   "integrity_submit_snapshot",
   "interview_append_transcript",

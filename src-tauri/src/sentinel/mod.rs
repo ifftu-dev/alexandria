@@ -29,6 +29,9 @@
 //!   `alexandria_studio::integrity` (Tauri-free)
 //! - `snapshots` — the integrity snapshot chain: validation, commitment,
 //!   severity, status, and flags the backend records itself
+//! - `trust_profile` — the session's locked trust profile: selection at
+//!   start (attestation, capabilities, benchmark, floor, consent), degradation
+//!   flags, and the policy floor judged before the first item
 //! - `evidence` — learner-consented retention of appeal evidence for
 //!   flagged sessions; nothing is persisted without an explicit yes
 //!
@@ -54,4 +57,5 @@ pub mod prior_blob;
 pub mod processes;
 pub mod scoring;
 pub mod snapshots;
+pub mod trust_profile;
 pub mod types;
