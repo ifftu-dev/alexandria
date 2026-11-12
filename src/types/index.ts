@@ -1535,6 +1535,8 @@ export interface InterviewCriterion {
   position: number
   status: InterviewCriterionStatus
   notes: string | null
+  /** Follow-up questions authored for this criterion. */
+  follow_ups: string[]
 }
 
 export interface InterviewTranscriptSegment {
@@ -1595,8 +1597,12 @@ export interface CreateInterviewRequest {
     role: InterviewParticipantRole
     peer_id?: string
   }>
-  criteria: string[]
+  /** A label, or a label with follow-ups authored for it. */
+  criteria: Array<string | { label: string; follow_ups: string[] }>
 }
+
+/** A live signal on the candidate's answer that can suggest a follow-up. */
+export type InterviewSignalConcern = 'relay_lag' | 'gaze_down' | 'second_voice'
 
 export interface InterviewConsentRequest {
   consent_transcription: boolean

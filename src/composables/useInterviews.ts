@@ -11,6 +11,7 @@ import type {
   InterviewNote,
   InterviewParticipant,
   InterviewSession,
+  InterviewSignalConcern,
   InterviewTranscriptSegment,
 } from '@/types'
 import { errorMessage } from '@/utils/errorMessage'
@@ -109,6 +110,27 @@ export function useInterviews() {
     return result
   }
 
+  /** A live signal on the candidate's answer: suggest a follow-up for its criterion. */
+  async function followupsForSignal(
+    sessionId: string,
+    criterionId: string | null,
+    signal: InterviewSignalConcern,
+  ): Promise<InterviewFollowup[]> {
+    const result = await invoke<InterviewFollowup[]>('interview_followups_for_signal', {
+      sessionId,
+      criterionId,
+      signal,
+    })
+    if (activeInterview.value?.session.id === sessionId) activeInterview.value.followups = result
+    return result
+  }
+
+  async function setCriterionFollowups(id: string, followUps: string[]): Promise<void> {
+    await invoke<void>('interview_set_criterion_followups', { id, followUps })
+    const criterion = activeInterview.value?.criteria.find(item => item.id === id)
+    if (criterion) criterion.follow_ups = followUps.map(item => item.trim())
+  }
+
   async function setFollowupStatus(id: string, status: InterviewFollowupStatus): Promise<void> {
     await invoke<void>('interview_set_followup_status', { id, status })
     const followup = activeInterview.value?.followups.find(item => item.id === id)
@@ -170,6 +192,8 @@ export function useInterviews() {
     recordConsent,
     appendTranscript,
     recommendFollowups,
+    followupsForSignal,
+    setCriterionFollowups,
     setFollowupStatus,
     setCriterion,
     saveNote,

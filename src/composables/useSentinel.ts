@@ -210,6 +210,12 @@ const trustProfile = ref<SelectedProfile | null>(null)
 export interface SentinelStartOptions {
   /** Assessments only: the sponsor role whose policy floor applies. */
   roleAssessmentId?: string | null
+  /**
+   * The learner allowed voice checks on the microphone for this session
+   * (interviews held in Alexandria). Recorded as the session's microphone
+   * consent; voice checks refuse to listen without it.
+   */
+  microphone?: boolean
 }
 
 // AI scoring is advisory until validated with labeled data (see
@@ -1694,7 +1700,7 @@ function createSentinelService() {
     camera: boolean,
     options: SentinelStartOptions,
   ): Promise<SelectedProfile | null> => {
-    const capabilities = { camera, microphone: false, companion_phone: false }
+    const capabilities = { camera, microphone: options.microphone === true, companion_phone: false }
     const request: ProfileRequest = {
       capabilities,
       consent: capabilities,

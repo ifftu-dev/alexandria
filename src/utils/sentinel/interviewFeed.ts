@@ -8,7 +8,7 @@
 // latency, the candidate's own baseline and the cues just before it; a
 // second voice goes to the panel as soon as it is heard. Timings and cues
 // only: no audio, no words.
-import type { InterviewAnswerSignal, InterviewSignal, VoiceOnsetEvent } from '@/types'
+import type { InterviewAnswerSignal, InterviewSignal, InterviewSignalConcern, VoiceOnsetEvent } from '@/types'
 import type { ResponseTracker } from '@/utils/sentinel/responseProcess'
 
 /** Playback level at which the far end counts as speaking. */
@@ -20,7 +20,7 @@ export const MARKER_LAPSE_MS = 30_000
 /** Added lag over the candidate's baseline that the panel is shown as a concern. */
 export const RELAY_CONCERN_MS = 3_000
 
-export type AnswerConcern = 'relay_lag' | 'gaze_down' | 'second_voice'
+export type AnswerConcern = InterviewSignalConcern
 
 export interface InterviewFeedDeps {
   responses: Pick<ResponseTracker, 'present' | 'input' | 'cue' | 'latest'>
