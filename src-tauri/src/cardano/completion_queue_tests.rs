@@ -4,6 +4,7 @@ use super::*;
 use crate::cardano::blockfrost::BlockfrostClient;
 use crate::cardano::fake_ledger::{ada, FakeLedger};
 use crate::cardano::test_chain::TestProfile;
+use crate::cardano::tx_builder::TTL_OFFSET;
 use crate::db::Database;
 
 const TIP: u64 = 120_000_000;
@@ -387,4 +388,69 @@ async fn mints_built_in_one_pass_behind_a_lagging_index_spend_different_utxos() 
         let witness = profile.with_conn(|conn| state(conn, claim_id).unwrap());
         assert_eq!(witness.status, WitnessStatus::Submitted, "{claim_id}");
     }
+}
+
+fn last_error(profile: &TestProfile, claim_id: &str) -> Option<String> {
+    profile.with_conn(|conn| {
+        conn.query_row(
+            "SELECT last_error FROM completion_witness_requests WHERE claim_id = ?1",
+            [claim_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    })
+}
+
+#[tokio::test]
+async fn mint_waits_while_every_eligible_utxo_is_reserved_then_submits_after_the_window() {
+    let db = test_db();
+    for (claim_id, course) in [("first", "course-a"), ("second", "course-b")] {
+        claim(db.conn(), claim_id);
+        enqueue(db.conn(), claim_id, &context_for(course)).unwrap();
+    }
+    let profile = TestProfile::new(db);
+    let journal = profile.background();
+    let wallet = wallet();
+    let ledger = FakeLedger::at_tip(TIP);
+    ledger.set_utxos(
+        &wallet.payment_address,
+        vec![ada(0x11, 0, 40_000_000), ada(0x22, 0, 30_000_000)],
+    );
+    tick(&journal, &ledger, &wallet).await.unwrap();
+    let (first_hash, _) = ledger.submissions().pop().unwrap();
+
+    // The first mint's input and collateral are the only eligible UTxOs.
+    tick(&journal, &ledger, &wallet).await.unwrap();
+    assert_eq!(ledger.submissions().len(), 1, "nothing known to fail is sent");
+    let waiting = profile.with_conn(|conn| state(conn, "second").unwrap());
+    assert_eq!(waiting.status, WitnessStatus::Pending);
+    assert!(waiting.tx_hash.is_none());
+    assert_eq!(
+        last_error(&profile, "second").as_deref(),
+        Some("wallet busy: inputs reserved by in-flight transactions")
+    );
+
+    // The first mint lands; its collateral stays reserved until its window
+    // ends, so the wallet is free only once the tip is past it.
+    ledger.include(&first_hash, TIP + 10);
+    ledger.catch_up();
+    ledger.set_tip(TIP + TTL_OFFSET + submission::EXPIRY_MARGIN_SLOTS + 1);
+    profile.with_conn(|conn| {
+        conn.execute(
+            "UPDATE completion_witness_requests SET next_attempt_at = 0",
+            [],
+        )
+        .unwrap()
+    });
+    tick(&journal, &ledger, &wallet).await.unwrap();
+    let submissions = ledger.submissions();
+    assert_eq!(submissions.len(), 2);
+    let (second_hash, second_bytes) = &submissions[1];
+    assert_eq!(
+        spent_by(second_bytes),
+        (vec![format!("{first_hash}#1")], vec![outpoint(0x22, 0)])
+    );
+    let witness = profile.with_conn(|conn| state(conn, "second").unwrap());
+    assert_eq!(witness.status, WitnessStatus::Submitted);
+    assert_eq!(witness.tx_hash.as_deref(), Some(second_hash.as_str()));
 }
