@@ -239,6 +239,55 @@ describe('response-process collector', () => {
     expect(submitted()[0]!.baseline).toEqual({ source: 'history', items: history })
   })
 
+  it('times a spoken interview answer from the end of the question to the first speech, without device history', async () => {
+    mocks.stakeAddress = 'learner'
+    const history = Array.from({ length: 4 }, () => ({ chars: 60, difficulty: 1, first_input_ms: 2_000 }))
+    vi.resetModules()
+    const service = (await import('../useSentinel')).useSentinel()
+    mocks.storedProfile = {
+      userId: 'learner',
+      deviceFingerprint: await service.computeDeviceFingerprint(),
+      typingPattern: { avgDwellTime: 80, avgFlightTime: 120, speedWpm: 60, sampleCount: 0 },
+      mousePattern: { avgVelocity: 2, avgAcceleration: 0.5, clickPrecision: 0.9, sampleCount: 0 },
+      lastUpdated: 1,
+      responsePattern: { recent: history },
+    }
+    await service.start(null, false, 'interview')
+    const spoken = { chars: 0, difficulty: null, input: 'voice' as const }
+    // Each question ended 400 ms before it was handed over; the answer
+    // began at a time the voice detector reports.
+    for (const [id, latency] of [['q1', 700], ['q2', 900], ['q3', 800], ['q4', 5_000]] as const) {
+      await vi.advanceTimersByTimeAsync(10_000)
+      const endedAt = Date.now() - 400
+      service.responses.present(id, spoken, endedAt)
+      service.responses.input(id, { changesAnswer: false, at: endedAt + latency })
+    }
+    expect(service.responses.latest()).toEqual({ itemId: 'q4', latencyMs: 5_000, baselineMs: 800, cues: [] })
+    await service.stop()
+    expect(submittedItems().map(i => [i.item_id, i.input, i.first_input_ms])).toEqual([
+      ['q1', 'voice', 700], ['q2', 'voice', 900], ['q3', 'voice', 800], ['q4', 'voice', 5_000],
+    ])
+    // Click timings from assessments say nothing about spoken turns.
+    expect(submitted().slice(-1)[0]!.baseline?.source).toBe('attempt')
+    expect(savedProfiles().length).toBeGreaterThan(0)
+    expect(savedProfiles().map(p => p.responsePattern)).toEqual(savedProfiles().map(() => ({ recent: history })))
+  })
+
+  it('reports which cues came just before the latest answer', async () => {
+    const service = await startedService()
+    service.responses.present('q1', { chars: 0, difficulty: null, input: 'voice' })
+    await vi.advanceTimersByTimeAsync(2_000)
+    service.responses.cue('second_voice', Date.now() - 500)
+    service.responses.input('q1', { changesAnswer: false })
+    expect(service.responses.latest()).toEqual({ itemId: 'q1', latencyMs: 2_000, baselineMs: null, cues: ['second_voice'] })
+    // A cue reported as happening after the answer began is not before it.
+    service.responses.present('q2', { chars: 0, difficulty: null, input: 'voice' })
+    service.responses.cue('gaze_down', Date.now() + 1_000)
+    service.responses.input('q2', { changesAnswer: false })
+    expect(service.responses.latest()?.cues).toEqual([])
+    await service.stop()
+  })
+
   it('submits nothing when no item was answered', async () => {
     const service = await startedService()
     service.responses.present('q1', { chars: 100, difficulty: 2, input: 'choice' })

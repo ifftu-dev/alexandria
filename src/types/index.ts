@@ -1135,8 +1135,11 @@ export interface WindowFeatures {
   response: ResponseFeatures | null
 }
 
-/** How a learner answers an item: the timing features are the same for each. */
-export type ResponseInputKind = 'choice' | 'text' | 'plugin'
+/**
+ * How a learner answers an item: the timing features are the same for each.
+ * `voice` is a spoken answer to a question heard in an interview.
+ */
+export type ResponseInputKind = 'choice' | 'text' | 'plugin' | 'voice'
 
 /**
  * Mirrors `alexandria_studio::integrity::ResponseFeatures`: per-visit
@@ -1409,6 +1412,43 @@ export interface TutoringTranscriptMessage {
   sender_name: string | null
   text: string
   confidence: number | null
+  timestamp: number
+}
+
+/** A voice the candidate's microphone heard start (`tutoring:voice-onset`). */
+export interface VoiceOnsetEvent {
+  /** Milliseconds since the Unix epoch. */
+  at_ms: number
+  /** `primary`: the voice heard on this device from the start; `other`: one pitched well apart from it. */
+  speaker: 'primary' | 'other'
+}
+
+/** The candidate's answer to a marked question, as their app timed it. */
+export interface InterviewAnswerSignal {
+  question_id: string
+  /** From the end of the question to the candidate's first speech. */
+  latency_ms: number
+  /** Median latency of the candidate's own first answers; null until three. */
+  baseline_ms: number | null
+  gaze_down_before: boolean
+  second_voice_before: boolean
+}
+
+/**
+ * Mirrors `tutoring::interview_signal::InterviewSignal` (serde's external
+ * tagging): the panel marks a question; the candidate's app sends an answer's
+ * timing or a second voice. Travels over the call's encrypted room channel.
+ */
+export type InterviewSignal =
+  | { question: { question_id: string } }
+  | { answer: InterviewAnswerSignal }
+  | 'second_voice'
+
+/** `tutoring:interview-signal`: a signal from another participant in the call. */
+export interface InterviewSignalMessage {
+  sender: string
+  sender_name: string | null
+  signal: InterviewSignal
   timestamp: number
 }
 

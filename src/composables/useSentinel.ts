@@ -818,7 +818,7 @@ function createSentinelService() {
       }
     }
 
-    const responseHistory = responseTracker.historyAfterSession()
+    const responseHistory = sessionPurpose === 'interview' ? [] : responseTracker.historyAfterSession()
     if (responseHistory.length > 0) profile.responsePattern = { recent: responseHistory }
 
     profile.lastUpdated = Date.now()
@@ -1207,7 +1207,10 @@ function createSentinelService() {
     if (profile) loadAIModels(profile)
     if (generation !== lifecycleGeneration) return
     responseTracker.reset()
-    responseTracker.setHistory(profile?.responsePattern?.recent ?? [])
+    // Spoken interview turns and assessment clicks are different responses:
+    // an interview's baseline is its own first answers, and it leaves the
+    // device's assessment history alone.
+    responseTracker.setHistory(purpose === 'interview' ? [] : (profile?.responsePattern?.recent ?? []))
 
     try {
       const response = await invoke<StartSessionResponse>('integrity_start_session', { enrollmentId, purpose })
@@ -2348,6 +2351,7 @@ function createSentinelService() {
       present: responseTracker.present,
       input: responseTracker.input,
       cue: responseTracker.cue,
+      latest: responseTracker.latest,
     },
     stopForProfileLock,
     setElement,

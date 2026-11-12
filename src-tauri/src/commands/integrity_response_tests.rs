@@ -348,3 +348,67 @@ fn response_timing_no_honest_collector_produces_is_refused_before_writing() {
         .unwrap();
     assert_eq!(count, 0);
 }
+
+/// A spoken answer in an interview: nothing to read, timed from the end of
+/// the interviewer's question to the candidate's first speech.
+fn spoken(id: &str, first_input_ms: f64) -> ItemResponse {
+    ItemResponse {
+        item_id: id.into(),
+        input: InputKind::Voice,
+        chars: 0,
+        difficulty: None,
+        first_input_ms,
+        commit_ms: first_input_ms,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_spoken_answer_that_starts_straight_after_the_question_is_turn_taking() {
+    let db = session_db();
+    // Conversational turns start within a few hundred milliseconds; a heard
+    // question has no reading floor.
+    let snapshot = submit(
+        &db,
+        ResponseFeatures {
+            items: vec![spoken("q1", 250.0), spoken("q2", 400.0)],
+            ..Default::default()
+        },
+    );
+    assert!(
+        snapshot.anomaly_flags.is_empty(),
+        "{:?}",
+        snapshot.anomaly_flags
+    );
+    assert_eq!(
+        read_session(db.conn(), "rp-session")
+            .unwrap()
+            .response_items,
+        2
+    );
+}
+
+#[test]
+fn spoken_answers_that_all_wait_for_a_relay_are_judged_against_the_candidates_own_turns() {
+    let db = session_db();
+    let own_turns = ResponseBaseline {
+        source: BaselineSource::Attempt,
+        items: vec![
+            BaselineItem {
+                chars: 0,
+                difficulty: None,
+                first_input_ms: 600.0,
+            };
+            3
+        ],
+    };
+    let snapshot = submit(
+        &db,
+        ResponseFeatures {
+            items: vec![spoken("q4", 5_200.0), spoken("q5", 5_600.0)],
+            baseline: Some(own_turns),
+            ..Default::default()
+        },
+    );
+    assert_eq!(snapshot.anomaly_flags, ["response_relay_lag"]);
+}

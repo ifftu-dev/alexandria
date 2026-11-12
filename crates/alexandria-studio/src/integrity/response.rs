@@ -48,6 +48,10 @@ pub enum InputKind {
     Choice,
     Text,
     Plugin,
+    /// A spoken answer to a question heard in an interview held in
+    /// Alexandria, timed from the end of the question to the first speech.
+    /// A heard question has no reading floor: answering at once is turn-taking.
+    Voice,
 }
 
 /// Response timing for the items the learner worked on in one window.
@@ -223,10 +227,10 @@ impl ResponseFeatures {
     /// order.
     pub(crate) fn flags(&self) -> Vec<&'static str> {
         let mut flags = Vec::new();
-        if self
-            .first_visits()
-            .any(|i| i.first_input_ms < reading_floor_ms(i.chars, i.difficulty))
-        {
+        if self.first_visits().any(|i| {
+            i.input != InputKind::Voice
+                && i.first_input_ms < reading_floor_ms(i.chars, i.difficulty)
+        }) {
             flags.push("response_below_reading_floor");
         }
         if self.relay_lag() {
