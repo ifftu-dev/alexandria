@@ -47,6 +47,8 @@
 //!   flagged sessions; nothing is persisted without an explicit yes
 //! - `verification` — verification results (probe outcomes) folded into a
 //!   session's commitment chain, and the summary the credential reads
+//! - `surface` — what a credential says about its session, derived at
+//!   issuance: profile, signals, verification rung, probes, coverage
 //!
 //! Replaces `src/utils/sentinel/*.ts`. The frontend now buffers raw
 //! events and sends them across IPC; everything else runs in this
@@ -75,6 +77,7 @@ pub mod prior_blob;
 pub mod processes;
 pub mod scoring;
 pub mod snapshots;
+pub mod surface;
 pub mod trust_profile;
 pub mod types;
 pub mod verification;

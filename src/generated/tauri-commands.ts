@@ -227,6 +227,7 @@ export const TAURI_COMMANDS = [
   "instructor_inbox",
   "instructor_overview",
   "integrity_attest_session",
+  "integrity_coverage_statement",
   "integrity_end_session",
   "integrity_get_session",
   "integrity_list_sessions",

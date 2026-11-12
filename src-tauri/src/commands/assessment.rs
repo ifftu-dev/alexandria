@@ -73,9 +73,8 @@ pub struct AttemptRoleTarget {
     pub role_assessment_id: String,
     pub role_title: String,
     pub org_name: String,
-    /// True when the role's issuance policy sets `min_camera_coverage > 0`.
+    /// True when the role's minimum trust profile runs the camera.
     pub camera_required: bool,
-    pub min_camera_coverage: Option<f64>,
 }
 
 /// `(id, question_ids, option_orders, draft_answers_json, role_assessment_id)`
@@ -108,14 +107,14 @@ fn map_role_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleRow> {
             })
         })
         .transpose()?;
-    let min_camera_coverage = policy.and_then(|p| p.min_camera_coverage);
+    let floor = policy.and_then(|p| p.min_trust_profile);
     Ok(RoleRow {
         target: AttemptRoleTarget {
             role_assessment_id: r.get(0)?,
             role_title: r.get(1)?,
             org_name: r.get(2)?,
-            camera_required: min_camera_coverage.is_some_and(|c| c > 0.0),
-            min_camera_coverage,
+            camera_required: floor
+                .is_some_and(|f| f.includes(crate::sentinel::scoring::ProfileSignal::Camera)),
         },
         status: r.get(4)?,
         skill_ids: r
@@ -1245,6 +1244,15 @@ pub(crate) fn grade_attempt_with_manifest(
     };
     let passed = score >= threshold;
 
+    // The score is on the row before issuance (inside this transaction), so
+    // the integrity assertion derives the attempt's consistency rung from
+    // the attempt itself.
+    conn.execute(
+        "UPDATE assessment_attempts SET score = ?1 WHERE id = ?2",
+        params![score, attempt_id],
+    )
+    .map_err(|e| e.to_string())?;
+
     // The outcome against the learner's own history, before the assertion
     // is built: a measured divergence can move the session to review.
     crate::sentinel::consistency::apply_at_grading(conn, attempt_id, score, manifest)?;
@@ -1669,6 +1677,53 @@ mod tests {
         assert_eq!(
             integrity_status(&ctx, result.credential_id),
             serde_json::json!("review")
+        );
+    }
+
+    #[test]
+    fn a_pass_in_step_with_the_learners_history_is_issued_on_the_consistent_rung() {
+        use crate::sentinel::verification::{
+            record_verification, NewVerification, VerificationOutcome,
+        };
+        let ctx = setup();
+        let conn = ctx.db.conn();
+        // The day before: an attempt on the skill with every item right.
+        failed_earlier_attempt(&ctx);
+        conn.execute("UPDATE attempt_items SET score = 1.0", [])
+            .unwrap();
+        // Both items observed, and a probe on them satisfied in the session.
+        conn.execute(
+            "UPDATE integrity_sessions SET response_items = 2 WHERE id = 'test-session'",
+            [],
+        )
+        .unwrap();
+        record_verification(
+            conn,
+            &NewVerification {
+                session_id: "test-session",
+                attempt_id: Some("att_1"),
+                step: "probe",
+                policy: "reseed",
+                outcome: VerificationOutcome::Satisfied,
+                reason: None,
+                subject_ref: None,
+                detail: serde_json::json!({}),
+            },
+        )
+        .unwrap();
+
+        let result = grade(&ctx, &[answer("q1", &[0]), answer("q2", &[1])]);
+        let json: String = conn
+            .query_row(
+                "SELECT signed_vc_json FROM credentials WHERE id=?1",
+                [result.credential_id.expect("a credential")],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let vc: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            vc.pointer("/integrity/verificationRung"),
+            Some(&serde_json::json!("consistent"))
         );
     }
 
@@ -2421,7 +2476,7 @@ mod role_target_tests {
         org_id: &str,
         title: &str,
         skills: &[&str],
-        camera: Option<f64>,
+        floor: Option<TrustProfile>,
     ) -> String {
         let req = CreateRoleAssessmentRequest {
             org_id: org_id.into(),
@@ -2430,7 +2485,7 @@ mod role_target_tests {
             course_id: None,
             skill_ids: skills.iter().map(|s| (*s).to_string()).collect(),
             issuance_policy: Some(IssuancePolicy {
-                min_camera_coverage: camera,
+                min_trust_profile: floor,
                 ..Default::default()
             }),
             required_assurance_level: None,
@@ -2450,7 +2505,7 @@ mod role_target_tests {
             &org.id,
             "Rust Dev",
             &["skill_rust", "skill_go"],
-            Some(0.8),
+            Some(TrustProfile::Camera),
         );
         let _go_only = role(conn, &org.id, "Go Dev", &["skill_go"], None);
         let archived = role(conn, &org.id, "Old Rust", &["skill_rust"], None);
@@ -2461,7 +2516,6 @@ mod role_target_tests {
         assert_eq!(open[0].role_assessment_id, rust);
         assert_eq!(open[0].org_name, "Acme");
         assert!(open[0].camera_required);
-        assert_eq!(open[0].min_camera_coverage, Some(0.8));
         assert!(open_roles_for_skill(conn, "skill_py").unwrap().is_empty());
     }
 
@@ -2470,7 +2524,13 @@ mod role_target_tests {
         let db = setup();
         let conn = db.conn();
         let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
-        let id = role(conn, &org.id, "Rust Dev", &["skill_rust"], Some(0.8));
+        let id = role(
+            conn,
+            &org.id,
+            "Rust Dev",
+            &["skill_rust"],
+            Some(TrustProfile::Camera),
+        );
         conn.execute(
             "UPDATE role_assessments SET issuance_policy_json = '{not json' WHERE id = ?1",
             params![id],
@@ -2481,11 +2541,17 @@ mod role_target_tests {
     }
 
     #[test]
-    fn a_zero_coverage_policy_does_not_require_the_camera() {
+    fn a_floor_without_the_camera_does_not_require_it() {
         let db = setup();
         let conn = db.conn();
         let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
-        role(conn, &org.id, "Rust Dev", &["skill_rust"], Some(0.0));
+        role(
+            conn,
+            &org.id,
+            "Rust Dev",
+            &["skill_rust"],
+            Some(TrustProfile::Attested),
+        );
         let open = open_roles_for_skill(conn, "skill_rust").unwrap();
         assert!(!open[0].camera_required);
     }
@@ -2515,7 +2581,7 @@ mod role_target_tests {
     fn a_new_attempt_stores_the_chosen_role_and_a_resume_reports_it() {
         let db = setup();
         let org = create_organization_impl(db.conn(), "Acme", "stake_owner", None, NOW).unwrap();
-        let rust = role(db.conn(), &org.id, "Rust Dev", &["skill_rust"], Some(0.9));
+        let rust = role(db.conn(), &org.id, "Rust Dev", &["skill_rust"], None);
 
         let started = start_attempt_db(
             &db,
@@ -2529,7 +2595,6 @@ mod role_target_tests {
         .unwrap();
         let role = started.role.expect("role target");
         assert_eq!(role.role_assessment_id, rust);
-        assert!(role.camera_required);
         let stored: Option<String> = db
             .conn()
             .query_row(

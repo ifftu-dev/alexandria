@@ -13,8 +13,8 @@ use super::{status_list, CredentialError, Issuer, PolicyViolation, SupersessionR
 use crate::crypto::did::Did;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
-    integrity_hash_of, Claim, CredentialStatus, CredentialType, IntegrityAssertion, Proof,
-    VerifiableCredential,
+    integrity_hash_of, Claim, CredentialStatus, CredentialType, IntegrityAssertion, ProbeSummary,
+    Proof, VerifiableCredential,
 };
 
 /// Issuance-time integrity gate (§ Integrity→VC bridge). When an
@@ -43,16 +43,12 @@ pub struct IssuancePolicy {
     /// `"local"` is currently achievable.
     #[serde(default)]
     pub required_assurance_level: Option<String>,
-    /// Minimum fraction of snapshots (in `[0,1]`) captured with the camera
-    /// opted in. `Some(1.0)` means the camera was on for the whole
-    /// session; a session with no snapshots never satisfies it. Evaluated
-    /// against the stored snapshots, not the embedded assertion, so the VC
-    /// schema is unchanged.
-    #[serde(default)]
-    pub min_camera_coverage: Option<f64>,
     /// Probe policy for attempts made for this role. Overrides the
-    /// assessment's own policy when set to anything but `none`. Chooses which
-    /// probes run after submission; it is not an issuance bound by itself.
+    /// assessment's own policy when set to anything but `none`, and chooses
+    /// which probes run after submission. At issuance, anything but `none`
+    /// requires that the probe step ran under it and that no probe failed;
+    /// a skipped probe never counts against the learner (require a satisfied
+    /// one with `min_verification_rung: probed`).
     #[serde(default)]
     pub probe_policy: Option<crate::assessment::probes::ProbePolicy>,
     /// Minimum trust profile (the policy floor). Judged at attempt start and
@@ -60,6 +56,9 @@ pub struct IssuancePolicy {
     /// two judgements agree.
     #[serde(default)]
     pub min_trust_profile: Option<crate::sentinel::scoring::TrustProfile>,
+    /// Minimum verification rung, judged at issuance from the session.
+    #[serde(default)]
+    pub min_verification_rung: Option<crate::sentinel::scoring::VerificationRung>,
 }
 
 impl IssuancePolicy {
@@ -105,22 +104,12 @@ impl IssuancePolicy {
                 });
             }
         }
-        if let Some(min) = self.min_camera_coverage {
-            match facts.camera_coverage {
-                Some(coverage) if coverage >= min => {}
-                Some(coverage) => {
-                    return Err(PolicyViolation::CameraCoverageBelowMinimum { coverage, min })
-                }
-                None => return Err(PolicyViolation::NoSnapshots),
-            }
-        }
         if let Some(floor) = self.min_trust_profile {
             use crate::sentinel::scoring::evaluate_floor;
             // Judged again from the session as it stands: the attestation
-            // counts only if it verifies now.
-            let credited =
-                a.assurance_level == crate::sentinel::attestation::ASSURANCE_DEVICE_ATTESTED;
-            let now = evaluate_floor(facts.trust_profile, Some(floor), credited);
+            // counts only if it verifies now, the camera only if its
+            // coverage meets the profile's minimum.
+            let now = evaluate_floor(facts.trust_profile, Some(floor), &facts.uncredited);
             if !now.satisfied {
                 return Err(PolicyViolation::TrustProfileBelowFloor {
                     profile: facts
@@ -138,43 +127,65 @@ impl IssuancePolicy {
                 });
             }
         }
+        if let Some(required) = self.min_verification_rung {
+            if facts.rung < required {
+                return Err(PolicyViolation::RungBelowMinimum {
+                    rung: facts.rung.as_str().to_string(),
+                    required: required.as_str().to_string(),
+                });
+            }
+        }
+        if let Some(policy) = self
+            .probe_policy
+            .filter(|p| *p != crate::assessment::probes::ProbePolicy::None)
+        {
+            let name = policy.as_str().to_string();
+            match &facts.probe {
+                Some(p) if p.policies.contains(&name) => {
+                    if p.failed > 0 {
+                        return Err(PolicyViolation::ProbeFailed { policy: name });
+                    }
+                }
+                _ => return Err(PolicyViolation::ProbePolicyNotRun { policy: name }),
+            }
+        }
         Ok(())
     }
 }
 
 /// Facts about the bound session that the assertion does not carry but a
-/// policy may gate on. Read from the session's snapshots at issuance.
+/// policy may gate on. Derived from the session at issuance.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SessionFacts {
-    /// `camera snapshots / all snapshots`, or `None` without snapshots.
-    pub camera_coverage: Option<f64>,
     /// The session's locked trust profile, if one was chosen.
     pub trust_profile: Option<crate::sentinel::scoring::TrustProfile>,
+    /// Signals the profile runs that do not count towards a floor now.
+    pub uncredited: Vec<crate::sentinel::scoring::ProfileSignal>,
     /// The policy floor as judged at attempt start or interview-check
     /// acceptance.
     pub recorded_floor: Option<crate::sentinel::scoring::PolicyFloor>,
+    /// The verification rung the session reached.
+    pub rung: crate::sentinel::scoring::VerificationRung,
+    /// The probe step's results, when it ran.
+    pub probe: Option<crate::sentinel::surface::ProbeOutcome>,
 }
 
 impl SessionFacts {
-    fn load(conn: &Connection, session_id: &str) -> Result<Self, CredentialError> {
-        let (total, with_camera): (i64, i64) = conn.query_row(
-            "SELECT COUNT(*),
-                        COALESCE(SUM(CASE WHEN camera_score IS NOT NULL THEN 1 ELSE 0 END), 0)
-                 FROM integrity_snapshots WHERE session_id = ?1",
+    fn load(
+        conn: &Connection,
+        session_id: &str,
+        surface: &crate::sentinel::surface::SessionSurface,
+    ) -> Result<Self, CredentialError> {
+        let floor: Option<String> = conn.query_row(
+            "SELECT policy_floor_json FROM integrity_sessions WHERE id = ?1",
             params![session_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
-        let (profile, floor): (Option<String>, Option<String>) = conn.query_row(
-            "SELECT trust_profile, policy_floor_json FROM integrity_sessions WHERE id = ?1",
-            params![session_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| r.get(0),
         )?;
         Ok(Self {
-            camera_coverage: (total > 0).then(|| with_camera as f64 / total as f64),
-            // The column's CHECK admits only known profiles.
-            trust_profile: profile
-                .as_deref()
-                .and_then(crate::sentinel::scoring::TrustProfile::parse),
+            trust_profile: surface.trust_profile,
+            uncredited: surface.uncredited.clone(),
+            rung: surface.rung,
+            probe: surface.probe.clone(),
             // An unreadable judgement is no judgement: issuance then refuses.
             recorded_floor: floor.and_then(|j| serde_json::from_str(&j).ok()),
         })
@@ -182,17 +193,23 @@ impl SessionFacts {
 }
 
 /// Load an integrity session and summarise it as an `IntegrityAssertion`
-/// for embedding at issuance. `assurance_level` is `local` unless the
-/// session's stored device attestation verifies right now against `trust`
-/// (see `sentinel::attestation::effective_assurance`); the stored level is
-/// never copied. No anchor reference is embedded.
+/// for embedding at issuance, with the facts a policy gates on.
+/// `assurance_level` is `local` unless the session's stored device
+/// attestation verifies right now against `trust` (see
+/// `sentinel::attestation::effective_assurance`); the stored level is never
+/// copied. The profile, signals, rung, probe summary and coverage statement
+/// are derived from the session (`sentinel::surface`). No anchor reference
+/// is embedded.
 pub(crate) fn build_integrity_assertion(
     conn: &Connection,
     session_id: &str,
     now: &str,
     trust: &crate::sentinel::attestation::TrustConfig,
-) -> Result<IntegrityAssertion, CredentialError> {
-    use crate::sentinel::attestation::{effective_assurance, SessionAttestationFacts};
+) -> Result<(IntegrityAssertion, SessionFacts), CredentialError> {
+    use crate::sentinel::attestation::{
+        effective_assurance, SessionAttestationFacts, ASSURANCE_DEVICE_ATTESTED,
+    };
+    use crate::sentinel::scoring::{active_certification, active_manifest};
     let row = conn
         .query_row(
             "SELECT status, integrity_score, critical_count, warning_count, commitment_root,
@@ -239,7 +256,17 @@ pub(crate) fn build_integrity_assertion(
             "session {session_id}: device attestation not credited: {why:?}"
         );
     }
-    Ok(IntegrityAssertion {
+    let certification = active_certification();
+    let surface = crate::sentinel::surface::session_surface(
+        conn,
+        session_id,
+        assurance_level == ASSURANCE_DEVICE_ATTESTED,
+        &active_manifest(),
+        certification.as_ref().map(|(c, d)| (c, d.as_str())),
+    )
+    .map_err(CredentialError::Profile)?;
+    let session_facts = SessionFacts::load(conn, session_id, &surface)?;
+    let assertion = IntegrityAssertion {
         session_id: session_id.to_string(),
         status,
         integrity_score,
@@ -249,7 +276,21 @@ pub(crate) fn build_integrity_assertion(
         commitment_root,
         anchor_ref: None,
         generated_at: now.to_string(),
-    })
+        trust_profile: surface.trust_profile.map(|p| p.as_str().to_string()),
+        verification_rung: Some(surface.rung.as_str().to_string()),
+        coverage_statement_digest: surface.coverage.as_ref().map(|c| c.digest()),
+        signals_run: surface.signals_run,
+        signals_degraded: surface.signals_degraded,
+        signals_not_run: surface.signals_not_run,
+        probe: surface.probe.map(|p| ProbeSummary {
+            outcome: p.outcome.as_str().to_string(),
+            policies: p.policies,
+            satisfied: p.satisfied,
+            failed: p.failed,
+            skipped: p.skipped,
+        }),
+    };
+    Ok((assertion, session_facts))
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -330,14 +371,13 @@ pub fn issue(
     // policy embeds the attestation but gates on nothing.
     let integrity = match &req.integrity_session_id {
         Some(session_id) => {
-            let assertion = build_integrity_assertion(
+            let (assertion, facts) = build_integrity_assertion(
                 conn,
                 session_id,
                 now,
                 &crate::sentinel::attestation::TrustConfig::from_profile(),
             )?;
             if let Some(policy) = &req.integrity_policy {
-                let facts = SessionFacts::load(conn, session_id)?;
                 policy.evaluate(&assertion, &facts)?;
             }
             Some(assertion)
@@ -478,13 +518,23 @@ mod tests {
         .unwrap();
     }
 
-    fn seed_snapshot(conn: &Connection, session: &str, id: &str, camera: Option<f64>) {
-        conn.execute(
-            "INSERT INTO integrity_snapshots (id, session_id, camera_score, composite_score, captured_at)
-             VALUES (?1, ?2, ?3, 0.9, ?4)",
-            params![id, session, camera, NOW],
-        )
-        .unwrap();
+    /// `windows` committed windows for `session`, the first `degraded` of
+    /// them without camera checks.
+    fn camera_windows(conn: &Connection, session: &str, windows: usize, degraded: usize) {
+        for i in 0..windows {
+            let (camera, flags) = if i < degraded {
+                (None, r#"["camera_degraded"]"#)
+            } else {
+                (Some(0.9), "[]")
+            };
+            conn.execute(
+                "INSERT INTO integrity_snapshots
+                     (id, session_id, camera_score, composite_score, captured_at, anomaly_flags)
+                 VALUES (?1, ?2, ?3, 0.9, ?4, ?5)",
+                params![format!("{session}-w{i}"), session, camera, NOW, flags],
+            )
+            .unwrap();
+        }
     }
 
     /// A live session that selected `profile` (with the camera benchmark
@@ -528,6 +578,320 @@ mod tests {
         .unwrap();
     }
 
+    /// A finished assessment session on a profile chosen from `camera`, whose
+    /// attempt served `served` items, `observed` of which the response
+    /// tracker saw the learner work through.
+    fn assessed(conn: &Connection, id: &str, camera: bool, served: usize, observed: i64) {
+        session_on_profile(conn, id, false, camera, None);
+        conn.execute(
+            "INSERT OR IGNORE INTO question_banks (id, skill_id, label) VALUES ('bank', 'skill_test', 'Test')",
+            [],
+        )
+        .unwrap();
+        let ids: Vec<String> = (0..served).map(|i| format!("q{i}")).collect();
+        conn.execute(
+            "INSERT INTO assessment_attempts
+                 (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders,
+                  integrity_session_id, started_at)
+             VALUES (?1, ?5, 'bank', 'skill_test', 1, ?2, '[]', ?3, ?4)",
+            params![
+                format!("att-{id}"),
+                serde_json::to_string(&ids).unwrap(),
+                id,
+                NOW,
+                format!("did:key:{id}")
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE integrity_sessions SET response_items = ?2 WHERE id = ?1",
+            params![id, observed],
+        )
+        .unwrap();
+    }
+
+    fn assertion_for(
+        conn: &Connection,
+        key: &Issuer,
+        subject: &Did,
+        session: &str,
+    ) -> IntegrityAssertion {
+        let mut req = sample_request(subject.clone());
+        req.integrity_session_id = Some(session.into());
+        issue(conn, key, &req, NOW)
+            .unwrap()
+            .integrity
+            .expect("integrity assertion embedded")
+    }
+
+    #[test]
+    fn the_assertion_names_profile_rung_and_signals_and_its_coverage_statement_resolves() {
+        use crate::domain::vc::{verify_credential_db, VerificationPolicy};
+        use crate::sentinel::scoring::{
+            resolve_coverage_statement, TrustProfile, VerificationRung,
+        };
+        let (db, key, _, subject) = setup();
+        assessed(db.conn(), "seen", false, 3, 3);
+        let mut req = sample_request(subject.clone());
+        req.integrity_session_id = Some("seen".into());
+        let vc = issue(db.conn(), &key, &req, NOW).unwrap();
+        // The new fields are inside the signed envelope: the stored JSON, as
+        // a verifier receives it, still verifies.
+        let stored: VerifiableCredential =
+            serde_json::from_str(&serde_json::to_string(&vc).unwrap()).unwrap();
+        let verified =
+            verify_credential_db(db.conn(), &stored, NOW, &VerificationPolicy::default());
+        assert!(verified.valid_signature);
+        let json = serde_json::to_value(&vc).unwrap();
+        assert_eq!(
+            json.pointer("/integrity/trustProfile"),
+            Some(&"core".into())
+        );
+
+        let a = vc.integrity.expect("integrity assertion embedded");
+        assert_eq!(a.trust_profile.as_deref(), Some("core"));
+        assert_eq!(a.verification_rung.as_deref(), Some("process"));
+        assert_eq!(a.signals_run, vec!["core"]);
+        assert_eq!(a.signals_not_run, vec!["device_attestation", "camera"]);
+        assert!(a.signals_degraded.is_empty());
+        assert_eq!(a.probe, None);
+
+        let digest = a.coverage_statement_digest.expect("coverage digest");
+        let statement = resolve_coverage_statement(&digest).expect("bundled statement");
+        assert_eq!(
+            (statement.profile, statement.rung),
+            (TrustProfile::Core, VerificationRung::Process)
+        );
+        assert!(statement.certification.is_none());
+        assert!(statement
+            .not_checked
+            .iter()
+            .any(|line| line.contains("second person")));
+    }
+
+    #[test]
+    fn items_the_learner_was_never_seen_working_leave_the_rung_at_none() {
+        let (db, key, _, subject) = setup();
+        assessed(db.conn(), "partial", false, 3, 2);
+        let a = assertion_for(db.conn(), &key, &subject, "partial");
+        assert_eq!(a.verification_rung.as_deref(), Some("none"));
+
+        // A session with no attempt behind it has no response process either.
+        session_on_profile(db.conn(), "bare", false, false, None);
+        let a = assertion_for(db.conn(), &key, &subject, "bare");
+        assert_eq!(a.verification_rung.as_deref(), Some("none"));
+    }
+
+    /// Record a verification result in a finished session, as if it had
+    /// been recorded before monitoring ended.
+    fn verified(conn: &Connection, session: &str, step: &str, policy: &str, outcome: &str) {
+        use crate::sentinel::verification::{record_verification, NewVerification};
+        let outcome = match outcome {
+            "satisfied" => crate::sentinel::verification::VerificationOutcome::Satisfied,
+            "failed" => crate::sentinel::verification::VerificationOutcome::Failed,
+            _ => crate::sentinel::verification::VerificationOutcome::Skipped,
+        };
+        conn.execute(
+            "UPDATE integrity_sessions SET ended_at = NULL WHERE id = ?1",
+            [session],
+        )
+        .unwrap();
+        record_verification(
+            conn,
+            &NewVerification {
+                session_id: session,
+                attempt_id: None,
+                step,
+                policy,
+                outcome,
+                reason: None,
+                subject_ref: None,
+                detail: serde_json::json!({}),
+            },
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE integrity_sessions SET ended_at = ?2 WHERE id = ?1",
+            params![session, NOW],
+        )
+        .unwrap();
+    }
+
+    /// The session's attempt scored `score`, after `prior` graded items on
+    /// the same skill scored `prior_score` a day before it started.
+    fn scored_with_history(
+        conn: &Connection,
+        session: &str,
+        score: f64,
+        prior: usize,
+        prior_score: f64,
+    ) {
+        conn.execute(
+            "UPDATE assessment_attempts SET score = ?2 WHERE integrity_session_id = ?1",
+            params![session, score],
+        )
+        .unwrap();
+        let earlier = format!("prior-{session}");
+        conn.execute(
+            "INSERT INTO assessment_attempts
+                 (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, started_at)
+             VALUES (?1, ?2, 'bank', 'skill_test', 2, '[]', '[]', '2026-04-11T00:00:00Z')",
+            params![earlier, format!("did:key:{session}")],
+        )
+        .unwrap();
+        for i in 0..prior {
+            conn.execute(
+                "INSERT INTO attempt_items (attempt_id, ordinal, item_id, score, graded_at)
+                 VALUES (?1, ?2, ?3, ?4, '2026-04-12T00:00:00Z')",
+                params![earlier, i as i64, format!("p{i}"), prior_score],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn satisfied_probes_raise_the_rung_and_skipped_ones_leave_it_at_process() {
+        let (db, key, _, subject) = setup();
+        assessed(db.conn(), "probed", false, 2, 2);
+        verified(db.conn(), "probed", "probe", "reseed", "satisfied");
+        verified(db.conn(), "probed", "probe", "reseed", "satisfied");
+        let a = assertion_for(db.conn(), &key, &subject, "probed");
+        assert_eq!(a.verification_rung.as_deref(), Some("probed"));
+        assert_eq!(
+            a.probe,
+            Some(ProbeSummary {
+                outcome: "satisfied".into(),
+                policies: vec!["reseed".into()],
+                satisfied: 2,
+                failed: 0,
+                skipped: 0,
+            })
+        );
+
+        // A probe that timed out never counts against the learner, but the
+        // probe policy was not satisfied either.
+        assessed(db.conn(), "timeout", false, 2, 2);
+        verified(db.conn(), "timeout", "probe", "reseed", "satisfied");
+        verified(db.conn(), "timeout", "probe", "reseed", "skipped");
+        let a = assertion_for(db.conn(), &key, &subject, "timeout");
+        assert_eq!(a.verification_rung.as_deref(), Some("process"));
+        assert_eq!(a.probe.as_ref().map(|p| p.skipped), Some(1));
+    }
+
+    #[test]
+    fn consistency_with_history_and_a_live_segment_climb_the_ladder_in_order() {
+        let (db, key, _, subject) = setup();
+        assessed(db.conn(), "steady", false, 2, 2);
+        verified(db.conn(), "steady", "probe", "authored", "satisfied");
+        scored_with_history(db.conn(), "steady", 0.9, 6, 1.0);
+        let a = assertion_for(db.conn(), &key, &subject, "steady");
+        assert_eq!(a.verification_rung.as_deref(), Some("consistent"));
+
+        verified(db.conn(), "steady", "interview", "live", "satisfied");
+        let a = assertion_for(db.conn(), &key, &subject, "steady");
+        assert_eq!(a.verification_rung.as_deref(), Some("live"));
+
+        // Too little history: consistency is not established, so a live
+        // segment cannot stand on it.
+        assessed(db.conn(), "new", false, 2, 2);
+        verified(db.conn(), "new", "probe", "authored", "satisfied");
+        verified(db.conn(), "new", "interview", "live", "satisfied");
+        scored_with_history(db.conn(), "new", 0.9, 1, 1.0);
+        let a = assertion_for(db.conn(), &key, &subject, "new");
+        assert_eq!(a.verification_rung.as_deref(), Some("probed"));
+
+        // History that fails the skill throughout does not agree with a pass.
+        assessed(db.conn(), "odd", false, 2, 2);
+        verified(db.conn(), "odd", "probe", "authored", "satisfied");
+        scored_with_history(db.conn(), "odd", 1.0, 8, 0.0);
+        let a = assertion_for(db.conn(), &key, &subject, "odd");
+        assert_eq!(a.verification_rung.as_deref(), Some("probed"));
+    }
+
+    #[test]
+    fn a_minimum_rung_refuses_issuance_below_it() {
+        use crate::sentinel::scoring::VerificationRung;
+        let (db, key, _, subject) = setup();
+        let mut req = sample_request(subject);
+        req.integrity_policy = Some(IssuancePolicy {
+            min_verification_rung: Some(VerificationRung::Probed),
+            ..Default::default()
+        });
+        assessed(db.conn(), "process", false, 2, 2);
+        req.integrity_session_id = Some("process".into());
+        let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                CredentialError::Policy(PolicyViolation::RungBelowMinimum { rung, required })
+                    if rung == "process" && required == "probed"
+            ),
+            "{err:?}"
+        );
+        assert_eq!(
+            err.to_string(),
+            "issuance policy: verification rung 'process' does not meet the 'probed' minimum"
+        );
+
+        verified(db.conn(), "process", "probe", "reseed", "satisfied");
+        assert!(issue(db.conn(), &key, &req, NOW).is_ok());
+    }
+
+    #[test]
+    fn a_role_probe_policy_must_have_run_and_must_not_have_failed() {
+        use crate::assessment::probes::ProbePolicy;
+        let (db, key, _, subject) = setup();
+        let mut req = sample_request(subject);
+        req.integrity_policy = Some(IssuancePolicy {
+            probe_policy: Some(ProbePolicy::Reseed),
+            ..Default::default()
+        });
+        let refusal = |req: &IssueCredentialRequest, session: &str| {
+            let mut req = req.clone();
+            req.integrity_session_id = Some(session.into());
+            issue(db.conn(), &key, &req, NOW)
+        };
+
+        // The learner never reached the probes.
+        assessed(db.conn(), "skipped_step", false, 2, 2);
+        assert!(matches!(
+            refusal(&req, "skipped_step").unwrap_err(),
+            CredentialError::Policy(PolicyViolation::ProbePolicyNotRun { .. })
+        ));
+
+        // Probes ran, but under another policy.
+        assessed(db.conn(), "other", false, 2, 2);
+        verified(db.conn(), "other", "probe", "authored", "satisfied");
+        assert!(matches!(
+            refusal(&req, "other").unwrap_err(),
+            CredentialError::Policy(PolicyViolation::ProbePolicyNotRun { .. })
+        ));
+
+        // A probe that failed is a failed verification.
+        assessed(db.conn(), "failed", false, 2, 2);
+        verified(db.conn(), "failed", "probe", "reseed", "failed");
+        let err = refusal(&req, "failed").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                CredentialError::Policy(PolicyViolation::ProbeFailed { .. })
+            ),
+            "{err:?}"
+        );
+
+        // Ran and timed out: never counts against the learner.
+        assessed(db.conn(), "timed_out", false, 2, 2);
+        verified(db.conn(), "timed_out", "probe", "reseed", "skipped");
+        assert!(refusal(&req, "timed_out").is_ok());
+
+        // `none` asks for nothing.
+        req.integrity_policy = Some(IssuancePolicy {
+            probe_policy: Some(ProbePolicy::None),
+            ..Default::default()
+        });
+        assert!(refusal(&req, "skipped_step").is_ok());
+    }
+
     fn floor_policy(floor: crate::sentinel::scoring::TrustProfile) -> IssuancePolicy {
         IssuancePolicy {
             min_trust_profile: Some(floor),
@@ -544,12 +908,14 @@ mod tests {
 
         // Judged at attempt start, met, and met again now.
         session_on_profile(db.conn(), "met", false, true, Some(TrustProfile::Camera));
+        camera_windows(db.conn(), "met", 3, 0);
         req.integrity_session_id = Some("met".into());
         assert!(issue(db.conn(), &key, &req, NOW).is_ok());
 
         // Never judged at attempt start: fail closed even though the session
         // runs the camera.
         session_on_profile(db.conn(), "unjudged", false, true, None);
+        camera_windows(db.conn(), "unjudged", 3, 0);
         req.integrity_session_id = Some("unjudged".into());
         assert!(matches!(
             issue(db.conn(), &key, &req, NOW).unwrap_err(),
@@ -563,6 +929,52 @@ mod tests {
             issue(db.conn(), &key, &req, NOW).unwrap_err(),
             CredentialError::Policy(PolicyViolation::TrustProfileBelowFloor { .. })
         ));
+    }
+
+    #[test]
+    fn a_camera_lost_for_too_much_of_the_session_no_longer_carries_a_camera_floor() {
+        use crate::sentinel::scoring::TrustProfile;
+        let (db, key, _, subject) = setup();
+        let mut req = sample_request(subject.clone());
+        req.integrity_policy = Some(floor_policy(TrustProfile::Camera));
+
+        // One window in ten without camera checks: degraded, and said so,
+        // but within the profile's coverage minimum.
+        session_on_profile(db.conn(), "brief", false, true, Some(TrustProfile::Camera));
+        camera_windows(db.conn(), "brief", 10, 1);
+        req.integrity_session_id = Some("brief".into());
+        let vc = issue(db.conn(), &key, &req, NOW).unwrap();
+        let a = vc.integrity.unwrap();
+        assert_eq!(a.trust_profile.as_deref(), Some("camera"));
+        assert_eq!(a.signals_run, vec!["core", "camera"]);
+        assert_eq!(a.signals_degraded, vec!["camera"]);
+        assert_eq!(a.signals_not_run, vec!["device_attestation"]);
+
+        // Half the session without the camera: the floor is not met.
+        session_on_profile(
+            db.conn(),
+            "covered",
+            false,
+            true,
+            Some(TrustProfile::Camera),
+        );
+        camera_windows(db.conn(), "covered", 4, 2);
+        req.integrity_session_id = Some("covered".into());
+        assert!(matches!(
+            issue(db.conn(), &key, &req, NOW).unwrap_err(),
+            CredentialError::Policy(PolicyViolation::TrustProfileBelowFloor { .. })
+        ));
+
+        // A camera session with no committed windows has no coverage at all.
+        session_on_profile(db.conn(), "empty", false, true, Some(TrustProfile::Camera));
+        req.integrity_session_id = Some("empty".into());
+        assert!(matches!(
+            issue(db.conn(), &key, &req, NOW).unwrap_err(),
+            CredentialError::Policy(PolicyViolation::TrustProfileBelowFloor { .. })
+        ));
+        // Without a floor it still issues, and the assertion says it degraded.
+        let a = assertion_for(db.conn(), &key, &subject, "empty");
+        assert_eq!(a.signals_degraded, vec!["camera"]);
     }
 
     #[test]
@@ -580,62 +992,15 @@ mod tests {
             issue(db.conn(), &key, &req, NOW).unwrap_err(),
             CredentialError::Policy(PolicyViolation::TrustProfileBelowFloor { .. })
         ));
-    }
-
-    #[test]
-    fn camera_coverage_gate_reads_snapshots() {
-        let (db, key, _, subject) = setup();
-        seed_session(db.conn(), "sess_cam", "completed", Some(0.9), 0, 0);
-        seed_snapshot(db.conn(), "sess_cam", "snap_1", Some(0.8));
-        seed_snapshot(db.conn(), "sess_cam", "snap_2", Some(0.7));
-        seed_snapshot(db.conn(), "sess_cam", "snap_3", None);
-        let mut req = sample_request(subject);
-        req.integrity_session_id = Some("sess_cam".into());
-
-        // 2 of 3 snapshots had the camera: 0.66 coverage.
-        req.integrity_policy = Some(IssuancePolicy {
-            min_camera_coverage: Some(0.5),
-            ..Default::default()
-        });
-        assert!(issue(db.conn(), &key, &req, NOW).is_ok());
-
-        req.integrity_policy = Some(IssuancePolicy {
-            min_camera_coverage: Some(0.9),
-            ..Default::default()
-        });
-        let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
-        assert!(
-            matches!(
-                err,
-                CredentialError::Policy(PolicyViolation::CameraCoverageBelowMinimum { .. })
-            ),
-            "{err:?}"
-        );
-        assert_eq!(
-            err.to_string(),
-            "issuance policy: camera coverage 0.67 below minimum 0.90"
-        );
-    }
-
-    #[test]
-    fn camera_coverage_gate_refuses_sessions_without_snapshots() {
-        let (db, key, _, subject) = setup();
-        seed_session(db.conn(), "sess_empty", "completed", Some(0.9), 0, 0);
-        let mut req = sample_request(subject);
-        req.integrity_session_id = Some("sess_empty".into());
-        req.integrity_policy = Some(IssuancePolicy {
-            min_camera_coverage: Some(0.1),
-            ..Default::default()
-        });
-        let err = issue(db.conn(), &key, &req, NOW).unwrap_err();
-        assert!(
-            matches!(err, CredentialError::Policy(PolicyViolation::NoSnapshots)),
-            "{err:?}"
-        );
-
-        // Without the camera bound, the same session issues fine.
-        req.integrity_policy = Some(IssuancePolicy::default());
-        assert!(issue(db.conn(), &key, &req, NOW).is_ok());
+        // Without the floor the credential issues and names the loss.
+        req.integrity_policy = None;
+        let a = issue(db.conn(), &key, &req, NOW)
+            .unwrap()
+            .integrity
+            .unwrap();
+        assert_eq!(a.trust_profile.as_deref(), Some("attested"));
+        assert_eq!(a.assurance_level, "local");
+        assert_eq!(a.signals_degraded, vec!["device_attestation"]);
     }
 
     #[test]

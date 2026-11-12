@@ -11,3 +11,17 @@ pub use alexandria_studio::integrity::*;
 pub fn active_manifest() -> RatioManifest {
     RatioManifest::uncertified()
 }
+
+/// The certification in force, with the digest of its exact bytes. `None`
+/// until a real (non-synthetic) certification is bundled; coverage
+/// statements then say that no signal has a certified rate.
+pub fn active_certification() -> Option<(measurement::Certification, String)> {
+    None
+}
+
+/// The coverage statement with `digest`, resolved offline from the
+/// statements bundled with the app under the certification in force.
+pub fn resolve_coverage_statement(digest: &str) -> Option<CoverageStatement> {
+    let certification = active_certification();
+    resolve_coverage(digest, certification.as_ref().map(|(c, d)| (c, d.as_str())))
+}

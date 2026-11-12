@@ -61,16 +61,18 @@ pub enum PolicyViolation {
     TooManyWarnings { count: i64, max: i64 },
     #[error("issuance policy: assurance level '{level}' does not meet required '{required}'")]
     AssuranceBelowRequired { level: String, required: String },
-    #[error("issuance policy: camera coverage {coverage:.2} below minimum {min:.2}")]
-    CameraCoverageBelowMinimum { coverage: f64, min: f64 },
-    #[error("issuance policy: camera coverage required but session has no snapshots")]
-    NoSnapshots,
     #[error("issuance policy: trust profile '{profile}' does not meet the '{required}' floor")]
     TrustProfileBelowFloor { profile: String, required: String },
     #[error(
         "issuance policy: the '{required}' floor judged before the first item does not match issuance"
     )]
     PolicyFloorDisagrees { required: String },
+    #[error("issuance policy: verification rung '{rung}' does not meet the '{required}' minimum")]
+    RungBelowMinimum { rung: String, required: String },
+    #[error("issuance policy: the '{policy}' probe step did not run in the session")]
+    ProbePolicyNotRun { policy: String },
+    #[error("issuance policy: a '{policy}' probe failed")]
+    ProbeFailed { policy: String },
 }
 
 #[derive(Debug, thiserror::Error)]

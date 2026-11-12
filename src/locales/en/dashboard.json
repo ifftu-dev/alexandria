@@ -127,7 +127,6 @@
       "emptyBody": "Create one for an organization.",
       "requiresClean": "requires a clean session",
       "minIntegrity": "min integrity {value}",
-      "minCameraCoverage": "min camera coverage {value}",
       "publish": "Publish",
       "archive": "Archive"
     },
@@ -167,7 +166,6 @@
       "minIntegrity": "Min integrity",
       "maxCritical": "Max critical",
       "maxWarning": "Max warning",
-      "minCameraCoverage": "Min camera coverage (0–1)",
       "requireClean": "Require a clean session",
       "assuranceLabel": "Required assurance level",
       "assuranceNone": "(none)"

@@ -20,6 +20,10 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Camera coverage the `camera` and `full` profiles need for the camera to
+/// count (see [`TrustProfile::min_camera_coverage`]).
+pub const MIN_CAMERA_COVERAGE: f64 = 0.9;
+
 /// A fixed set of signals a session runs, locked at session start.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -70,6 +74,14 @@ impl TrustProfile {
             TrustProfile::Camera => &[ProfileSignal::Camera],
             TrustProfile::Full => &[ProfileSignal::DeviceAttestation, ProfileSignal::Camera],
         }
+    }
+
+    /// The fraction of committed windows that must carry camera checks for
+    /// the camera to count towards a policy floor. A property of the camera
+    /// profiles, not a sponsor knob; an operating constant until measured.
+    pub fn min_camera_coverage(self) -> Option<f64> {
+        self.includes(ProfileSignal::Camera)
+            .then_some(MIN_CAMERA_COVERAGE)
     }
 
     pub fn includes(self, signal: ProfileSignal) -> bool {
@@ -229,14 +241,15 @@ pub struct PolicyFloor {
     pub missing: Vec<ProfileSignal>,
 }
 
-/// Judge `floor` against a session locked to `profile`. `attestation_credited`
-/// is whether the session's device attestation verifies at the time of the
-/// evaluation, so a profile that claimed it cannot carry a floor once the
-/// attestation stops verifying.
+/// Judge `floor` against a session locked to `profile`. `uncredited` lists
+/// the signals the profile runs that do not count at the time of the
+/// evaluation: an attestation that no longer verifies, or a camera whose
+/// coverage fell below the profile's minimum. A profile cannot carry a floor
+/// on a signal it has lost.
 pub fn evaluate_floor(
     profile: Option<TrustProfile>,
     floor: Option<TrustProfile>,
-    attestation_credited: bool,
+    uncredited: &[ProfileSignal],
 ) -> PolicyFloor {
     let missing: Vec<ProfileSignal> = floor
         .map(|f| f.signals())
@@ -245,8 +258,7 @@ pub fn evaluate_floor(
         .copied()
         .filter(|s| {
             let runs = profile.is_some_and(|p| p.includes(*s));
-            let credited = *s != ProfileSignal::DeviceAttestation || attestation_credited;
-            !(runs && credited)
+            !runs || uncredited.contains(s)
         })
         .collect();
     // With a floor, a session that never selected a profile cannot meet it,

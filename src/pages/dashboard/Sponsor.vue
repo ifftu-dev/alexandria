@@ -55,7 +55,6 @@ const roleForm = ref({
   min_integrity: '',
   max_critical: '',
   max_warning: '',
-  min_camera_coverage: '',
   require_clean: false,
   required_assurance_level: '',
 })
@@ -71,7 +70,6 @@ function buildPolicy(): IssuancePolicy | null {
   if (roleForm.value.min_integrity !== '') p.min_integrity = Number(roleForm.value.min_integrity)
   if (roleForm.value.max_critical !== '') p.max_critical = Number(roleForm.value.max_critical)
   if (roleForm.value.max_warning !== '') p.max_warning = Number(roleForm.value.max_warning)
-  if (roleForm.value.min_camera_coverage !== '') p.min_camera_coverage = Number(roleForm.value.min_camera_coverage)
   if (roleForm.value.require_clean) p.require_clean = true
   // required_assurance_level is folded in backend-side from the column.
   return Object.keys(p).length > 0 ? p : null
@@ -93,7 +91,7 @@ async function createRole() {
   if (ra) {
     roleForm.value = {
       org_id: '', role_title: '', job_description: '', skill_ids: '',
-      min_integrity: '', max_critical: '', max_warning: '', min_camera_coverage: '',
+      min_integrity: '', max_critical: '', max_warning: '',
       require_clean: false, required_assurance_level: '',
     }
     roleModalOpen.value = false
@@ -223,9 +221,6 @@ onMounted(async () => {
             <span v-if="ra.issuance_policy?.min_integrity != null" class="text-muted-foreground">
               {{ $t('dashboard.sponsor.roles.minIntegrity', { value: ra.issuance_policy.min_integrity }) }}
             </span>
-            <span v-if="ra.issuance_policy?.min_camera_coverage != null" class="text-muted-foreground">
-              {{ $t('dashboard.sponsor.roles.minCameraCoverage', { value: ra.issuance_policy.min_camera_coverage }) }}
-            </span>
             <span v-for="s in ra.skill_ids" :key="s" class="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{{ s }}</span>
           </div>
           <div class="mt-2 flex gap-2">
@@ -309,7 +304,6 @@ onMounted(async () => {
           <AppInput v-model="roleForm.max_critical" :label="$t('dashboard.sponsor.roleModal.maxCritical')" placeholder="0" type="number" />
           <AppInput v-model="roleForm.max_warning" :label="$t('dashboard.sponsor.roleModal.maxWarning')" placeholder="2" type="number" />
         </div>
-        <AppInput v-model="roleForm.min_camera_coverage" :label="$t('dashboard.sponsor.roleModal.minCameraCoverage')" placeholder="0.90" type="number" />
         <label class="flex items-center gap-2 text-sm text-foreground">
           <input v-model="roleForm.require_clean" type="checkbox" /> {{ $t('dashboard.sponsor.roleModal.requireClean') }}
         </label>

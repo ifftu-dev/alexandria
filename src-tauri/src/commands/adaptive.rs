@@ -497,8 +497,13 @@ pub fn finalize_adaptive_impl(
         .unwrap_or(0.7);
     let passed = score >= threshold;
 
-    // Same as the fixed path: the outcome against the learner's history,
-    // before the assertion is built.
+    // Same as the fixed path: the score on the row before issuance, then the
+    // outcome against the learner's history, before the assertion is built.
+    conn.execute(
+        "UPDATE assessment_attempts SET score = ?1 WHERE id = ?2",
+        params![score, attempt_id],
+    )
+    .map_err(|e| e.to_string())?;
     crate::sentinel::consistency::apply_at_grading(
         conn,
         attempt_id,

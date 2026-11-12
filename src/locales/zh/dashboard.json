@@ -127,7 +127,6 @@
       "emptyBody": "为某个组织创建一个。",
       "requiresClean": "需要一次无异常的会话",
       "minIntegrity": "最低诚信度 {value}",
-      "minCameraCoverage": "最低摄像头覆盖率 {value}",
       "publish": "发布",
       "archive": "归档"
     },
@@ -167,7 +166,6 @@
       "minIntegrity": "最低诚信度",
       "maxCritical": "最多严重项",
       "maxWarning": "最多警告项",
-      "minCameraCoverage": "最低摄像头覆盖率（0–1）",
       "requireClean": "要求一次无异常的会话",
       "assuranceLabel": "所需保障级别",
       "assuranceNone": "（无）"
