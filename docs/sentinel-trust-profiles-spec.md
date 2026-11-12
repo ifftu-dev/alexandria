@@ -247,3 +247,10 @@ Owner actions, not agent work (ticket 16):
 3. Put both keys, base64, into `play_integrity_response_keys` in the preprod network profile. The profile loader rejects anything that is not base64.
 4. Install a Play-distributed build (internal testing track) on an Android device and a signed build on an iPhone, run an assessment, and read the assurance level in the Sentinel dev panel.
 5. Run the red-team and clean-session protocol from the ticket-02 runbook to build the first real corpus (ticket 14).
+
+## Notes
+
+2026-11-12, cross-repo follow-up (ticket 15):
+
+- **Republish `alexandria-verify`.** The integrity assertion gained `trustProfile`, `verificationRung`, `coverageStatementDigest`, `signalsRun`, `signalsDegraded`, `signalsNotRun` and `probe` on `alexandria_verify::vc::IntegrityAssertion`. Verifiers re-serialise the typed credential to check its proof, so a verifier on the published 0.5.0 drops these fields and rejects every credential that carries them. Publish a new minor of the crate (the added public fields break struct-literal construction), then move Cloud and the website verifier to it, before credentials with these fields leave the device. The website's display of the new fields stays out of scope until then.
+- Doc updates for the work landed in `sentinel.md`, the protocol specification (§12, §14.7, §14.9.5), `ai-chat-spec.md` §13A, `skills-and-reputation.md`, `project-structure.md`, both Sentinel runbooks and the new repo `GLOSSARY.md`. `interview-assistant.md` still describes the panel without the live signal feed, authored follow-ups and **Ask now**; `sentinel.md` §Candidate integrity check covers them.
