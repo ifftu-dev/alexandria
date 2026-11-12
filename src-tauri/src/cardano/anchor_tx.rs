@@ -339,30 +339,41 @@ pub fn sponsor_utxo_is_spendable(
 /// Pick a spendable sponsor UTxO. Nodes choose by a hash of their issuer and
 /// the tip, so concurrent nodes spread across the pool instead of racing for
 /// the first entry. UTxOs this node's own in-flight transactions spend
-/// (`reserved`) are left out before the pick; with none left, the caller
-/// falls back to the issuer's wallet as when nothing is spendable.
+/// (`reserved`) are left out before the pick.
+///
+/// `Ok(None)` when no sponsor UTxO is spendable at all (the caller falls back
+/// to the issuer's wallet); [`WalletBusy`] when only this node's own
+/// in-flight anchors keep the spendable ones (the caller waits for them).
 pub fn select_sponsor_utxo<'a>(
     profile: &AnchorSponsorProfile,
     utxos: &'a [UTxO],
     tip_slot: u64,
     issuer: &Did,
     reserved: &ReservedOutpoints,
-) -> Option<&'a UTxO> {
-    let mut eligible: Vec<&UTxO> = utxos
+) -> Result<Option<&'a UTxO>, WalletBusy> {
+    let spendable: Vec<&UTxO> = utxos
         .iter()
-        .filter(|u| !reserved.contains(u) && sponsor_utxo_is_spendable(profile, u, tip_slot))
+        .filter(|u| sponsor_utxo_is_spendable(profile, u, tip_slot))
+        .collect();
+    if spendable.is_empty() {
+        return Ok(None);
+    }
+    let mut eligible: Vec<&UTxO> = spendable
+        .into_iter()
+        .filter(|u| !reserved.contains(u))
         .collect();
     if eligible.is_empty() {
-        return None;
+        return Err(WalletBusy);
     }
     eligible.sort_by(|a, b| (&a.tx_hash, a.tx_index).cmp(&(&b.tx_hash, b.tx_index)));
     let mut seed = blake3::Hasher::new();
     seed.update(issuer.as_str().as_bytes());
     seed.update(&tip_slot.to_be_bytes());
     let digest = seed.finalize();
-    let pick = u64::from_be_bytes(digest.as_bytes()[..8].try_into().ok()?);
-    let index = usize::try_from(pick % eligible.len() as u64).ok()?;
-    Some(eligible[index])
+    let mut pick = [0; 8];
+    pick.copy_from_slice(&digest.as_bytes()[..8]);
+    let index = u64::from_be_bytes(pick) % eligible.len() as u64;
+    Ok(eligible.get(index as usize).copied())
 }
 
 /// The smallest ADA-only UTxO holding at least `needed` lovelace.
@@ -508,6 +519,7 @@ mod tests {
                         &record.issuer_did,
                         &ReservedOutpoints::default(),
                     )
+                    .map_err(|e| e.to_string())?
                     .ok_or("no spendable sponsor UTxO")?
                     .clone();
                     Some((profile, utxo))

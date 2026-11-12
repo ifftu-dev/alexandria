@@ -615,6 +615,11 @@ async fn build_and_submit<L: Ledger>(
         match sponsored(ledger, profile, &record, wallet, &reserved).await {
             Ok(Some((tx, funding))) => built = Some((tx, funding)),
             Ok(None) => {}
+            // Busy only with this node's own in-flight transactions: wait
+            // for them rather than pay from the issuer's wallet.
+            Err(busy @ AnchorBuildError::WalletBusy(_)) => {
+                return Err(SubmitError::Failed(busy.to_string()));
+            }
             Err(error) => {
                 log::warn!("sponsored anchor not built, trying the issuer's wallet: {error}");
                 sponsor_error = Some(error);
@@ -718,7 +723,8 @@ fn wait_reason(sponsor: Option<AnchorBuildError>, issuer: AnchorBuildError) -> S
 }
 
 /// Build a sponsored anchor when a sponsor UTxO is spendable now, with its
-/// funding label. `Ok(None)` when none is.
+/// funding label. `Ok(None)` when none is; [`AnchorBuildError::WalletBusy`]
+/// when only this node's own in-flight transactions stand in the way.
 async fn sponsored<L: Ledger>(
     ledger: &L,
     profile: &AnchorSponsorProfile,
@@ -728,11 +734,18 @@ async fn sponsored<L: Ledger>(
 ) -> Result<Option<(anchor_tx::AnchorTx, &'static str)>, AnchorBuildError> {
     let (utxos, tip) = tokio::join!(ledger.utxos(&profile.address), ledger.tip_slot());
     let (utxos, tip) = (utxos?, tip?);
-    let Some(utxo) =
-        anchor_tx::select_sponsor_utxo(profile, &utxos, tip, &record.issuer_did, reserved)
-    else {
-        return Ok(None);
-    };
+    let utxo =
+        match anchor_tx::select_sponsor_utxo(profile, &utxos, tip, &record.issuer_did, reserved) {
+            Ok(Some(utxo)) => utxo,
+            Ok(None) => return Ok(None),
+            Err(busy) => {
+                // A free sponsor UTxO would still need collateral. A wallet that
+                // could not pledge any needs funds, not patience.
+                let wallet_utxos = ledger.utxos(&wallet.payment_address).await?;
+                anchor_tx::sponsor_collateral(&wallet_utxos, reserved)?;
+                return Err(busy.into());
+            }
+        };
     let funding = Funding::Sponsor { profile, utxo };
     let label = funding.label();
     anchor_tx::build_anchor_tx(record, funding, wallet, ledger, reserved)

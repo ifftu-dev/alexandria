@@ -812,6 +812,42 @@ fn one_sponsor_utxo_node() -> Node {
 }
 
 #[tokio::test]
+async fn an_anchor_waits_while_its_own_in_flight_anchor_spends_the_only_sponsor_utxo() {
+    let node = one_sponsor_utxo_node();
+    node.ledger.set_utxos(
+        &node.wallet.payment_address,
+        vec![
+            ada(0x11, 0, 6_000_000),
+            ada(0x12, 0, 7_000_000),
+            ada(0x13, 0, 20_000_000),
+        ],
+    );
+    let a = issue(&node.profile, &node.issuer, "a");
+    let b = issue(&node.profile, &node.issuer, "b");
+    node.tick(T0_PLUS_7H).await;
+    node.tick(T0_PLUS_7H).await;
+
+    // The sponsor is only busy with this node's own anchor: the issuer's
+    // wallet does not pay for the second batch.
+    let anchors = anchor_submissions(&node);
+    assert_eq!(anchors.len(), 1);
+    assert_eq!(anchors[0].inputs, vec![("21".repeat(32), 0)], "sponsored");
+    let (first, waiting) = if node.state(&a).status == AnchorStatus::Submitted {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    assert_eq!(node.state(&first).status, AnchorStatus::Submitted);
+    let state = node.state(&waiting);
+    assert_eq!((state.status, state.attempts), (AnchorStatus::Pending, 0));
+    assert!(!state.needs_funds);
+    assert_eq!(
+        state.last_error.as_deref(),
+        Some("wallet busy: inputs reserved by in-flight transactions")
+    );
+}
+
+#[tokio::test]
 async fn a_busy_sponsor_does_not_hide_a_wallet_that_needs_funds() {
     let node = one_sponsor_utxo_node();
     node.ledger
