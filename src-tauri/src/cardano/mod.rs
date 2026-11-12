@@ -9,6 +9,8 @@ pub mod cost_models;
 #[cfg(test)]
 pub(crate) mod fake_ledger;
 pub mod gov_tx_builder;
+#[cfg(test)]
+mod in_flight_spends_tests;
 pub mod ledger;
 pub mod plutus_data;
 pub mod plutus_spend;
