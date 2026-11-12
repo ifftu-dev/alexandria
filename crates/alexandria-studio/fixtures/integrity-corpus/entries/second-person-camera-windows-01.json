@@ -1,0 +1,30 @@
+{
+  "id": "second-person-camera-windows-01",
+  "label": "second_person",
+  "provenance": "synthetic",
+  "profile": "camera",
+  "platform": "windows",
+  "device_class": "desktop",
+  "windows": [
+    {
+      "features": {
+        "camera": {
+          "face_present": true,
+          "face_count": 1,
+          "face_checks": 10,
+          "gaze_checks": 10
+        }
+      }
+    },
+    {
+      "features": {
+        "camera": {
+          "face_present": true,
+          "face_count": 2,
+          "face_checks": 10,
+          "gaze_checks": 10
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "id": "clean-core-android-01",
+  "label": "clean",
+  "provenance": "synthetic",
+  "profile": "core",
+  "platform": "android",
+  "device_class": "phone",
+  "windows": [
+    {
+      "features": {
+        "android": {}
+      }
+    },
+    {
+      "features": {
+        "android": {}
+      }
+    },
+    {
+      "features": {
+        "android": {}
+      }
+    }
+  ]
+}

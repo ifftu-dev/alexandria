@@ -15,6 +15,7 @@
 mod features;
 mod flags;
 mod fusion;
+pub mod measurement;
 
 pub use features::{
     derive_window, AndroidFeatures, BehaviouralBaseline, CameraFeatures, ClipboardFeatures,

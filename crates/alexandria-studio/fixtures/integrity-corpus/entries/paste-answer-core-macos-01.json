@@ -1,0 +1,24 @@
+{
+  "id": "paste-answer-core-macos-01",
+  "label": "paste_answer",
+  "provenance": "synthetic",
+  "profile": "core",
+  "platform": "macos",
+  "device_class": "desktop",
+  "windows": [
+    {
+      "features": {}
+    },
+    {
+      "features": {
+        "clipboard": {
+          "paste_events": 1,
+          "pasted_chars": 800
+        }
+      }
+    },
+    {
+      "features": {}
+    }
+  ]
+}

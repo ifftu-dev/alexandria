@@ -12,6 +12,8 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::hash::entity_id;
+use crate::sentinel::corpus_capture;
+use crate::sentinel::scoring::measurement::CorpusWindow;
 use crate::sentinel::scoring::{
     self, decide, derive_window, FusionSummary, RatioManifest, SessionEvidence, SessionStatus,
     WindowFeatures, DEFAULT_PROFILE,
@@ -116,7 +118,7 @@ pub(crate) fn record_backend_flag(
         let composite = score.unwrap_or(1.0).clamp(0.0, 1.0);
         let flags = [flag.to_string()];
         // A session that stopped accepting snapshots is already final.
-        if commit_window(
+        if let Ok(snapshot) = commit_window(
             conn,
             &session_id,
             "alexandria",
@@ -124,9 +126,12 @@ pub(crate) fn record_backend_flag(
             &ScoreColumns::default(),
             &flags,
             &manifest,
-        )
-        .is_ok()
-        {
+        ) {
+            corpus_capture::capture(&session_id, || CorpusWindow {
+                features: None,
+                backend_flags: flags.to_vec(),
+                snapshot: serde_json::to_value(&snapshot).ok(),
+            });
             flagged += 1;
         }
     }
@@ -180,6 +185,11 @@ pub(crate) fn persist_snapshot_with(
         &assessment.flags,
         manifest,
     )?;
+    corpus_capture::capture(&req.session_id, || CorpusWindow {
+        features: Some(features.clone()),
+        backend_flags: Vec::new(),
+        snapshot: serde_json::to_value(&snapshot).ok(),
+    });
     snapshot.consistency_score = Some(s.consistency);
     Ok(snapshot)
 }

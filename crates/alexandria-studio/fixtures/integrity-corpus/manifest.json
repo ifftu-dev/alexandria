@@ -1,0 +1,60 @@
+{
+  "format": 1,
+  "corpus_id": "sentinel-synthetic-fixture",
+  "description": "Hand-written synthetic sessions with known labels. Contract tests and the CI gate only; never certification.",
+  "entries": [
+    {
+      "path": "entries/clean-core-macos-01.json",
+      "digest": "blake3:05c11ae10fd3288f5571e5eb0b4489710d21b23ce344fdd82f9b3f1342fa664d"
+    },
+    {
+      "path": "entries/clean-core-windows-01.json",
+      "digest": "blake3:d51ec1eac22d5be58cfdd95368874d374bd92a102b7fe9c920ff8e838890d487"
+    },
+    {
+      "path": "entries/clean-core-android-01.json",
+      "digest": "blake3:3fd075144d7a45f78b3e5bc55427b4a1e70913f6966f7fa7fbcec67f987c39ee"
+    },
+    {
+      "path": "entries/clean-core-ios-01.json",
+      "digest": "blake3:0404c9547b6b0825e75ae7c2157ea716f843dbb0c80bb6e385607259973ea3c4"
+    },
+    {
+      "path": "entries/paste-answer-core-macos-01.json",
+      "digest": "blake3:6c810200879f391cbbce39806a5e0d924783193a8b068dbf037f57d2f7796bb2"
+    },
+    {
+      "path": "entries/paste-answer-core-android-01.json",
+      "digest": "blake3:56178626104ec989a58f4e93ef12e66f6364e35ab6b89dc37f526e913cdf21c8"
+    },
+    {
+      "path": "entries/cheat-overlay-core-windows-01.json",
+      "digest": "blake3:eca194e6deb1bf639ed09ad315c0556598c1184fd6a9c81e3d3fa8080228e4f3"
+    },
+    {
+      "path": "entries/lookup-core-macos-01.json",
+      "digest": "blake3:75c97f62292583b78aeb401f765e0256acec3a2f08b690e4ef6f4051d4c20755"
+    },
+    {
+      "path": "entries/in-app-assistant-core-macos-01.json",
+      "digest": "blake3:0d67c1bd5e8fbbb243ff18462c1f56380f9bbabb964097d85c3fd92c10c3eb87"
+    },
+    {
+      "path": "entries/clean-camera-macos-01.json",
+      "digest": "blake3:d57ec1d972088b810e437402936eac4af1a0a3466a090bd97f002de6e271fa32"
+    },
+    {
+      "path": "entries/clean-camera-ios-01.json",
+      "digest": "blake3:e0ead84226d8f25a5f75129e7bec7024f495958b1ea81b62584dbecae90497e6"
+    },
+    {
+      "path": "entries/phone-glance-camera-macos-01.json",
+      "digest": "blake3:f790361a2584989211698f1ae5b4899e3b28e460b97a1c341a22b7599a7dac88"
+    },
+    {
+      "path": "entries/second-person-camera-windows-01.json",
+      "digest": "blake3:0f456388883df4c59b2b7a1c5daa6481e301cf8c5a6b56533699e92709718ee0"
+    }
+  ],
+  "digest": "blake3:28649b90556632ef845595df37aa9e510d83052a5bc9cfef71265818d90ff79e"
+}

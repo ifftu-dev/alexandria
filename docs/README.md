@@ -49,6 +49,7 @@ Start with the [project README](../README.md) for what Alexandria is and the qui
 | [default-network-genesis.md](default-network-genesis.md) | The preprod demo's single-operator governance genesis |
 | [stake-pubkey-registry-runbook.md](stake-pubkey-registry-runbook.md) | Pre-launch registry ceremony |
 | [sentinel-runbook.md](sentinel-runbook.md) | Retraining or rolling back the bundled paste classifier |
+| [sentinel-corpus-runbook.md](sentinel-corpus-runbook.md) | Red-team and consented clean sessions, the offline evaluator and signal certification |
 
 ## Specs and proposals
 

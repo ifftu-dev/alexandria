@@ -1,0 +1,32 @@
+{
+  "id": "phone-glance-camera-macos-01",
+  "label": "phone_glance",
+  "provenance": "synthetic",
+  "profile": "camera",
+  "platform": "macos",
+  "device_class": "desktop",
+  "windows": [
+    {
+      "features": {
+        "camera": {
+          "face_present": true,
+          "face_count": 1,
+          "face_checks": 10,
+          "gaze_checks": 10,
+          "gaze_down_glances": 4
+        }
+      }
+    },
+    {
+      "features": {
+        "camera": {
+          "face_present": true,
+          "face_count": 1,
+          "face_checks": 10,
+          "gaze_checks": 10,
+          "gaze_down_glances": 5
+        }
+      }
+    }
+  ]
+}

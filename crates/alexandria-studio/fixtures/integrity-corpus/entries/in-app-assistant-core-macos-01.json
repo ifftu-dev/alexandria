@@ -1,0 +1,18 @@
+{
+  "id": "in-app-assistant-core-macos-01",
+  "label": "in_app_assistant",
+  "provenance": "synthetic",
+  "profile": "core",
+  "platform": "macos",
+  "device_class": "desktop",
+  "windows": [
+    {
+      "features": {}
+    },
+    {
+      "backend_flags": [
+        "in_app_assistant_during_attempt"
+      ]
+    }
+  ]
+}

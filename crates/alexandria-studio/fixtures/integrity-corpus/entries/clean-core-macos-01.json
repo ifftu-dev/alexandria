@@ -1,0 +1,19 @@
+{
+  "id": "clean-core-macos-01",
+  "label": "clean",
+  "provenance": "synthetic",
+  "profile": "core",
+  "platform": "macos",
+  "device_class": "desktop",
+  "windows": [
+    {
+      "features": {}
+    },
+    {
+      "features": {}
+    },
+    {
+      "features": {}
+    }
+  ]
+}
