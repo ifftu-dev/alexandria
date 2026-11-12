@@ -1688,13 +1688,7 @@ function createSentinelService() {
     trustProfile.value = null
     cameraOptedIn.value = false
     sentinelDebug.cameraOptedIn = false
-    keystrokeBuffer = []
-    mouseBuffer = []
-    tabSwitchCount = 0
-    totalUnfocusedMs = 0
-    pasteEventCount = 0
-    pastedCharCount = 0
-    environmentChanged = false
+    resetWindow()
     lastKeystrokeTime = 0
     snapshotWindowStartMs = 0
     facePresent = undefined
@@ -1703,15 +1697,6 @@ function createSentinelService() {
     faceSimilarity = undefined
     faceMatch = undefined
     consecutiveNoFaceChecks = 0
-    totalFaceChecks = 0
-    faceAbsentChecks = 0
-    gazeTotalChecks = 0
-    gazeOffscreenChecks = 0
-    gazeOccludedChecks = 0
-    gazeDownGlances = 0
-    livenessChecks = 0
-    livenessSpoofChecks = 0
-    livenessRealProbSum = 0
 
     return currentSessionId
   }
@@ -1780,34 +1765,19 @@ function createSentinelService() {
       gazeCanvas = null
       currentElementId = ''
       currentElementType = ''
-      keystrokeBuffer = []
-      mouseBuffer = []
+      resetWindow()
       lastKeystrokeTime = 0
       lastBlurTime = 0
       snapshotWindowStartMs = 0
-      tabSwitchCount = 0
-      totalUnfocusedMs = 0
-      pasteEventCount = 0
-      pastedCharCount = 0
-      environmentChanged = false
-      appFocusLostCount = 0
-      appFocusLostMs = 0
       focusLostAt = 0
       lastFocusApp = ''
       displayBaseline = null
       displayLatest = null
-      displayChangeCount = 0
       displayNativeTransitions = -1
-      displayNativeToggle = false
       androidEnvLatest = null
-      obscuredTouchesWindow = 0
       overlayLatest = null
       processLatest = null
       hotkeyStatus = null
-      webviewCombos = []
-      blurIntervals = []
-      phantomWindow = []
-      nativeHotkeyCount = 0
       blurStartedAt = 0
       cameraDeviceLabel = ''
       cameraDeviceVirtual = false
@@ -1817,15 +1787,6 @@ function createSentinelService() {
       faceSimilarity = undefined
       faceMatch = undefined
       consecutiveNoFaceChecks = 0
-      totalFaceChecks = 0
-      faceAbsentChecks = 0
-      gazeTotalChecks = 0
-      gazeOffscreenChecks = 0
-      gazeOccludedChecks = 0
-      gazeDownGlances = 0
-      livenessChecks = 0
-      livenessSpoofChecks = 0
-      livenessRealProbSum = 0
       keystrokeAeStatus.value = null
       mouseCnnStatus.value = null
       cameraOptedIn.value = false
