@@ -94,8 +94,8 @@ function runByKey(key: string): ContestableRun | undefined {
 onMounted(async () => {
   try {
     sessions.value = await invoke<IntegritySession[]>('integrity_list_sessions', {})
-    // Only flagged sessions can hold evidence, so only those are queried.
-    for (const s of sessions.value.filter((x) => x.status === 'flagged')) {
+    // Only flagged or in-review sessions can hold evidence, so only those are queried.
+    for (const s of sessions.value.filter((x) => x.status === 'flagged' || x.status === 'review')) {
       try {
         retained.value[s.id] = await invoke<EvidenceSummary>('sentinel_evidence_stored', {
           sessionId: s.id,
@@ -245,7 +245,7 @@ function fmtDate(iso: string | null): string {
               {{ t('sentinel.evidence.deleteNow') }}
             </AppButton>
           </div>
-          <p v-else-if="s.status === 'flagged'" class="ih-muted">
+          <p v-else-if="s.status === 'flagged' || s.status === 'review'" class="ih-muted">
             {{ t('sentinel.evidence.retainedNone') }}
           </p>
         </div>

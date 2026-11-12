@@ -109,10 +109,10 @@ const anomalyFlagTypes = computed(() => FLAG_CATALOG.map(f => ({
 // ---------------------------------------------------------------------------
 
 function getOutcome(session: IntegritySession): 'clean' | 'flagged' | 'suspended' {
-  // Server-authoritative: backend computes status from cumulative anomaly
-  // severity + running integrity score. Clean == active|completed.
+  // Server-authoritative: the backend's decision rule sets the status.
+  // Clean == active|completed; a session in review is counted with flagged.
   if (session.status === 'suspended') return 'suspended'
-  if (session.status === 'flagged') return 'flagged'
+  if (session.status === 'flagged' || session.status === 'review') return 'flagged'
   return 'clean'
 }
 

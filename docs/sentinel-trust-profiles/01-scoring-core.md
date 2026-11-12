@@ -13,3 +13,15 @@ Spec: Implementation Decisions → Signals and measurement (first four bullets);
 - Historical snapshots are not rescored; old-client snapshots carrying precomputed scores follow the existing retirement pattern.
 
 Done when: seam-1 tests (session over in-memory DB) cover single-flag → review, two channels → flagged, tamper flag → suspended, advisory signals contributing zero; composable vitest asserts raw features submitted.
+
+## Notes
+
+2026-11-12, deviations and choices made while implementing:
+
+- Module: `alexandria_studio::integrity` (features, flags, fusion), re-exported as `sentinel::scoring`. The snapshot request is `{ session_id, element_id, features }`; any other field (old-client scores or flags) is refused before writing.
+- "A single flag of any severity" is read as any warning or critical flag. Info flags (`external_display`, `tab_switching`, `ai_assistant_running`, …) stay context and do not send a session to review.
+- Interview checks never suspend: a tamper flag sets them to `flagged`.
+- The weighted composite stays as a descriptive per-window score (`composite_score`, session `integrity_score`); it no longer decides status, so a low running score no longer flags a session by itself. `integrity_end_session` takes no client scores.
+- `review` is accepted wherever terminal session statuses are listed (grading gate, evidence consent, hiring report, `alexandria-verify` exchange, dashboards). No migration: `integrity_sessions.status` has no CHECK constraint.
+- Sessions are scored under profile `core` until ticket 05 records a profile per session.
+- The calibration wizard's training metrics keep their small TS analyzers; they never reach a snapshot.

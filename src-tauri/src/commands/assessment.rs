@@ -311,7 +311,7 @@ pub(crate) fn end_interrupted_attempts(
             AND integrity_session_id IS NOT ?4
             AND NOT (submitted_at IS NOT NULL AND EXISTS (
                 SELECT 1 FROM integrity_sessions s WHERE s.id=assessment_attempts.integrity_session_id
-                  AND s.ended_at IS NOT NULL AND s.status IN ('completed','flagged','suspended')))",
+                  AND s.ended_at IS NOT NULL AND s.status IN ('completed','review','flagged','suspended')))",
         params![now, subject_did, skill_id, current_integrity_session_id],
     )
     .map(|changed| changed as u32)
@@ -476,7 +476,7 @@ pub async fn assessment_recover(
         db.conn().query_row(
             "SELECT a.id,a.submitted_answers_json FROM assessment_attempts a JOIN integrity_sessions s ON s.id=a.integrity_session_id
              WHERE a.subject_did=?1 AND a.skill_id=?2 AND a.submitted_at IS NOT NULL AND a.graded_at IS NULL AND a.ended_at IS NULL
-             AND s.ended_at IS NOT NULL AND s.status IN ('completed','flagged','suspended')
+             AND s.ended_at IS NOT NULL AND s.status IN ('completed','review','flagged','suspended')
              AND ((?3 IS NULL AND a.exchange_binding IS NULL) OR a.exchange_binding LIKE ?3)
              ORDER BY a.started_at DESC LIMIT 1",
             params![did, skill_id, binding], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))
@@ -1058,7 +1058,7 @@ pub fn grade_attempt_impl(
         return Err("assessment items changed during the attempt; answers were not graded".into());
     }
     let finalized: bool = conn.query_row(
-        "SELECT ended_at IS NOT NULL AND status IN ('completed','flagged','suspended') FROM integrity_sessions WHERE id=?1",
+        "SELECT ended_at IS NOT NULL AND status IN ('completed','review','flagged','suspended') FROM integrity_sessions WHERE id=?1",
         [integrity_session_id.as_deref().ok_or("assessment has no integrity session")?], |r|r.get(0))
         .map_err(|e|e.to_string())?;
     if !finalized {
