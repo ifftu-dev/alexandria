@@ -24,7 +24,7 @@ use crate::assessment::items::{self, GradeEngine};
 use crate::assessment::policy::{
     evaluate_attempt_policy, AttemptPolicy, AttemptRecord, PolicyDecision, ScorePolicy,
 };
-use crate::assessment::randomizer::{draw, QuestionMeta};
+use crate::assessment::randomizer::{draw, DifficultyBand, DrawContext, QuestionMeta};
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
 use crate::settings::{registry::keys, SettingsStore};
@@ -311,7 +311,7 @@ pub(crate) fn end_interrupted_attempts(
             AND integrity_session_id IS NOT ?4
             AND NOT (submitted_at IS NOT NULL AND EXISTS (
                 SELECT 1 FROM integrity_sessions s WHERE s.id=assessment_attempts.integrity_session_id
-                  AND s.ended_at IS NOT NULL AND s.status IN ('completed','flagged','suspended')))",
+                  AND s.ended_at IS NOT NULL AND s.status IN ('completed','review','flagged','suspended')))",
         params![now, subject_did, skill_id, current_integrity_session_id],
     )
     .map(|changed| changed as u32)
@@ -417,7 +417,9 @@ pub fn plan_goal_impl(
 
 /// Begin an attempt for `skill_id`: pick a ratified bank, draw a randomized,
 /// difficulty-stratified subset with shuffled options, persist the attempt, and
-/// return the served questions (without answers).
+/// return the served questions (without answers). The draw skips items this
+/// profile has seen, adds the bank's transfer items, and centres on the
+/// learner's difficulty band; see [`crate::assessment::randomizer`].
 #[tauri::command]
 pub async fn assessment_start_attempt(
     state: State<'_, AppState>,
@@ -476,7 +478,7 @@ pub async fn assessment_recover(
         db.conn().query_row(
             "SELECT a.id,a.submitted_answers_json FROM assessment_attempts a JOIN integrity_sessions s ON s.id=a.integrity_session_id
              WHERE a.subject_did=?1 AND a.skill_id=?2 AND a.submitted_at IS NOT NULL AND a.graded_at IS NULL AND a.ended_at IS NULL
-             AND s.ended_at IS NOT NULL AND s.status IN ('completed','flagged','suspended')
+             AND s.ended_at IS NOT NULL AND s.status IN ('completed','review','flagged','suspended')
              AND ((?3 IS NULL AND a.exchange_binding IS NULL) OR a.exchange_binding LIKE ?3)
              ORDER BY a.started_at DESC LIMIT 1",
             params![did, skill_id, binding], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))
@@ -571,6 +573,7 @@ pub(crate) fn start_attempt_db(
         multiple: bool,
         difficulty: u8,
         bloom: crate::domain::bloom::BloomLevel,
+        transfer: bool,
     }
     let all: Vec<Q> = stmt
         .query_map(params![bank_id], |r| {
@@ -594,6 +597,9 @@ pub(crate) fn start_attempt_db(
                     })
                     .unwrap_or_default(),
                 multiple: content.get("kind").and_then(|v| v.as_str()) != Some("single"),
+                // Part of the ratified item content, so the item fingerprint
+                // covers it and it cannot be toggled without changing the item.
+                transfer: content.get("transfer").and_then(|v| v.as_bool()) == Some(true),
                 difficulty: r.get::<_, i64>(2)? as u8,
                 // Credential-bearing assessments require an explicit cognitive level.
                 bloom: r.get::<_, String>(3)?.parse().map_err(|e: String| {
@@ -619,6 +625,7 @@ pub(crate) fn start_attempt_db(
             difficulty: q.difficulty,
             option_count: q.options.len(),
             bloom: q.bloom,
+            transfer: q.transfer,
         })
         .collect();
     // Resume the one open attempt verbatim. Re-drawing here would let a
@@ -664,9 +671,10 @@ pub(crate) fn start_attempt_db(
             .as_deref()
             .map(|id| resolve_role_target(conn, &skill_id, id))
             .transpose()?;
+        let ctx = load_draw_context(conn, &subject_did, &skill_id)?;
         (
             attempt_id,
-            draw(&metas, draw_count.max(1) as usize, seed),
+            draw(&metas, draw_count.max(1) as usize, seed, &ctx),
             Vec::new(),
             role,
             false,
@@ -738,6 +746,69 @@ pub(crate) fn start_attempt_db(
         role,
     })
 }
+
+/// What the draw needs to know about this learner's history on `skill_id`:
+/// how many earlier attempts served each item, and the difficulty band their
+/// most recent graded answers point to. Fixed-form attempts list their
+/// items in `question_ids`; adaptive attempts store `[]` there and record
+/// each served item in `attempt_items`, so both are read and an item counts
+/// once per attempt. Ungraded and interrupted attempts count too: the
+/// learner still saw the items.
+pub(crate) fn load_draw_context(
+    conn: &rusqlite::Connection,
+    subject_did: &str,
+    skill_id: &str,
+) -> Result<DrawContext, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT item_id, COUNT(*) FROM ( \
+                 SELECT a.id AS attempt_id, j.value AS item_id \
+                   FROM assessment_attempts a, json_each(a.question_ids) j \
+                  WHERE a.subject_did = ?1 AND a.skill_id = ?2 \
+                 UNION \
+                 SELECT ai.attempt_id, ai.item_id \
+                   FROM attempt_items ai \
+                   JOIN assessment_attempts a ON a.id = ai.attempt_id \
+                  WHERE a.subject_did = ?1 AND a.skill_id = ?2 \
+             ) GROUP BY item_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let exposure = stmt
+        .query_map(params![subject_did, skill_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?.max(0) as u32))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT i.difficulty, ai.score \
+               FROM attempt_items ai \
+               JOIN assessment_attempts a ON a.id = ai.attempt_id \
+               JOIN assessment_items i ON i.id = ai.item_id \
+              WHERE a.subject_did = ?1 AND a.skill_id = ?2 AND ai.score IS NOT NULL \
+              ORDER BY ai.graded_at DESC LIMIT ?3",
+        )
+        .map_err(|e| e.to_string())?;
+    let prior: Vec<(u8, f64)> = stmt
+        .query_map(
+            params![subject_did, skill_id, PRIOR_ANSWERS_FOR_BAND],
+            |r| Ok((r.get::<_, i64>(0)?.clamp(1, 5) as u8, r.get::<_, f64>(1)?)),
+        )
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(DrawContext {
+        exposure,
+        band: DifficultyBand::from_prior(&prior),
+    })
+}
+
+/// How many of the learner's most recent graded answers on a skill set the
+/// difficulty band of the next draw. Recent enough to follow improvement,
+/// long enough that one bad attempt does not swing the band.
+const PRIOR_ANSWERS_FOR_BAND: i64 = 30;
 
 /// Published sponsor roles the learner can assess `skill_id` for. Drives
 /// the pre-attempt role chooser; an empty list means no chooser.
@@ -1058,7 +1129,7 @@ pub fn grade_attempt_impl(
         return Err("assessment items changed during the attempt; answers were not graded".into());
     }
     let finalized: bool = conn.query_row(
-        "SELECT ended_at IS NOT NULL AND status IN ('completed','flagged','suspended') FROM integrity_sessions WHERE id=?1",
+        "SELECT ended_at IS NOT NULL AND status IN ('completed','review','flagged','suspended') FROM integrity_sessions WHERE id=?1",
         [integrity_session_id.as_deref().ok_or("assessment has no integrity session")?], |r|r.get(0))
         .map_err(|e|e.to_string())?;
     if !finalized {
@@ -2404,5 +2475,259 @@ mod role_target_tests {
             .collect();
         assert_eq!(multiple.get("q1"), Some(&false));
         assert_eq!(multiple.get("q2"), Some(&true));
+    }
+}
+
+#[cfg(test)]
+mod adaptive_draw_tests {
+    //! The fixed-form draw adapts to the learner: it skips items this profile
+    //! has already been served, always includes the bank's transfer items,
+    //! and centres on the difficulty band their earlier answers suggest.
+    use super::*;
+    use crate::db::Database;
+    use std::collections::HashSet;
+
+    const NOW: &str = "2026-10-09T00:00:00Z";
+    const DID: &str = "did:key:zLearner";
+
+    /// A ratified bank with no cooldown, so successive attempts are allowed.
+    fn setup(draw_count: i64) -> Database {
+        let db = Database::open_in_memory().expect("db");
+        db.run_migrations().expect("migrations");
+        SettingsStore::set(db.conn(), keys::IDENTITY_LOCAL_DID, DID.to_string()).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO question_banks (id, skill_id, label, ratified, draw_count, cooldown_hours)
+                 VALUES ('bank_d', 'skill_rust', 'D', 1, ?1, '[0]')",
+                params![draw_count],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO integrity_sessions (id, status) VALUES ('isess_live', 'active')",
+                [],
+            )
+            .unwrap();
+        db
+    }
+
+    fn add_item(db: &Database, id: &str, difficulty: u8, transfer: bool) {
+        let content = serde_json::json!({
+            "kind": "single",
+            "prompt": format!("{id}?"),
+            "options": ["a", "b", "c"],
+            "transfer": transfer,
+        });
+        db.conn()
+            .execute(
+                "INSERT INTO assessment_items
+                     (id, item_kind, skill_id, content_public, grader_private, difficulty,
+                      bank_id, ratified, bloom_level)
+                 VALUES (?1, 'mcq', 'skill_rust', ?2, '{\"correct_indices\":[0]}', ?3,
+                         'bank_d', 1, 'remember')",
+                params![id, content.to_string(), difficulty],
+            )
+            .unwrap();
+    }
+
+    /// A finished earlier attempt that served `items` with the given scores.
+    fn prior_attempt(db: &Database, id: &str, items: &[(&str, f64)]) {
+        let ids: Vec<&str> = items.iter().map(|(q, _)| *q).collect();
+        let orders: Vec<Vec<usize>> = items.iter().map(|_| vec![0, 1, 2]).collect();
+        db.conn()
+            .execute(
+                "INSERT INTO assessment_attempts
+                     (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders,
+                      started_at, graded_at, score, passed, attempt_ordinal)
+                 VALUES (?1, ?2, 'bank_d', 'skill_rust', 1, ?3, ?4,
+                         '2026-10-01T00:00:00Z', '2026-10-01T00:10:00Z', 0.5, 0, 1)",
+                params![
+                    id,
+                    DID,
+                    serde_json::to_string(&ids).unwrap(),
+                    serde_json::to_string(&orders).unwrap()
+                ],
+            )
+            .unwrap();
+        for (ordinal, (item, score)) in items.iter().enumerate() {
+            db.conn()
+                .execute(
+                    "INSERT INTO attempt_items (attempt_id, ordinal, item_id, score, graded_at)
+                     VALUES (?1, ?2, ?3, ?4, '2026-10-01T00:10:00Z')",
+                    params![id, ordinal as i64, item, score],
+                )
+                .unwrap();
+        }
+    }
+
+    fn start(db: &Database, seed: u64) -> StartedAttempt {
+        start_attempt_db(
+            db,
+            "skill_rust".into(),
+            Some("isess_live".into()),
+            None,
+            seed,
+            format!("att_{seed}"),
+            NOW.into(),
+        )
+        .unwrap()
+    }
+
+    fn drawn(started: &StartedAttempt) -> HashSet<String> {
+        started.questions.iter().map(|q| q.id.clone()).collect()
+    }
+
+    /// Start a fresh attempt in a fresh database for every seed, so each
+    /// draw sees the same history.
+    fn draws_over_seeds(build: impl Fn() -> Database) -> Vec<HashSet<String>> {
+        (0..12u64)
+            .map(|seed| drawn(&start(&build(), seed)))
+            .collect()
+    }
+
+    #[test]
+    fn items_already_served_to_the_profile_are_excluded_while_unseen_ones_remain() {
+        let build = || {
+            let db = setup(3);
+            for i in 0..10 {
+                add_item(&db, &format!("q{i}"), 3, false);
+            }
+            prior_attempt(&db, "prior", &[("q0", 1.0), ("q1", 0.0), ("q2", 1.0)]);
+            db
+        };
+        for set in draws_over_seeds(build) {
+            assert_eq!(set.len(), 3);
+            for seen in ["q0", "q1", "q2"] {
+                assert!(!set.contains(seen), "{seen} was served before: {set:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_exhausted_bank_falls_back_to_the_least_exposed_items() {
+        let build = || {
+            let db = setup(2);
+            for i in 0..4 {
+                add_item(&db, &format!("q{i}"), 3, false);
+            }
+            // q0 and q1 served twice, q2 once, q3 never.
+            prior_attempt(&db, "p1", &[("q0", 1.0), ("q1", 1.0)]);
+            prior_attempt(&db, "p2", &[("q0", 0.0), ("q1", 0.0), ("q2", 1.0)]);
+            db
+        };
+        let expected: HashSet<String> = ["q2", "q3"].map(String::from).into();
+        for set in draws_over_seeds(build) {
+            assert_eq!(set, expected);
+        }
+    }
+
+    #[test]
+    fn every_draw_includes_the_banks_transfer_items_on_top_of_the_standard_draw() {
+        let build = || {
+            let db = setup(3);
+            for i in 0..10 {
+                add_item(&db, &format!("q{i}"), 3, false);
+            }
+            add_item(&db, "t1", 3, true);
+            // Served before, yet still required.
+            prior_attempt(&db, "prior", &[("t1", 1.0)]);
+            db
+        };
+        for set in draws_over_seeds(build) {
+            assert_eq!(
+                set.len(),
+                4,
+                "three standard items plus the transfer item: {set:?}"
+            );
+            assert!(set.contains("t1"), "transfer item missing: {set:?}");
+        }
+    }
+
+    /// Four unseen items at every difficulty 1–5 (ids `d<difficulty>_<n>`),
+    /// plus six difficulty-3 items an earlier attempt served and scored
+    /// `prior_score`.
+    fn banded_bank(prior_score: f64) -> Database {
+        let db = setup(3);
+        for d in 1..=5u8 {
+            for n in 0..4 {
+                add_item(&db, &format!("d{d}_{n}"), d, false);
+            }
+        }
+        let history: Vec<(String, f64)> = (0..6)
+            .map(|n| {
+                let id = format!("h{n}");
+                add_item(&db, &id, 3, false);
+                (id, prior_score)
+            })
+            .collect();
+        let history: Vec<(&str, f64)> = history.iter().map(|(id, s)| (id.as_str(), *s)).collect();
+        prior_attempt(&db, "prior", &history);
+        db
+    }
+
+    fn difficulties(set: &HashSet<String>) -> Vec<u8> {
+        set.iter().map(|id| id[1..2].parse().unwrap()).collect()
+    }
+
+    #[test]
+    fn a_learner_who_answered_correctly_before_draws_from_a_harder_band() {
+        for set in draws_over_seeds(|| banded_bank(1.0)) {
+            let ds = difficulties(&set);
+            assert_eq!(ds.len(), 3);
+            assert!(ds.iter().all(|&d| d >= 4), "easy item drawn: {set:?}");
+        }
+    }
+
+    #[test]
+    fn a_learner_who_answered_wrongly_before_draws_from_an_easier_band() {
+        for set in draws_over_seeds(|| banded_bank(0.0)) {
+            let ds = difficulties(&set);
+            assert_eq!(ds.len(), 3);
+            assert!(ds.iter().all(|&d| d <= 2), "hard item drawn: {set:?}");
+        }
+    }
+
+    /// Served order, ids and option order: everything a learner sees.
+    fn served(started: &StartedAttempt) -> Vec<(String, Vec<String>)> {
+        started
+            .questions
+            .iter()
+            .map(|q| (q.id.clone(), q.options.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn a_seed_reproduces_the_adapted_draw_exactly() {
+        let build = || {
+            let db = banded_bank(1.0);
+            add_item(&db, "t1", 2, true);
+            db
+        };
+        for seed in [3, 41, 977] {
+            assert_eq!(
+                served(&start(&build(), seed)),
+                served(&start(&build(), seed))
+            );
+        }
+        let distinct: HashSet<Vec<(String, Vec<String>)>> =
+            (0..8).map(|seed| served(&start(&build(), seed))).collect();
+        assert!(
+            distinct.len() > 1,
+            "different seeds should draw differently"
+        );
+    }
+
+    #[test]
+    fn a_resumed_attempt_keeps_its_original_draw() {
+        let db = setup(3);
+        for i in 0..10 {
+            add_item(&db, &format!("q{i}"), 3, false);
+        }
+        let first = start(&db, 5);
+        // The open attempt's items now count as served; a fresh draw would
+        // avoid them. The retry must return the same attempt instead.
+        let retry = start(&db, 6);
+        assert_eq!(retry.attempt_id, first.attempt_id);
+        assert_eq!(served(&retry), served(&first));
     }
 }

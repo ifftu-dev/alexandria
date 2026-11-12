@@ -755,7 +755,7 @@ export type FlagType =
 export interface IntegritySession {
   id: string
   enrollment_id: string | null
-  status: string
+  status: IntegritySessionStatus
   integrity_score: number | null
   critical_count: number
   warning_count: number
@@ -915,52 +915,120 @@ export interface IntegritySnapshot {
   camera_score: number | null
   composite_score: number | null
   ai_paste_anomaly: number | null
+  gaze_offscreen_ratio: number | null
   anomaly_flags: string[]
   captured_at: string
   /** Session status once this snapshot counted; set only on submit. */
-  session_status?: string
+  session_status?: IntegritySessionStatus
+  /** The window's consistency score; set only on submit. */
+  consistency_score?: number
+  /** What the fusion saw once this snapshot counted; set only on submit. */
+  fusion?: FusionSummary
 }
 
-export interface SignalData {
-  typing_consistency: number
-  typing_speed_wpm: number
-  mouse_consistency: number
-  is_human_likely: boolean
-  face_present?: boolean
-  face_count?: number
-  face_consistency?: number
-  tab_switches: number
-  unfocused_ms: number
-  paste_events: number
-  pasted_chars: number
-  environment_changed: boolean
-  display_count?: number
-  external_display?: boolean
-  split_screen?: boolean
-  screen_captured?: boolean
-  display_changes?: number
-  foreign_accessibility_services?: number
-  adb_enabled?: boolean
-  obscured_touches?: number
-  hidden_overlays?: number
-  overlay_windows_scanned?: number
-  overlay_windows_allowlisted?: number
-  camera_device_virtual?: boolean
-  /** Liveness ticks this window and how many scored as a possible spoof. */
-  liveness_checks?: number
-  liveness_spoof_checks?: number
-  /** Mean real-face probability over the window's liveness ticks. */
-  liveness_real_prob?: number
-  watched_processes?: number
-  processes_scanned?: number
-  watched_categories?: WatchCategory[]
-  global_hotkeys?: number
-  phantom_hotkeys?: number
-  ai_keystroke_anomaly?: number
-  ai_mouse_human_prob?: number
-  ai_face_similarity?: number
-  ai_face_match?: boolean
-  ai_paste_anomaly?: number
+/**
+ * Integrity session status. A single flag sends a session to `review`;
+ * `flagged` needs two independent channels over threshold or a failed
+ * verification; only backend-recorded tamper flags `suspended` it.
+ */
+export type IntegritySessionStatus = 'active' | 'completed' | 'review' | 'flagged' | 'suspended'
+
+/** One evidence channel in a session's fusion (`alexandria_studio::integrity`). */
+export interface ChannelEvidence {
+  channel: string
+  /** Accumulated log-likelihood ratio; zero when no signal has a ratio. */
+  llr: number
+  over_threshold: boolean
+  signals: string[]
+}
+
+export interface FusionSummary {
+  manifest_version: string
+  profile: string
+  /** Null when the manifest certifies nothing for this profile. */
+  threshold: number | null
+  channels: ChannelEvidence[]
+  /** Observed signals with no measured ratio: they contributed zero. */
+  advisory: string[]
+}
+
+/**
+ * Raw features of one snapshot window, submitted by the collector. Mirrors
+ * `alexandria_studio::integrity::WindowFeatures`; measurements only.
+ */
+export interface WindowFeatures {
+  typing: {
+    keystrokes: number
+    mean_dwell_ms: number
+    mean_flight_ms: number | null
+    speed_wpm: number
+  }
+  mouse: {
+    points: number
+    velocity_samples: number
+    mean_velocity: number
+    velocity_variance: number
+  }
+  baseline: {
+    typing_samples: number
+    avg_dwell_ms: number
+    avg_flight_ms: number
+    speed_wpm: number
+    mouse_samples: number
+    avg_velocity: number
+  } | null
+  focus: {
+    tab_switches: number
+    unfocused_ms: number
+    app_switches: number
+    app_unfocused_ms: number
+    environment_changed: boolean
+  }
+  clipboard: { paste_events: number; pasted_chars: number }
+  /** Latest native display sample; null where the platform has no probe. */
+  display: {
+    display_count: number
+    external_display: boolean
+    split_screen: boolean
+    screen_captured: boolean
+    native_toggle: boolean
+  } | null
+  display_changes: number
+  /** Null off Android. */
+  android: { foreign_accessibility_services: number; adb_enabled: boolean } | null
+  obscured_touches: number
+  /** Null on mobile and Wayland. */
+  overlay: { suspicious: number; scanned: number; allowlisted: number } | null
+  /** Null on mobile. */
+  processes: { categories: WatchCategory[]; watched: number; scanned: number } | null
+  /** Null when the global hotkey monitor is not running. */
+  hotkeys: { native: number; phantom: number } | null
+  /** Present only while the camera is opted in. */
+  camera: {
+    device_virtual: boolean | null
+    face_present: boolean | null
+    face_count: number | null
+    face_consistency: number | null
+    face_similarity: number | null
+    face_match: boolean | null
+    consecutive_no_face: number
+    face_checks: number
+    face_absent_checks: number
+    gaze_checks: number
+    gaze_offscreen_checks: number
+    gaze_occluded_checks: number
+    gaze_down_glances: number
+    liveness_checks: number
+    liveness_spoof_checks: number
+    liveness_real_prob: number | null
+  } | null
+  models: {
+    paste_anomaly: number | null
+    keystroke_anomaly: number | null
+    mouse_human_prob: number | null
+    advisory_enabled: boolean
+    paste_classifier_enabled: boolean
+  }
 }
 
 /** Native display arrangement reported by `sentinel_display_topology`. */
@@ -1062,24 +1130,11 @@ export interface StartSessionResponse {
   session_id: string
 }
 
+/** `integrity_submit_snapshot` request: raw features only; the backend scores. */
 export interface SubmitSnapshotRequest {
   session_id: string
   element_id: string
-  integrity_score: number
-  consistency_score: number
-  typing_score: number | null
-  mouse_score: number | null
-  human_score: number | null
-  tab_score: number | null
-  paste_score: number | null
-  devtools_score: number | null
-  camera_score: number | null
-  anomaly_flags: string[]
-}
-
-export interface EndSessionRequest {
-  overall_integrity_score: number
-  overall_consistency_score: number
+  features: WindowFeatures
 }
 
 /** Content document structure returned from the content store */

@@ -748,7 +748,7 @@ pub fn build_integrity_report(
         .map(|s| (s.clamp(0.0, 1.0) * 100.0).round() as u8);
     let flagged = serious
         || score.is_some_and(|s| s < 40)
-        || matches!(run.status.as_str(), "flagged" | "suspended");
+        || matches!(run.status.as_str(), "review" | "flagged" | "suspended");
     let total = run.snapshots.len();
     let camera = with_camera > 0;
     let camera_coverage = if total == 0 {

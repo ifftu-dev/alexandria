@@ -796,11 +796,8 @@ mod ipc {
             json!({"attemptId": attempt_id, "answers": answers}),
         )
         .await;
-        app.call(
-            "integrity_end_session",
-            json!({"sessionId": session_id, "req": {"overall_integrity_score": 0.92, "overall_consistency_score": 0.9}}),
-        )
-        .await;
+        app.call("integrity_end_session", json!({"sessionId": session_id}))
+            .await;
         let graded = app
             .call(
                 "assessment_grade",
@@ -1233,18 +1230,16 @@ mod ipc {
             )
             .await;
         let check_id = check["session_id"].as_str().unwrap().to_string();
-        for flags in [json!([]), json!(["tab_switching"])] {
+        // A clean window, then one with enough tab switches for `tab_switching`.
+        for features in [json!({}), json!({"focus": {"tab_switches": 11}})] {
             app.call(
                 "integrity_submit_snapshot",
-                json!({"req": {"session_id": check_id, "element_id": "interview", "integrity_score": 0.9, "consistency_score": 0.9, "typing_score": null, "mouse_score": null, "human_score": null, "tab_score": 0.9, "paste_score": 1.0, "devtools_score": null, "camera_score": null, "ai_paste_anomaly": null, "anomaly_flags": flags}}),
+                json!({"req": {"session_id": check_id, "element_id": "interview", "features": features}}),
             )
             .await;
         }
-        app.call(
-            "integrity_end_session",
-            json!({"sessionId": check_id, "req": {"overall_integrity_score": 0.9, "overall_consistency_score": 0.9}}),
-        )
-        .await;
+        app.call("integrity_end_session", json!({"sessionId": check_id}))
+            .await;
         let sent = app
             .call(
                 "hiring_interview_integrity_send",
