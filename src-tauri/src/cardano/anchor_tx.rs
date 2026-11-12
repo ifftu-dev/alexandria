@@ -34,6 +34,7 @@ use crate::cardano::cost_models::PLUTUS_V3_COST_MODEL;
 use crate::cardano::ledger::{Ledger, ANCHOR_RECORD_VERSION};
 use crate::cardano::plutus_data;
 use crate::cardano::plutus_spend::{plutus_fee, EST_MEM, EST_STEPS, MIN_COLLATERAL_LOVELACE};
+use crate::cardano::reservations::{select_unreserved, ReservedOutpoints, WalletBusy};
 use crate::cardano::script_refs::ALEXANDRIA_ANCHOR_LABEL;
 use crate::cardano::tx_builder::{self, MIN_UTXO_LOVELACE, TTL_OFFSET};
 use crate::cardano::types::UTxO;
@@ -77,27 +78,49 @@ impl Funding<'_> {
     }
 }
 
+/// Why an anchor transaction was not built.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum AnchorBuildError {
+    /// Every UTxO that would do is spent by this node's own in-flight
+    /// transactions: a wait, which clears when they land or expire.
+    #[error(transparent)]
+    WalletBusy(#[from] WalletBusy),
+    /// The wallet holds no UTxO that would do, reserved or not; funding it
+    /// fixes this. Shown with the [`NEEDS_FUNDS`] marker.
+    #[error("{marker}: {0}", marker = NEEDS_FUNDS)]
+    NeedsFunds(String),
+    #[error("{0}")]
+    Other(String),
+}
+
+impl From<String> for AnchorBuildError {
+    fn from(error: String) -> Self {
+        Self::Other(error)
+    }
+}
+
 /// A signed anchor transaction.
 pub struct AnchorTx {
     pub signed_cbor: Vec<u8>,
     pub tx_hash: String,
-    /// First slot at which the transaction can no longer be included.
-    pub invalid_from_slot: u64,
 }
 
-/// Build and sign the anchor transaction for `record`.
+/// Build and sign the anchor transaction for `record` at `tip_slot`. Wallet
+/// inputs and collateral are chosen among UTxOs outside `reserved`; when only
+/// reserved ones would do, the error is [`AnchorBuildError::WalletBusy`].
 pub async fn build_anchor_tx<L: Ledger>(
     record: &AnchorRecord,
     funding: Funding<'_>,
     wallet: &Wallet,
     ledger: &L,
-) -> Result<AnchorTx, String> {
-    let (utxos, params, tip_slot) = tokio::join!(
+    tip_slot: u64,
+    reserved: &ReservedOutpoints,
+) -> Result<AnchorTx, AnchorBuildError> {
+    let (utxos, params) = tokio::join!(
         ledger.utxos(&wallet.payment_address),
         ledger.protocol_params(),
-        ledger.tip_slot(),
     );
-    let (wallet_utxos, params, tip_slot) = (utxos?, params?, tip_slot?);
+    let (wallet_utxos, params) = (utxos?, params?);
     let metadata = build_anchor_metadata(record);
     let payment_key = tx_builder::extended_private_key(&wallet.payment_key_extended)
         .map_err(|e| format!("payment key: {e}"))?;
@@ -109,20 +132,19 @@ pub async fn build_anchor_tx<L: Ledger>(
     ));
     let issuer_hash = did_key_hash(wallet);
 
-    let (unsigned, invalid_from_slot) = match funding {
+    let unsigned = match funding {
         Funding::Issuer => {
             let fee = tx_builder::estimate_fee(&params, 1);
-            let selected = select_ada_only(&wallet_utxos, fee + MIN_UTXO_LOVELACE).ok_or_else(
-                || {
-                    format!(
-                        "{NEEDS_FUNDS}: no sponsor available, and the wallet has no ADA-only UTxO holding {} lovelace",
-                        fee + MIN_UTXO_LOVELACE
-                    )
-                },
-            )?;
+            let needed = fee + MIN_UTXO_LOVELACE;
+            let selected =
+                select_unreserved(&wallet_utxos, reserved, |u| select_ada_only(u, needed))?
+                    .ok_or_else(|| {
+                        AnchorBuildError::NeedsFunds(format!(
+                            "no sponsor available, and the wallet has no ADA-only UTxO holding {needed} lovelace"
+                        ))
+                    })?;
             let address = PallasAddress::from_bech32(&wallet.payment_address)
                 .map_err(|e| format!("bad wallet address: {e}"))?;
-            let invalid_from = tip_slot + TTL_OFFSET;
             let built = StagingTransaction::new()
                 .input(Input::new(
                     parse_hash(&selected.tx_hash)?,
@@ -131,26 +153,17 @@ pub async fn build_anchor_tx<L: Ledger>(
                 .output(Output::new(address, selected.lovelace() - fee))
                 .disclosed_signer(issuer_hash)
                 .fee(fee)
-                .invalid_from_slot(invalid_from)
+                .invalid_from_slot(tip_slot + TTL_OFFSET)
                 .network_id(0)
                 .build_conway_raw()
                 .map_err(|e| format!("build: {e}"))?;
             let (with_metadata, _) = tx_builder::inject_metadata(&built.tx_bytes.0, metadata)
                 .map_err(|e| format!("inject_metadata: {e}"))?;
-            (with_metadata, invalid_from)
+            with_metadata
         }
         Funding::Sponsor { profile, utxo } => {
             let plan = SponsorPlan::new(profile, utxo, tip_slot)?;
-            // The smallest sufficient UTxO: collateral is forfeited whole if
-            // the script fails on chain, and no collateral return is set.
-            let collateral = smallest_ada_only(&wallet_utxos, MIN_COLLATERAL_LOVELACE)
-                .ok_or_else(|| {
-                    format!(
-                        "{NEEDS_FUNDS}: a sponsored anchor needs collateral, an ADA-only UTxO of at least {} lovelace in the wallet",
-                        MIN_COLLATERAL_LOVELACE
-                    )
-                })?
-                .clone();
+            let collateral = sponsor_collateral(&wallet_utxos, reserved)?.clone();
             // Execution units as `(mem, steps)`; `ExUnits` is not `Copy`.
             let build = |fee: u64, (mem, steps): (u64, u64)| -> Result<Vec<u8>, String> {
                 plan.build(
@@ -174,16 +187,20 @@ pub async fn build_anchor_tx<L: Ledger>(
                     .into_iter()
                     .fold((0, 0), |(m, s), (um, us)| (m.max(um), s.max(us))),
                 Ok(_) => est_units,
-                Err(e) => return Err(format!("sponsor script evaluation failed: {e}")),
+                Err(e) => {
+                    return Err(AnchorBuildError::Other(format!(
+                        "sponsor script evaluation failed: {e}"
+                    )))
+                }
             };
             let fee = estimate(units, draft.len() as u64 + 200);
             if fee > profile.fee_cap_lovelace {
-                return Err(format!(
+                return Err(AnchorBuildError::Other(format!(
                     "anchor fee {fee} lovelace exceeds the sponsor's cap of {}",
                     profile.fee_cap_lovelace
-                ));
+                )));
             }
-            (build(fee, units)?, plan.invalid_from_slot)
+            build(fee, units)?
         }
     };
 
@@ -193,7 +210,24 @@ pub async fn build_anchor_tx<L: Ledger>(
     Ok(AnchorTx {
         signed_cbor,
         tx_hash,
-        invalid_from_slot,
+    })
+}
+
+/// The collateral a sponsored anchor pledges from the issuer's wallet: the
+/// smallest sufficient ADA-only UTxO outside `reserved`, since collateral is
+/// forfeited whole if the script fails on chain and no collateral return is
+/// set.
+pub fn sponsor_collateral<'a>(
+    wallet_utxos: &'a [UTxO],
+    reserved: &ReservedOutpoints,
+) -> Result<&'a UTxO, AnchorBuildError> {
+    select_unreserved(wallet_utxos, reserved, |u| {
+        smallest_ada_only(u, MIN_COLLATERAL_LOVELACE)
+    })?
+    .ok_or_else(|| {
+        AnchorBuildError::NeedsFunds(format!(
+            "a sponsored anchor needs collateral, an ADA-only UTxO of at least {MIN_COLLATERAL_LOVELACE} lovelace in the wallet"
+        ))
     })
 }
 
@@ -300,28 +334,42 @@ pub fn sponsor_utxo_is_spendable(
 
 /// Pick a spendable sponsor UTxO. Nodes choose by a hash of their issuer and
 /// the tip, so concurrent nodes spread across the pool instead of racing for
-/// the first entry.
+/// the first entry. UTxOs this node's own in-flight transactions spend
+/// (`reserved`) are left out before the pick.
+///
+/// `Ok(None)` when no sponsor UTxO is spendable at all (the caller falls back
+/// to the issuer's wallet); [`WalletBusy`] when only this node's own
+/// in-flight anchors keep the spendable ones (the caller waits for them).
 pub fn select_sponsor_utxo<'a>(
     profile: &AnchorSponsorProfile,
     utxos: &'a [UTxO],
     tip_slot: u64,
     issuer: &Did,
-) -> Option<&'a UTxO> {
-    let mut eligible: Vec<&UTxO> = utxos
+    reserved: &ReservedOutpoints,
+) -> Result<Option<&'a UTxO>, WalletBusy> {
+    let spendable: Vec<&UTxO> = utxos
         .iter()
         .filter(|u| sponsor_utxo_is_spendable(profile, u, tip_slot))
         .collect();
+    if spendable.is_empty() {
+        return Ok(None);
+    }
+    let mut eligible: Vec<&UTxO> = spendable
+        .into_iter()
+        .filter(|u| !reserved.contains(u))
+        .collect();
     if eligible.is_empty() {
-        return None;
+        return Err(WalletBusy);
     }
     eligible.sort_by(|a, b| (&a.tx_hash, a.tx_index).cmp(&(&b.tx_hash, b.tx_index)));
     let mut seed = blake3::Hasher::new();
     seed.update(issuer.as_str().as_bytes());
     seed.update(&tip_slot.to_be_bytes());
     let digest = seed.finalize();
-    let pick = u64::from_be_bytes(digest.as_bytes()[..8].try_into().ok()?);
-    let index = usize::try_from(pick % eligible.len() as u64).ok()?;
-    Some(eligible[index])
+    let mut pick = [0; 8];
+    pick.copy_from_slice(&digest.as_bytes()[..8]);
+    let index = u64::from_be_bytes(pick) % eligible.len() as u64;
+    Ok(eligible.get(index as usize).copied())
 }
 
 /// The smallest ADA-only UTxO holding at least `needed` lovelace.
@@ -457,22 +505,45 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let outcome = rt.block_on(async {
             let bf = crate::cardano::blockfrost::BlockfrostClient::new(pid).unwrap();
+            let tip = bf.tip_slot().await?;
             let funding = match &sponsor {
                 Some(profile) => {
-                    let (utxos, tip) = (bf.utxos(&profile.address).await?, bf.tip_slot().await?);
-                    let utxo = select_sponsor_utxo(profile, &utxos, tip, &record.issuer_did)
-                        .ok_or("no spendable sponsor UTxO")?
-                        .clone();
+                    let utxos = bf.utxos(&profile.address).await?;
+                    let utxo = select_sponsor_utxo(
+                        profile,
+                        &utxos,
+                        tip,
+                        &record.issuer_did,
+                        &ReservedOutpoints::default(),
+                    )
+                    .map_err(|e| e.to_string())?
+                    .ok_or("no spendable sponsor UTxO")?
+                    .clone();
                     Some((profile, utxo))
                 }
                 None => None,
             };
             let built = match &funding {
-                Some((profile, utxo)) => {
-                    build_anchor_tx(&record, Funding::Sponsor { profile, utxo }, &wallet, &bf)
-                        .await?
-                }
-                None => build_anchor_tx(&record, Funding::Issuer, &wallet, &bf).await?,
+                Some((profile, utxo)) => build_anchor_tx(
+                    &record,
+                    Funding::Sponsor { profile, utxo },
+                    &wallet,
+                    &bf,
+                    tip,
+                    &ReservedOutpoints::default(),
+                )
+                .await
+                .map_err(|e| e.to_string())?,
+                None => build_anchor_tx(
+                    &record,
+                    Funding::Issuer,
+                    &wallet,
+                    &bf,
+                    tip,
+                    &ReservedOutpoints::default(),
+                )
+                .await
+                .map_err(|e| e.to_string())?,
             };
             bf.submit(&built.signed_cbor).await
         });

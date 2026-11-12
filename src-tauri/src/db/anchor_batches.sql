@@ -15,7 +15,6 @@ CREATE TABLE anchor_batches (
     status TEXT NOT NULL DEFAULT 'outcome_unknown'
         CHECK (status IN ('outcome_unknown', 'submitted', 'confirmed', 'failed', 'expired')),
     tx_hash TEXT NOT NULL CHECK (length(tx_hash) = 64),
-    invalid_from_slot INTEGER NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     confirmed_at TEXT
 );
