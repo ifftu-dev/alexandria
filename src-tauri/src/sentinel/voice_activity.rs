@@ -286,6 +286,66 @@ fn median(values: &[f32]) -> f32 {
     sorted[sorted.len() / 2]
 }
 
+/// Whether voice checks may listen for this integrity session: an interview's
+/// check that is still running and whose microphone consent is recorded. The
+/// call's own voice checks start only after this passes.
+pub fn may_listen(conn: &rusqlite::Connection, session_id: &str) -> Result<(), String> {
+    use rusqlite::OptionalExtension;
+    let row: Option<(String, Option<String>, bool)> = conn
+        .query_row(
+            "SELECT purpose, ended_at, consent_microphone FROM integrity_sessions WHERE id = ?1",
+            [session_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    match row {
+        None => Err("no such integrity check".into()),
+        Some((purpose, _, _)) if purpose != "interview" => {
+            Err("voice checks run only in an interview's integrity check".into())
+        }
+        Some((_, Some(_), _)) => Err("that integrity check has ended".into()),
+        Some((_, None, false)) => Err("voice checks were not allowed for this check".into()),
+        Some((_, None, true)) => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod consent_tests {
+    use super::may_listen;
+    use crate::db::Database;
+
+    fn db_with(purpose: &str, ended: bool, microphone: bool) -> Database {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO integrity_sessions (id, purpose, ended_at, consent_microphone)
+                 VALUES ('s', ?1, CASE WHEN ?2 THEN datetime('now') END, ?3)",
+                rusqlite::params![purpose, ended, microphone],
+            )
+            .unwrap();
+        db
+    }
+
+    #[test]
+    fn voice_checks_listen_only_in_a_running_interview_check_with_microphone_consent() {
+        assert!(may_listen(db_with("interview", false, true).conn(), "s").is_ok());
+        for (purpose, ended, microphone) in [
+            ("interview", false, false),
+            ("interview", true, true),
+            ("assessment", false, true),
+        ] {
+            let db = db_with(purpose, ended, microphone);
+            assert!(
+                may_listen(db.conn(), "s").is_err(),
+                "{purpose} {ended} {microphone}"
+            );
+        }
+        assert!(may_listen(db_with("interview", false, true).conn(), "missing").is_err());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
