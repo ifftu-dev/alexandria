@@ -177,25 +177,35 @@ pub fn record_verification(
     // A failed verification is credential-affecting on its own (the fusion
     // decision rule): raise the session to `flagged`. Status only moves up.
     if new.outcome == VerificationOutcome::Failed {
-        let current: String = tx
-            .query_row(
-                "SELECT status FROM integrity_sessions WHERE id = ?1",
-                params![new.session_id],
-                |r| r.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        if SessionStatus::parse(&current).unwrap_or(SessionStatus::Active) < SessionStatus::Flagged
-        {
-            tx.execute(
-                "UPDATE integrity_sessions SET status = ?2 WHERE id = ?1",
-                params![new.session_id, SessionStatus::Flagged.as_str()],
-            )
-            .map_err(|e| e.to_string())?;
-        }
+        raise_status(&tx, new.session_id, SessionStatus::Flagged)?;
     }
     let result = read_result(&tx, &id)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(result)
+}
+
+/// Move a session's status up to `to`; a session already there or beyond
+/// stays where it is.
+pub fn raise_status(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+    to: SessionStatus,
+) -> Result<(), String> {
+    let current: String = conn
+        .query_row(
+            "SELECT status FROM integrity_sessions WHERE id = ?1",
+            params![session_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if SessionStatus::parse(&current).unwrap_or(SessionStatus::Active) < to {
+        conn.execute(
+            "UPDATE integrity_sessions SET status = ?2 WHERE id = ?1",
+            params![session_id, to.as_str()],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// Whether any verification step in the session failed. The fusion

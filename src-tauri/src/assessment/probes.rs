@@ -44,6 +44,7 @@ use crate::assessment::SplitMix64;
 use crate::crypto::hash::entity_id;
 use crate::db::Database;
 use crate::plugins::grade_contract::{PROBE_TIME_BOX_MAX_MS, PROBE_TIME_BOX_MIN_MS};
+use crate::sentinel::scoring::SessionStatus;
 use crate::sentinel::verification::{
     record_verification, session_verification_summary, NewVerification, VerificationOutcome,
     VerificationSummary, STEP_PROBE,
@@ -103,6 +104,9 @@ const RESEED_TIME_BOX_MIN_MS: u64 = 15_000;
 const RESEED_TIME_BOX_MAX_MS: u64 = 300_000;
 
 /// Skip reasons recorded with a `skipped` result.
+/// `assessment_probes.source` of a probe a model wrote (`llm` policy).
+pub const GENERATED_SOURCE: &str = "llm";
+
 pub mod skip_reason {
     pub const POLICY_NONE: &str = "policy_none";
     pub const NO_ELIGIBLE_ITEMS: &str = "no_eligible_items";
@@ -123,6 +127,10 @@ pub mod skip_reason {
     /// `llm`: the model answered with something that is not a gradable
     /// probe.
     pub const INVALID_PROBE: &str = "invalid_probe";
+    /// `llm`: the learner's answer disagreed with a key only the model
+    /// wrote. That key is unverified, so the disagreement is no evidence
+    /// against the learner: the session goes to review instead.
+    pub const UNCONFIRMED_KEY: &str = "unconfirmed_key";
 }
 
 /// What starting the probe step needs next.
@@ -926,6 +934,14 @@ pub fn answer_probe_db(
         Some(Ok(g)) if g.score + 1e-9 >= probe.pass_score => {
             (VerificationOutcome::Satisfied, None, Some(g))
         }
+        // A generated probe's key is the model's word alone: missing it is
+        // no evidence against the learner. It never fails verification; the
+        // session goes to review instead (below).
+        Some(Ok(g)) if probe.source == GENERATED_SOURCE => (
+            VerificationOutcome::Skipped,
+            Some(skip_reason::UNCONFIRMED_KEY),
+            Some(g),
+        ),
         Some(Ok(g)) => (VerificationOutcome::Failed, None, Some(g)),
     };
 
@@ -951,6 +967,9 @@ pub fn answer_probe_db(
         })
         .with_generation(&probe.generation),
     )?;
+    if reason == Some(skip_reason::UNCONFIRMED_KEY) {
+        crate::sentinel::verification::raise_status(conn, &session, SessionStatus::Review)?;
+    }
     conn.execute(
         "UPDATE assessment_probes SET answered_at_ms = ?2, first_input_ms = ?3, \
                 response_json = ?4, score = ?5, grader_cid = ?6, content_cid = ?7, \
@@ -1779,17 +1798,24 @@ mod tests {
     use alexandria_ai::{ChatRequest, Completion, FinishReason};
     use std::sync::Mutex;
 
-    /// A model that answers every request with `reply` and keeps what it
-    /// was sent. Never touches the network.
+    /// A model that answers its requests with `replies` in turn, repeating
+    /// the last, and keeps what it was sent. Never touches the network.
     struct FakeModel {
-        reply: Result<String, String>,
+        replies: Vec<Result<String, String>>,
         sent: Mutex<Vec<ChatRequest>>,
     }
 
     impl FakeModel {
         fn answering(reply: Result<&str, &str>) -> Self {
+            Self::replying(&[reply])
+        }
+
+        fn replying(replies: &[Result<&str, &str>]) -> Self {
             Self {
-                reply: reply.map(str::to_owned).map_err(str::to_owned),
+                replies: replies
+                    .iter()
+                    .map(|r| r.map(str::to_owned).map_err(str::to_owned))
+                    .collect(),
                 sent: Mutex::new(Vec::new()),
             }
         }
@@ -1800,8 +1826,10 @@ mod tests {
             &self,
             request: &ChatRequest,
         ) -> impl std::future::Future<Output = Result<Completion, String>> + Send {
-            self.sent.lock().unwrap().push(request.clone());
-            let reply = self.reply.clone().map(|text| Completion {
+            let mut sent = self.sent.lock().unwrap();
+            sent.push(request.clone());
+            let turn = (sent.len() - 1).min(self.replies.len() - 1);
+            let reply = self.replies[turn].clone().map(|text| Completion {
                 text,
                 usage: None,
                 finish: FinishReason::Stop,
@@ -1887,7 +1915,11 @@ mod tests {
 
         let model = FakeModel::answering(Ok(GOOD_PROBE));
         let probe = generate_and_store(&ctx, &plan, &model).remove(0);
-        assert_eq!(model.sent.lock().unwrap().len(), 1);
+        assert_eq!(
+            model.sent.lock().unwrap().len(),
+            2,
+            "written, then answered again to confirm the key"
+        );
         assert_eq!(probe.content["prompt"], "Which follows?");
         assert!(
             probe.content.get("correct_indices").is_none(),
@@ -1926,8 +1958,20 @@ mod tests {
         ));
     }
 
+    fn session_status(ctx: &Ctx) -> String {
+        ctx.conn()
+            .query_row(
+                "SELECT status FROM integrity_sessions WHERE id = 'sess'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
     #[test]
-    fn a_wrong_answer_to_a_generated_probe_fails_verification() {
+    fn a_wrong_answer_to_a_generated_probe_sends_the_session_to_review_and_never_flags_it() {
+        // Only the model vouches for the key, so disagreeing with it is no
+        // evidence against the learner: the session goes to a person.
         let ctx = llm_setup(true);
         submit(&ctx, &[answer("q1", &[0]), answer("q2", &[0])]);
         let plan = plan(&ctx).unwrap();
@@ -1935,7 +1979,50 @@ mod tests {
             generate_and_store(&ctx, &plan, &FakeModel::answering(Ok(GOOD_PROBE))).remove(0);
         render_probe_db(&ctx.db, &probe.id, LEARNER, NOW_MS).unwrap();
         respond(&ctx, &probe, &["w"], NOW_MS + 4_000);
-        assert_eq!(summary(&ctx).outcome, Some(VerificationOutcome::Failed));
+        let s = summary(&ctx);
+        assert_eq!(s.outcome, Some(VerificationOutcome::Skipped));
+        assert_eq!(s.failed, 0);
+        assert_eq!(
+            s.results[0].reason.as_deref(),
+            Some(skip_reason::UNCONFIRMED_KEY)
+        );
+        assert!(
+            !crate::sentinel::verification::has_failed_verification(ctx.conn(), "sess").unwrap()
+        );
+        assert_eq!(session_status(&ctx), "review");
+        // A later window keeps the session in review, not flagged.
+        crate::sentinel::snapshots::persist_snapshot(
+            ctx.conn(),
+            &crate::sentinel::snapshots::SubmitSnapshotRequest::from_features(
+                "sess",
+                "assessment",
+                Default::default(),
+            ),
+        )
+        .unwrap();
+        assert_eq!(session_status(&ctx), "review");
+    }
+
+    #[test]
+    fn a_generated_key_the_model_does_not_choose_again_is_never_served() {
+        let ctx = llm_setup(true);
+        submit(&ctx, &[answer("q1", &[0]), answer("q2", &[0])]);
+        let plan = plan(&ctx).unwrap();
+        // Asked to answer its own question, the model picks another option.
+        let model = FakeModel::replying(&[Ok(GOOD_PROBE), Ok(r#"{"correct_index":2}"#)]);
+        assert!(generate_and_store(&ctx, &plan, &model).is_empty());
+        let sent = model.sent.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        let check = &sent[1].messages[1].content;
+        assert!(check.contains("Which follows?"));
+        assert!(!check.contains("correct_index"), "the key is not sent back");
+        drop(sent);
+        let s = summary(&ctx);
+        assert_eq!(s.outcome, Some(VerificationOutcome::Skipped));
+        assert_eq!(
+            s.results[0].reason.as_deref(),
+            Some(skip_reason::INVALID_PROBE)
+        );
     }
 
     #[test]
