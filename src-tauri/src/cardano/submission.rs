@@ -53,6 +53,10 @@ pub enum SubmissionStatus {
     Submitted,
     Confirmed,
     FailedOnChain,
+    /// The tip passed the validity upper bound plus [`EXPIRY_MARGIN_SLOTS`]
+    /// with no receipt, so ledger rules forbid including it. Terminal; it
+    /// reserves nothing.
+    Expired,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -203,6 +207,7 @@ pub fn lookup(conn: &Connection, operation: Operation<'_>) -> Result<Option<Subm
                 "submitted" => SubmissionStatus::Submitted,
                 "confirmed" => SubmissionStatus::Confirmed,
                 "failed_on_chain" => SubmissionStatus::FailedOnChain,
+                "expired" => SubmissionStatus::Expired,
                 _ => return Err(rusqlite::Error::InvalidQuery),
             };
             Ok(Submission {
@@ -256,6 +261,8 @@ pub fn unapplied_operations(
     rows
 }
 
+/// Finish a final result's domain projection: a verified receipt, or proof
+/// of expiry.
 pub fn mark_applied(
     tx: &rusqlite::Transaction<'_>,
     operation: Operation<'_>,
@@ -264,13 +271,16 @@ pub fn mark_applied(
         .execute(
             "UPDATE chain_submissions SET applied_at = COALESCE(applied_at, datetime('now'))
          WHERE network = ?1 AND operation_kind = ?2 AND operation_id = ?3
-           AND status IN ('confirmed', 'failed_on_chain') AND confirmed_slot IS NOT NULL",
+           AND ((status IN ('confirmed', 'failed_on_chain') AND confirmed_slot IS NOT NULL)
+                OR status = 'expired')",
             params![NETWORK, operation.kind, operation.id],
         )
         .map_err(|e| e.to_string())?
         != 1
     {
-        return Err("cannot finish projection before a verified ledger receipt".into());
+        return Err(
+            "cannot finish projection before a verified ledger receipt or expiry".into(),
+        );
     }
     Ok(())
 }
@@ -495,7 +505,7 @@ where
                 "UPDATE chain_submissions SET
                  status = CASE WHEN status = 'outcome_unknown' AND ?4
                                THEN 'submitted' ELSE status END,
-                 last_error = CASE WHEN status IN ('confirmed', 'failed_on_chain') THEN last_error ELSE ?5 END,
+                 last_error = CASE WHEN status IN ('confirmed', 'failed_on_chain', 'expired') THEN last_error ELSE ?5 END,
                  updated_at = datetime('now')
              WHERE network = ?1 AND operation_kind = ?2 AND operation_id = ?3",
                 params![
@@ -533,7 +543,9 @@ where
 /// Decoded from the stored signed bytes; no network request.
 pub fn reserved_outpoints(conn: &Connection, tip: u64) -> Result<ReservedOutpoints, String> {
     let mut statement = conn
-        .prepare("SELECT signed_cbor FROM chain_submissions WHERE network = ?1")
+        .prepare(
+            "SELECT signed_cbor FROM chain_submissions WHERE network = ?1 AND status != 'expired'",
+        )
         .map_err(|e| e.to_string())?;
     let rows = statement
         .query_map(params![NETWORK], |row| row.get::<_, Vec<u8>>(0))
@@ -560,6 +572,46 @@ pub fn reserved_outpoints(conn: &Connection, tip: u64) -> Result<ReservedOutpoin
     Ok(reserved)
 }
 
+/// Mark a transaction without a receipt expired once `tip` is past its
+/// validity upper bound plus the margin. Never touches a receipt-backed row.
+fn expire_if_past_window(
+    conn: &Connection,
+    operation: Operation<'_>,
+    tip: u64,
+) -> Result<(), String> {
+    let bytes: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT signed_cbor FROM chain_submissions
+             WHERE network = ?1 AND operation_kind = ?2 AND operation_id = ?3
+               AND status IN ('outcome_unknown', 'submitted') AND confirmed_slot IS NULL",
+            params![NETWORK, operation.kind, operation.id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some(bytes) = bytes else {
+        return Ok(());
+    };
+    let Some(ttl) = MultiEraTx::decode(&bytes)
+        .map_err(|e| format!("decode journaled tx: {e}"))?
+        .ttl()
+    else {
+        // No bound: it may still land at any time.
+        return Ok(());
+    };
+    if tip <= ttl.saturating_add(EXPIRY_MARGIN_SLOTS) {
+        return Ok(());
+    }
+    conn.execute(
+        "UPDATE chain_submissions SET status = 'expired', updated_at = datetime('now')
+         WHERE network = ?1 AND operation_kind = ?2 AND operation_id = ?3
+           AND status IN ('outcome_unknown', 'submitted') AND confirmed_slot IS NULL",
+        params![NETWORK, operation.kind, operation.id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// The slot from which `signed_cbor` can no longer be included. Every
 /// journaled transaction must have one, so each reservation ends and each
 /// transaction can expire.
@@ -570,29 +622,62 @@ fn validity_upper_bound(signed_cbor: &[u8]) -> Result<u64, String> {
         .ok_or_else(|| "transaction has no validity upper bound; refusing to journal it".into())
 }
 
-/// Reconcile only the journaled identity. Not found, unavailable, or timed out
-/// is not proof of rejection and never makes the operation eligible to rebuild.
+/// Reconcile only the journaled identity, at an unknown tip: it never
+/// expires anything. Not found, unavailable, or timed out is not proof of
+/// rejection and never makes the operation eligible to rebuild.
 pub(crate) async fn reconcile<L: Ledger>(
     journal: &Journal,
     blockfrost: &L,
     operation: Operation<'_>,
 ) -> Result<Option<Submission>, String> {
-    reconcile_with(journal, operation, |hash| async move {
-        blockfrost.receipt(&hash).await
+    reconcile_at(journal, blockfrost, operation, None).await
+}
+
+/// Reconcile the journaled identity at `tip`, read from the ledger before
+/// this call (`None` when the tip is unavailable). A receipt confirms or fails
+/// the transaction as [`reconcile`] does. With no receipt, and only when the
+/// tip is known and past the validity upper bound plus
+/// [`EXPIRY_MARGIN_SLOTS`], the transaction becomes
+/// [`SubmissionStatus::Expired`]. A provider error never expires anything.
+pub(crate) async fn reconcile_at<L: Ledger>(
+    journal: &Journal,
+    ledger: &L,
+    operation: Operation<'_>,
+    tip: Option<u64>,
+) -> Result<Option<Submission>, String> {
+    reconcile_at_with(journal, operation, tip, |hash| async move {
+        ledger.receipt(&hash).await
     })
     .await
 }
 
 fn is_final(submission: &Submission) -> bool {
-    matches!(
-        submission.status,
-        SubmissionStatus::Confirmed | SubmissionStatus::FailedOnChain
-    ) && submission.confirmed_slot.is_some()
+    match submission.status {
+        SubmissionStatus::Confirmed | SubmissionStatus::FailedOnChain => {
+            submission.confirmed_slot.is_some()
+        }
+        SubmissionStatus::Expired => true,
+        SubmissionStatus::OutcomeUnknown | SubmissionStatus::Submitted => false,
+    }
 }
 
+#[cfg(test)]
 async fn reconcile_with<F, Fut>(
     journal: &Journal,
     operation: Operation<'_>,
+    check: F,
+) -> Result<Option<Submission>, String>
+where
+    F: FnOnce(String) -> Fut,
+    Fut: Future<Output = Result<Option<TransactionReceipt>, String>>,
+{
+    reconcile_at_with(journal, operation, None, check).await
+}
+
+async fn reconcile_at_with<F, Fut>(
+    journal: &Journal,
+    operation: Operation<'_>,
+    tip: Option<u64>,
     check: F,
 ) -> Result<Option<Submission>, String>
 where
@@ -628,8 +713,13 @@ where
     }
     let Some(receipt) = check(original.tx_hash.clone()).await? else {
         return journal
-            .run("submission.reconcile-lookup", move |database| {
-                lookup(database.conn(), owned.get())
+            .run("submission.reconcile-expire", move |database| {
+                let conn = database.conn();
+                let operation = owned.get();
+                if let Some(tip) = tip {
+                    expire_if_past_window(conn, operation, tip)?;
+                }
+                lookup(conn, operation)
             })
             .await;
     };
@@ -661,6 +751,7 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     use super::*;
+    use crate::cardano::fake_ledger::FakeLedger;
     use crate::cardano::test_chain::{self, FakeChain, Reply, TestProfile};
     use pallas_addresses::Address;
     use pallas_crypto::{hash::Hash, key::ed25519::SecretKey};
@@ -1535,5 +1626,127 @@ mod tests {
             reserved_at(&after, TTL),
             vec![outpoint(1, 0), outpoint(2, 0)]
         );
+    }
+
+    #[tokio::test]
+    async fn rejected_transaction_expires_only_after_its_window_and_releases_its_outpoints() {
+        let profile = TestProfile::migrated();
+        let journal = profile.background();
+        let ledger = FakeLedger::at_tip(TTL - 100);
+        ledger.reject_submissions("BadInputsUTxO");
+        let bytes = transaction(200_000, Some(TTL), &[(1, 0)], &[(2, 0)]);
+        let rejected = submit_once(&journal, &ledger, OPERATION, &bytes, CONTEXT)
+            .await
+            .unwrap();
+        assert_eq!(rejected.status, SubmissionStatus::OutcomeUnknown);
+
+        for tip in [None, Some(TTL), Some(TTL + EXPIRY_MARGIN_SLOTS)] {
+            let pending = reconcile_at(&journal, &ledger, OPERATION, tip)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(pending.status, SubmissionStatus::OutcomeUnknown, "{tip:?}");
+        }
+        assert_eq!(reserved_at(&profile, TTL), vec![outpoint(1, 0), outpoint(2, 0)]);
+
+        let expired = reconcile_at(
+            &journal,
+            &ledger,
+            OPERATION,
+            Some(TTL + EXPIRY_MARGIN_SLOTS + 1),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(expired.status, SubmissionStatus::Expired);
+        assert_eq!(expired.tx_hash, rejected.tx_hash);
+        // Released at once, even at a tip still inside the original window.
+        assert_eq!(reserved_at(&profile, TTL), Vec::new());
+
+        // Terminal: no more receipt queries, and the operation is not resent.
+        let again = reconcile_with(&journal, OPERATION, |_| async {
+            panic!("an expired transaction is not polled")
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(again, expired);
+        let repeated = submit_with(&journal, OPERATION, &bytes, CONTEXT, |_| async {
+            panic!("an expired operation is not resent by submit_once")
+        })
+        .await
+        .unwrap();
+        assert_eq!(repeated, expired);
+        assert_eq!(ledger.submissions().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn provider_error_never_expires() {
+        let profile = TestProfile::migrated();
+        let journal = profile.background();
+        let original = uncertain(&journal).await;
+        let result = reconcile_at_with(&journal, OPERATION, Some(TTL * 10), |_| async {
+            Err("provider timed out".into())
+        })
+        .await;
+        assert!(result.is_err());
+        assert_eq!(saved(&profile, OPERATION), Some(original));
+    }
+
+    #[tokio::test]
+    async fn receipt_inside_the_margin_confirms_instead_of_expiring() {
+        let profile = TestProfile::migrated();
+        let journal = profile.background();
+        let ledger = FakeLedger::at_tip(TTL - 100);
+        let bytes = signed_transaction(200_000);
+        let sent = submit_once(&journal, &ledger, OPERATION, &bytes, CONTEXT)
+            .await
+            .unwrap();
+        // Included late but before its bound; seen only once the tip is past
+        // the bound, inside the margin.
+        ledger.include(&sent.tx_hash, TTL - 1);
+        let confirmed = reconcile_at(&journal, &ledger, OPERATION, Some(TTL + 900))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(confirmed.status, SubmissionStatus::Confirmed);
+        assert_eq!(confirmed.confirmed_slot, Some(TTL - 1));
+        let later = reconcile_at(&journal, &ledger, OPERATION, Some(TTL * 10))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(later, confirmed);
+    }
+
+    #[tokio::test]
+    async fn expired_entry_leaves_the_recovery_scan_once_its_projection_commits() {
+        let profile = TestProfile::migrated();
+        let journal = profile.background();
+        uncertain(&journal).await;
+        let expired = reconcile_at_with(&journal, OPERATION, Some(TTL * 10), |_| async {
+            Ok(None)
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(expired.status, SubmissionStatus::Expired);
+        let unapplied = |profile: &TestProfile| {
+            with_database(&profile.db, |conn| {
+                unapplied_operations(conn, OPERATION.kind, 10)
+            })
+            .unwrap()
+        };
+        assert_eq!(unapplied(&profile), vec![OPERATION.id.to_owned()]);
+        with_database(&profile.db, |conn| {
+            let tx = rusqlite::Transaction::new_unchecked(
+                conn,
+                rusqlite::TransactionBehavior::Immediate,
+            )
+            .map_err(|e| e.to_string())?;
+            mark_applied(&tx, OPERATION)?;
+            tx.commit().map_err(|e| e.to_string())
+        })
+        .unwrap();
+        assert!(unapplied(&profile).is_empty());
     }
 }

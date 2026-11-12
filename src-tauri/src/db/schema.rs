@@ -351,7 +351,7 @@ CREATE TABLE chain_submissions (
     tx_hash TEXT NOT NULL CHECK (length(tx_hash) = 64),
     signed_cbor BLOB NOT NULL CHECK (length(signed_cbor) > 0),
     context_json TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'outcome_unknown' CHECK (status IN ('outcome_unknown', 'submitted', 'confirmed', 'failed_on_chain')),
+    status TEXT NOT NULL DEFAULT 'outcome_unknown' CHECK (status IN ('outcome_unknown', 'submitted', 'confirmed', 'failed_on_chain', 'expired')),
     confirmed_slot INTEGER CHECK (confirmed_slot >= 0),
     applied_at TEXT,
     last_error TEXT,
