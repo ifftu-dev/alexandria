@@ -378,13 +378,16 @@ async fn batches_that_fail_on_chain_end_in_failure_until_retried() {
     funded(&node.ledger, &node.wallet);
     let vc = issue(&node.profile, &node.issuer, "a");
     let mut now = chrono::DateTime::parse_from_rfc3339(T0_PLUS_7H).unwrap();
+    // A failed transaction keeps its input reserved until its window passes,
+    // so each attempt comes one window after the last.
+    let window = crate::cardano::tx_builder::TTL_OFFSET + EXPIRY_MARGIN_SLOTS + 1;
+    let tip_of = |attempt: u32| TIP + window * u64::from(attempt);
     for attempt in 1..=MAX_ATTEMPTS {
-        node.ledger.set_tip(TIP + 100 * u64::from(attempt));
+        node.ledger.set_tip(tip_of(attempt));
         node.tick(&now.to_rfc3339()).await;
         let submissions = node.ledger.submissions();
         let (hash, _) = submissions.last().unwrap();
-        node.ledger
-            .include_failed(hash, TIP + 100 * u64::from(attempt) + 5);
+        node.ledger.include_failed(hash, tip_of(attempt) + 5);
         node.tick(&now.to_rfc3339()).await;
         let state = node.state(&vc);
         assert_eq!(state.attempts, attempt);
@@ -406,12 +409,13 @@ async fn batches_that_fail_on_chain_end_in_failure_until_retried() {
     let state = node.state(&vc);
     assert_eq!((state.status, state.attempts), (AnchorStatus::Pending, 0));
     node.tick(&now.to_rfc3339()).await;
+    let state = node.state(&vc);
     assert_eq!(
-        node.state(&vc).status,
-        AnchorStatus::Pending,
-        "an identical rebuild of the last failure waits"
+        (state.status, state.attempts),
+        (AnchorStatus::Pending, 0),
+        "the last failure's input is still reserved: wait"
     );
-    node.ledger.set_tip(TIP + 10_000);
+    node.ledger.set_tip(tip_of(MAX_ATTEMPTS + 1));
     now += chrono::Duration::hours(1);
     node.tick(&now.to_rfc3339()).await;
     assert_eq!(node.state(&vc).status, AnchorStatus::Submitted);
@@ -586,6 +590,91 @@ async fn an_imported_receipt_is_observed_on_the_ledger_and_then_verifies() {
         .unwrap();
     assert_eq!(state.status, AnchorStatus::Confirmed);
     assert_eq!(state.tx_hash.as_deref(), Some(tx.hash.as_str()));
+}
+
+// -- in-flight spends -----------------------------------------------------------
+
+/// Another feature's transaction (a completion mint, say) journaled and sent
+/// in an earlier pass: spends `inputs`, pledges `collateral`, can land until
+/// `ttl`. Returns its hash.
+async fn in_flight_spend(node: &Node, inputs: &[&UTxO], collateral: &[&UTxO], ttl: u64) -> String {
+    use crate::cardano::tx_builder;
+    use pallas_txbuilder::{BuildConway, Input, Output, StagingTransaction};
+    let input = |u: &UTxO| Input::new(tx_builder::parse_tx_hash(&u.tx_hash).unwrap(), u.tx_index);
+    let mut staging = StagingTransaction::new()
+        .output(Output::new(
+            pallas_addresses::Address::from_bech32(&node.wallet.payment_address).unwrap(),
+            2_000_000,
+        ))
+        .fee(200_000)
+        .invalid_from_slot(ttl)
+        .network_id(0);
+    for u in inputs {
+        staging = staging.input(input(u));
+    }
+    for u in collateral {
+        staging = staging.collateral_input(input(u));
+    }
+    let built = staging.build_conway_raw().unwrap();
+    let key = tx_builder::extended_private_key(&node.wallet.payment_key_extended).unwrap();
+    let signed = tx_builder::sign_raw_tx(&built.tx_bytes.0, &key).unwrap();
+    let hash = tx_builder::compute_tx_hash(&signed).unwrap();
+    let sent = submission::submit_once(
+        &node.profile.background(),
+        &node.ledger,
+        Operation {
+            kind: "completion_mint",
+            id: &hash,
+        },
+        &signed,
+        "{}",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        sent.status,
+        SubmissionStatus::Submitted,
+        "the mempool took it"
+    );
+    hash
+}
+
+/// Anchor transactions submitted so far, oldest first; other features'
+/// transactions are skipped.
+fn anchor_submissions(node: &Node) -> Vec<Submitted> {
+    node.ledger
+        .submissions()
+        .iter()
+        .filter(|(_, bytes)| {
+            MultiEraTx::decode(bytes)
+                .unwrap()
+                .metadata()
+                .find(1697)
+                .is_some()
+        })
+        .map(|(hash, bytes)| decode(hash, bytes))
+        .collect()
+}
+
+#[tokio::test]
+async fn an_issuer_paid_anchor_spends_a_utxo_no_in_flight_transaction_spends() {
+    let node = Node::new();
+    let largest = ada(0x11, 0, 50_000_000);
+    let free = ada(0x12, 0, 20_000_000);
+    node.ledger.set_utxos(
+        &node.wallet.payment_address,
+        vec![largest.clone(), free.clone()],
+    );
+    // A completion mint earlier in the pass took the largest UTxO; the
+    // provider still lists it.
+    in_flight_spend(&node, &[&largest], &[], TIP + 3_600).await;
+    let vc = issue(&node.profile, &node.issuer, "a");
+    node.tick(T0_PLUS_7H).await;
+
+    let anchors = anchor_submissions(&node);
+    assert_eq!(anchors.len(), 1);
+    assert_eq!(anchors[0].inputs, vec![(free.tx_hash.clone(), 0)]);
+    assert_eq!(node.state(&vc).status, AnchorStatus::Submitted, "accepted");
 }
 
 /// Live preprod run of the whole anchorer: issue two credentials, flush them

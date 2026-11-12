@@ -34,6 +34,7 @@ use crate::cardano::cost_models::PLUTUS_V3_COST_MODEL;
 use crate::cardano::ledger::{Ledger, ANCHOR_RECORD_VERSION};
 use crate::cardano::plutus_data;
 use crate::cardano::plutus_spend::{plutus_fee, EST_MEM, EST_STEPS, MIN_COLLATERAL_LOVELACE};
+use crate::cardano::reservations::{select_unreserved, ReservedOutpoints};
 use crate::cardano::script_refs::ALEXANDRIA_ANCHOR_LABEL;
 use crate::cardano::tx_builder::{self, MIN_UTXO_LOVELACE, TTL_OFFSET};
 use crate::cardano::types::UTxO;
@@ -85,12 +86,16 @@ pub struct AnchorTx {
     pub invalid_from_slot: u64,
 }
 
-/// Build and sign the anchor transaction for `record`.
+/// Build and sign the anchor transaction for `record`. Wallet inputs and
+/// collateral are chosen among UTxOs outside `reserved`; when only reserved
+/// ones would do, the error is
+/// [`WalletBusy`](crate::cardano::reservations::WalletBusy)'s.
 pub async fn build_anchor_tx<L: Ledger>(
     record: &AnchorRecord,
     funding: Funding<'_>,
     wallet: &Wallet,
     ledger: &L,
+    reserved: &ReservedOutpoints,
 ) -> Result<AnchorTx, String> {
     let (utxos, params, tip_slot) = tokio::join!(
         ledger.utxos(&wallet.payment_address),
@@ -112,14 +117,14 @@ pub async fn build_anchor_tx<L: Ledger>(
     let (unsigned, invalid_from_slot) = match funding {
         Funding::Issuer => {
             let fee = tx_builder::estimate_fee(&params, 1);
-            let selected = select_ada_only(&wallet_utxos, fee + MIN_UTXO_LOVELACE).ok_or_else(
-                || {
-                    format!(
-                        "{NEEDS_FUNDS}: no sponsor available, and the wallet has no ADA-only UTxO holding {} lovelace",
-                        fee + MIN_UTXO_LOVELACE
-                    )
-                },
-            )?;
+            let needed = fee + MIN_UTXO_LOVELACE;
+            let selected =
+                select_unreserved(&wallet_utxos, reserved, |u| select_ada_only(u, needed))?
+                    .ok_or_else(|| {
+                        format!(
+                            "{NEEDS_FUNDS}: no sponsor available, and the wallet has no ADA-only UTxO holding {needed} lovelace"
+                        )
+                    })?;
             let address = PallasAddress::from_bech32(&wallet.payment_address)
                 .map_err(|e| format!("bad wallet address: {e}"))?;
             let invalid_from = tip_slot + TTL_OFFSET;
@@ -469,10 +474,25 @@ mod tests {
             };
             let built = match &funding {
                 Some((profile, utxo)) => {
-                    build_anchor_tx(&record, Funding::Sponsor { profile, utxo }, &wallet, &bf)
-                        .await?
+                    build_anchor_tx(
+                        &record,
+                        Funding::Sponsor { profile, utxo },
+                        &wallet,
+                        &bf,
+                        &ReservedOutpoints::default(),
+                    )
+                    .await?
                 }
-                None => build_anchor_tx(&record, Funding::Issuer, &wallet, &bf).await?,
+                None => {
+                    build_anchor_tx(
+                        &record,
+                        Funding::Issuer,
+                        &wallet,
+                        &bf,
+                        &ReservedOutpoints::default(),
+                    )
+                    .await?
+                }
             };
             bf.submit(&built.signed_cbor).await
         });

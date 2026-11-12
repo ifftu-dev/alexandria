@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cardano::anchor_tx::{self, AnchorRecord, Funding};
 use crate::cardano::ledger::{self, Ledger};
+use crate::cardano::reservations::ReservedOutpoints;
 use crate::cardano::submission::{
     self, Journal, Operation, Submission, SubmissionStatus, SubmitError,
 };
@@ -615,10 +616,19 @@ async fn build_and_submit<L: Ledger>(
         anchored_from: queued[0].issued_at.clone(),
     };
 
+    // What this node's in-flight transactions spend, read just before
+    // selecting: every earlier writer in the pass has journaled its bytes.
+    let tip = ledger.tip_slot().await.map_err(SubmitError::Failed)?;
+    let reserved = journal
+        .before_send("anchor_queue.reserved", move |db| {
+            submission::reserved_outpoints(db.conn(), tip)
+        })
+        .await?;
+
     let mut sponsor_error = None;
     let mut built = None;
     if let Some(profile) = sponsor {
-        match sponsored(ledger, profile, &record, wallet).await {
+        match sponsored(ledger, profile, &record, wallet, &reserved).await {
             Ok(Some((tx, funding))) => built = Some((tx, funding)),
             Ok(None) => {}
             Err(error) => {
@@ -629,15 +639,19 @@ async fn build_and_submit<L: Ledger>(
     }
     let (anchor, funding) = match built {
         Some(built) => built,
-        None => match anchor_tx::build_anchor_tx(&record, Funding::Issuer, wallet, ledger).await {
-            Ok(tx) => (tx, Funding::Issuer.label()),
-            Err(error) => {
-                return Err(SubmitError::Failed(match sponsor_error {
-                    Some(sponsor) => format!("{sponsor}; {error}"),
-                    None => error,
-                }))
+        None => {
+            match anchor_tx::build_anchor_tx(&record, Funding::Issuer, wallet, ledger, &reserved)
+                .await
+            {
+                Ok(tx) => (tx, Funding::Issuer.label()),
+                Err(error) => {
+                    return Err(SubmitError::Failed(match sponsor_error {
+                        Some(sponsor) => format!("{sponsor}; {error}"),
+                        None => error,
+                    }))
+                }
             }
-        },
+        }
     };
 
     let context = BatchContext {
@@ -718,6 +732,7 @@ async fn sponsored<L: Ledger>(
     profile: &AnchorSponsorProfile,
     record: &AnchorRecord,
     wallet: &Wallet,
+    reserved: &ReservedOutpoints,
 ) -> Result<Option<(anchor_tx::AnchorTx, &'static str)>, String> {
     let (utxos, tip) = tokio::join!(ledger.utxos(&profile.address), ledger.tip_slot());
     let (utxos, tip) = (utxos?, tip?);
@@ -727,7 +742,7 @@ async fn sponsored<L: Ledger>(
     };
     let funding = Funding::Sponsor { profile, utxo };
     let label = funding.label();
-    anchor_tx::build_anchor_tx(record, funding, wallet, ledger)
+    anchor_tx::build_anchor_tx(record, funding, wallet, ledger, reserved)
         .await
         .map(|tx| Some((tx, label)))
 }
