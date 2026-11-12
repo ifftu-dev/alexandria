@@ -56,6 +56,27 @@ use crate::plugins::grade_contract::GradeInput;
 #[cfg(desktop)]
 use crate::plugins::wasm_runtime::{GraderBudgets, GraderRuntime};
 
+/// Why an item could not be graded.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum GradeError {
+    /// The response breaks the item's submission contract before any grader
+    /// sees it: not a JSON object, or, for a choice item, positions that are
+    /// not a list of options the item has. The learner's answer is at fault.
+    #[error("invalid response: {0}")]
+    InvalidResponse(String),
+    /// The grader could not grade: not installed, not runnable on this
+    /// platform, bytes that do not match its CID, or a failure inside it.
+    /// Nothing about the response is known.
+    #[error("{0}")]
+    Unavailable(String),
+}
+
+impl From<GradeError> for String {
+    fn from(e: GradeError) -> Self {
+        e.to_string()
+    }
+}
+
 /// Grading engine for one call.
 ///
 /// Wasmtime has no mobile target, so the runtime is `#[cfg(desktop)]`. This
@@ -302,20 +323,22 @@ pub fn grade_item(
     item: &AssessmentItem,
     submission: &serde_json::Value,
     option_order: Option<&[usize]>,
-) -> Result<ItemGrade, String> {
-    let resolved = resolve_grader(db, item)?;
-
-    let submission = normalize_submission(item, submission, option_order)?;
+) -> Result<ItemGrade, GradeError> {
+    let submission = normalize_submission(item, submission, option_order)
+        .map_err(GradeError::InvalidResponse)?;
+    let resolved = resolve_grader(db, item).map_err(GradeError::Unavailable)?;
     let content = grade_content(item);
 
     // Serialize each half once and hash exactly those bytes, so the CIDs
     // describe what the grader actually saw.
-    let content_bytes = serde_json::to_vec(&content).map_err(|e| e.to_string())?;
-    let submission_bytes = serde_json::to_vec(&submission).map_err(|e| e.to_string())?;
+    let unavailable = |e: serde_json::Error| GradeError::Unavailable(e.to_string());
+    let content_bytes = serde_json::to_vec(&content).map_err(unavailable)?;
+    let submission_bytes = serde_json::to_vec(&submission).map_err(unavailable)?;
     let content_cid = blake3::hash(&content_bytes).to_hex().to_string();
     let submission_cid = blake3::hash(&submission_bytes).to_hex().to_string();
 
-    let record = run_grader(engine, &resolved, item, &content, &submission)?;
+    let record = run_grader(engine, &resolved, item, &content, &submission)
+        .map_err(GradeError::Unavailable)?;
 
     Ok(ItemGrade {
         // A grader returning out-of-range is a bug in that grader, not a
@@ -471,19 +494,36 @@ fn normalize_submission(
     submission: &serde_json::Value,
     option_order: Option<&[usize]>,
 ) -> Result<serde_json::Value, String> {
+    if !submission.is_object() {
+        return Err("a submission is a JSON object".into());
+    }
     if item.item_kind != ItemKind::Mcq {
         return Ok(submission.clone());
     }
 
-    let positions: Vec<usize> = submission
-        .get("selected_positions")
+    let option_count = item
+        .content_public
+        .get("options")
         .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_u64().map(|n| n as usize))
-                .collect()
-        })
-        .unwrap_or_default();
+        .map(|a| a.len())
+        .unwrap_or(0);
+    // No selection at all is an unanswered question: a wrong answer, not an
+    // invalid one.
+    let empty = Vec::new();
+    let positions: Vec<usize> = match submission.get("selected_positions") {
+        None => &empty,
+        Some(v) => v
+            .as_array()
+            .ok_or("selected positions are a list of option positions")?,
+    }
+    .iter()
+    .map(|v| {
+        v.as_u64()
+            .and_then(|n| usize::try_from(n).ok())
+            .filter(|&n| n < option_count)
+            .ok_or_else(|| format!("{v} is not one of the {option_count} options"))
+    })
+    .collect::<Result<_, _>>()?;
 
     // Identity order when the attempt did not shuffle (served positions are
     // already original indices).
@@ -491,13 +531,7 @@ fn normalize_submission(
     let order = match option_order {
         Some(o) => o,
         None => {
-            let len = item
-                .content_public
-                .get("options")
-                .and_then(|v| v.as_array())
-                .map(|a| a.len())
-                .unwrap_or(0);
-            identity = (0..len).collect();
+            identity = (0..option_count).collect();
             &identity
         }
     };
@@ -858,7 +892,9 @@ mod e2e {
             .expect("insert");
 
         let item = load_item(&f.db, "q_bad").unwrap().unwrap();
-        let err = grade_item(&f.db, &f.engine(), &item, &serde_json::json!({}), None).unwrap_err();
+        let err = grade_item(&f.db, &f.engine(), &item, &serde_json::json!({}), None)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("no plugin_cid"), "unexpected error: {err}");
     }
 

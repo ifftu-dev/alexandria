@@ -532,6 +532,21 @@ impl WithGeneration for serde_json::Value {
     }
 }
 
+trait WithInvalidResponse {
+    fn with_invalid_response(self, invalid: bool) -> Self;
+}
+
+impl WithInvalidResponse for serde_json::Value {
+    /// Marks a result whose response broke the submission contract, so a
+    /// reviewer can tell it from a graded wrong answer.
+    fn with_invalid_response(mut self, invalid: bool) -> Self {
+        if let (true, Some(obj)) = (invalid, self.as_object_mut()) {
+            obj.insert("error".into(), "invalid_response".into());
+        }
+        self
+    }
+}
+
 // ---- stored probes --------------------------------------------------------
 
 pub(crate) struct ProbeRow {
@@ -920,13 +935,20 @@ pub fn answer_probe_db(
     } else {
         None
     };
+    let invalid_response = matches!(graded, Some(Err(items::GradeError::InvalidResponse(_))));
     let (outcome, reason, grade) = match graded {
         None => (
             VerificationOutcome::Skipped,
             Some(skip_reason::TIMEOUT),
             None,
         ),
-        Some(Err(_)) => (
+        // The response breaks the probe's submission contract: an answer
+        // nobody could grade is a wrong answer, never a pass on the step.
+        Some(Err(items::GradeError::InvalidResponse(_))) => {
+            (VerificationOutcome::Failed, None, None)
+        }
+        // The grader could not run: nothing is known about the answer.
+        Some(Err(items::GradeError::Unavailable(_))) => (
             VerificationOutcome::Skipped,
             Some(skip_reason::PROVIDER_UNAVAILABLE),
             None,
@@ -965,7 +987,8 @@ pub fn answer_probe_db(
             "content_cid": grade.as_ref().map(|g| &g.content_cid),
             "submission_cid": grade.as_ref().map(|g| &g.submission_cid),
         })
-        .with_generation(&probe.generation),
+        .with_generation(&probe.generation)
+        .with_invalid_response(invalid_response),
     )?;
     if reason == Some(skip_reason::UNCONFIRMED_KEY) {
         crate::sentinel::verification::raise_status(conn, &session, SessionStatus::Review)?;
@@ -1501,6 +1524,61 @@ mod tests {
         let s = summary(&ctx);
         assert_eq!(s.outcome, Some(VerificationOutcome::Failed));
         assert_eq!(s.failed, 2);
+    }
+
+    fn respond_raw(ctx: &Ctx, probe: &ServedProbe, response: serde_json::Value) {
+        answer_probe_db(
+            &ctx.db,
+            &ctx.engine(),
+            &probe.id,
+            LEARNER,
+            &response,
+            Some(1_500),
+            NOW_MS + 3_000,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_response_the_item_cannot_accept_fails_verification_rather_than_skipping() {
+        for response in [
+            serde_json::json!("a"),
+            serde_json::json!({ "selected_positions": "a" }),
+            serde_json::json!({ "selected_positions": [9] }),
+        ] {
+            let ctx = setup("reseed");
+            submit(&ctx, &[answer("q1", &[0]), answer("q2", &[0])]);
+            let probe = &start(&ctx)[0];
+            render_probe_db(&ctx.db, &probe.id, LEARNER, NOW_MS).unwrap();
+            respond_raw(&ctx, probe, response.clone());
+            let s = summary(&ctx);
+            assert_eq!(s.outcome, Some(VerificationOutcome::Failed), "{response}");
+            assert_eq!(
+                s.results[0].detail["error"], "invalid_response",
+                "{response}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_grader_that_cannot_run_skips_the_probe_as_provider_unavailable() {
+        let ctx = setup("reseed");
+        submit(&ctx, &[answer("q1", &[0]), answer("q2", &[0])]);
+        let probe = &start(&ctx)[0];
+        render_probe_db(&ctx.db, &probe.id, LEARNER, NOW_MS).unwrap();
+        ctx.conn()
+            .execute(
+                "UPDATE plugin_installed SET install_path = '/nonexistent/grader'",
+                [],
+            )
+            .unwrap();
+        respond(&ctx, probe, &["a"], NOW_MS + 3_000);
+        let s = summary(&ctx);
+        assert_eq!(s.outcome, Some(VerificationOutcome::Skipped));
+        assert_eq!(
+            s.results[0].reason.as_deref(),
+            Some(skip_reason::PROVIDER_UNAVAILABLE)
+        );
     }
 
     #[test]
