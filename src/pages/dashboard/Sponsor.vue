@@ -11,6 +11,7 @@ import { useI18n } from 'vue-i18n'
 import { AppButton, AppBadge, AppModal, AppInput, AppTextarea, AppTabs, EmptyState, AppAlert } from '@/components/ui'
 import { useSponsor } from '@/composables/useSponsor'
 import { useAuth } from '@/composables/useAuth'
+import GeneratedProbeConnectionField from '@/components/integrity/GeneratedProbeConnectionField.vue'
 import type { IssuancePolicy, RoleAttemptSummary, VerifiableCredential } from '@/types'
 
 const { t } = useI18n()
@@ -57,6 +58,7 @@ const roleForm = ref({
   max_warning: '',
   require_clean: false,
   required_assurance_level: '',
+  probe_connection_id: '',
 })
 const roleBusy = ref(false)
 
@@ -71,6 +73,11 @@ function buildPolicy(): IssuancePolicy | null {
   if (roleForm.value.max_critical !== '') p.max_critical = Number(roleForm.value.max_critical)
   if (roleForm.value.max_warning !== '') p.max_warning = Number(roleForm.value.max_warning)
   if (roleForm.value.require_clean) p.require_clean = true
+  // A chosen model connection turns on generated follow-ups for the role.
+  if (roleForm.value.probe_connection_id) {
+    p.probe_policy = 'llm'
+    p.probe_connection_id = roleForm.value.probe_connection_id
+  }
   // required_assurance_level is folded in backend-side from the column.
   return Object.keys(p).length > 0 ? p : null
 }
@@ -92,7 +99,7 @@ async function createRole() {
     roleForm.value = {
       org_id: '', role_title: '', job_description: '', skill_ids: '',
       min_integrity: '', max_critical: '', max_warning: '',
-      require_clean: false, required_assurance_level: '',
+      require_clean: false, required_assurance_level: '', probe_connection_id: '',
     }
     roleModalOpen.value = false
   }
@@ -221,6 +228,7 @@ onMounted(async () => {
             <span v-if="ra.issuance_policy?.min_integrity != null" class="text-muted-foreground">
               {{ $t('dashboard.sponsor.roles.minIntegrity', { value: ra.issuance_policy.min_integrity }) }}
             </span>
+            <span v-if="ra.issuance_policy?.probe_policy === 'llm'" class="text-muted-foreground">{{ $t('dashboard.sponsor.roles.generatedProbe') }}</span>
             <span v-for="s in ra.skill_ids" :key="s" class="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{{ s }}</span>
           </div>
           <div class="mt-2 flex gap-2">
@@ -313,6 +321,7 @@ onMounted(async () => {
             <option v-for="l in ASSURANCE_LEVELS" :key="l" :value="l">{{ l }}</option>
           </select>
         </label>
+        <GeneratedProbeConnectionField v-model="roleForm.probe_connection_id" />
         <div class="flex justify-end gap-2">
           <AppButton variant="ghost" size="sm" @click="roleModalOpen = false">{{ $t('common.actions.cancel') }}</AppButton>
           <AppButton variant="primary" size="sm" :disabled="roleBusy || !roleForm.role_title.trim() || !roleForm.org_id" @click="createRole">{{ $t('dashboard.sponsor.actions.create') }}</AppButton>

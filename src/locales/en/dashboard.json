@@ -128,7 +128,8 @@
       "requiresClean": "requires a clean session",
       "minIntegrity": "min integrity {value}",
       "publish": "Publish",
-      "archive": "Archive"
+      "archive": "Archive",
+      "generatedProbe": "generated follow-ups"
     },
     "issue": {
       "roleLabel": "Role assessment",
@@ -168,7 +169,11 @@
       "maxWarning": "Max warning",
       "requireClean": "Require a clean session",
       "assuranceLabel": "Required assurance level",
-      "assuranceNone": "(none)"
+      "assuranceNone": "(none)",
+      "generatedProbeLabel": "Generated follow-up questions",
+      "generatedProbeOff": "Off",
+      "generatedProbeNone": "No model connections are set up on this device.",
+      "generatedProbeNote": "A saved model connection writes short follow-ups from each candidate's chosen answers and the skill description. Candidates are asked first; without their consent, or when the model is unavailable, the follow-up is skipped."
     },
     "actions": {
       "create": "Create"

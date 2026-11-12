@@ -2013,6 +2013,11 @@ export interface IssuancePolicy {
    */
   probe_policy?: ProbePolicy | null
   /**
+   * The saved model connection that writes follow-ups under the 'llm' probe
+   * policy. Without one a generated follow-up is skipped.
+   */
+  probe_connection_id?: string | null
+  /**
    * Minimum trust profile, judged at attempt start and again at issuance. The
    * camera profiles carry their own camera coverage minimum.
    */
@@ -2578,6 +2583,10 @@ export interface AttemptRoleTarget {
   org_name: string
   /** The role's minimum trust profile runs the camera. */
   camera_required: boolean
+  /** The role's follow-ups are written by its model connection ('llm'); the
+   *  learner is asked before the attempt whether their answers may leave the
+   *  device for that. */
+  generated_probes: boolean
 }
 
 /** One submitted answer: the served option positions the learner selected. */
@@ -2593,7 +2602,7 @@ export interface GradeResult {
 }
 
 /** Where an attempt's follow-up probes come from (assessment or role policy). */
-export type ProbePolicy = 'none' | 'reseed' | 'authored' | 'plugin'
+export type ProbePolicy = 'none' | 'reseed' | 'authored' | 'plugin' | 'llm'
 
 /** A probe as served after submission: the public half only. For a choice
  *  item `content` carries `prompt`, `options` (this probe's own order) and
