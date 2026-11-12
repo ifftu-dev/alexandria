@@ -1042,6 +1042,28 @@ pub fn grade_attempt_impl(
     answers: &[SubmittedAnswer],
     now: &str,
 ) -> Result<GradeResult, String> {
+    grade_attempt_with_manifest(
+        db,
+        engine,
+        issuer,
+        attempt_id,
+        answers,
+        now,
+        &crate::sentinel::scoring::active_manifest(),
+    )
+}
+
+/// [`grade_attempt_impl`] against an explicit ratio manifest, which scores
+/// the attempt's longitudinal consistency before a credential is issued.
+pub(crate) fn grade_attempt_with_manifest(
+    db: &crate::db::Database,
+    engine: &GradeEngine<'_>,
+    issuer: &Issuer,
+    attempt_id: &str,
+    answers: &[SubmittedAnswer],
+    now: &str,
+    manifest: &crate::sentinel::scoring::RatioManifest,
+) -> Result<GradeResult, String> {
     let issuer_did = issuer.did();
     let conn = db.conn();
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
@@ -1180,6 +1202,10 @@ pub fn grade_attempt_impl(
         0.0
     };
     let passed = score >= threshold;
+
+    // The outcome against the learner's own history, before the assertion
+    // is built: a measured divergence can move the session to review.
+    crate::sentinel::consistency::apply_at_grading(conn, attempt_id, score, manifest)?;
 
     // Persist per-item results, including the reproducibility triple for
     // each one — an attempt total alone cannot be re-derived.
@@ -1532,6 +1558,86 @@ mod tests {
         assert!(
             r.credential_id.is_some(),
             "a passing attempt must credential"
+        );
+    }
+
+    /// An earlier attempt on the skill, the day before, with every item wrong.
+    fn failed_earlier_attempt(ctx: &Ctx) {
+        let conn = ctx.db.conn();
+        conn.execute(
+            "INSERT INTO assessment_attempts \
+             (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
+              started_at, graded_at, score, passed) \
+             VALUES ('att_0', ?1, 'bank_t', 'skill_rust', 1, '[]', '[]', \
+                     '2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z', 0.0, 0)",
+            [&ctx.did.0],
+        )
+        .unwrap();
+        for ordinal in 0..6 {
+            conn.execute(
+                "INSERT INTO attempt_items (attempt_id, ordinal, item_id, score, graded_at) \
+                 VALUES ('att_0', ?1, 'q1', 0.0, '2026-07-21T00:00:00Z')",
+                [ordinal],
+            )
+            .unwrap();
+        }
+    }
+
+    fn integrity_status(ctx: &Ctx, credential_id: Option<String>) -> serde_json::Value {
+        let json: String = ctx
+            .db
+            .conn()
+            .query_row(
+                "SELECT signed_vc_json FROM credentials WHERE id=?1",
+                [credential_id.expect("a credential")],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let vc: serde_json::Value = serde_json::from_str(&json).unwrap();
+        vc.pointer("/integrity/status").cloned().unwrap()
+    }
+
+    #[test]
+    fn a_pass_that_outruns_the_learners_history_is_reviewed_once_divergence_is_measured() {
+        use crate::sentinel::scoring::{ProfileRatios, RatioManifest, DEFAULT_PROFILE};
+        let ctx = setup();
+        failed_earlier_attempt(&ctx);
+        let mut measured = RatioManifest::uncertified();
+        measured.version = "test-certified".into();
+        measured.profiles.insert(
+            DEFAULT_PROFILE.into(),
+            ProfileRatios {
+                threshold: 2.0,
+                ratios: [("longitudinal_divergence".to_string(), 3.0)].into(),
+            },
+        );
+        let answers = [answer("q1", &[0]), answer("q2", &[1])];
+        prepare(&ctx, &answers);
+        let result = grade_attempt_with_manifest(
+            &ctx.db,
+            &ctx.engine(),
+            &ctx.issuer,
+            "att_1",
+            &answers,
+            NOW,
+            &measured,
+        )
+        .unwrap();
+        assert!(result.passed, "review is not a verdict");
+        assert_eq!(
+            integrity_status(&ctx, result.credential_id),
+            serde_json::json!("review")
+        );
+    }
+
+    #[test]
+    fn an_unmeasured_divergence_does_not_change_the_issued_integrity() {
+        let ctx = setup();
+        failed_earlier_attempt(&ctx);
+        let result = grade(&ctx, &[answer("q1", &[0]), answer("q2", &[1])]);
+        assert_eq!(
+            integrity_status(&ctx, result.credential_id),
+            serde_json::json!("completed")
         );
     }
 

@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::crypto::hash::entity_id;
 use crate::sentinel::scoring::{
-    self, decide, derive_window, FusionSummary, RatioManifest, SessionEvidence, SessionStatus,
-    WindowFeatures, DEFAULT_PROFILE,
+    self, decide, derive_window, Decision, FusionSummary, RatioManifest, SessionEvidence,
+    SessionStatus, WindowFeatures, DEFAULT_PROFILE,
 };
 
 pub(crate) use crate::sentinel::scoring::{severity as flag_severity, Severity};
@@ -340,6 +340,47 @@ fn commit_window(
     snapshot.fusion = Some(decision.summary);
     tx.commit().map_err(|e| e.to_string())?;
     Ok(snapshot)
+}
+
+/// Applies the decision rule to a session's committed chain plus signals
+/// the backend derives from the profile database once the attempt is
+/// graded (longitudinal consistency). Grading needs a finished session, so
+/// the signals are not written into the chain, which may already be final
+/// and attested; only the status moves, and only up. The same signals are
+/// derived again from the database whenever they are needed.
+pub(crate) fn decide_with_verification(
+    conn: &rusqlite::Connection,
+    session_id: &str,
+    signals: &[String],
+    manifest: &RatioManifest,
+) -> Result<Decision, String> {
+    let (current_status, ended, purpose): (String, bool, String) = conn
+        .query_row(
+            "SELECT status, ended_at IS NOT NULL, purpose FROM integrity_sessions WHERE id = ?1",
+            params![session_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => "session not found".to_string(),
+            other => other.to_string(),
+        })?;
+    let mut windows = committed_flags(conn, session_id)?;
+    windows.push(signals.to_vec());
+    let evidence = SessionEvidence {
+        windows,
+        verification_failed: false,
+        interview: purpose == "interview",
+    };
+    let decision = decide(&evidence, manifest, DEFAULT_PROFILE, ended);
+    let current = SessionStatus::parse(&current_status).unwrap_or(SessionStatus::Active);
+    if decision.status > current {
+        conn.execute(
+            "UPDATE integrity_sessions SET status = ?2 WHERE id = ?1",
+            params![session_id, decision.status.as_str()],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(decision)
 }
 
 pub(crate) fn map_snapshot(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySnapshot> {

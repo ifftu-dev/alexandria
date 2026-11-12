@@ -27,6 +27,8 @@
 //!   mobile split-screen (native per-OS probes)
 //! - `scoring` — window scores, flags and session fusion, re-exported from
 //!   `alexandria_studio::integrity` (Tauri-free)
+//! - `consistency` — longitudinal consistency of an attempt with the
+//!   learner's practice, lessons and earlier attempts on the skill
 //! - `snapshots` — the integrity snapshot chain: validation, commitment,
 //!   severity, status, and flags the backend records itself
 //! - `evidence` — learner-consented retention of appeal evidence for
@@ -39,6 +41,7 @@
 pub mod active_app;
 pub mod android_environment;
 pub mod attestation;
+pub mod consistency;
 pub mod display_topology;
 pub mod evidence;
 pub mod face_detect;

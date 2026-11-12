@@ -12,10 +12,15 @@
 //! outcome needs two independent channels over threshold or a failed
 //! verification. Only backend-recorded tamper flags suspend.
 
+mod consistency;
 mod features;
 mod flags;
 mod fusion;
 
+pub use consistency::{
+    assess as assess_consistency, Consistency, ConsistencyVerdict, EvidenceSource, History,
+    Observation, DIVERGENCE_SIGNAL, LOOKBACK_HOURS,
+};
 pub use features::{
     derive_window, AndroidFeatures, BehaviouralBaseline, CameraFeatures, ClipboardFeatures,
     DisplayFeatures, FocusFeatures, HotkeyFeatures, ModelFeatures, MouseFeatures, OverlayFeatures,

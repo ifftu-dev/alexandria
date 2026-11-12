@@ -497,6 +497,15 @@ pub fn finalize_adaptive_impl(
         .unwrap_or(0.7);
     let passed = score >= threshold;
 
+    // Same as the fixed path: the outcome against the learner's history,
+    // before the assertion is built.
+    crate::sentinel::consistency::apply_at_grading(
+        conn,
+        attempt_id,
+        score,
+        &crate::sentinel::scoring::active_manifest(),
+    )?;
+
     let mut credential_id = None;
     if passed {
         // Carry the per-item reproducibility triples and the ability estimate
