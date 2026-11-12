@@ -10,8 +10,8 @@
   "scope": "global",
   "capabilities": [],
   "grader": {
-    "cid": "7cbb8f10544bf94d95ec0448070a7e0bf45af5e004467551158fb83e8b16ab98",
-    "blake3": "7cbb8f10544bf94d95ec0448070a7e0bf45af5e004467551158fb83e8b16ab98",
+    "cid": "88b9b98d44a9a931a69e711857d70e430eab51915d91915896217073e82a049b",
+    "blake3": "88b9b98d44a9a931a69e711857d70e430eab51915d91915896217073e82a049b",
     "entrypoint": "alex_grade"
   },
   "subject_tags": ["assessment"],

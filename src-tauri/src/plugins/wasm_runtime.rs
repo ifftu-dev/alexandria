@@ -19,6 +19,13 @@
 //! and returns a UTF-8 JSON envelope:
 //!     `{"version":"1","score":<0..=1>,"details":<...>}`
 //!
+//! Optional probe export (additive; absent means "no probes"):
+//!     ```
+//!     (export "alex_probe"  (func (param i32 i32) (result i64)))
+//!     ```
+//! takes `{"version":"1","content":<...>,"submission":<...>,"seed":<u64>}`
+//! and returns a probe envelope (see [`super::grade_contract::ProbeRecord`]).
+//!
 //! Determinism config:
 //!  - NaN canonicalization on
 //!  - relaxed SIMD off (its lane-order is implementation-defined)
@@ -249,7 +256,82 @@ impl GraderRuntime {
         input_json: &[u8],
         budgets: GraderBudgets,
     ) -> Result<(ScoreRecord, u64), String> {
+        let (out, fuel_consumed) = self
+            .invoke_export(
+                grader_cid,
+                wasm_bytes,
+                cwasm_path,
+                "alex_grade",
+                input_json,
+                budgets,
+            )?
+            .ok_or_else(|| "grader missing required export 'alex_grade'".to_string())?;
+
+        let record: ScoreRecord = serde_json::from_slice(&out)
+            .map_err(|e| format!("grader output is not a valid ScoreRecord: {e}"))?;
+
+        if !record.score.is_finite() || record.score < 0.0 || record.score > 1.0 {
+            return Err(format!(
+                "grader returned out-of-range score {} (expected [0.0, 1.0] finite)",
+                record.score
+            ));
+        }
+        if record.version != "1" {
+            return Err(format!(
+                "grader output declared version '{}', host expects '1'",
+                record.version
+            ));
+        }
+        Ok((record, fuel_consumed))
+    }
+
+    /// Ask a grader for a probe: a follow-up generated from the learner's own
+    /// submission (see [`super::grade_contract::ProbeRecord`]). `input_json`
+    /// is a serialized [`super::grade_contract::ProbeInput`].
+    ///
+    /// `alex_probe` is optional and has the same signature and sandbox as
+    /// `alex_grade`. `Ok(None)` when the grader does not export it or
+    /// declines to probe this submission.
+    pub fn probe(
+        &self,
+        grader_cid: &str,
+        wasm_bytes: &[u8],
+        cwasm_path: Option<&Path>,
+        input_json: &[u8],
+        budgets: GraderBudgets,
+    ) -> Result<Option<super::grade_contract::ProbeRecord>, String> {
+        let Some((out, _fuel)) = self.invoke_export(
+            grader_cid,
+            wasm_bytes,
+            cwasm_path,
+            "alex_probe",
+            input_json,
+            budgets,
+        )?
+        else {
+            return Ok(None);
+        };
+        let record: super::grade_contract::ProbeRecord = serde_json::from_slice(&out)
+            .map_err(|e| format!("grader output is not a valid ProbeRecord: {e}"))?;
+        record.validated()
+    }
+
+    /// Run one `(ptr, len) -> packed(ptr, len)` export over `input_json` in a
+    /// fresh store and return its output bytes and the fuel it burned.
+    /// `Ok(None)` when the module does not export `export`.
+    fn invoke_export(
+        &self,
+        grader_cid: &str,
+        wasm_bytes: &[u8],
+        cwasm_path: Option<&Path>,
+        export: &str,
+        input_json: &[u8],
+        budgets: GraderBudgets,
+    ) -> Result<Option<(Vec<u8>, u64)>, String> {
         let module = self.load_module(grader_cid, wasm_bytes, cwasm_path)?;
+        if module.get_export(export).is_none() {
+            return Ok(None);
+        }
 
         // Each grade gets its own Store — no shared state between
         // submissions, ever.
@@ -273,10 +355,9 @@ impl GraderRuntime {
         let alloc: TypedFunc<i32, i32> = instance
             .get_typed_func(&mut store, "alex_alloc")
             .map_err(|_| "grader missing required export 'alex_alloc'".to_string())?;
-        let grade: TypedFunc<(i32, i32), i64> =
-            instance
-                .get_typed_func(&mut store, "alex_grade")
-                .map_err(|_| "grader missing required export 'alex_grade'".to_string())?;
+        let entry: TypedFunc<(i32, i32), i64> = instance
+            .get_typed_func(&mut store, export)
+            .map_err(|_| format!("grader export '{export}' has the wrong signature"))?;
         let memory: Memory = instance
             .get_memory(&mut store, "memory")
             .ok_or_else(|| "grader does not export linear memory 'memory'".to_string())?;
@@ -300,10 +381,10 @@ impl GraderRuntime {
             .write(&mut store, in_ptr as usize, input_json)
             .map_err(|e| format!("failed to write input into grader memory: {e}"))?;
 
-        // Call grade. Returns a packed (ptr_hi32 << 32) | len_lo32.
-        let packed = grade
+        // Call the entry point. Returns a packed (ptr_hi32 << 32) | len_lo32.
+        let packed = entry
             .call(&mut store, (in_ptr, in_len))
-            .map_err(|e| format!("alex_grade trapped: {e}"))?;
+            .map_err(|e| format!("{export} trapped: {e}"))?;
         let (out_ptr, out_len) = unpack_pointer(packed);
         if out_ptr < 0 || out_len < 0 {
             return Err(format!(
@@ -323,22 +404,6 @@ impl GraderRuntime {
             .read(&store, out_ptr as usize, &mut out)
             .map_err(|e| format!("failed to read grader output: {e}"))?;
 
-        let record: ScoreRecord = serde_json::from_slice(&out)
-            .map_err(|e| format!("grader output is not a valid ScoreRecord: {e}"))?;
-
-        if !record.score.is_finite() || record.score < 0.0 || record.score > 1.0 {
-            return Err(format!(
-                "grader returned out-of-range score {} (expected [0.0, 1.0] finite)",
-                record.score
-            ));
-        }
-        if record.version != "1" {
-            return Err(format!(
-                "grader output declared version '{}', host expects '1'",
-                record.version
-            ));
-        }
-
         // Fuel remaining is only unavailable if fuel metering were off, which
         // `grader_config` guarantees it is not; saturate rather than unwrap so a
         // future config change can never panic a grade.
@@ -346,7 +411,7 @@ impl GraderRuntime {
             .fuel
             .saturating_sub(store.get_fuel().unwrap_or(budgets.fuel));
 
-        Ok((record, fuel_consumed))
+        Ok(Some((out, fuel_consumed)))
     }
 
     fn load_module(
@@ -699,6 +764,102 @@ mod tests {
             serde_json::to_vec(&serde_json::json!({"version":"1","score":0,"details":{}})).unwrap();
         let err = runtime.grade(&cid, &bytes, None, &input, GraderBudgets::default());
         assert!(err.is_err());
+    }
+
+    /// Echo grader that also exports `alex_probe`, echoing its input. Feeding
+    /// it a probe envelope exercises the host side of the probe contract.
+    fn echo_prober_wasm() -> Vec<u8> {
+        let wat = r#"
+            (module
+              (memory (export "memory") 1)
+              (global $bump (mut i32) (i32.const 1024))
+              (func (export "alex_alloc") (param i32) (result i32)
+                (local $p i32)
+                (local.set $p (global.get $bump))
+                (global.set $bump (i32.add (global.get $bump) (local.get 0)))
+                (local.get $p))
+              (func $echo (param i32 i32) (result i64)
+                (i64.or
+                  (i64.shl (i64.extend_i32_u (local.get 0)) (i64.const 32))
+                  (i64.extend_i32_u (local.get 1))))
+              (export "alex_grade" (func $echo))
+              (export "alex_probe" (func $echo)))
+        "#;
+        wat::parse_str(wat).expect("wat must parse")
+    }
+
+    #[test]
+    fn probe_envelope_round_trips_and_details_stay_opaque() {
+        let runtime = GraderRuntime::new().expect("runtime");
+        let wasm = echo_prober_wasm();
+        let cid = blake3::hash(&wasm).to_hex().to_string();
+        let output = serde_json::json!({
+            "version": "1",
+            "question": { "anything": ["the", "grader", "wants"] },
+            "expectation": { "secret": 7 },
+            "time_box_ms": 30_000,
+            "pass_score": 0.5,
+            "details": { "opaque": { "nested": true } },
+        });
+        let probe = runtime
+            .probe(
+                &cid,
+                &wasm,
+                None,
+                &serde_json::to_vec(&output).unwrap(),
+                GraderBudgets::default(),
+            )
+            .expect("probe runs")
+            .expect("grader offered a probe");
+        assert_eq!(probe.question, output["question"]);
+        assert_eq!(probe.expectation, output["expectation"]);
+        assert_eq!(probe.details, output["details"]);
+        assert_eq!(probe.time_box_ms, 30_000);
+        assert_eq!(probe.pass_score, 0.5);
+    }
+
+    #[test]
+    fn probe_time_box_is_clamped_and_a_null_question_declines() {
+        let runtime = GraderRuntime::new().expect("runtime");
+        let wasm = echo_prober_wasm();
+        let cid = blake3::hash(&wasm).to_hex().to_string();
+        let run = |v: serde_json::Value| {
+            runtime.probe(
+                &cid,
+                &wasm,
+                None,
+                &serde_json::to_vec(&v).unwrap(),
+                GraderBudgets::default(),
+            )
+        };
+        let short = run(serde_json::json!({"version":"1","question":{},"time_box_ms":1}))
+            .unwrap()
+            .unwrap();
+        assert_eq!(short.time_box_ms, 5_000);
+        assert_eq!(short.pass_score, 1.0, "full marks unless the grader says otherwise");
+        let long = run(serde_json::json!({"version":"1","question":{},"time_box_ms":86_400_000}))
+            .unwrap()
+            .unwrap();
+        assert_eq!(long.time_box_ms, 600_000);
+        assert!(run(serde_json::json!({"version":"1","question":null}))
+            .unwrap()
+            .is_none());
+        assert!(run(serde_json::json!({"version":"2","question":{}})).is_err());
+        assert!(run(serde_json::json!({"version":"1","question":{},"pass_score":0})).is_err());
+    }
+
+    #[test]
+    fn grader_without_a_probe_export_has_no_probe() {
+        // Probes are optional: a grader built before the probe contract is
+        // not broken by it, it simply cannot serve the `plugin` policy.
+        let runtime = GraderRuntime::new().expect("runtime");
+        let echo = echo_grader_wasm();
+        let cid = blake3::hash(&echo).to_hex().to_string();
+        let input = br#"{"version":"1","question":{}}"#;
+        assert!(runtime
+            .probe(&cid, &echo, None, input, GraderBudgets::default())
+            .expect("absence is not an error")
+            .is_none());
     }
 
     #[test]
