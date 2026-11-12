@@ -123,6 +123,11 @@ pub fn state(conn: &Connection, claim_id: &str) -> Result<WitnessState, String> 
         }
     }
     Ok(match saved {
+        // It can never land; the queue builds its replacement.
+        Some(saved) if saved.status == SubmissionStatus::Expired => WitnessState {
+            status: WitnessStatus::Pending,
+            tx_hash: None,
+        },
         Some(saved) => WitnessState {
             status: match saved.status {
                 SubmissionStatus::OutcomeUnknown => WitnessStatus::OutcomeUnknown,
@@ -153,7 +158,8 @@ fn next_request(conn: &Connection) -> Result<Option<(String, String)>, String> {
         "SELECT operation_id, context_json FROM completion_witness_requests r
          WHERE blocked = 0 AND next_attempt_at <= unixepoch()
            AND NOT EXISTS (SELECT 1 FROM chain_submissions s
-             WHERE s.network = 'cardano-preprod' AND s.operation_kind = ?1 AND s.operation_id = r.operation_id)
+             WHERE s.network = 'cardano-preprod' AND s.operation_kind = ?1 AND s.operation_id = r.operation_id
+               AND s.status != 'expired')
          ORDER BY next_attempt_at, operation_id LIMIT 1",
         [KIND], |row| Ok((row.get(0)?, row.get(1)?)),
     ).optional().map_err(|e| e.to_string())
@@ -171,8 +177,9 @@ fn validate_owner(context: &CompletionContext, id: &str, wallet: &Wallet) -> Res
 }
 
 // The caller must retain its profile lease throughout this pass. At most one
-// unsigned intent is built per pass. Signed operations are exclusively handled
-// by receipt recovery: neither absence nor an error authorizes a replacement.
+// unsigned intent is built per pass. Signed operations are handled by receipt
+// recovery: neither absence nor an error authorizes a replacement. Only an
+// operation recovery found expired, and released, is built again here.
 pub(crate) async fn tick<L: Ledger>(
     journal: &Journal,
     ledger: &L,
@@ -254,9 +261,28 @@ pub(crate) async fn tick<L: Ledger>(
             )
         })
         .await?;
-    if journaled.is_some() {
-        return Ok(());
-    }
+    // A journaled mint is never rebuilt unless the journal proved it can never
+    // land. Its replacement carries the preserved evidence exactly; only
+    // inputs, collateral, validity and fee change.
+    let (context, json, replacing) = match journaled {
+        None => (context, json, false),
+        Some(saved) if saved.status == SubmissionStatus::Expired => {
+            match context.original_for_retry(&saved) {
+                Ok(original) => (original, saved.context_json, true),
+                Err(error) => {
+                    journal
+                        .run("completion_queue.block", move |db| {
+                            db.conn().execute("UPDATE completion_witness_requests SET blocked = 1, last_error = ?2 WHERE operation_id = ?1", params![id, error])
+                                .map_err(|e| e.to_string())?;
+                            Ok(())
+                        })
+                        .await?;
+                    return Ok(());
+                }
+            }
+        }
+        Some(_) => return Ok(()),
+    };
     let result = async {
         let treasury = super::treasury::TreasuryPayer::from_env();
         // Read reservations just before selecting: every earlier build in
@@ -287,7 +313,12 @@ pub(crate) async fn tick<L: Ledger>(
         )
         .await
         .map_err(|e| SubmitError::Failed(e.to_string()))?;
-        submission::submit_once(journal, ledger, operation, &built.tx_cbor, &json).await
+        if replacing {
+            submission::replace_expired(journal, ledger, operation, &built.tx_cbor, &json, &[])
+                .await
+        } else {
+            submission::submit_once(journal, ledger, operation, &built.tx_cbor, &json).await
+        }
     }
     .await;
     match result {

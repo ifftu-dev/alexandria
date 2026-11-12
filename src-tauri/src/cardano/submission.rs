@@ -608,13 +608,6 @@ pub fn history(
 /// bound. The expired bytes move to [`history`] and the new bytes are
 /// checkpointed in the same committed transaction before sending, as with a
 /// first submission. Anything else is refused without sending.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "completion minting and username anchoring adopt it next"
-    )
-)]
 pub(crate) async fn replace_expired<L: Ledger>(
     journal: &Journal,
     ledger: &L,

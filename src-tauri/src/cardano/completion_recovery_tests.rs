@@ -181,8 +181,11 @@ async fn uncertain_witness_recovers_by_querying_its_original_transaction_only() 
     let pending = profile.with_conn(|conn| completion::pending_observations(conn).unwrap());
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].tx_hash, saved.tx_hash);
+    // Each pass reads the tip (expiry needs it), then asks only for the
+    // original transaction.
+    let tip = "GET /blocks/latest".to_owned();
     let query = format!("GET /txs/{}", saved.tx_hash);
-    assert_eq!(chain.requests(), vec![query.clone(), query]);
+    assert_eq!(chain.requests(), vec![tip.clone(), query.clone(), tip, query]);
 }
 
 #[test]
@@ -266,4 +269,156 @@ async fn tick_confirms_a_queued_mint_once_the_ledger_includes_it() {
         witness.status,
         super::super::completion_queue::WitnessStatus::Confirmed
     );
+}
+
+use super::super::completion_queue::{self as queue, WitnessStatus};
+use super::super::reservations::ReservedOutpoints;
+use super::super::tx_builder::TTL_OFFSET;
+use pallas_traverse::MultiEraTx;
+
+const TIP: u64 = 120_000_000;
+/// First slot at which a transaction built at [`TIP`] can be expired.
+const PAST_WINDOW: u64 = TIP + TTL_OFFSET + submission::EXPIRY_MARGIN_SLOTS + 1;
+
+fn wallet_context(course: &str) -> CompletionContext {
+    let wallet = test_chain::wallet();
+    CompletionContext {
+        course_id: course.into(),
+        subject_pubkey: *wallet.signing_key.verifying_key().as_bytes(),
+        payment_key_hash: wallet.payment_key_hash,
+        ..context()
+    }
+}
+
+/// A profile with one queued completion request for `context`.
+fn queued(context: &CompletionContext) -> TestProfile {
+    let db = test_db();
+    db.conn()
+        .execute(
+            "INSERT INTO completion_claims (id, subject_did, course_id, completion_root, credential_ids_json)
+             VALUES ('claim', 'subject', 'course', 'root', '[]')",
+            [],
+        )
+        .unwrap();
+    queue::enqueue(db.conn(), "claim", context).unwrap();
+    TestProfile::new(db)
+}
+
+/// A transaction from this wallet that never went through this node's
+/// journal (another node, or one from before reservations), spending the
+/// wallet's largest UTxO.
+async fn foreign_spend(ledger: &FakeLedger) -> String {
+    let wallet = test_chain::wallet();
+    let other = wallet_context("elsewhere");
+    let built = completion_tx_builder::build_completion_mint_tx(
+        ledger,
+        &wallet.payment_address,
+        &wallet.payment_key_hash,
+        &wallet.payment_key_extended,
+        &other.subject_pubkey,
+        other.course_id.as_bytes(),
+        &other.leaves,
+        &other.root,
+        other.timestamp_ms,
+        TIP,
+        &ReservedOutpoints::default(),
+        None,
+    )
+    .await
+    .unwrap();
+    ledger.submit(&built.tx_cbor).await.unwrap()
+}
+
+/// What a completion mint attests: the token output with its inline datum,
+/// and the redeemer carrying the leaves.
+fn evidence(bytes: &[u8]) -> (Vec<u8>, Vec<Vec<u8>>) {
+    let tx = MultiEraTx::decode(bytes).unwrap();
+    let redeemers = tx
+        .redeemers()
+        .iter()
+        .map(|redeemer| pallas_codec::minicbor::to_vec(redeemer.data()).unwrap())
+        .collect();
+    (tx.outputs()[0].encode(), redeemers)
+}
+
+fn inputs(bytes: &[u8]) -> Vec<String> {
+    MultiEraTx::decode(bytes)
+        .unwrap()
+        .inputs()
+        .iter()
+        .map(|input| format!("{}#{}", input.hash(), input.index()))
+        .collect()
+}
+
+fn witness(profile: &TestProfile) -> queue::WitnessState {
+    profile.with_conn(|conn| queue::state(conn, "claim").unwrap())
+}
+
+#[tokio::test]
+async fn double_spent_mint_expires_and_is_replaced_with_identical_evidence() {
+    let wallet = test_chain::wallet();
+    let context = wallet_context("course");
+    let profile = queued(&context);
+    let journal = profile.background();
+    let ledger = FakeLedger::at_tip(TIP);
+    ledger.set_utxos(
+        &wallet.payment_address,
+        vec![
+            ada(0x11, 0, 40_000_000),
+            ada(0x22, 0, 30_000_000),
+            ada(0x33, 0, 20_000_000),
+        ],
+    );
+    let foreign = foreign_spend(&ledger).await;
+
+    queue::tick(&journal, &ledger, &wallet).await.unwrap();
+    let (rejected_hash, rejected_bytes) = ledger.submissions().pop().unwrap();
+    assert_ne!(rejected_hash, foreign, "the mint itself was sent");
+    assert_eq!(witness(&profile).status, WitnessStatus::OutcomeUnknown);
+    ledger.include(&foreign, TIP + 5);
+    ledger.catch_up();
+
+    // Inside the window, no receipt proves nothing.
+    ledger.set_tip(PAST_WINDOW - 1);
+    tick(&journal, &ledger).await.unwrap();
+    assert_eq!(witness(&profile).status, WitnessStatus::OutcomeUnknown);
+
+    ledger.set_tip(PAST_WINDOW);
+    tick(&journal, &ledger).await.unwrap();
+    let waiting = witness(&profile);
+    assert_eq!(waiting.status, WitnessStatus::Pending);
+    assert!(waiting.tx_hash.is_none());
+
+    queue::tick(&journal, &ledger, &wallet).await.unwrap();
+    let submissions = ledger.submissions();
+    assert_eq!(submissions.len(), 3, "one replacement");
+    let (replacement_hash, replacement_bytes) = submissions.last().unwrap().clone();
+    assert_ne!(replacement_hash, rejected_hash);
+    assert_eq!(evidence(&replacement_bytes), evidence(&rejected_bytes));
+    assert_eq!(inputs(&rejected_bytes), vec![format!("{}#0", "11".repeat(32))]);
+    assert_eq!(inputs(&replacement_bytes), vec![format!("{foreign}#1")]);
+    let replaced = witness(&profile);
+    assert_eq!(replaced.status, WitnessStatus::Submitted);
+    assert_eq!(replaced.tx_hash.as_deref(), Some(replacement_hash.as_str()));
+    let id = context.operation_id();
+    let operation = Operation {
+        kind: KIND,
+        id: &id,
+    };
+    let history = profile.with_conn(|conn| submission::history(conn, operation).unwrap());
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].tx_hash, rejected_hash);
+    assert_eq!(history[0].signed_cbor, rejected_bytes);
+    let journaled = profile.with_conn(|conn| submission::lookup(conn, operation).unwrap().unwrap());
+    assert_eq!(
+        serde_json::from_str::<CompletionContext>(&journaled.context_json).unwrap(),
+        context
+    );
+
+    ledger.include(&replacement_hash, PAST_WINDOW + 10);
+    tick(&journal, &ledger).await.unwrap();
+    assert_eq!(witness(&profile).status, WitnessStatus::Confirmed);
+    let observed = profile.with_conn(|conn| completion::pending_observations(conn).unwrap());
+    assert_eq!(observed.len(), 1);
+    assert_eq!(observed[0].tx_hash, replacement_hash);
 }
