@@ -550,7 +550,7 @@ fn with_provisional_notifications(db: Database) -> Database {
 #[test]
 fn provisional_notifications_upgrade_preserves_data_and_backfills_call_kinds() {
     let db = provisional_notification_database();
-    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 16);
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 18);
     assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
     let saved: (
         String,
@@ -805,7 +805,7 @@ fn provisional_notifications_failed_upgrade_reopens_and_retries_atomically() {
     db.conn()
         .execute_batch("DROP TRIGGER fail_upgrade")
         .unwrap();
-    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 16);
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 18);
     assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
 }
 
