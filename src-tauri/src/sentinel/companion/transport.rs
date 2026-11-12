@@ -68,10 +68,28 @@ enum PhoneReply {
 }
 
 /// A hello the protocol accepted, waiting for the session to store it.
-/// Answer through `reply`: `Ok(assurance_level)` or `Err(reason)`.
+/// Answer with [`Joined::answer`].
 pub struct Joined {
     pub accepted: Accepted,
-    pub reply: oneshot::Sender<Result<String, String>>,
+    reply: oneshot::Sender<Result<String, String>>,
+    /// The phone link, put in place when the pairing is stored.
+    link: (Arc<Mutex<HubState>>, String, DesktopLink),
+}
+
+impl Joined {
+    /// Answer the phone with the result of storing the pairing:
+    /// `Ok(assurance_level)` or `Err(reason)`. On success the phone link is
+    /// in place before this returns, so the session's next read of the
+    /// phone's role sees it.
+    pub fn answer(self, stored: Result<String, String>) {
+        let (state, session_id, link) = self.link;
+        if stored.is_ok() {
+            // A poisoned hub only holds transient pairing state.
+            let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+            state.links.insert(session_id, link);
+        }
+        let _ = self.reply.send(stored);
+    }
 }
 
 /// Platform capture on the phone (blocking): `native::capture` in the app.
@@ -262,27 +280,38 @@ impl CompanionHub {
         let Some(waiter) = pending.waiter.take() else {
             return DesktopReply::Refused("the desktop is not waiting for a phone".into());
         };
-        let benchmark = accepted.camera_benchmark;
+        let link = DesktopLink {
+            conn: conn.clone(),
+            remote: remote.into(),
+            camera: pending.offer.camera,
+            benchmark: accepted.camera_benchmark,
+            window: None,
+        };
         let (reply, answer) = oneshot::channel();
-        if waiter.send(Joined { accepted, reply }).is_err() {
+        let joined = Joined {
+            accepted,
+            reply,
+            link: (self.state.clone(), hello.session_id.clone(), link),
+        };
+        if waiter.send(joined).is_err() {
             return DesktopReply::Refused("the desktop stopped waiting for a phone".into());
         }
         match tokio::time::timeout(REPLY_TIMEOUT, answer).await {
-            Ok(Ok(Ok(assurance_level))) => {
-                self.lock().links.insert(
-                    hello.session_id.clone(),
-                    DesktopLink {
-                        conn: conn.clone(),
-                        remote: remote.into(),
-                        camera: pending.offer.camera,
-                        benchmark,
-                        window: None,
-                    },
-                );
-                DesktopReply::Accepted { assurance_level }
-            }
+            // The link went in with the answer (`Joined::answer`).
+            Ok(Ok(Ok(assurance_level))) => DesktopReply::Accepted { assurance_level },
             Ok(Ok(Err(why))) => DesktopReply::Refused(why),
-            _ => DesktopReply::Refused("the desktop did not store the pairing".into()),
+            _ => {
+                // An answer that came too late may have put the link in.
+                let mut state = self.lock();
+                if state
+                    .links
+                    .get(&hello.session_id)
+                    .is_some_and(|link| link.remote == remote)
+                {
+                    state.links.remove(&hello.session_id);
+                }
+                DesktopReply::Refused("the desktop did not store the pairing".into())
+            }
         }
     }
 
@@ -612,9 +641,10 @@ mod tests {
             let joined = self.desktop.take_join(SESSION).expect("an open offer");
             tokio::spawn(async move {
                 let joined = joined.await.expect("the phone joined");
-                let level = joined.accepted.assurance_level.clone();
-                let _ = joined.reply.send(store.map(|_| level));
-                joined.accepted
+                let accepted = joined.accepted.clone();
+                let level = accepted.assurance_level.clone();
+                joined.answer(store.map(|_| level));
+                accepted
             })
         }
 
@@ -730,6 +760,23 @@ mod tests {
         p.desktop.close(SESSION);
         assert!(p.desktop.role(SESSION).is_none());
         assert!(p.desktop.request_assertion(SESSION, "r").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn the_phone_link_is_in_place_as_soon_as_the_desktop_has_stored_the_pairing() {
+        let p = pair(true).await;
+        let joined = p.desktop.take_join(SESSION).expect("an open offer");
+        let desktop = p.desktop.clone();
+        // As `integrity_companion_await` does: store, answer, then read the
+        // phone's role, with nothing in between.
+        let seen = tokio::spawn(async move {
+            let joined = joined.await.expect("the phone joined");
+            let level = joined.accepted.assurance_level.clone();
+            joined.answer(Ok(level));
+            desktop.role(SESSION)
+        });
+        p.join(None).await.unwrap();
+        assert!(seen.await.unwrap().is_some_and(|role| role.camera));
     }
 
     #[tokio::test]

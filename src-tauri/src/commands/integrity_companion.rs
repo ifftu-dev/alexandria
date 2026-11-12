@@ -109,10 +109,11 @@ pub async fn integrity_companion_await(
         .take_join(&session_id)
         .ok_or("no companion code is open for this session")?;
     let wait = std::time::Duration::from_secs(OFFER_TTL_SECS as u64 + 5);
-    let transport::Joined { accepted, reply } = tokio::time::timeout(wait, join)
+    let joined = tokio::time::timeout(wait, join)
         .await
         .map_err(|_| "the companion code expired before a phone joined".to_string())?
         .map_err(|_| "the companion code was withdrawn".to_string())?;
+    let accepted = joined.accepted.clone();
     let (sid, record) = (session_id.clone(), accepted.clone());
     let stored = state
         .db_executor
@@ -123,7 +124,8 @@ pub async fn integrity_companion_await(
             move |db| session::store_pairing(db.conn(), &sid, &record),
         )
         .await;
-    let _ = reply.send(stored.clone());
+    // The phone link is in place once this returns, before the role is read.
+    joined.answer(stored.clone());
     let assurance_level = stored?;
     Ok(CompanionPaired {
         assurance_level,

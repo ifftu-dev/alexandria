@@ -29,3 +29,4 @@ Spec: Implementation Decisions → Device axis.
 - Phone as camera: the protocol, desktop ingestion (the phone's window replaces the desktop client's camera group) and the phone's own benchmark (reported, not attested) are built and tested. The phone-side producer of camera windows in the UI is not built, so the desktop UI pairs with the camera off for now. Follow-up.
 - Phone UI: Sentinel dashboard → Join from phone (phones only) takes a pasted code; the desktop shows the code in the assessment runner when "Pair my phone first" is ticked. There is no QR code.
 - The transport tests were written after the transport code, not before it.
+- Review fix: the desktop read the phone's role (camera, benchmark) right after answering the join, while the transport inserted the phone link only once it received that answer, so the read could miss the link. `Joined::answer` now puts the link in place before it replies; a desktop that answers too late leaves no link.
