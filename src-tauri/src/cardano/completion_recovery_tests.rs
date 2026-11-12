@@ -1,7 +1,8 @@
 use std::sync::atomic::Ordering;
 
 use super::*;
-use crate::cardano::test_chain::{FakeChain, TestProfile, SHORT_LIMITS};
+use crate::cardano::fake_ledger::{ada, FakeLedger};
+use crate::cardano::test_chain::{self, FakeChain, TestProfile, SHORT_LIMITS};
 use crate::db::Database;
 
 fn context() -> CompletionContext {
@@ -219,5 +220,50 @@ fn conflicting_observation_is_not_overwritten_and_issued_observation_stays_issue
             .credential_id
             .as_deref(),
         Some("issued")
+    );
+}
+
+#[tokio::test]
+async fn tick_confirms_a_queued_mint_once_the_ledger_includes_it() {
+    let wallet = test_chain::wallet();
+    let context = CompletionContext {
+        subject_pubkey: *wallet.signing_key.verifying_key().as_bytes(),
+        payment_key_hash: wallet.payment_key_hash,
+        ..context()
+    };
+    let db = test_db();
+    db.conn()
+        .execute(
+            "INSERT INTO completion_claims (id, subject_did, course_id, completion_root, credential_ids_json)
+             VALUES ('claim', 'subject', 'course', 'root', '[]')",
+            [],
+        )
+        .unwrap();
+    super::super::completion_queue::enqueue(db.conn(), "claim", &context).unwrap();
+    let profile = TestProfile::new(db);
+    let journal = profile.background();
+    let ledger = FakeLedger::at_tip(120_000_000);
+    ledger.set_utxos(
+        &wallet.payment_address,
+        vec![ada(0x11, 0, 20_000_000), ada(0x22, 0, 6_000_000)],
+    );
+    super::super::completion_queue::tick(&journal, &ledger, &wallet)
+        .await
+        .unwrap();
+    let (tx_hash, _) = ledger.submissions().pop().unwrap();
+
+    tick(&journal, &ledger).await.unwrap();
+    assert!(profile.with_conn(|conn| completion::pending_observations(conn).unwrap().is_empty()));
+
+    ledger.include(&tx_hash, 120_000_042);
+    tick(&journal, &ledger).await.unwrap();
+    let pending = profile.with_conn(|conn| completion::pending_observations(conn).unwrap());
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].tx_hash, tx_hash);
+    let witness =
+        profile.with_conn(|conn| super::super::completion_queue::state(conn, "claim").unwrap());
+    assert_eq!(
+        witness.status,
+        super::super::completion_queue::WitnessStatus::Confirmed
     );
 }

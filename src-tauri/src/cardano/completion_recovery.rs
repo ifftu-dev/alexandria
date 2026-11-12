@@ -1,9 +1,9 @@
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
-use super::blockfrost::BlockfrostClient;
 use super::completion::{self, CompletionObservation};
 use super::completion_tx_builder;
+use super::ledger::Ledger;
 use super::script_refs;
 use super::submission::{self, Journal, Operation, Submission, SubmissionStatus};
 use crate::domain::completion::merkle_root;
@@ -165,7 +165,7 @@ pub fn ensure_unobserved(conn: &Connection, context: &CompletionContext) -> Resu
     Ok(())
 }
 
-pub(crate) async fn tick(journal: &Journal, bf: &BlockfrostClient) -> Result<(), String> {
+pub(crate) async fn tick<L: Ledger>(journal: &Journal, ledger: &L) -> Result<(), String> {
     let ids = journal
         .run("completion_recovery.scan", |db| {
             submission::unapplied_operations(db.conn(), KIND, 10)
@@ -176,7 +176,7 @@ pub(crate) async fn tick(journal: &Journal, bf: &BlockfrostClient) -> Result<(),
             kind: KIND,
             id: &id,
         };
-        match submission::reconcile(journal, bf, operation).await {
+        match submission::reconcile(journal, ledger, operation).await {
             Ok(Some(submitted)) => {
                 let id = id.clone();
                 if let Err(error) = journal

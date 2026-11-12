@@ -1,8 +1,8 @@
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use super::blockfrost::BlockfrostClient;
 use super::completion_recovery::{self, CompletionContext, KIND};
+use super::ledger::Ledger;
 use super::submission::{self, Journal, Operation, SubmissionStatus, SubmitError};
 use crate::crypto::wallet::Wallet;
 
@@ -173,9 +173,9 @@ fn validate_owner(context: &CompletionContext, id: &str, wallet: &Wallet) -> Res
 // The caller must retain its profile lease throughout this pass. At most one
 // unsigned intent is built per pass. Signed operations are exclusively handled
 // by receipt recovery: neither absence nor an error authorizes a replacement.
-pub(crate) async fn tick(
+pub(crate) async fn tick<L: Ledger>(
     journal: &Journal,
-    bf: &BlockfrostClient,
+    ledger: &L,
     wallet: &Wallet,
 ) -> Result<(), String> {
     let Some((id, json)) = journal
@@ -260,7 +260,7 @@ pub(crate) async fn tick(
     let result = async {
         let treasury = super::treasury::TreasuryPayer::from_env();
         let built = super::completion_tx_builder::build_completion_mint_tx(
-            bf,
+            ledger,
             &wallet.payment_address,
             &wallet.payment_key_hash,
             &wallet.payment_key_extended,
@@ -273,7 +273,7 @@ pub(crate) async fn tick(
         )
         .await
         .map_err(|e| SubmitError::Failed(e.to_string()))?;
-        submission::submit_once(journal, bf, operation, &built.tx_cbor, &json).await
+        submission::submit_once(journal, ledger, operation, &built.tx_cbor, &json).await
     }
     .await;
     match result {

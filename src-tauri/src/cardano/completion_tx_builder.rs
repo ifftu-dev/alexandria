@@ -17,9 +17,9 @@ use pallas_addresses::Address as PallasAddress;
 use pallas_crypto::hash::Hash;
 use pallas_txbuilder::{BuildConway, ExUnits, Input, Output, ScriptKind, StagingTransaction};
 
-use super::blockfrost::BlockfrostClient;
 use super::cost_models::PLUTUS_V3_COST_MODEL;
 use super::gov_tx_builder::{self, GovTxResult};
+use super::ledger::Ledger;
 use super::plutus_data;
 use super::script_refs;
 use super::tx_builder::{
@@ -114,8 +114,8 @@ pub fn completion_asset_name(
 /// the observer will index via `list_policy_assets` and eventually
 /// land in the issued VC's `witness.tx_hash`.
 #[allow(clippy::too_many_arguments)]
-pub async fn build_completion_mint_tx(
-    blockfrost: &BlockfrostClient,
+pub async fn build_completion_mint_tx<L: Ledger>(
+    ledger: &L,
     payment_address: &str,
     payment_key_hash: &[u8; LEARNER_PKH_LENGTH],
     payment_key_extended: &[u8; 64],
@@ -154,13 +154,13 @@ pub async fn build_completion_mint_tx(
         .map(|t| t.address.as_str())
         .unwrap_or(payment_address);
     let (utxos_res, params_res, tip_res) = tokio::join!(
-        blockfrost.get_utxos(funding_address),
-        blockfrost.get_protocol_params(),
-        blockfrost.get_tip_slot(),
+        ledger.utxos(funding_address),
+        ledger.protocol_params(),
+        ledger.tip_slot(),
     );
-    let utxos = utxos_res?;
-    let params = params_res?;
-    let tip_slot = tip_res?;
+    let utxos = utxos_res.map_err(TxBuildError::Ledger)?;
+    let params = params_res.map_err(TxBuildError::Ledger)?;
+    let tip_slot = tip_res.map_err(TxBuildError::Ledger)?;
 
     if utxos.is_empty() {
         return Err(TxBuildError::NoUtxos);
@@ -266,7 +266,7 @@ pub async fn build_completion_mint_tx(
     // 6. Evaluate real execution units, then recompute fee from the
     //    drafted size + true ex-units. Falls back to the estimate if the
     //    evaluator is unavailable.
-    let (mem, steps) = match blockfrost.evaluate_tx(&draft).await {
+    let (mem, steps) = match ledger.evaluate(&draft).await {
         Ok(units) => units
             .into_iter()
             .fold((0u64, 0u64), |(m, s), (um, us)| (m.max(um), s.max(us))),
@@ -319,6 +319,7 @@ pub const MIN_NFT_UTXO: u64 = MIN_NFT_LOVELACE;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cardano::blockfrost::BlockfrostClient;
 
     #[test]
     fn asset_name_has_expected_length_and_structure() {

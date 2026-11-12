@@ -1,6 +1,19 @@
+use pallas_traverse::{MultiEraInput, MultiEraTx};
+
 use super::*;
+use crate::cardano::blockfrost::BlockfrostClient;
+use crate::cardano::fake_ledger::{ada, FakeLedger};
 use crate::cardano::test_chain::TestProfile;
 use crate::db::Database;
+
+const TIP: u64 = 120_000_000;
+
+fn outpoints(inputs: Vec<MultiEraInput<'_>>) -> Vec<String> {
+    inputs
+        .iter()
+        .map(|input| format!("{}#{}", input.hash(), input.index()))
+        .collect()
+}
 
 fn wallet() -> Wallet {
     crate::crypto::wallet::wallet_from_mnemonic(
@@ -283,4 +296,37 @@ async fn cancelled_unsigned_build_preserves_intent_and_restart_backoff() {
         next_request(db.conn()).unwrap().is_some(),
         "unsigned intent may resume"
     );
+}
+
+#[tokio::test]
+async fn tick_mints_through_the_ledger_port_with_largest_input_and_separate_collateral() {
+    let db = test_db();
+    let context = context();
+    claim(db.conn(), "claim");
+    enqueue(db.conn(), "claim", &context).unwrap();
+    let profile = TestProfile::new(db);
+    let wallet = wallet();
+    let ledger = FakeLedger::at_tip(TIP);
+    ledger.set_utxos(
+        &wallet.payment_address,
+        vec![ada(0x22, 0, 6_000_000), ada(0x11, 1, 20_000_000)],
+    );
+
+    tick(&profile.background(), &ledger, &wallet).await.unwrap();
+
+    let submissions = ledger.submissions();
+    assert_eq!(submissions.len(), 1);
+    let (tx_hash, bytes) = &submissions[0];
+    let tx = MultiEraTx::decode(bytes).unwrap();
+    assert_eq!(
+        outpoints(tx.inputs()),
+        vec![format!("{}#1", "11".repeat(32))]
+    );
+    assert_eq!(
+        outpoints(tx.collateral()),
+        vec![format!("{}#0", "22".repeat(32))]
+    );
+    let witness = profile.with_conn(|conn| state(conn, "claim").unwrap());
+    assert_eq!(witness.status, WitnessStatus::Submitted);
+    assert_eq!(witness.tx_hash.as_deref(), Some(tx_hash.as_str()));
 }
