@@ -742,6 +742,44 @@ async fn the_sponsor_pool_pick_skips_a_sponsor_utxo_this_nodes_pending_anchor_sp
     }
 }
 
+#[tokio::test]
+async fn with_every_eligible_utxo_reserved_the_anchor_waits_without_spending_an_attempt() {
+    let mut node = Node::new();
+    let profile = sponsor();
+    node.sponsor = Some(profile.clone());
+    let only = ada(0x11, 0, 20_000_000);
+    node.ledger
+        .set_utxos(&node.wallet.payment_address, vec![only.clone()]);
+    node.ledger.set_utxos(
+        &profile.address,
+        vec![sponsor_utxo(0x22, profile.slot_to_posix_ms(TIP) - 1)],
+    );
+    let mint_ttl = TIP + 3_600;
+    let mint = in_flight_spend(&node, &[&only], &[], mint_ttl).await;
+    let vc = issue(&node.profile, &node.issuer, "a");
+    node.tick(T0_PLUS_7H).await;
+
+    // Neither collateral for the sponsor nor an issuer-paid input is free.
+    assert!(anchor_submissions(&node).is_empty(), "nothing sent");
+    let state = node.state(&vc);
+    assert_eq!((state.status, state.attempts), (AnchorStatus::Pending, 0));
+    assert!(!state.needs_funds, "the wallet is busy, not short");
+    assert_eq!(
+        state.last_error.as_deref(),
+        Some("wallet busy: inputs reserved by in-flight transactions")
+    );
+
+    // The mint never lands; once its window passes, the next pass after the
+    // retry delay anchors.
+    node.ledger.drop_tx(&mint);
+    node.ledger.set_tip(mint_ttl + EXPIRY_MARGIN_SLOTS + 1);
+    node.tick("2026-11-10T07:31:00Z").await;
+    assert_eq!(anchor_submissions(&node).len(), 1);
+    let state = node.state(&vc);
+    assert_eq!((state.status, state.attempts), (AnchorStatus::Submitted, 0));
+    assert_eq!(state.last_error, None);
+}
+
 /// Live preprod run of the whole anchorer: issue two credentials, flush them
 /// as one batch, wait for confirmation, and check the verifier finds them
 /// anchored. Ignored by default. Uses the network profile's sponsor unless

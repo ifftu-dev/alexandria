@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cardano::anchor_tx::{self, AnchorRecord, Funding};
 use crate::cardano::ledger::{self, Ledger};
-use crate::cardano::reservations::ReservedOutpoints;
+use crate::cardano::reservations::{ReservedOutpoints, WalletBusy};
 use crate::cardano::submission::{
     self, Journal, Operation, Submission, SubmissionStatus, SubmitError,
 };
@@ -645,10 +645,14 @@ async fn build_and_submit<L: Ledger>(
             {
                 Ok(tx) => (tx, Funding::Issuer.label()),
                 Err(error) => {
+                    // A busy wallet is the whole reason to wait: the
+                    // sponsor's own error was logged above.
                     return Err(SubmitError::Failed(match sponsor_error {
-                        Some(sponsor) => format!("{sponsor}; {error}"),
-                        None => error,
-                    }))
+                        Some(sponsor) if !WalletBusy::matches(&error) => {
+                            format!("{sponsor}; {error}")
+                        }
+                        _ => error,
+                    }));
                 }
             }
         }
