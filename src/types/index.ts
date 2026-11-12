@@ -1669,6 +1669,8 @@ export interface IssuancePolicy {
   required_assurance_level?: string | null
   /** Minimum fraction of snapshots captured with the camera opted in. */
   min_camera_coverage?: number | null
+  /** Probe policy for attempts made for this role; overrides the assessment's unless 'none'. */
+  probe_policy?: ProbePolicy | null
 }
 
 export interface IssueCredentialRequest {
@@ -2237,6 +2239,80 @@ export interface GradeResult {
   score: number
   passed: boolean
   credential_id: string | null
+}
+
+/** Where an attempt's follow-up probes come from (assessment or role policy). */
+export type ProbePolicy = 'none' | 'reseed' | 'authored' | 'plugin'
+
+/** A probe as served after submission: the public half only. For a choice
+ *  item `content` carries `prompt`, `options` (this probe's own order) and
+ *  `kind`; `probe: 'complement'` asks for every option that is not correct. */
+export interface ServedProbe {
+  id: string
+  item_kind: 'mcq' | 'plugin'
+  content: Record<string, unknown>
+  time_box_ms: number
+  /** Time left once rendered; null before the first render. */
+  remaining_ms: number | null
+}
+
+export interface ProbeAnswerReceipt {
+  probe_id: string
+  /** False when the answer arrived after the time box (recorded as skipped). */
+  in_time: boolean
+}
+
+export type VerificationOutcome = 'satisfied' | 'failed' | 'skipped'
+
+/** One verification result in a session's commitment chain. */
+export interface VerificationResult {
+  id: string
+  session_id: string
+  attempt_id: string | null
+  step: string
+  policy: string
+  outcome: VerificationOutcome
+  reason: string | null
+  subject_ref: string | null
+  detail: Record<string, unknown>
+  commitment_hash: string
+  recorded_at: string
+}
+
+/** Every verification result of a session; `outcome` null when none ran. */
+export interface VerificationSummary {
+  session_id: string
+  outcome: VerificationOutcome | null
+  policies: string[]
+  satisfied: number
+  failed: number
+  skipped: number
+  results: VerificationResult[]
+}
+
+export type ItemProbeKind = 'follow_up' | 'variant'
+
+/** An instructor-authored follow-up or seeded variant of an item. */
+export interface ItemProbe {
+  id: string
+  item_id: string
+  probe_kind: ItemProbeKind
+  content_public: Record<string, unknown>
+  /** Present only on probes the viewer wrote. */
+  grader_private: Record<string, unknown> | null
+  time_box_ms: number | null
+  author_did: string
+  mine: boolean
+  created_at: string
+}
+
+export interface ItemProbeInput {
+  id?: string | null
+  item_id: string
+  probe_kind: ItemProbeKind
+  content_public: Record<string, unknown>
+  grader_private?: Record<string, unknown> | null
+  time_box_ms?: number | null
 }
 
 /** One skill in a goal assessment plan, with assessability resolved. */

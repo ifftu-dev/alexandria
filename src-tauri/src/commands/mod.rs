@@ -52,6 +52,7 @@ pub mod personhood_receipts;
 pub mod pinning;
 pub mod plugins;
 pub mod presentation;
+pub mod probes;
 pub mod profile;
 pub mod reputation;
 pub mod role_assessment;

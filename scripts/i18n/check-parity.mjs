@@ -46,6 +46,9 @@ function catalog(loc) {
 // Key prefixes shipped English-only for now. Each needs a reason and an owner
 // in the comment, so "temporary" stays visible.
 const PENDING_TRANSLATION = [
+  // Sentinel probes after an attempt (trust profiles ticket 07): English-only
+  // until the next learner translation pass; renders via the i18n fallback.
+  'learn.assessment.probe',
   // Jev goal entry: English fallback pending the next learner translation pass.
   'goals.picker.learningGoal',
   'goals.picker.goalPlaceholder',

@@ -836,7 +836,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(short.time_box_ms, 5_000);
-        assert_eq!(short.pass_score, 1.0, "full marks unless the grader says otherwise");
+        assert_eq!(
+            short.pass_score, 1.0,
+            "full marks unless the grader says otherwise"
+        );
         let long = run(serde_json::json!({"version":"1","question":{},"time_box_ms":86_400_000}))
             .unwrap()
             .unwrap();

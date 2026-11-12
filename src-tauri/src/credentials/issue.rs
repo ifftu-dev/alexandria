@@ -50,6 +50,11 @@ pub struct IssuancePolicy {
     /// schema is unchanged.
     #[serde(default)]
     pub min_camera_coverage: Option<f64>,
+    /// Probe policy for attempts made for this role. Overrides the
+    /// assessment's own policy when set to anything but `none`. Chooses which
+    /// probes run after submission; it is not an issuance bound by itself.
+    #[serde(default)]
+    pub probe_policy: Option<crate::assessment::probes::ProbePolicy>,
 }
 
 impl IssuancePolicy {

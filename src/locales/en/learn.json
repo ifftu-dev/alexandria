@@ -27,7 +27,14 @@
     "chooseOne": "Choose one answer.",
     "chooseAll": "Choose all that apply.",
     "integritySuspended": "Integrity checks suspended this attempt.",
-    "integritySuspendedNote": "No more checks are taken. You can still submit; the result will record that the session was suspended."
+    "integritySuspendedNote": "No more checks are taken. You can still submit; the result will record that the session was suspended.",
+    "probeTitle": "A quick follow-up",
+    "probeIntro": "Before grading, a short follow-up on one of your answers. It has a time limit; running out of time or skipping never counts against you.",
+    "probeProgress": "Follow-up {current} of {total}",
+    "probeComplement": "Select every option that is not a correct answer.",
+    "probeTimeLeft": "{seconds}s left",
+    "probeAnswer": "Answer",
+    "probeSkip": "Skip"
   },
   "player": {
     "courseFallback": "Course",

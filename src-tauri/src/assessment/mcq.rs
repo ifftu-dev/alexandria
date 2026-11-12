@@ -544,7 +544,11 @@ mod equivalence {
         for options in 1..=5usize {
             let opts: Vec<String> = (0..options).map(|i| format!("opt{i}")).collect();
             for correct in subsets(options).into_iter().filter(|s| !s.is_empty()) {
-                let kind = if correct.len() == 1 { "single" } else { "multi" };
+                let kind = if correct.len() == 1 {
+                    "single"
+                } else {
+                    "multi"
+                };
                 cases.push(serde_json::json!({
                     "kind": kind, "prompt": "Pick", "options": opts, "correct_indices": correct,
                 }));
@@ -558,11 +562,22 @@ mod equivalence {
                 (None, None) => {}
                 (Some(n), Some(w)) => {
                     assert_eq!(n.question, w.question, "question differs for {content}");
-                    assert_eq!(n.expectation, w.expectation, "expectation differs for {content}");
-                    assert_eq!(n.time_box_ms, w.time_box_ms, "time box differs for {content}");
-                    assert_eq!(n.pass_score, w.pass_score, "pass score differs for {content}");
+                    assert_eq!(
+                        n.expectation, w.expectation,
+                        "expectation differs for {content}"
+                    );
+                    assert_eq!(
+                        n.time_box_ms, w.time_box_ms,
+                        "time box differs for {content}"
+                    );
+                    assert_eq!(
+                        n.pass_score, w.pass_score,
+                        "pass score differs for {content}"
+                    );
                 }
-                (n, w) => panic!("native {n:?} and wasm {w:?} disagree on whether {content} has a probe"),
+                (n, w) => {
+                    panic!("native {n:?} and wasm {w:?} disagree on whether {content} has a probe")
+                }
             }
         }
     }
