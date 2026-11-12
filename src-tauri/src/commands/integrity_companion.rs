@@ -12,7 +12,7 @@ use serde::Serialize;
 
 use crate::db::executor::DatabaseWorkload;
 use crate::sentinel::attestation::{native, Unverified};
-use crate::sentinel::companion::{session, transport, CompanionOffer, OFFER_TTL_SECS};
+use crate::sentinel::companion::{session, CompanionOffer, OFFER_TTL_SECS};
 use crate::sentinel::scoring::CameraFeatures;
 use crate::AppState;
 
