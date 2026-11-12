@@ -34,6 +34,8 @@
 //!   mobile split-screen (native per-OS probes)
 //! - `scoring` — window scores, flags and session fusion, re-exported from
 //!   `alexandria_studio::integrity` (Tauri-free)
+//! - `consistency` — longitudinal consistency of an attempt with the
+//!   learner's practice, lessons and earlier attempts on the skill
 //! - `snapshots` — the integrity snapshot chain: validation, commitment,
 //!   severity, status, and flags the backend records itself
 //! - `corpus_capture` — opt-in capture of committed windows for the
@@ -52,6 +54,7 @@ pub mod android_environment;
 pub mod attestation;
 pub mod camera_budget;
 pub mod camera_pipeline;
+pub mod consistency;
 pub mod corpus_capture;
 pub mod display_topology;
 pub mod evidence;

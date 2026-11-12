@@ -93,6 +93,8 @@ pub fn channel(signal: &str) -> &str {
         // Derived from the other scores, so never independent of them.
         "low_integrity" => "composite",
         "in_app_assistant_during_attempt" | "mcp_call_during_attempt" => "assistant",
+        // Derived from the learner's history, not from the session.
+        "longitudinal_divergence" => "longitudinal",
         other => other,
     }
 }
