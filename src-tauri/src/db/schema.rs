@@ -131,6 +131,9 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // inputs to its selection, consent per capability, and the policy floor
     // judged before the first item. See `crate::sentinel::trust_profile`.
     (36, "trust_profiles", include_str!("trust_profiles.sql")),
+    // Follow-up questions authored per interview criterion, suggested to the
+    // interviewer during the interview.
+    (37, "interview_criterion_followups", include_str!("interview_criterion_followups.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

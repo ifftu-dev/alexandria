@@ -1859,6 +1859,8 @@ pub fn run() {
             commands::interview::interview_recommend_followups,
             commands::interview::interview_set_followup_status,
             commands::interview::interview_set_criterion,
+            commands::interview::interview_set_criterion_followups,
+            commands::interview::interview_followups_for_signal,
             commands::interview::interview_save_note,
             commands::interview::interview_set_status,
             commands::interview::interview_generate_summary,
