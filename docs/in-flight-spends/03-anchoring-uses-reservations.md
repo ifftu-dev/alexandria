@@ -1,6 +1,6 @@
 # Credential anchoring: reservations, wallet busy, journal expiry
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: alexandria/docs/in-flight-spends-spec.md
 Blocked by: alexandria/docs/in-flight-spends/01-journal-reservations-and-expiry.md
@@ -19,3 +19,9 @@ Acceptance: the spec's anchoring scenarios (collateral avoids a pending outpoint
 ## Implementation workflow
 
 Read the parent spec and the applicable AGENTS.md files. Use the TDD skill at the seam the user confirmed: feature ticks driven through the `Ledger` port against the in-memory fake ledger. Work on an isolated branch started from the integration branch; confirm ancestry before editing. Merge the integration tip before reporting. Return commits, red/green evidence, tests run and open blockers; the parent arranges the merge.
+
+## Notes
+
+### 2026-11-12: completed
+
+Merged to the integration branch with the other tickets of this spec. Code review follow-ups and accepted deviations are recorded in the parent spec's Notes.

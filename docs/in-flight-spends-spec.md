@@ -1,8 +1,8 @@
 # In-flight spends: reserve wallet inputs and expire dead submissions
 
-Status: active
-Updated: 2026-11-10
-Triage: ready-for-agent
+Status: implemented
+Updated: 2026-11-12
+Triage: done
 Repos: alexandria
 Blocked by: alexandria/docs/sponsored-anchoring-spec.md
 
@@ -122,3 +122,15 @@ From a user's point of view, credentials, usernames and completion witnesses sto
 - The Blockfrost mempool endpoint is not a substitute: it lists only transactions submitted through Blockfrost and exists only on the hosted service. The journal is the source of truth that holds for every provider.
 - Preprod slots are one second long, and builders set a validity window of about an hour. A dead transaction is therefore expired, and its inputs freed, about 90 minutes after it was built. That is also the longest a wallet-busy wait can last when no transaction lands.
 - Accepted limitation: if a provider has no record of a transaction even though it is on chain, and stays wrong past the margin, the journal would expire a transaction that actually landed, and the replacement would be rejected as a double spend. The margin and the requirement for a known tip make this unlikely. Mithril inclusion proofs (research step 7) would remove the dependence on the provider.
+
+## Notes
+
+### 2026-11-12: implemented
+
+All five tickets and a review-fix pass landed on one integration branch. Behaviour differs from the decisions above in three places, accepted after code review:
+
+- **The journal stores each transaction's validity bound in a column.** "The journal schema is unchanged" no longer holds. The bound is written when a transaction is checkpointed or replaced, reservations filter by window in SQL, and expiry reads the column. Without it, every pass decoded every journal row ever written.
+- **An expired username batch is rebuilt only while all its claims are still valid.** One holding a stale claim (released, replaced, anchored elsewhere or no longer verifying), or whose rebuild fails for a reason other than a busy wallet, is abandoned and its claims are freed for a fresh batch. Stale digests are never paid for, and new claims are never held behind a dead batch.
+- **A sponsor that is only busy does not fall back to the issuer's wallet.** When the only spendable sponsor UTxOs are reserved by this node's own in-flight anchors, or the sponsored build is busy, the anchor waits. The issuer pays only when no sponsor UTxO is spendable or the sponsored build fails for another reason.
+
+Also from review: selection policies require the amount the transaction actually needs, so a reservation hiding every sufficient UTxO reports a busy wallet. Each feature pass reads the tip at most once. Building an anchor has a typed error, so "needs funds" wins over "wallet busy". The username pass returns claims it already anchored even when a later step fails. The unused `invalid_from_slot` on anchor batches is removed. A cross-feature test covers a completion mint and an issuer-paid anchor in one pass behind a lagging index.
