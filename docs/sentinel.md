@@ -113,10 +113,10 @@ The calibration wizard's training metrics keep small TypeScript analyzers; they 
 Per-window rules in `alexandria_studio::integrity::derive_window`. Every threshold is carried over from the retired client scorer and is unmeasured until the corpus certifies it.
 
 1. Composite below 0.40 → `low_integrity` warning (channel `composite`: derived from the other scores, never independent evidence)
-2. Consistency score below 0.35, or keystroke autoencoder anomaly ≥ 0.65 → `behavior_shift` warning
+2. Consistency score below 0.35, or keystroke autoencoder anomaly ≥ 0.65 with advisory AI scoring on → `behavior_shift` warning
 3. Excessive tab switching (> 10) → `tab_switching` info
 4. Excessive pasting (> 500 chars) → `paste_detected` warning
-5. Bot-like mouse variance, or mouse CNN human probability < 0.5 → `bot_suspected` critical
+5. Bot-like mouse variance, or mouse CNN human probability < 0.5 with advisory AI scoring on → `bot_suspected` critical
 6. Face absent (camera running) → `no_face` info
 7. Multiple faces → `multiple_faces` warning
 8. Face identity mismatch (enrolled) → `face_mismatch` critical
@@ -363,7 +363,7 @@ Every model output is a feature like any other: it raises a flag only through th
 
 **Inference**: Reconstruction error averaged across all digraphs in the snapshot window. Mapped to [0,1] via sigmoid calibrated against training loss (5× `trainLoss` ≈ 0.5 anomaly score). A 0.05 floor is applied to `trainLoss` to prevent ratio blow-up when users train with very consistent typing.
 
-**Anomaly threshold**: 0.65 — at or above this, the typing pattern doesn't match the enrolled user, and the backend raises `behavior_shift`.
+**Anomaly threshold**: 0.65 — at or above this, the typing pattern doesn't match the enrolled user, and the backend raises `behavior_shift` when advisory AI scoring is on (§Runtime Toggle).
 
 **Storage**: weights persist as a JSON blob in `sentinel_user_models` (composite PK `user_address, device_fp_prefix, model_kind='keystroke_ae'`). Backing store is the already-sqlcipher-encrypted SQLite DB — replaces the legacy `localStorage` location. Never broadcast over P2P.
 
@@ -379,7 +379,7 @@ Every model output is a feature like any other: it raises a flag only through th
 
 **Inference**: Average prediction across all 50-point segments in the buffer. Output is probability of human input.
 
-**Human threshold**: 0.50 — below it the backend raises `bot_suspected`.
+**Human threshold**: 0.50 — below it the backend raises `bot_suspected` when advisory AI scoring is on (§Runtime Toggle).
 
 **Storage**: weights persist as a JSON blob in `sentinel_user_models` (`model_kind='mouse_cnn'`). Conv kernels are not stored — they are deterministic given the seed, recomputed on load. Only the dense-head parameters (~5 KB) round-trip through the DB.
 
@@ -501,7 +501,7 @@ Field names are snake_case. `tools/sentinel-train/featurize.py` reads these blob
 
 ### Runtime Toggle
 
-AI model outputs do not contribute to the descriptive composite by default; they still raise flags through §Flagging Logic whenever the model ran. A per-profile toggle (`setSetting('sentinel.ai_scoring_enabled')` in the profile-scoped settings DB, exposed in the Sentinel dashboard Profile tab) folds them into the composite at a 0.05 weight each:
+AI model outputs do not contribute to the descriptive composite by default, and the per-user keystroke and mouse models raise no flags: with the toggle off, `behavior_shift` and `bot_suspected` come only from the rule-based checks (consistency, mouse variance). The paste classifier and face match still raise their flags whenever they ran. A per-profile toggle (`setSetting('sentinel.ai_scoring_enabled')` in the profile-scoped settings DB, exposed in the Sentinel dashboard Profile tab) folds them into the composite at a 0.05 weight each and lets the keystroke and mouse models raise `behavior_shift` and `bot_suspected`:
 - `(1 − ai_keystroke_anomaly)` × 0.05
 - `ai_mouse_human_prob` × 0.05
 - `ai_face_similarity` × 0.05 (only when the window carries camera checks)

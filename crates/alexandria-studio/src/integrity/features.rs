@@ -372,10 +372,14 @@ pub fn derive_window(f: &WindowFeatures) -> WindowAssessment {
     let keystroke_anomaly = f.models.keystroke_anomaly.map(round3);
     let mouse_human_prob = f.models.mouse_human_prob.map(round3);
     let paste_anomaly = f.models.paste_anomaly.map(round3);
-    if keystroke_anomaly.is_some_and(|a| a >= KEYSTROKE_ANOMALY_THRESHOLD) {
+    // The per-user keystroke and mouse models speak only when the learner
+    // turned advisory AI scoring on; the rule-based checks below still raise
+    // the same flags without them.
+    let advisory = f.models.advisory_enabled;
+    if advisory && keystroke_anomaly.is_some_and(|a| a >= KEYSTROKE_ANOMALY_THRESHOLD) {
         flags.push("behavior_shift");
     }
-    if mouse_human_prob.is_some_and(|p| p < MOUSE_HUMAN_THRESHOLD) {
+    if advisory && mouse_human_prob.is_some_and(|p| p < MOUSE_HUMAN_THRESHOLD) {
         flags.push("bot_suspected");
     }
     let face_similarity = camera.and_then(|c| c.face_similarity).map(round3);

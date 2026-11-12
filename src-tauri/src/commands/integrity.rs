@@ -939,6 +939,9 @@ mod tests {
         models.models.keystroke_anomaly = Some(0.7);
         models.models.mouse_human_prob = Some(0.3);
         models.models.paste_anomaly = Some(0.96);
+        // The keystroke and mouse models flag only with advisory AI scoring on.
+        let mut advisory = models.clone();
+        advisory.models.advisory_enabled = true;
         let mut critical_paste = WindowFeatures::default();
         critical_paste.models.paste_anomaly = Some(0.995);
         let mut focus = WindowFeatures::default();
@@ -1043,8 +1046,9 @@ mod tests {
                 }),
                 &[],
             ),
+            (models, &["paste_classifier_anomaly"]),
             (
-                models,
+                advisory,
                 &[
                     "behavior_shift",
                     "bot_suspected",
