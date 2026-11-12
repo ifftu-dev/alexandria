@@ -422,3 +422,111 @@ async fn double_spent_mint_expires_and_is_replaced_with_identical_evidence() {
     assert_eq!(observed.len(), 1);
     assert_eq!(observed[0].tx_hash, replacement_hash);
 }
+
+/// A queued mint sent once and rejected as a double spend, with the tip past
+/// its window. Returns the profile, the ledger and the rejected hash.
+async fn rejected_mint(context: &CompletionContext) -> (TestProfile, FakeLedger, String) {
+    let wallet = test_chain::wallet();
+    let profile = queued(context);
+    let ledger = FakeLedger::at_tip(TIP);
+    ledger.set_utxos(
+        &wallet.payment_address,
+        vec![ada(0x11, 0, 40_000_000), ada(0x22, 0, 30_000_000)],
+    );
+    let foreign = foreign_spend(&ledger).await;
+    queue::tick(&profile.background(), &ledger, &wallet)
+        .await
+        .unwrap();
+    let (rejected, _) = ledger.submissions().pop().unwrap();
+    assert_ne!(rejected, foreign);
+    ledger.include(&foreign, TIP + 5);
+    ledger.catch_up();
+    ledger.set_tip(PAST_WINDOW);
+    (profile, ledger, rejected)
+}
+
+#[tokio::test]
+async fn expired_mint_is_not_replaced_with_different_evidence() {
+    let wallet = test_chain::wallet();
+    let context = wallet_context("course");
+    let (profile, ledger, rejected) = rejected_mint(&context).await;
+    let journal = profile.background();
+    tick(&journal, &ledger).await.unwrap();
+    assert_eq!(witness(&profile).status, WitnessStatus::Pending);
+
+    // Same operation, different leaves: not what the original attested.
+    let changed = CompletionContext {
+        leaves: vec![[10; 32]],
+        root: [10; 32],
+        ..context.clone()
+    };
+    assert_eq!(changed.operation_id(), context.operation_id());
+    profile.with_conn(|conn| {
+        conn.execute(
+            "UPDATE completion_witness_requests SET context_json = ?1",
+            [serde_json::to_string(&changed).unwrap()],
+        )
+        .unwrap()
+    });
+    let sent = ledger.submissions().len();
+    queue::tick(&journal, &ledger, &wallet).await.unwrap();
+
+    assert_eq!(ledger.submissions().len(), sent, "no replacement is sent");
+    let refused = witness(&profile);
+    assert_eq!(refused.status, WitnessStatus::Unavailable);
+    assert!(refused.tx_hash.is_none());
+    let id = context.operation_id();
+    let operation = Operation {
+        kind: KIND,
+        id: &id,
+    };
+    let journaled = profile.with_conn(|conn| submission::lookup(conn, operation).unwrap().unwrap());
+    assert_eq!(journaled.status, SubmissionStatus::Expired);
+    assert_eq!(journaled.tx_hash, rejected);
+    assert!(profile.with_conn(|conn| submission::history(conn, operation).unwrap().is_empty()));
+}
+
+/// The fake ledger with its tip unavailable.
+struct NoTip<'a>(&'a FakeLedger);
+
+impl Ledger for NoTip<'_> {
+    async fn utxos(&self, address: &str) -> Result<Vec<super::super::types::UTxO>, String> {
+        self.0.utxos(address).await
+    }
+    async fn protocol_params(&self) -> Result<super::super::types::ProtocolParameters, String> {
+        self.0.protocol_params().await
+    }
+    async fn tip_slot(&self) -> Result<u64, String> {
+        Err("tip unavailable".into())
+    }
+    async fn evaluate(&self, tx: &[u8]) -> Result<Vec<(u64, u64)>, String> {
+        self.0.evaluate(tx).await
+    }
+    async fn submit(&self, tx: &[u8]) -> Result<String, String> {
+        self.0.submit(tx).await
+    }
+    async fn receipt(
+        &self,
+        tx_hash: &str,
+    ) -> Result<Option<super::super::blockfrost::TransactionReceipt>, String> {
+        self.0.receipt(tx_hash).await
+    }
+    async fn tx_cbor(&self, tx_hash: &str) -> Result<Option<Vec<u8>>, String> {
+        self.0.tx_cbor(tx_hash).await
+    }
+}
+
+#[tokio::test]
+async fn mint_past_its_window_is_not_expired_while_the_tip_is_unavailable() {
+    let context = wallet_context("course");
+    let (profile, ledger, rejected) = rejected_mint(&context).await;
+    let journal = profile.background();
+
+    tick(&journal, &NoTip(&ledger)).await.unwrap();
+    let waiting = witness(&profile);
+    assert_eq!(waiting.status, WitnessStatus::OutcomeUnknown);
+    assert_eq!(waiting.tx_hash.as_deref(), Some(rejected.as_str()));
+
+    tick(&journal, &ledger).await.unwrap();
+    assert_eq!(witness(&profile).status, WitnessStatus::Pending);
+}
