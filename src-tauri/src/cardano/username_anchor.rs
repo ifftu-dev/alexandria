@@ -303,7 +303,15 @@ pub(crate) async fn tick<L: Ledger>(
             submission::reserved_outpoints(database.conn(), tip)
         })
         .await?;
-    let tx = build_batch_anchor_tx(&entries, w, ledger, tip, &reserved).await?;
+    let tx = match build_batch_anchor_tx(&entries, w, ledger, tip, &reserved).await {
+        Ok(tx) => tx,
+        // A wait, not a failure: the claims stay pending for the next pass.
+        Err(error) if WalletBusy::matches(&error) => {
+            log::info!("username anchoring waits: {error}");
+            return Ok(anchored);
+        }
+        Err(error) => return Err(error),
+    };
     let context = BatchContext {
         version: 1,
         claims: pending
@@ -655,6 +663,45 @@ mod tests {
         assert_eq!(
             statuses,
             vec![SubmissionStatus::Submitted, SubmissionStatus::Submitted]
+        );
+    }
+
+    #[tokio::test]
+    async fn busy_wallet_waits_for_the_next_pass_without_submitting() {
+        let profile = TestProfile::migrated();
+        profile.with_conn(|conn| cache(conn, &claim(1, "ada_99")));
+        let wallet = test_chain::wallet();
+        let ledger = FakeLedger::at_tip(TIP);
+        ledger.set_utxos(&wallet.payment_address, vec![ada(0x11, 0, 20_000_000)]);
+        let journal = profile.background();
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+        let first = ledger.submissions()[0].0.clone();
+
+        // The only UTxO is spent by the in-flight batch: wait, don't fail.
+        let waiting = claim(2, "bob_22");
+        profile.with_conn(|conn| cache(conn, &waiting));
+        assert!(tick(&journal, Some(&ledger), Some(&wallet))
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(ledger.submissions().len(), 1);
+        assert_eq!(batches(&profile).len(), 1);
+        assert_eq!(
+            profile.with_conn(|conn| cached(conn, &waiting.username)),
+            waiting
+        );
+
+        // Once the first batch lands and the index shows its change, the
+        // waiting claim goes out on that change.
+        ledger.include(&first, TIP + 20);
+        ledger.catch_up();
+        tick(&journal, Some(&ledger), Some(&wallet)).await.unwrap();
+        let submissions = ledger.submissions();
+        assert_eq!(submissions.len(), 2);
+        assert_eq!(spent(&submissions[1].1), vec![format!("{first}#0")]);
+        assert_eq!(
+            batches(&profile)[1].1.status,
+            SubmissionStatus::Submitted
         );
     }
 
