@@ -36,7 +36,7 @@ Spec: Implementation Decisions → Performance.
 | Tick, every tick / mean of 60 ticks at 1 Hz | 102.4 ms | 3.9 ms (20 detected at 9.9 ms, 40 tracked at 1.0 ms, 6 liveness reads) |
 | Tick with no face | 102.4 ms | 8.8 ms (every tick detects) |
 
-`camera_budget::benchmark()` on the same machine: detect 8.8 ms, liveness 6.6 ms, track 0.1 ms.
+`camera_budget::benchmark()` on the same machine: detect 8.8 ms, liveness 6.6 ms, track 0.1 ms. A run under heavy load (load average about 65, other builds running) gave detect 44.5 ms, liveness 49.1 ms and track 0.1 ms, which admits `camera` but not `full`. The benchmark measures contention at session start as well as the hardware.
 
 ### Budgets (ticket 05)
 
