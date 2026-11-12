@@ -309,7 +309,7 @@ The verification rung is positive evidence that the learner did the work, indepe
 | Rung | Evidence |
 |---|---|
 | `none` | — |
-| `process` | Every served item was observed by the response tracker (`integrity_sessions.response_items` ≥ items served) and the `response_process` channel is not over threshold. Every attempt is drawn by the backend's adaptive, exposure-weighted draw (see [skills-and-reputation.md](skills-and-reputation.md) §6.2), so that half needs no separate record |
+| `process` | Every served item was observed and the `response_process` channel is not over threshold. An item is observed when the response tracker reported a visit to it (`integrity_observed_items`, each id once, ids the attempt never served ignored) or the submitted attempt holds an answer for it, which covers answers restored on resume and left alone. An item left blank and never visited is left out. The tracker must have reported at least one served item. Every attempt is drawn by the backend's adaptive, exposure-weighted draw (see [skills-and-reputation.md](skills-and-reputation.md) §6.2), so that half needs no separate record |
 | `probed` | The probe step ran and every probe result is satisfied |
 | `consistent` | Longitudinal consistency is satisfied for the attempt |
 | `live` | A satisfied live segment (verification step `interview`) in the same session |
@@ -582,6 +582,7 @@ integrity_sessions       -- One per monitored session; status, assurance_level, 
                          --   attestation_json (incl. companion binding), purpose=assessment|interview,
                          --   trust_profile, profile_selection_json, policy_floor_json,
                          --   consent_camera|consent_microphone|consent_companion_phone, response_items
+  ├── integrity_observed_items -- Item ids the response tracker reported, once per session
   ├── integrity_snapshots      -- Committed windows: derived scores, anomaly_flags, ai_paste_anomaly,
   │                            --   gaze_offscreen_ratio, commitment_hash
   └── integrity_verifications  -- Probe and live-segment results folded into the chain

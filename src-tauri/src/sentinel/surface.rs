@@ -6,10 +6,18 @@
 //! Nothing here is copied from client text. The rung's evidence is read from
 //! the session and its attempt:
 //!
-//! - `process`: every served item was observed by the response tracker
-//!   (`integrity_sessions.response_items` ≥ items served), the session's
-//!   `response_process` channel is not over threshold, and the attempt's
-//!   items came from the backend's draw (every attempt's are).
+//! - `process`: every served item was observed, the response tracker ran,
+//!   the session's `response_process` channel is not over threshold, and the
+//!   attempt's items came from the backend's draw (every attempt's are). An
+//!   item is observed when the tracker reported a visit to it
+//!   (`integrity_observed_items`, once per id, ids the attempt never served
+//!   ignored) or the submitted attempt holds an answer for it: an answer
+//!   restored on resume and left alone is never visited again. An item left
+//!   unanswered and never visited carries no response and scores nothing, so
+//!   it is left out rather than counted against the learner. Together these
+//!   cover every served item, so what the rung asks of coverage is that the
+//!   tracker reported at least one served item: a session whose tracker never
+//!   ran has no response process to vouch for.
 //! - `probed`: probe results exist and all of them were satisfied.
 //! - `consistent`: the attempt's outcome agrees with the learner's history
 //!   ([`crate::sentinel::consistency::for_attempt`]).
@@ -67,11 +75,11 @@ pub(crate) fn session_surface(
     manifest: &RatioManifest,
     certification: Option<(&Certification, &str)>,
 ) -> Result<SessionSurface, String> {
-    let (profile, response_items, purpose): (Option<String>, i64, String) = conn
+    let (profile, purpose): (Option<String>, String) = conn
         .query_row(
-            "SELECT trust_profile, response_items, purpose FROM integrity_sessions WHERE id = ?1",
+            "SELECT trust_profile, purpose FROM integrity_sessions WHERE id = ?1",
             params![session_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?
@@ -136,7 +144,7 @@ pub(crate) fn session_surface(
                 .channels
                 .iter()
                 .any(|c| c.channel == RESPONSE_PROCESS_CHANNEL && c.over_threshold);
-            a.served > 0 && response_items >= a.served && !anomalous
+            a.tracked > 0 && !anomalous
         }
         None => false,
     };
@@ -287,21 +295,26 @@ pub(crate) fn session_review(
 
 struct Attempt {
     id: String,
-    served: i64,
+    /// Distinct served items the response tracker reported a visit to.
+    tracked: i64,
     score: Option<f64>,
 }
 
 /// The attempt the session monitored: the most recent one, preferring one
 /// that has been scored. Items served are the fixed draw (`question_ids`) or,
-/// for adaptive delivery, the items served one by one (`attempt_items`).
+/// for adaptive delivery, the items served one by one (`attempt_items`);
+/// reported ids the attempt never served are ignored.
 fn session_attempt(
     conn: &rusqlite::Connection,
     session_id: &str,
 ) -> Result<Option<Attempt>, String> {
     conn.query_row(
         "SELECT a.id,
-                MAX(json_array_length(a.question_ids),
-                    (SELECT COUNT(*) FROM attempt_items i WHERE i.attempt_id = a.id)),
+                (SELECT COUNT(*) FROM integrity_observed_items o
+                  WHERE o.session_id = a.integrity_session_id
+                    AND (o.item_id IN (SELECT value FROM json_each(a.question_ids))
+                         OR o.item_id IN (SELECT i.item_id FROM attempt_items i
+                                           WHERE i.attempt_id = a.id))),
                 a.score
            FROM assessment_attempts a
           WHERE a.integrity_session_id = ?1
@@ -310,7 +323,7 @@ fn session_attempt(
         |r| {
             Ok(Attempt {
                 id: r.get(0)?,
-                served: r.get(1)?,
+                tracked: r.get(1)?,
                 score: r.get(2)?,
             })
         },
@@ -393,6 +406,8 @@ mod tests {
                 "INSERT INTO question_banks (id, skill_id, label) VALUES ('bank', 'skill', 'Skill');
                  INSERT INTO integrity_sessions (id, status, trust_profile, response_items, ended_at)
                      VALUES ('s', 'completed', 'core', 2, '2026-04-13T00:00:00Z');
+                 INSERT INTO integrity_observed_items (session_id, item_id)
+                     VALUES ('s', 'q1'), ('s', 'q2');
                  INSERT INTO assessment_attempts
                      (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders,
                       integrity_session_id, started_at)
@@ -404,6 +419,112 @@ mod tests {
             ))
             .unwrap();
         db
+    }
+
+    /// A live `core` session whose attempt served `served`, with the
+    /// learner's submitted answers to `answered`.
+    fn live_attempt(served: &[&str], answered: &[&str]) -> Database {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let answers: Vec<serde_json::Value> = answered
+            .iter()
+            .map(|q| serde_json::json!({"question_id": q, "selected": [0]}))
+            .collect();
+        db.conn()
+            .execute_batch(
+                "INSERT INTO question_banks (id, skill_id, label) VALUES ('bank', 'skill', 'Skill');
+                 INSERT INTO integrity_sessions (id, status, trust_profile) VALUES ('s', 'active', 'core');",
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO assessment_attempts
+                     (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders,
+                      integrity_session_id, started_at, submitted_answers_json)
+                     VALUES ('a', 'did:key:l', 'bank', 'skill', 1, ?1, '[]', 's',
+                             '2026-04-13T00:00:00Z', ?2)",
+                params![
+                    serde_json::to_string(served).unwrap(),
+                    serde_json::to_string(&answers).unwrap()
+                ],
+            )
+            .unwrap();
+        db
+    }
+
+    /// Commit one window whose response tracker reported visits to `items`.
+    fn tracked(db: &Database, items: &[&str]) {
+        use crate::sentinel::scoring::{InputKind, ItemResponse, ResponseFeatures, WindowFeatures};
+        use crate::sentinel::snapshots::{persist_snapshot, SubmitSnapshotRequest};
+        let response = ResponseFeatures {
+            items: items
+                .iter()
+                .map(|id| ItemResponse {
+                    item_id: (*id).into(),
+                    input: InputKind::Choice,
+                    chars: 40,
+                    difficulty: Some(2),
+                    first_input_ms: 30_000.0,
+                    commit_ms: 30_000.0,
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let features = WindowFeatures {
+            response: Some(response),
+            ..Default::default()
+        };
+        persist_snapshot(
+            db.conn(),
+            &SubmitSnapshotRequest::from_features("s", "assessment", features),
+        )
+        .unwrap();
+    }
+
+    fn rung(db: &Database) -> VerificationRung {
+        session_surface(db.conn(), "s", false, &RatioManifest::uncertified(), None)
+            .unwrap()
+            .rung
+    }
+
+    #[test]
+    fn repeated_or_unserved_item_ids_never_stand_in_for_the_served_items() {
+        // Two served items, but the tracker only ever reported an item this
+        // attempt never served, twice over.
+        let db = live_attempt(&["q1", "q2"], &["q1", "q2"]);
+        tracked(&db, &["zz"]);
+        tracked(&db, &["zz"]);
+        assert_eq!(rung(&db), VerificationRung::None);
+
+        // A served item reported again after a resume is one item.
+        let db = live_attempt(&["q1", "q2"], &["q1", "q2"]);
+        tracked(&db, &["q1"]);
+        tracked(&db, &["q1"]);
+        let items: i64 = db
+            .conn()
+            .query_row(
+                "SELECT response_items FROM integrity_sessions WHERE id = 's'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(items, 1);
+    }
+
+    #[test]
+    fn answers_restored_on_resume_and_items_left_blank_keep_an_honest_attempt_on_process() {
+        // q1 and q2 were worked through before the app restarted; q3's answer
+        // was restored on resume and never touched again; q4 was left blank.
+        let db = live_attempt(&["q1", "q2", "q3", "q4"], &["q1", "q2", "q3"]);
+        tracked(&db, &["q1", "q2"]);
+        assert_eq!(rung(&db), VerificationRung::Process);
+    }
+
+    #[test]
+    fn a_session_whose_tracker_never_reported_a_served_item_has_no_response_process() {
+        let db = live_attempt(&["q1", "q2"], &["q1", "q2"]);
+        assert_eq!(rung(&db), VerificationRung::None);
     }
 
     /// Ratios under which an idle-then-burst answer in two windows puts the

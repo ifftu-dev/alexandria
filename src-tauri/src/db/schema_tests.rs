@@ -196,7 +196,8 @@ fn the_view_set_is_exact() {
 /// 4 tables (inbox, deduplication, registration, operation state) and 1 unread index.
 /// Subject-field atlas slots add 1 unique index. Batched credential anchors
 /// add 3 tables (batches, receipts, observations) and, net of the rebuilt
-/// anchor queue, 2 indexes.
+/// anchor queue, 2 indexes. Response-process coverage by item adds 1 table
+/// (keyed by session and item, without rowid, so no index).
 #[test]
 fn the_schema_object_counts_are_pinned() {
     let db = migrated();
@@ -204,7 +205,7 @@ fn the_schema_object_counts_are_pinned() {
         .into_iter()
         .filter(|t| t != "_migrations" && t != "_schema_identity")
         .count();
-    assert_eq!(tables, 141, "table count changed");
+    assert_eq!(tables, 142, "table count changed");
     assert_eq!(names(db.conn(), "index").len(), 132, "index count changed");
     assert_eq!(
         names(db.conn(), "trigger").len(),
@@ -550,7 +551,7 @@ fn with_provisional_notifications(db: Database) -> Database {
 #[test]
 fn provisional_notifications_upgrade_preserves_data_and_backfills_call_kinds() {
     let db = provisional_notification_database();
-    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 20);
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 21);
     assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
     let saved: (
         String,
@@ -673,7 +674,8 @@ fn provisional_notifications_upgrade_preserves_data_and_backfills_call_kinds() {
             (35, "integrity_response_items".into()),
             (36, "trust_profiles".into()),
             (37, "interview_criterion_followups".into()),
-            (38, "llm_probes".into())
+            (38, "llm_probes".into()),
+            (39, "integrity_observed_items".into())
         ]
     );
     let applied_at: String = db
@@ -721,7 +723,7 @@ fn notifications_migrate_fresh_and_current_main_without_changing_existing_calls(
         }
         assert_eq!(
             super::run_migrations_on_connection(db.conn()).unwrap(),
-            38 - prior_version
+            39 - prior_version
         );
         assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
         db.conn().execute_batch(
@@ -807,7 +809,7 @@ fn provisional_notifications_failed_upgrade_reopens_and_retries_atomically() {
     db.conn()
         .execute_batch("DROP TRIGGER fail_upgrade")
         .unwrap();
-    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 20);
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 21);
     assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
 }
 

@@ -251,9 +251,10 @@ impl ResponseFeatures {
         flags
     }
 
-    /// First visits observed in this window: the session's response-process
-    /// coverage.
-    pub fn observed_items(&self) -> u32 {
-        self.first_visits().count() as u32
+    /// Ids of the items visited in this window, first visits and returns
+    /// alike: the session's response-process coverage. A resumed attempt can
+    /// report an item again as a first visit, so callers count distinct ids.
+    pub fn observed_item_ids(&self) -> impl Iterator<Item = &str> {
+        self.items.iter().map(|i| i.item_id.as_str())
     }
 }

@@ -18,7 +18,7 @@ Spec: Implementation Decisions → Vocabulary (rung, coverage statement), Creden
 2026-11-12, deviations and decisions:
 
 - The rung is a strict ladder (`verification_rung`): each rung needs every rung below it, so a coverage statement for a rung states everything beneath it. Insufficient history or a skipped probe leaves the session one rung lower and never counts against the learner.
-- `process`: every served item observed (`response_items` ≥ items served, adaptive attempts counted from `attempt_items`) and the `response_process` channel not over threshold. The adaptive-draw half has no separate record: every attempt is drawn by the backend, so it holds whenever an attempt is bound to the session.
+- `process`: every served item observed and the `response_process` channel not over threshold. Observed is decided per item id, not by a visit count (rule in ticket 03's Notes). The adaptive-draw half has no separate record: every attempt is drawn by the backend, so it holds whenever an attempt is bound to the session.
 - `probed` needs every probe result satisfied: a timed-out probe beside a satisfied one keeps the rung at `process`. `live` is a satisfied verification with step `interview` (`STEP_INTERVIEW`) in the same session; ticket 10 records it.
 - Both grading paths write the attempt score to the row before issuance, inside the grading transaction, so the assertion reads consistency from the attempt itself.
 - Probe policy at issuance: anything but `none` requires the probe step to have run under that policy with no failed probe; skipped is accepted. A satisfied probe is required through `min_verification_rung: probed`.

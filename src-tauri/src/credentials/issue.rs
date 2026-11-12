@@ -592,7 +592,7 @@ mod tests {
     /// A finished assessment session on a profile chosen from `camera`, whose
     /// attempt served `served` items, `observed` of which the response
     /// tracker saw the learner work through.
-    fn assessed(conn: &Connection, id: &str, camera: bool, served: usize, observed: i64) {
+    fn assessed(conn: &Connection, id: &str, camera: bool, served: usize, observed: usize) {
         session_on_profile(conn, id, false, camera, None);
         conn.execute(
             "INSERT OR IGNORE INTO question_banks (id, skill_id, label) VALUES ('bank', 'skill_test', 'Test')",
@@ -614,11 +614,13 @@ mod tests {
             ],
         )
         .unwrap();
-        conn.execute(
-            "UPDATE integrity_sessions SET response_items = ?2 WHERE id = ?1",
-            params![id, observed],
-        )
-        .unwrap();
+        for item in ids.iter().take(observed) {
+            conn.execute(
+                "INSERT INTO integrity_observed_items (session_id, item_id) VALUES (?1, ?2)",
+                params![id, item],
+            )
+            .unwrap();
+        }
     }
 
     fn assertion_for(
@@ -681,10 +683,10 @@ mod tests {
     }
 
     #[test]
-    fn items_the_learner_was_never_seen_working_leave_the_rung_at_none() {
+    fn a_session_whose_tracker_never_saw_the_learner_work_leaves_the_rung_at_none() {
         let (db, key, _, subject) = setup();
-        assessed(db.conn(), "partial", false, 3, 2);
-        let a = assertion_for(db.conn(), &key, &subject, "partial");
+        assessed(db.conn(), "unseen", false, 3, 0);
+        let a = assertion_for(db.conn(), &key, &subject, "unseen");
         assert_eq!(a.verification_rung.as_deref(), Some("none"));
 
         // A session with no attempt behind it has no response process either.

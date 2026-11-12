@@ -126,7 +126,7 @@ pub(crate) fn record_backend_flag(
             composite,
             &ScoreColumns::default(),
             &flags,
-            0,
+            &[],
             &manifest,
         ) {
             corpus_capture::capture(&session_id, || CorpusWindow {
@@ -191,7 +191,11 @@ pub(crate) fn persist_snapshot_with(
         s.integrity,
         &columns,
         &assessment.flags,
-        features.response.as_ref().map_or(0, |r| r.observed_items()),
+        &features
+            .response
+            .as_ref()
+            .map(|r| r.observed_item_ids().collect::<Vec<_>>())
+            .unwrap_or_default(),
         manifest,
     )?;
     corpus_capture::capture(&req.session_id, || CorpusWindow {
@@ -236,7 +240,7 @@ fn commit_window(
     composite: f64,
     columns: &ScoreColumns,
     flags: &[String],
-    response_items: u32,
+    observed_items: &[&str],
     manifest: &RatioManifest,
 ) -> Result<IntegritySnapshot, String> {
     let tx =
@@ -319,6 +323,16 @@ fn commit_window(
     )
     .map_err(|e| e.to_string())?;
 
+    // Each item the response tracker visited counts once per session, however
+    // often it is reported (a resumed attempt reports items again).
+    for item_id in observed_items {
+        conn.execute(
+            "INSERT OR IGNORE INTO integrity_observed_items (session_id, item_id) VALUES (?1, ?2)",
+            params![session_id, item_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
     // Running integrity score (average of snapshots) and severity counters
     // in one statement, so they stay consistent with each other.
     conn.execute(
@@ -329,15 +343,11 @@ fn commit_window(
                 critical_count  = critical_count + ?2,
                 warning_count   = warning_count  + ?3,
                 commitment_root = ?4,
-                response_items  = response_items + ?5
+                response_items  = (
+                    SELECT COUNT(*) FROM integrity_observed_items WHERE session_id = ?1
+                )
              WHERE id = ?1",
-        params![
-            session_id,
-            snap_critical,
-            snap_warning,
-            commitment_hash,
-            response_items
-        ],
+        params![session_id, snap_critical, snap_warning, commitment_hash],
     )
     .map_err(|e| e.to_string())?;
 

@@ -138,6 +138,9 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // probe source and each generated probe's record. See
     // `crate::assessment::llm_probe`.
     (38, "llm_probes", include_str!("llm_probes.sql")),
+    // The item ids each integrity session's response tracker reported, so
+    // the `process` rung counts served items, not visits.
+    (39, "integrity_observed_items", include_str!("integrity_observed_items.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

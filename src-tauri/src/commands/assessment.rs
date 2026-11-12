@@ -1731,7 +1731,9 @@ mod tests {
             .unwrap();
         // Both items observed, and a probe on them satisfied in the session.
         conn.execute(
-            "UPDATE integrity_sessions SET response_items = 2 WHERE id = 'test-session'",
+            "INSERT INTO integrity_observed_items (session_id, item_id)
+             SELECT 'test-session', value FROM assessment_attempts, json_each(question_ids)
+              WHERE assessment_attempts.id = 'att_1'",
             [],
         )
         .unwrap();
@@ -2265,7 +2267,7 @@ mod tests {
             .conn()
             .execute(
                 "UPDATE assessment_attempts SET ended_at = ?1, end_reason = 'diagnostics' \
-                  WHERE id = 'att_1'",
+                  WHERE assessment_attempts.id = 'att_1'",
                 [NOW],
             )
             .unwrap();
