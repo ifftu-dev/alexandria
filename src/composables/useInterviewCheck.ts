@@ -22,7 +22,6 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { liveSegment, markedQuestion, useInterviewSignals } from '@/composables/useInterviewSignals'
 import { useSentinel } from '@/composables/useSentinel'
 import { createInterviewFeed, type InterviewFeed } from '@/utils/sentinel/interviewFeed'
-import type { InterviewSignalMessage } from '@/types'
 import { errorMessage } from '@/utils/errorMessage'
 
 export interface IntegrityFlag {
@@ -83,15 +82,14 @@ export function useInterviewCheck() {
   }
 
   /** The panel marked a live segment done: record it in the running check. */
-  async function recordLiveSegment(check: RunningCheck, sessionId: string, segmentId: string, message: InterviewSignalMessage) {
+  // Who marked it comes from the panelist's signature, which the backend kept.
+  async function recordLiveSegment(check: RunningCheck, sessionId: string, segmentId: string) {
     if (running.value !== check) return
     try {
       await invoke('hiring_interview_live_segment', {
         interviewId: check.interviewId,
         integritySessionId: sessionId,
         segmentId,
-        markedBy: message.sender,
-        markedByName: message.sender_name,
       })
     } catch (cause) {
       console.warn('[interview] live segment not recorded', errorMessage(cause))
@@ -118,7 +116,7 @@ export function useInterviewCheck() {
     stopSignals = [await signals.onSignal(message => {
       const segment = liveSegment(message.signal)
       if (segment) {
-        void recordLiveSegment(check, sessionId, segment, message)
+        void recordLiveSegment(check, sessionId, segment)
         return
       }
       const question = markedQuestion(message.signal)

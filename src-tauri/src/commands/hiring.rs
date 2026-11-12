@@ -1008,16 +1008,21 @@ pub fn record_live_segment(
 }
 
 /// The panel marked a live segment done during the interview: record it in
-/// the candidate's running integrity check.
+/// the candidate's running integrity check. Only a segment the current call
+/// received signed by a member of the interview's panel is recorded, and
+/// who marked it comes from that signature, never from the caller.
 #[tauri::command]
 pub async fn hiring_interview_live_segment(
     state: State<'_, AppState>,
     interview_id: String,
     integrity_session_id: String,
     segment_id: String,
-    marked_by: String,
-    marked_by_name: Option<String>,
 ) -> Result<crate::sentinel::verification::VerificationResult, String> {
+    let (marked_by, marked_by_name) = state
+        .tutoring
+        .panel_live_segment(&segment_id)
+        .await
+        .ok_or("this live segment did not come from the interview's panel in this call")?;
     state
         .db_executor
         .execute(

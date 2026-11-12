@@ -8,11 +8,16 @@
 //! The feed is the candidate's app's own report, shown to the panel as a
 //! reason to ask, never as a verdict. The panel also marks an unscripted
 //! live segment as done, which the candidate's check records.
+//!
+//! Each message is signed by the sending node's key over the room's gossip
+//! topic, so a relay cannot change who sent it and a signal does not replay
+//! in another room. Question markers and live segments are accepted only
+//! from the interview's [`Panel`].
 
 use serde::{Deserialize, Serialize};
 
 /// Prefix that keeps signals apart from chat and captions on the channel.
-pub(super) const PREFIX: &[u8] = b"ALXIS1";
+pub(super) const PREFIX: &[u8] = b"ALXIS2";
 const MAX_QUESTION_ID: usize = 128;
 /// Ten minutes: no answer timing above it is meaningful.
 const MAX_LATENCY_MS: u32 = 600_000;
@@ -73,7 +78,8 @@ impl InterviewSignal {
     }
 }
 
-/// A signal as it travels: who sent it and when.
+/// A signal as the webview sees it: who sent it and when. `sender` is the
+/// node id whose key signed it, never a claim the payload makes alone.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SignalMessage {
     pub sender: String,
@@ -82,38 +88,111 @@ pub struct SignalMessage {
     pub timestamp: u64,
 }
 
-/// Prefix and encode a valid message for the channel.
-pub(super) fn encode(message: &SignalMessage) -> Result<Vec<u8>, String> {
-    message.signal.validate()?;
-    let payload = postcard::to_stdvec(message).map_err(|e| e.to_string())?;
+/// A message as it travels: signed by the sender's node key over the room's
+/// topic, so a gossip relay cannot change who sent it and a signal from one
+/// room does not replay in another.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Wire {
+    message: SignalMessage,
+    signature: Vec<u8>,
+}
+
+/// The node ids of the interview's panel, as this device knows them. On the
+/// candidate's side these are the bootstrap peers of the room ticket the
+/// organisation's Cloud handed over, which a panelist published. Elsewhere
+/// it is empty.
+pub(super) type Panel = std::collections::HashSet<String>;
+
+fn signing_bytes(topic: &[u8], message: &SignalMessage) -> Vec<u8> {
+    let mut bytes = b"alexandria-interview-signal/2\n".to_vec();
+    bytes.extend_from_slice(&(topic.len() as u64).to_be_bytes());
+    bytes.extend_from_slice(topic);
+    // Postcard of a struct of owned fields cannot fail.
+    bytes.extend(postcard::to_stdvec(message).unwrap_or_default());
+    bytes
+}
+
+/// Sign, prefix and encode a valid signal from `key`'s node for the room
+/// with gossip topic `topic`.
+pub(super) fn encode(
+    signal: InterviewSignal,
+    sender_name: Option<String>,
+    timestamp: u64,
+    key: &iroh::SecretKey,
+    topic: &[u8],
+) -> Result<Vec<u8>, String> {
+    signal.validate()?;
+    let message = SignalMessage {
+        sender: key.public().to_string(),
+        sender_name,
+        signal,
+        timestamp,
+    };
+    let signature = key
+        .sign(&signing_bytes(topic, &message))
+        .to_bytes()
+        .to_vec();
+    let payload = postcard::to_stdvec(&Wire { message, signature }).map_err(|e| e.to_string())?;
     let mut encoded = Vec::with_capacity(PREFIX.len() + payload.len());
     encoded.extend_from_slice(PREFIX);
     encoded.extend_from_slice(&payload);
     Ok(encoded)
 }
 
-/// A valid message from channel bytes; `None` when the bytes are something
-/// else on the channel, `Err` when they claim to be a signal and are not.
-pub(super) fn decode(bytes: &[u8]) -> Option<Result<SignalMessage, String>> {
+/// An accepted message from channel bytes; `None` when the bytes are
+/// something else on the channel, `Err` when they claim to be a signal and
+/// are not one this device accepts: malformed, not signed by the node they
+/// name for this room, or a question marker or live segment from outside
+/// the `panel`.
+pub(super) fn receive(
+    bytes: &[u8],
+    topic: &[u8],
+    panel: &Panel,
+) -> Option<Result<SignalMessage, String>> {
     let payload = bytes.strip_prefix(PREFIX)?;
-    Some(
-        postcard::from_bytes::<SignalMessage>(payload)
-            .map_err(|e| e.to_string())
-            .and_then(|m| m.signal.validate().map(|()| m)),
-    )
+    Some(accept(payload, topic, panel))
+}
+
+fn accept(payload: &[u8], topic: &[u8], panel: &Panel) -> Result<SignalMessage, String> {
+    use ed25519_dalek::{Signature, VerifyingKey};
+    let Wire { message, signature } =
+        postcard::from_bytes::<Wire>(payload).map_err(|e| e.to_string())?;
+    message.signal.validate()?;
+    let node: [u8; 32] = hex::decode(&message.sender)
+        .ok()
+        .and_then(|k| k.try_into().ok())
+        .ok_or("a signal names its sender's node")?;
+    let node = VerifyingKey::from_bytes(&node).map_err(|e| e.to_string())?;
+    let signature = Signature::from_slice(&signature).map_err(|e| e.to_string())?;
+    node.verify_strict(&signing_bytes(topic, &message), &signature)
+        .map_err(|_| "a signal not signed by the node it names".to_string())?;
+    let panel_only = matches!(
+        message.signal,
+        InterviewSignal::Question { .. } | InterviewSignal::LiveSegment { .. }
+    );
+    if panel_only && !panel.contains(&message.sender) {
+        return Err("only the interview's panel sends question markers and live segments".into());
+    }
+    Ok(message)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn message(signal: InterviewSignal) -> SignalMessage {
-        SignalMessage {
-            sender: "node".into(),
-            sender_name: Some("Candidate".into()),
-            signal,
-            timestamp: 1_700_000_000_000,
-        }
+    const ROOM: &[u8] = b"room-topic";
+    const TIME: u64 = 1_700_000_000_000;
+
+    fn key(seed: u8) -> iroh::SecretKey {
+        iroh::SecretKey::from_bytes(&[seed; 32])
+    }
+
+    fn panel_of(keys: &[&iroh::SecretKey]) -> Panel {
+        keys.iter().map(|k| k.public().to_string()).collect()
+    }
+
+    fn send(signal: InterviewSignal, from: &iroh::SecretKey) -> Vec<u8> {
+        encode(signal, Some("Someone".into()), TIME, from, ROOM).unwrap()
     }
 
     fn answer(question_id: &str, latency_ms: u32) -> InterviewSignal {
@@ -126,31 +205,99 @@ mod tests {
         }
     }
 
-    #[test]
-    fn each_signal_survives_the_channel() {
-        for signal in [
-            InterviewSignal::Question {
-                question_id: "q-1".into(),
-            },
-            answer("q-1", 4_200),
-            InterviewSignal::SecondVoice,
-            InterviewSignal::LiveSegment {
-                segment_id: "live-1".into(),
-            },
-        ] {
-            let sent = message(signal);
-            assert_eq!(decode(&encode(&sent).unwrap()), Some(Ok(sent)));
+    fn question() -> InterviewSignal {
+        InterviewSignal::Question {
+            question_id: "q-1".into(),
+        }
+    }
+
+    fn live() -> InterviewSignal {
+        InterviewSignal::LiveSegment {
+            segment_id: "live-1".into(),
         }
     }
 
     #[test]
+    fn each_signal_survives_the_channel_with_its_signers_id_as_sender() {
+        let panelist = key(1);
+        let panel = panel_of(&[&panelist]);
+        for signal in [
+            question(),
+            answer("q-1", 4_200),
+            InterviewSignal::SecondVoice,
+            live(),
+        ] {
+            let received = receive(&send(signal.clone(), &panelist), ROOM, &panel)
+                .unwrap()
+                .unwrap();
+            assert_eq!(received.signal, signal);
+            assert_eq!(received.sender, panelist.public().to_string());
+            assert_eq!(received.timestamp, TIME);
+        }
+    }
+
+    #[test]
+    fn a_sender_the_signature_does_not_bind_is_refused() {
+        let (panelist, candidate) = (key(1), key(2));
+        let panel = panel_of(&[&panelist]);
+        // The candidate's own second node claims to be the panelist.
+        let message = SignalMessage {
+            sender: panelist.public().to_string(),
+            sender_name: Some("Panelist".into()),
+            signal: live(),
+            timestamp: TIME,
+        };
+        let signature = candidate.sign(&signing_bytes(ROOM, &message)).to_bytes();
+        let mut forged = PREFIX.to_vec();
+        forged.extend(
+            postcard::to_stdvec(&Wire {
+                message,
+                signature: signature.to_vec(),
+            })
+            .unwrap(),
+        );
+        assert!(matches!(receive(&forged, ROOM, &panel), Some(Err(_))));
+
+        // A signal signed for another room does not carry over.
+        let elsewhere = encode(live(), None, TIME, &panelist, b"other-room").unwrap();
+        assert!(matches!(receive(&elsewhere, ROOM, &panel), Some(Err(_))));
+    }
+
+    #[test]
+    fn question_markers_and_live_segments_come_only_from_the_panel() {
+        let (panelist, outsider) = (key(1), key(3));
+        let panel = panel_of(&[&panelist]);
+        for signal in [question(), live()] {
+            assert!(matches!(
+                receive(&send(signal, &outsider), ROOM, &panel),
+                Some(Err(_))
+            ));
+        }
+        // The candidate's own reports are not panel signals.
+        for signal in [answer("q-1", 900), InterviewSignal::SecondVoice] {
+            assert!(matches!(
+                receive(&send(signal, &outsider), ROOM, &panel),
+                Some(Ok(_))
+            ));
+        }
+        // A device that knows no panel accepts no marker at all.
+        assert!(matches!(
+            receive(&send(question(), &panelist), ROOM, &Panel::new()),
+            Some(Err(_))
+        ));
+    }
+
+    #[test]
     fn chat_and_captions_on_the_channel_are_not_signals() {
-        assert_eq!(decode(b"ALXTR1whatever"), None);
-        assert_eq!(decode(b"hello"), None);
+        let panel = Panel::new();
+        assert_eq!(receive(b"ALXTR1whatever", ROOM, &panel), None);
+        assert_eq!(receive(b"hello", ROOM, &panel), None);
     }
 
     #[test]
     fn a_signal_no_honest_app_sends_is_refused_both_ways() {
+        let panelist = key(1);
+        let panel = panel_of(&[&panelist]);
         for bad in [
             answer("", 100),
             answer("has spaces", 100),
@@ -160,11 +307,23 @@ mod tests {
                 segment_id: "not a token".into(),
             },
         ] {
-            let sent = message(bad);
-            assert!(encode(&sent).is_err());
+            assert!(encode(bad.clone(), None, TIME, &panelist, ROOM).is_err());
+            let message = SignalMessage {
+                sender: panelist.public().to_string(),
+                sender_name: None,
+                signal: bad,
+                timestamp: TIME,
+            };
+            let signature = panelist.sign(&signing_bytes(ROOM, &message)).to_bytes();
             let mut forged = PREFIX.to_vec();
-            forged.extend(postcard::to_stdvec(&sent).unwrap());
-            assert!(matches!(decode(&forged), Some(Err(_))));
+            forged.extend(
+                postcard::to_stdvec(&Wire {
+                    message,
+                    signature: signature.to_vec(),
+                })
+                .unwrap(),
+            );
+            assert!(matches!(receive(&forged, ROOM, &panel), Some(Err(_))));
         }
     }
 

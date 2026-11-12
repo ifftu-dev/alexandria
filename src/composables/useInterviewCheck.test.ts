@@ -112,8 +112,6 @@ describe('useInterviewCheck', () => {
       interviewId: 'int-6',
       integritySessionId: 'session-9',
       segmentId: 'live-1',
-      markedBy: 'panel-node',
-      markedByName: 'Priya',
     })
   })
 
