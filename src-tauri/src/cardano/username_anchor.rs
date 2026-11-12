@@ -56,7 +56,13 @@ struct BatchContext {
 
 /// Digest that gets anchored: blake3 over the owner signature.
 pub fn claim_digest(claim: &UsernameClaim) -> String {
-    blake3::hash(claim.sig.as_bytes()).to_hex().to_string()
+    signature_digest(&claim.sig)
+}
+
+/// The anchored digest of a claim with owner signature `signature`; the one
+/// rule batches and verification share.
+fn signature_digest(signature: &str) -> String {
+    blake3::hash(signature.as_bytes()).to_hex().to_string()
 }
 
 /// Build the `{ 1698: { "v": 1, "c": [ … ] } }` auxiliary-data map.
@@ -307,12 +313,7 @@ async fn pass<L: Ledger>(
         .context
         .claims
         .iter()
-        .map(|claim| {
-            let digest = blake3::hash(claim.signature.as_bytes())
-                .to_hex()
-                .to_string();
-            (claim.username.clone(), digest)
-        })
+        .map(|claim| (claim.username.clone(), signature_digest(&claim.signature)))
         .collect();
 
     let tip = tip.get().await.map_err(|e| format!("get_tip_slot: {e}"))?;
