@@ -20,8 +20,8 @@ mod features;
 mod flags;
 mod fusion;
 pub mod measurement;
-mod response;
 mod profile;
+mod response;
 
 pub use consistency::{
     assess as assess_consistency, Consistency, ConsistencyVerdict, EvidenceSource, History,
@@ -37,11 +37,11 @@ pub use fusion::{
     decide, ChannelEvidence, Decision, FusionSummary, ProfileRatios, RatioManifest,
     SessionEvidence, SessionStatus, DEFAULT_PROFILE, UNCERTIFIED_MANIFEST_VERSION,
 };
-pub use response::{
-    reading_floor_ms, BaselineItem, BaselineSource, InputKind, ItemResponse, ResponseBaseline,
-    ResponseFeatures, RESPONSE_PROCESS_SIGNALS,
-};
 pub use profile::{
     evaluate_floor, exclusion_reasons, select_profile, BudgetFit, Capabilities, Exclusion,
     ExclusionReason, PolicyFloor, ProfileSelection, ProfileSignal, SelectionInputs, TrustProfile,
+};
+pub use response::{
+    reading_floor_ms, BaselineItem, BaselineSource, InputKind, ItemResponse, ResponseBaseline,
+    ResponseFeatures, RESPONSE_PROCESS_SIGNALS,
 };
