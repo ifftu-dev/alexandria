@@ -26,4 +26,4 @@ Done when: seam-1 tests (session over in-memory DB) cover single-flag → review
 - Sessions are scored under profile `core` until ticket 05 records a profile per session.
 - The calibration wizard's training metrics keep their small TS analyzers; they never reach a snapshot.
 
-- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.
+- 2026-11-13: closed. Merged with the rest of the spec; review findings fixed alongside.

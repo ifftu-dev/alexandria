@@ -21,4 +21,4 @@ Done when: assessment command tests show exclusion, transfer-item inclusion, dif
 - Exclusion is soft: unseen items first, then served items least-exposed first, because the bundled banks are smaller than three draws. Exposure is this profile's only; cross-profile counts from Cloud can feed the same `DrawContext::exposure` map later.
 - Out of scope here: grading does not yet require transfer items or a minimum of unseen items to pass, the adaptive (IRT) delivery path is unchanged, and no bundled bank carries transfer items yet (ai-chat-spec §24 leaves which banks get them first open).
 
-- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.
+- 2026-11-13: closed. Merged with the rest of the spec; review findings fixed alongside.

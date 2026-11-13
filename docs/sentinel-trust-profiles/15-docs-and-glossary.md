@@ -14,4 +14,4 @@ Approved by the owner 2026-11-12 (see spec Decisions).
 
 - Review fix for the regression this ticket noted: since scoring moved to the backend, `behavior_shift` and `bot_suspected` fired whenever the keystroke or mouse model ran, even with advisory AI scoring off. `derive_window` again lets those two models flag only when `models.advisory_enabled` is set; the rule-based checks behind the same flags are unchanged. `docs/sentinel.md` §Runtime Toggle says so.
 
-- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.
+- 2026-11-13: closed. Merged with the rest of the spec; review findings fixed alongside.

@@ -32,4 +32,4 @@ Spec: Implementation Decisions → Device axis.
 - Review fix: the desktop read the phone's role (camera, benchmark) right after answering the join, while the transport inserted the phone link only once it received that answer, so the read could miss the link. `Joined::answer` now puts the link in place before it replies; a desktop that answers too late leaves no link.
 - Review fix: declining companion consent cleared the stored attestation but left the phone link up, so the phone's benchmark still fed selection and its camera windows still replaced the desktop's. Selection now drops the link first (`CompanionHub::consented_role`).
 
-- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.
+- 2026-11-13: closed. Merged with the rest of the spec; review findings fixed alongside.

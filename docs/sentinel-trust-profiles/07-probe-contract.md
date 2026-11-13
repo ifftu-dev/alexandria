@@ -27,4 +27,4 @@ Spec: Implementation Decisions → Probes (all but the llm and interview bullets
 - Authoring is IPC only (`assessment_item_probe_*`, allowlisted); there is no instructor UI yet. Authored probes do not travel with items over sync.
 - Review fix: every grading error used to skip the probe `provider_unavailable`, so a response no grader could read escaped as a skip. `items::grade_item` now returns `GradeError`: `Unavailable` (grader not installed, not runnable on the platform, bytes that do not match, a failure inside it) still skips; `InvalidResponse` (not a JSON object, or choice positions that are not a list of the item's options) fails the probe, with `error: invalid_response` in the detail. A choice response with no selection still grades as an unanswered, wrong answer. Attempt grading sees the same check; submitted answers are validated before they are stored, so it changes nothing there.
 
-- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.
+- 2026-11-13: closed. Merged with the rest of the spec; review findings fixed alongside.

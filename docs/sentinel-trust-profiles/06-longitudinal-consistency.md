@@ -22,4 +22,4 @@ Spec: Signals and measurement → longitudinal consistency bullet.
 - Divergence is a fusion signal (own `longitudinal` channel, info severity, advisory until certified), not a failed verification.
 - No migration: the result is derived again from the database when needed (ticket 08).
 
-- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.
+- 2026-11-13: closed. Merged with the rest of the spec; review findings fixed alongside.

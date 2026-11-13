@@ -28,4 +28,4 @@ Spec: Probes → llm bullet; Q3 decisions in the spec's Decisions section.
 - Concurrent starts: two starts racing during generation may both call the model; only the first store wins, the second returns the stored probes.
 - New strings are English-only (`learn.assessment.generatedProbe*`, `learn.assessment.probePreparing`, `dashboard.sponsor.roleModal.generatedProbe*`, `dashboard.sponsor.roles.generatedProbe`), pending translation. The UI never names a provider: the sponsor sees the connection name they chose.
 
-- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.
+- 2026-11-13: closed. Merged with the rest of the spec; review findings fixed alongside.

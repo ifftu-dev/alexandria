@@ -27,4 +27,4 @@ Prior art: `crates/alexandria-decisions` offline evaluate example; committee hol
 - `sentinel::scoring::active_manifest()` stays uncertified: there is no real certification until ticket 14.
 - Clean-session capture is a process environment variable (`ALEXANDRIA_SENTINEL_CAPTURE_DIR`) with consent signed out of band, not an in-app consent flow. Desktop and iOS (devicectl launch environment) only; Android has no capture path yet.
 
-- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.
+- 2026-11-13: closed. Merged with the rest of the spec; review findings fixed alongside.

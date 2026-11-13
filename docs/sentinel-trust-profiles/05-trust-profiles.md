@@ -29,4 +29,4 @@ Spec: Implementation Decisions → Vocabulary (trust profile), Profile selection
 - Microphone and companion-phone consent are recorded; no profile needs them yet.
 - Review fix: a backend flag raised before selection (the attempt gate flagging an AI surface) was committed at once, became the chain's first link and blocked both selection and pairing for good. Migration 40 adds `integrity_sessions.pending_backend_flags`: before the chain's first link a flag waits there (counted once, like a committed one), and `snapshots::flush_pending_flags` commits the queue in order right after the selection link, or ahead of the first client window or at session end when no profile is chosen. The chain then proves the order: selection (and any pairing before it) first, every flag after. A flag that would suspend the session takes effect at that point, seconds after it was raised.
 
-- 2026-11-13: closed. Merged to feat/sentinel-trust-profiles; review findings fixed on the same branch.
+- 2026-11-13: closed. Merged with the rest of the spec; review findings fixed alongside.
