@@ -224,6 +224,8 @@ onUnmounted(() => {
         <dd class="text-foreground">{{ $t('tutoring.interviewRoom.check.ranFor', { minutes: minutes(s.report), snapshots: s.report.snapshots }) }}</dd>
         <dt class="text-muted-foreground">{{ $t('tutoring.interviewRoom.check.cameraLabel') }}</dt>
         <dd class="text-foreground">{{ s.report.camera ? $t('tutoring.interviewRoom.check.cameraOn', { percent: s.report.camera_coverage }) : $t('tutoring.interviewRoom.check.cameraOff') }}</dd>
+        <dt class="text-muted-foreground">{{ $t('credentials.detail.integrityRung') }}</dt>
+        <dd class="text-foreground" data-testid="integrity-shared-rung">{{ $t(`sentinel.trust.rung.${s.report.verification_rung}`) }}</dd>
         <dt class="text-muted-foreground">{{ $t('tutoring.interviewRoom.check.flags') }}</dt>
         <dd class="text-foreground">
           <template v-if="s.report.flags.length">

@@ -755,8 +755,10 @@ any warning or critical flag was raised, the score fell below 0.40, or the
 session ended in `review`, `flagged` or `suspended`), the score as 0–100, start
 and end, the snapshot count, the percentage of snapshots with the camera on,
 each flag in the app's vocabulary with its severity and how many snapshots
-raised it, and the commitment root. It signs that over the accepted invitation
-under `alexandria-interview-integrity/1`, posts it to the organisation's Cloud,
+raised it, the commitment root, the assurance level (`local` or
+`device_attested`) and the verification rung (`live` when the panel marked a
+live segment done, otherwise `none`). It signs that over the accepted invitation
+under `alexandria-interview-integrity/2`, posts it to the organisation's Cloud,
 and keeps the learner's copy (`interview_integrity_reports`, migration 17). The
 waiting room then shows exactly what was sent, or offers to send it again.
 

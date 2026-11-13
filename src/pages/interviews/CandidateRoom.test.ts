@@ -169,6 +169,7 @@ describe('CandidateRoom', () => {
         outcome: 'flagged', score: 71, started_at: 1_000, ended_at: 1_000 + 31 * 60, snapshots: 60,
         camera: false, camera_coverage: 0,
         flags: [{ flag: 'app_switch', severity: 'warning', count: 2 }],
+        assurance_level: 'local', verification_rung: 'live',
       },
     }])
     const wrapper = mountRoom(); await flushPromises()
@@ -177,6 +178,7 @@ describe('CandidateRoom', () => {
     expect(card.text()).toContain('{"org":"IFFTU"}')
     expect(card.text()).toContain('tutoring.interviewRoom.check.flagged')
     expect(card.text()).toContain('71 / 100')
+    expect(card.get('[data-testid=integrity-shared-rung]').text()).toBe('sentinel.trust.rung.live')
     expect(card.text()).toContain('{"minutes":31,"snapshots":60}')
     expect(card.text()).toContain('app_switch × 2')
     expect(card.text()).toContain('tutoring.interviewRoom.check.cameraOff')

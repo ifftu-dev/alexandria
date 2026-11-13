@@ -45,6 +45,10 @@ export interface SentIntegrityReport {
     camera: boolean
     camera_coverage: number
     flags: IntegrityFlag[]
+    /** `local` or `device_attested`. */
+    assurance_level: string
+    /** `live` when the panel marked a live segment done, else `none`. */
+    verification_rung: 'none' | 'live'
   }
 }
 

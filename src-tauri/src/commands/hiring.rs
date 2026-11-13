@@ -631,7 +631,7 @@ pub async fn hiring_interview_room(
 /// What the app signs when it hands an organisation the result of the
 /// integrity check the candidate ran during an interview held in Alexandria.
 /// Mirrored in Alexandria Cloud (`src/hiring.rs`).
-pub const INTEGRITY_FORMAT: &str = "alexandria-interview-integrity/1";
+pub const INTEGRITY_FORMAT: &str = "alexandria-interview-integrity/2";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -659,6 +659,12 @@ pub struct IntegrityReport {
     pub camera_coverage: u8,
     pub flags: Vec<IntegrityFlag>,
     pub commitment_root: Option<String>,
+    /// `local` or `device_attested`: what the device the check ran on could
+    /// prove about itself.
+    pub assurance_level: String,
+    /// `live` when the panel marked a live segment done during the call,
+    /// otherwise `none`. An interview check has no other rung.
+    pub verification_rung: String,
     pub issued_at: i64,
     pub expires_at: i64,
 }
@@ -682,6 +688,8 @@ pub struct CheckRun {
     /// `local` or `device_attested` (a mobile device's own attestation, or a
     /// desktop paired with an attested phone).
     pub assurance_level: String,
+    /// `live` or `none`, from the session's verification results.
+    pub verification_rung: String,
     /// Per snapshot: whether the camera was in use, and the flags it raised.
     pub snapshots: Vec<(bool, Vec<String>)>,
 }
@@ -785,6 +793,8 @@ pub fn build_integrity_report(
         camera_coverage,
         flags,
         commitment_root,
+        assurance_level: run.assurance_level.clone(),
+        verification_rung: run.verification_rung.clone(),
         issued_at: now,
         expires_at: now + RESPONSE_LIFETIME_SECS,
     })
@@ -821,6 +831,7 @@ fn load_check(conn: &rusqlite::Connection, session_id: &str) -> Result<CheckRun,
                     ended_at: r.get(4)?,
                     commitment_root: r.get(5)?,
                     assurance_level: r.get(6)?,
+                    verification_rung: String::new(),
                     snapshots: Vec::new(),
                 })
             },
@@ -848,6 +859,16 @@ fn load_check(conn: &rusqlite::Connection, session_id: &str) -> Result<CheckRun,
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
+    run.verification_rung = crate::sentinel::surface::session_surface(
+        conn,
+        session_id,
+        run.assurance_level == "device_attested",
+        &crate::sentinel::scoring::active_manifest(),
+        None,
+    )?
+    .rung
+    .as_str()
+    .to_string();
     Ok(run)
 }
 
@@ -1243,6 +1264,7 @@ mod tests {
             ended_at: Some(at(created + 5400)),
             commitment_root: Some("ab".repeat(32)),
             assurance_level: "local".into(),
+            verification_rung: "none".into(),
             snapshots: snapshots
                 .into_iter()
                 .map(|(c, f)| (c, f.into_iter().map(String::from).collect()))
@@ -1656,6 +1678,30 @@ mod tests {
         let summary =
             crate::sentinel::verification::session_verification_summary(db.conn(), "s1").unwrap();
         assert_eq!(summary.satisfied, 1);
+    }
+
+    #[test]
+    fn the_report_carries_the_rung_and_assurance_of_the_check() {
+        let (_, did) = holder();
+        let invite = checked(&did, 1_800_000_000);
+        let db = accepted(&invite, "interview");
+        let unmarked = load_check(db.conn(), "s1").unwrap();
+        assert_eq!(unmarked.verification_rung, "none");
+
+        record_live_segment(db.conn(), &live_segment(&invite.id)).unwrap();
+        db.conn()
+            .execute(
+                "UPDATE integrity_sessions SET started_at = '2027-01-15 09:00:00',
+                        ended_at = '2027-01-15 10:00:00', status = 'completed' WHERE id = 's1'",
+                [],
+            )
+            .unwrap();
+        let marked = load_check(db.conn(), "s1").unwrap();
+        assert_eq!(marked.verification_rung, "live");
+        let report = build_integrity_report(invite, &marked, 1_800_000_000).unwrap();
+        assert_eq!(report.format, "alexandria-interview-integrity/2");
+        assert_eq!(report.verification_rung, "live");
+        assert_eq!(report.assurance_level, marked.assurance_level);
     }
 
     #[test]
