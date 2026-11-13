@@ -169,6 +169,13 @@ ignore = [
     # header record counts (RUSTSEC-2026-0491). The fix is >= 0.26.2; the
     # 0.26 copy used by iroh and our resolver is on 0.26.3.
     #
+    # hickory-proto / hickory-resolver 0.25.2 — DNSSEC validation flaws:
+    # inverted and unscoped NSEC3 checks (RUSTSEC-2026-0504, -0505), NXDOMAIN
+    # accepted for an empty non-terminal (RUSTSEC-2026-0511), an unrelated
+    # signed RRset accepted as the answer (RUSTSEC-2026-0512), and lookups
+    # returning records that failed validation (RUSTSEC-2026-0514). 0.26.x is
+    # unaffected.
+    #
     # 0.25.2 is only a lockfile entry: libp2p 0.56 pins it for its optional
     # `dns` and `mdns` features, which no workspace crate enables, so it is
     # never compiled (`cargo tree --all-features --target all -i
@@ -181,4 +188,9 @@ ignore = [
     "RUSTSEC-2026-0489",
     "RUSTSEC-2026-0490",
     "RUSTSEC-2026-0491",
+    "RUSTSEC-2026-0504",
+    "RUSTSEC-2026-0505",
+    "RUSTSEC-2026-0511",
+    "RUSTSEC-2026-0512",
+    "RUSTSEC-2026-0514",
 ]
