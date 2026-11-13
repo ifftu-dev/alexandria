@@ -1,9 +1,10 @@
 import { webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
+import type { WindowFeatures } from '@/types'
 
 const mocks = vi.hoisted(() => ({
-  invoke: vi.fn<(command: string, args?: Record<string, unknown>) => Promise<unknown>>(),
+  invoke: vi.fn<(command: string, args?: Record<string, unknown>, options?: { headers?: Record<string, string> }) => Promise<unknown>>(),
   listen: vi.fn(),
   unlisten: vi.fn(),
   stakeAddress: null as string | null,
@@ -12,6 +13,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: mocks.listen }))
 vi.mock('../useAuth', () => ({ useAuth: () => ({ stakeAddress: ref(mocks.stakeAddress) }) }))
+
+/** The raw features each submitted snapshot window carried, in order. */
+const submittedFeatures = () =>
+  mocks.invoke.mock.calls
+    .filter(([name]) => name === 'integrity_submit_snapshot')
+    .map(([, args]) => (args?.req as { features: WindowFeatures }).features)
 
 async function freshService() {
   vi.resetModules()
@@ -182,7 +189,50 @@ describe('Sentinel lifecycle ownership', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('window dimensions cannot affect snapshot or final scores or create misconduct flags', async () => {
+  it('sends a gaze frame as raw bytes with its size in headers, and does not count a dropped frame', async () => {
+    mocks.stakeAddress = 'gaze-test-user'
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false)
+    const pixels = new Uint8ClampedArray([10, 20, 30, 255, 40, 50, 60, 255])
+    const context = {
+      drawImage: vi.fn(),
+      getImageData: () => ({ data: pixels, width: 2, height: 1 }),
+    }
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(context as unknown as CanvasRenderingContext2D)
+    const video = document.createElement('video')
+    Object.defineProperties(video, {
+      readyState: { value: 2 }, videoWidth: { value: 2 }, videoHeight: { value: 1 },
+    })
+    const estimate = { yaw: 0, pitch: 0, screenX: 0.5, screenY: 0.5, onScreen: true, occluded: false, confidence: 1 }
+    let reply: unknown = { estimate, faceCount: 1, tracked: false }
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'sentinel_score_gaze') return reply
+      return fallback(command, args)
+    })
+    const service = (await freshService())()
+    await service.start('original', true)
+
+    expect(await service.scoreGaze(video)).toEqual(estimate)
+    const call = mocks.invoke.mock.calls.find(([name]) => name === 'sentinel_score_gaze')!
+    const [, body, options] = call
+    expect(body).toBeInstanceOf(Uint8Array)
+    expect(Array.from(body as unknown as Uint8Array)).toEqual(Array.from(pixels))
+    expect(options?.headers).toMatchObject({
+      'x-sentinel-frame-width': '2',
+      'x-sentinel-frame-height': '1',
+      'x-sentinel-user': 'gaze-test-user',
+    })
+    expect(options?.headers?.['x-sentinel-device']).toHaveLength(16)
+    expect(options?.headers?.['x-sentinel-preview']).toBeUndefined()
+    expect(service.debug.sessionGazeChecks).toBe(1)
+
+    reply = { dropped: true }
+    expect(await service.scoreGaze(video)).toBeNull()
+    expect(service.debug.sessionGazeChecks).toBe(1)
+    await service.stop()
+  })
+
+  it('window dimensions never reach the submitted features, and ending sends no scores', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     const service = (await freshService())()
     await service.start('enrollment')
@@ -194,23 +244,14 @@ describe('Sentinel lifecycle ownership', () => {
     window.dispatchEvent(new Event('resize'))
     await vi.advanceTimersByTimeAsync(15001)
     expect(service.integrityScore.value).toBe(baseline)
-    const snapshots = mocks.invoke.mock.calls.filter(([name]) => name === 'integrity_submit_snapshot')
-    expect(snapshots).toHaveLength(2)
-    for (const [, args] of snapshots) {
-      expect(args?.req).toMatchObject({
-        integrity_score: baseline,
-        devtools_score: null,
-        anomaly_flags: [],
-      })
-    }
+    const [before, after] = submittedFeatures()
+    expect(after).toEqual(before)
     await service.stop()
-    expect(mocks.invoke).toHaveBeenCalledWith('integrity_end_session', expect.objectContaining({
-      req: expect.objectContaining({ overall_integrity_score: baseline }),
-    }), { headers: {} })
+    expect(mocks.invoke).toHaveBeenCalledWith('integrity_end_session', { sessionId: 'session-1' }, { headers: {} })
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('retiring the resize heuristic preserves unrelated paste anomaly reporting', async () => {
+  it('a paste is reported as clipboard counts alongside a resize', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     const service = (await freshService())()
     await service.start('enrollment')
@@ -219,12 +260,7 @@ describe('Sentinel lifecycle ownership', () => {
     document.dispatchEvent(paste)
     window.dispatchEvent(new Event('resize'))
     await vi.advanceTimersByTimeAsync(15001)
-    const snapshot = mocks.invoke.mock.calls.find(([name]) => name === 'integrity_submit_snapshot')
-    expect(snapshot?.[1]?.req).toMatchObject({
-      devtools_score: null,
-      paste_score: 0.4,
-      anomaly_flags: ['paste_detected'],
-    })
+    expect(submittedFeatures()[0]?.clipboard).toEqual({ paste_events: 1, pasted_chars: 600 })
     await service.stop()
   })
 
@@ -318,6 +354,67 @@ describe('Sentinel lifecycle ownership', () => {
   })
 })
 
+describe('Sentinel collector', () => {
+  it('submits raw window features only, never scores or flags', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const service = (await freshService())()
+    await service.start('enrollment')
+    for (const key of 'abcdef') {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key }))
+      document.dispatchEvent(new KeyboardEvent('keyup', { key }))
+    }
+    document.dispatchEvent(new Event('visibilitychange'))
+    await vi.advanceTimersByTimeAsync(15001)
+    const request = mocks.invoke.mock.calls.find(([name]) => name === 'integrity_submit_snapshot')?.[1]?.req
+    expect(Object.keys(request as object).sort()).toEqual(['element_id', 'features', 'session_id'])
+    const [features] = submittedFeatures()
+    expect(features?.typing.keystrokes).toBe(6)
+    expect(features?.clipboard).toEqual({ paste_events: 0, pasted_chars: 0 })
+    // The paste classifier needs 12 keystrokes; the per-user models are untrained.
+    expect(features?.models).toMatchObject({ paste_anomaly: null, keystroke_anomaly: null, mouse_human_prob: null })
+    expect(features?.camera).toBeNull()
+    // The next window starts from empty buffers.
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(submittedFeatures()[1]?.typing.keystrokes).toBe(0)
+    await service.stop()
+  })
+
+  it('takes the score, consistency and flags the backend derived', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'integrity_submit_snapshot') {
+        return { composite_score: 0.42, consistency_score: 0.3, anomaly_flags: ['paste_detected'], session_status: 'review' }
+      }
+      return fallback(command, args)
+    })
+    const service = (await freshService())()
+    await service.start('enrollment')
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(service.integrityScore.value).toBe(0.42)
+    expect(service.consistencyScore.value).toBe(0.3)
+    expect(service.debug.flags).toEqual(['paste_detected'])
+    // Review is not suspension: monitoring carries on.
+    expect(service.suspended.value).toBe(false)
+    await vi.advanceTimersByTimeAsync(15001)
+    expect(submittedFeatures()).toHaveLength(2)
+    await service.stop()
+  })
+
+  it('offers the evidence decision when a session ends in review', async () => {
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      if (command === 'integrity_end_session') return { id: 'session-1', status: 'review' }
+      if (command === 'integrity_list_snapshots') return [{ anomaly_flags: ['split_screen'] }, { anomaly_flags: [] }]
+      return fallback(command, args)
+    })
+    const service = (await freshService())()
+    await service.start(null)
+    await service.stop()
+    expect(service.pendingEvidenceConsent.value).toEqual({ sessionId: 'session-1', reasons: ['split_screen'] })
+  })
+})
+
 describe('Display topology signal', () => {
   const topology = (overrides: Partial<{
     display_count: number; external_display: boolean; mirrored: boolean; split_screen: boolean; source: string
@@ -334,10 +431,6 @@ describe('Display topology signal', () => {
     })
   }
 
-  const snapshotFlags = () =>
-    mocks.invoke.mock.calls
-      .filter(([name]) => name === 'integrity_submit_snapshot')
-      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
 
   it('samples a baseline at start and once per snapshot window', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
@@ -347,33 +440,36 @@ describe('Display topology signal', () => {
     expect(mocks.invoke.mock.calls.filter(([n]) => n === 'sentinel_display_topology')).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(15001)
     expect(mocks.invoke.mock.calls.filter(([n]) => n === 'sentinel_display_topology')).toHaveLength(2)
-    expect(snapshotFlags()).toEqual([[]])
+    expect(submittedFeatures().map(f => [f.display, f.display_changes])).toEqual([[{ display_count: 1, external_display: false, split_screen: false, screen_captured: false, native_toggle: false }, 0]])
     await service.stop()
   })
 
-  it('a null probe (unsupported platform) adds no flags and no signal fields', async () => {
+  it('a null probe (unsupported platform) reports no display', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     withTopology([null])
     const service = (await freshService())()
     await service.start('enrollment')
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([[]])
-    expect(service.getDebugState().signals?.display_count).toBeUndefined()
+    expect(submittedFeatures().map(f => [f.display, f.display_changes])).toEqual([[null, 0]])
+    expect(service.getDebugState().features.display).toBeNull()
     await service.stop()
   })
 
-  it('a second monitor present from the start is info-only external_display, not a change', async () => {
+  it('a second monitor present from the start is reported, not counted as a change', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     withTopology([topology({ display_count: 2, external_display: true })])
     const service = (await freshService())()
     await service.start('enrollment')
     await vi.advanceTimersByTimeAsync(15001)
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([['external_display'], ['external_display']])
+    expect(submittedFeatures().map(f => [f.display, f.display_changes])).toEqual([
+      [{ display_count: 2, external_display: true, split_screen: false, screen_captured: false, native_toggle: false }, 0],
+      [{ display_count: 2, external_display: true, split_screen: false, screen_captured: false, native_toggle: false }, 0],
+    ])
     await service.stop()
   })
 
-  it('a monitor plugged in mid-session raises display_change for that window only', async () => {
+  it('a monitor plugged in mid-session counts as a change in that window only', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     withTopology([
       topology(),                                              // baseline at start
@@ -384,30 +480,23 @@ describe('Display topology signal', () => {
     await service.start('enrollment')
     await vi.advanceTimersByTimeAsync(15001)
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([
-      ['external_display', 'display_change'],
-      ['external_display'],
-    ])
+    expect(submittedFeatures().map(f => f.display_changes)).toEqual([1, 0])
+    expect(submittedFeatures()[1]?.display).toEqual({ display_count: 2, external_display: true, split_screen: false, screen_captured: false, native_toggle: false })
     await service.stop()
   })
 
-  it('split screen and screen capture are flagged every window they persist', async () => {
+  it('split screen and screen capture are reported every window they persist', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     withTopology([topology({ split_screen: true, mirrored: true })])
     const service = (await freshService())()
     await service.start('enrollment')
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([['split_screen', 'screen_captured']])
-    // getDebugState() only computes signals once there is typing to score.
-    for (let i = 0; i < 5; i++) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
-    const debug = service.getDebugState()
-    expect(debug.signals?.split_screen).toBe(true)
-    expect(debug.signals?.screen_captured).toBe(true)
-    expect(debug.signals?.display_count).toBe(1)
+    expect(submittedFeatures()[0]?.display).toEqual({ display_count: 1, external_display: false, split_screen: true, screen_captured: true, native_toggle: false })
+    expect(service.getDebugState().features.display).toEqual({ display_count: 1, external_display: false, split_screen: true, screen_captured: true, native_toggle: false })
     await service.stop()
   })
 
-  it('a failing probe is tolerated and never flags', async () => {
+  it('a failing probe is tolerated and reports no display', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const fallback = mocks.invoke.getMockImplementation()!
@@ -418,11 +507,11 @@ describe('Display topology signal', () => {
     const service = (await freshService())()
     await service.start('enrollment')
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([[]])
+    expect(submittedFeatures().map(f => [f.display, f.display_changes])).toEqual([[null, 0]])
     await service.stop()
   })
 
-  it('window resize still produces no display flags', async () => {
+  it('window resize does not count as a display change', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     withTopology([topology()])
     const service = (await freshService())()
@@ -430,7 +519,7 @@ describe('Display topology signal', () => {
     vi.stubGlobal('outerWidth', window.innerWidth + 800)
     window.dispatchEvent(new Event('resize'))
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([[]])
+    expect(submittedFeatures().map(f => [f.display, f.display_changes])).toEqual([[{ display_count: 1, external_display: false, split_screen: false, screen_captured: false, native_toggle: false }, 0]])
     await service.stop()
   })
 })
@@ -453,25 +542,21 @@ describe('Android environment signal and assessment shield', () => {
     })
   }
 
-  const snapshotFlags = () =>
-    mocks.invoke.mock.calls
-      .filter(([name]) => name === 'integrity_submit_snapshot')
-      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
 
   const shieldCalls = () =>
     mocks.invoke.mock.calls.filter(([name]) => name === 'sentinel_set_assessment_shield').map(([, args]) => (args as { on: boolean }).on)
 
-  it('off Android (null report, zero touches) adds no flags', async () => {
+  it('off Android (null report, zero touches) reports nothing', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     withEnv(null)
     const service = (await freshService())()
     await service.start('enrollment')
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([[]])
+    expect(submittedFeatures().map(f => [f.android, f.obscured_touches])).toEqual([[null, 0]])
     await service.stop()
   })
 
-  it('foreign accessibility service and adb are warnings; obscured touches are critical', async () => {
+  it('reports foreign accessibility services, adb and the window\'s obscured touches', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     // The first drain happens at start and discards taps from before the
     // session (7); the windows then see 3 and 0.
@@ -480,10 +565,8 @@ describe('Android environment signal and assessment shield', () => {
     await service.start('enrollment')
     await vi.advanceTimersByTimeAsync(15001)
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([
-      ['foreign_accessibility_service', 'debug_bridge_enabled', 'obscured_touch'],
-      ['foreign_accessibility_service', 'debug_bridge_enabled'],
-    ])
+    const android = { foreign_accessibility_services: 1, adb_enabled: true }
+    expect(submittedFeatures().map(f => [f.android, f.obscured_touches])).toEqual([[android, 3], [android, 0]])
     await service.stop()
   })
 
@@ -542,10 +625,6 @@ describe('Android environment signal and assessment shield', () => {
 })
 
 describe('Hidden overlay signal', () => {
-  const snapshotFlags = () =>
-    mocks.invoke.mock.calls
-      .filter(([name]) => name === 'integrity_submit_snapshot')
-      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
 
   const withScan = (scan: unknown) => {
     const fallback = mocks.invoke.getMockImplementation()!
@@ -555,22 +634,18 @@ describe('Hidden overlay signal', () => {
     })
   }
 
-  it('a clean scan adds no flag but records counts in signals', async () => {
+  it('a clean scan reports its counts', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     withScan({ suspicious: [], allowlisted: 1, scanned: 17, source: 'cgwindow' })
     const service = (await freshService())()
     await service.start('enrollment')
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([[]])
-    for (let i = 0; i < 5; i++) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
-    const signals = service.getDebugState().signals
-    expect(signals?.hidden_overlays).toBe(0)
-    expect(signals?.overlay_windows_scanned).toBe(17)
-    expect(signals?.overlay_windows_allowlisted).toBe(1)
+    expect(submittedFeatures()[0]?.overlay).toEqual({ suspicious: 0, scanned: 17, allowlisted: 1 })
+    expect(service.getDebugState().features.overlay).toEqual({ suspicious: 0, scanned: 17, allowlisted: 1 })
     await service.stop()
   })
 
-  it('a capture-excluded window is a critical hidden_overlay every window it persists', async () => {
+  it('a capture-excluded window is reported every window it persists', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     withScan({
       suspicious: [{ pid: 42, owner: 'Cluely', title: null, width: 800, height: 300, on_screen: true, reason: 'capture_excluded' }],
@@ -580,7 +655,7 @@ describe('Hidden overlay signal', () => {
     await service.start('enrollment')
     await vi.advanceTimersByTimeAsync(15001)
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([['hidden_overlay'], ['hidden_overlay']])
+    expect(submittedFeatures().map(f => f.overlay?.suspicious)).toEqual([1, 1])
     expect(service.debug.overlaySuspicious).toEqual(['Cluely:capture_excluded'])
     await service.stop()
   })
@@ -591,7 +666,7 @@ describe('Hidden overlay signal', () => {
     const service = (await freshService())()
     await service.start('enrollment')
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([[]])
+    expect(submittedFeatures()[0]?.overlay).toBeNull()
     // The dev view can tell "no scan here" from "scanned, nothing found".
     expect(service.debug.overlaySource).toBe('')
     expect(service.debug.androidEnvSource).toBe('')
@@ -618,18 +693,14 @@ describe('Hidden overlay signal', () => {
 })
 
 describe('Virtual camera signal', () => {
-  const snapshotFlags = () =>
-    mocks.invoke.mock.calls
-      .filter(([name]) => name === 'integrity_submit_snapshot')
-      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
 
-  it('a virtual camera label raises virtual_camera while the camera is opted in', async () => {
+  it('a virtual camera label is reported while the camera is opted in', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     const service = (await freshService())()
     await service.start('enrollment', true)
     service.reportCameraDevice('OBS Virtual Camera')
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([['virtual_camera']])
+    expect(submittedFeatures()[0]?.camera?.device_virtual).toBe(true)
     expect(service.debug.cameraDeviceVirtual).toBe(true)
     await service.stop()
   })
@@ -640,20 +711,20 @@ describe('Virtual camera signal', () => {
     await service.start('enrollment', true)
     service.reportCameraDevice('FaceTime HD Camera')
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([[]])
+    expect(submittedFeatures()[0]?.camera?.device_virtual).toBe(false)
     const snapshot = mocks.invoke.mock.calls.find(([name]) => name === 'integrity_submit_snapshot')?.[1]
     expect(JSON.stringify(snapshot)).not.toContain('FaceTime')
     await service.stop()
   })
 
-  it('opting the camera out clears the device and the flag', async () => {
+  it('opting the camera out clears the device and every camera feature', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     const service = (await freshService())()
     await service.start('enrollment', true)
     service.reportCameraDevice('ManyCam')
     service.setCameraOptedIn(false)
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([[]])
+    expect(submittedFeatures()[0]?.camera).toBeNull()
     expect(service.debug.cameraDeviceLabel).toBe('')
     await service.stop()
   })
@@ -663,10 +734,6 @@ describe('Display topology native nudges', () => {
   const topology = (overrides: Record<string, unknown> = {}) => ({
     display_count: 1, external_display: false, mirrored: false, split_screen: false, native_transitions: 0, source: 'test', ...overrides,
   })
-  const snapshotFlags = () =>
-    mocks.invoke.mock.calls
-      .filter(([name]) => name === 'integrity_submit_snapshot')
-      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
   const withTopology = (responses: Array<ReturnType<typeof topology>>) => {
     const fallback = mocks.invoke.getMockImplementation()!
     let i = 0
@@ -681,14 +748,14 @@ describe('Display topology native nudges', () => {
     handler!({ payload: { reason: 'moved' } })
   }
 
-  it('a native transition counter delta flags split_screen even when the sample is back to normal', async () => {
+  it('a native transition counter delta is reported as a toggle even when the sample is back to normal', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     withTopology([topology({ native_transitions: 4 }), topology({ native_transitions: 6 }), topology({ native_transitions: 6 })])
     const service = (await freshService())()
     await service.start('enrollment')
     await vi.advanceTimersByTimeAsync(15001)
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([['split_screen', 'display_change'], []])
+    expect(submittedFeatures().map(f => [f.display?.native_toggle, f.display_changes])).toEqual([[true, 2], [false, 0]])
     await service.stop()
   })
 
@@ -702,17 +769,13 @@ describe('Display topology native nudges', () => {
     await vi.advanceTimersByTimeAsync(350)
     expect(mocks.invoke.mock.calls.filter(([n]) => n === 'sentinel_display_topology').length).toBe(before + 1)
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()[0]).toEqual(['external_display', 'display_change'])
+    expect(submittedFeatures().map(f => [f.display, f.display_changes])[0]).toEqual([{ display_count: 2, external_display: true, split_screen: false, screen_captured: false, native_toggle: false }, 1])
     await service.stop()
     expect(mocks.unlisten).toHaveBeenCalled()
   })
 })
 
 describe('Process watchlist signal', () => {
-  const snapshotFlags = () =>
-    mocks.invoke.mock.calls
-      .filter(([name]) => name === 'integrity_submit_snapshot')
-      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
   const withScan = (scan: unknown) => {
     const fallback = mocks.invoke.getMockImplementation()!
     mocks.invoke.mockImplementation(async (command, args) => {
@@ -722,32 +785,31 @@ describe('Process watchlist signal', () => {
   }
   const proc = (name: string, category: string) => ({ pid: 1, name, identifier: name, category, rule: `name:${name}` })
 
-  it('maps categories to severity-tiered flags', async () => {
+  it('reports the distinct categories seen and the scan counts', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     withScan({ watched: [proc('Cluely', 'interview_cheat'), proc('AnyDesk', 'remote_desktop'), proc('Claude', 'ai_assistant'), proc('zoom', 'screen_share')], scanned: 400, source: 'nsworkspace' })
     const service = (await freshService())()
     await service.start('enrollment')
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([['cheat_tool_process', 'unauthorized_process', 'ai_assistant_running', 'screen_share_running']])
-    for (let i = 0; i < 5; i++) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
-    const signals = service.getDebugState().signals
-    expect(signals?.watched_processes).toBe(4)
-    expect(signals?.processes_scanned).toBe(400)
-    expect(signals?.watched_categories).toEqual(['interview_cheat', 'remote_desktop', 'ai_assistant', 'screen_share'])
+    expect(submittedFeatures()[0]?.processes).toEqual({
+      categories: ['interview_cheat', 'remote_desktop', 'ai_assistant', 'screen_share'],
+      watched: 4,
+      scanned: 400,
+    })
     await service.stop()
   })
 
-  it('a virtual camera or VM guest agent alone is a warning, nothing more', async () => {
+  it('a virtual camera and a VM guest agent are two categories', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     withScan({ watched: [proc('obs', 'virtual_camera'), proc('vmtoolsd', 'virtual_machine')], scanned: 90, source: 'procfs' })
     const service = (await freshService())()
     await service.start('enrollment')
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([['unauthorized_process']])
+    expect(submittedFeatures()[0]?.processes?.categories).toEqual(['virtual_camera', 'virtual_machine'])
     await service.stop()
   })
 
-  it('a clean or null scan adds nothing', async () => {
+  it('a clean scan reports no categories and a null scan reports no scan', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     withScan({ watched: [], scanned: 300, source: 'toolhelp' })
     const service = (await freshService())()
@@ -755,16 +817,12 @@ describe('Process watchlist signal', () => {
     await vi.advanceTimersByTimeAsync(15001)
     withScan(null)
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([[], []])
+    expect(submittedFeatures().map(f => f.processes)).toEqual([{ categories: [], watched: 0, scanned: 300 }, null])
     await service.stop()
   })
 })
 
 describe('Phantom hotkey signal', () => {
-  const snapshotFlags = () =>
-    mocks.invoke.mock.calls
-      .filter(([name]) => name === 'integrity_submit_snapshot')
-      .map(([, args]) => (args?.req as { anomaly_flags: string[] }).anomaly_flags)
   const calls = (name: string) => mocks.invoke.mock.calls.filter(([n]) => n === name)
   const status = (overrides: Record<string, unknown> = {}) => ({
     supported: true, permission_granted: true, running: false, source: 'cgeventtap', os_combos: ['cmd+tab'], cmd_is_system: false, ...overrides,
@@ -791,7 +849,7 @@ describe('Phantom hotkey signal', () => {
     await service.start(null)
     expect(calls('sentinel_hotkeys_start')).toHaveLength(1)
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([['phantom_hotkey']])
+    expect(submittedFeatures()[0]?.hotkeys).toEqual({ native: 2, phantom: 1 })
     expect(service.debug.phantomHotkeys).toEqual(['cmd+backslash'])
     await service.stop()
     expect(calls('sentinel_hotkeys_stop')).toHaveLength(1)
@@ -807,18 +865,18 @@ describe('Phantom hotkey signal', () => {
     now = 100_520
     press('b', { metaKey: true })
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([[]])
+    expect(submittedFeatures()[0]?.hotkeys).toEqual({ native: 1, phantom: 0 })
     await service.stop()
   })
 
-  it('three or more phantom combos in a window escalate to critical', async () => {
+  it('reports every phantom combo in the window', async () => {
     vi.spyOn(Math, 'random').mockReturnValue(0)
     vi.spyOn(performance, 'now').mockReturnValue(100_000)
     withHotkeys(status(), [[{ at_ms: 1, combo: 'cmd+b' }, { at_ms: 2, combo: 'cmd+enter' }, { at_ms: 3, combo: 'cmd+h' }]])
     const service = (await freshService())()
     await service.start(null)
     await vi.advanceTimersByTimeAsync(15001)
-    expect(snapshotFlags()).toEqual([['phantom_hotkey_repeated', 'phantom_hotkey']])
+    expect(submittedFeatures()[0]?.hotkeys).toEqual({ native: 3, phantom: 3 })
     await service.stop()
   })
 
@@ -844,5 +902,56 @@ describe('Phantom hotkey signal', () => {
     expect(calls('sentinel_hotkeys_start')).toHaveLength(0)
     await service.stop()
     expect(calls('sentinel_hotkeys_stop')).toHaveLength(0)
+  })
+})
+
+describe('Sentinel trust profile', () => {
+  const caps = (camera: boolean) => ({ camera, microphone: false, companion_phone: false })
+  const selected = (profile: string) => ({
+    profile,
+    inputs: { device_attested: false, capabilities: caps(true), consent: caps(true), budget: null, floor: null },
+    excluded: [],
+    not_run: profile === 'camera' ? ['device_attestation'] : ['device_attestation', 'camera'],
+    benchmark: null,
+    camera_budget: { detect_ms: 250, liveness_ms: 60, track_ms: 15, detect_interval: 3000 },
+    full_budget: { detect_ms: 150, liveness_ms: 40, track_ms: 10, detect_interval: 3000 },
+    policy_floor: { required: null, profile, satisfied: true, missing: [] },
+  })
+
+  function withProfile(profile: string) {
+    const order: string[] = []
+    const fallback = mocks.invoke.getMockImplementation()!
+    mocks.invoke.mockImplementation(async (command, args) => {
+      order.push(command)
+      if (command === 'integrity_attest_session') return { supported: false, stored: false, assurance_level: 'local' }
+      if (command === 'integrity_select_profile') return selected(profile)
+      return fallback(command, args)
+    })
+    return order
+  }
+
+  it('asks the backend for the profile once attestation settles, with consent and role', async () => {
+    const order = withProfile('camera')
+    const service = (await freshService())()
+    await service.start(null, true, 'assessment', { roleAssessmentId: 'role-1' })
+    const call = mocks.invoke.mock.calls.find(([name]) => name === 'integrity_select_profile')
+    expect(call?.[1]).toEqual({
+      sessionId: 'session-1',
+      request: { capabilities: caps(true), consent: caps(true), role_assessment_id: 'role-1' },
+    })
+    expect(order.indexOf('integrity_attest_session')).toBeLessThan(order.indexOf('integrity_select_profile'))
+    expect(service.trustProfile.value?.profile).toBe('camera')
+    expect(service.cameraOptedIn.value).toBe(true)
+    await service.stop()
+    expect(service.trustProfile.value).toBeNull()
+  })
+
+  it('does not run the camera when the chosen profile does not include it', async () => {
+    withProfile('core')
+    const service = (await freshService())()
+    await service.start(null, true)
+    expect(service.trustProfile.value?.profile).toBe('core')
+    expect(service.cameraOptedIn.value).toBe(false)
+    await service.stop()
   })
 })

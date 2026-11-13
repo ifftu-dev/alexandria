@@ -11,13 +11,19 @@ import {
   type EnrollmentEmbedding,
 } from '@/utils/sentinel/face-embedder'
 import { isVirtualCameraLabel } from '@/utils/sentinel/virtual-camera'
-import { frameSize, type SentinelFrame } from '@/utils/sentinel/frame'
+import { downscaledSize, frameHeaders, frameSize, rgbaBody, type SentinelFrame } from '@/utils/sentinel/frame'
+import { isDroppedGaze } from '@/types'
 import { normaliseWebviewCombo, phantomCombos, type WebviewCombo, type BlurInterval } from '@/utils/sentinel/hotkeys'
+import { createResponseTracker } from '@/utils/sentinel/responseProcess'
+import { useCompanionPhone } from './useCompanionPhone'
+import { isMobilePlatform } from './usePlatform'
 import type {
-  SignalData,
+  WindowFeatures,
   BehavioralProfile,
   StartSessionResponse,
   AttestSessionResponse,
+  ProfileRequest,
+  SelectedProfile,
   KeystrokeEvent,
   MousePoint,
   DigraphFeatures,
@@ -27,7 +33,7 @@ import type {
   TrainKeystrokeAeResponse,
   TrainMouseCnnResponse,
   GazeEstimate,
-  ScoreGazeResponse,
+  ScoreGazeReply,
   GazeFeatures,
   GazeCalibSample,
   TrainGazeCalibResponse,
@@ -35,7 +41,6 @@ import type {
   AndroidEnvironment,
   OverlayScan,
   ProcessScan,
-  WatchCategory,
   HotkeyStatus,
   HotkeyEvent,
   IntegritySnapshot,
@@ -43,48 +48,25 @@ import type {
 
 const { invoke: tauriInvoke } = useLocalApi()
 
-// Gaze flag thresholds (mirror docs/sentinel.md §Gaze). Off-screen
-// ratio over GAZE_WANDER → warning; repeated downward glances →
-// critical (the phone-in-lap tell).
-const GAZE_WANDER_RATIO = 0.30
-const GAZE_DOWN_GLANCE_COUNT = 3
-const GAZE_OCCLUDED_RATIO = 0.40
-
-// Threshold helpers were previously inlined in the TS classifier. With
-// the backend rewrite they're plain constants — keep them client-side
-// so flag promotion can run synchronously in `computeScores`.
-const PASTE_ANOMALY_THRESHOLD = 0.95
-const PASTE_ANOMALY_CRITICAL_THRESHOLD = 0.99
-const KEYSTROKE_ANOMALY_THRESHOLD = 0.65
-const MOUSE_HUMAN_THRESHOLD = 0.5
 // Minimum typed keystrokes before the paste classifier's timing features
 // are meaningful. Below this (e.g. a click-only MCQ with no typing) the
 // 12-dim feature vector is degenerate — near-zero flight reads as a paste
-// burst — so we treat the signal as absent rather than emit a false
-// paste_classifier_anomaly. A genuine paste (pasteEventCount > 0) still
-// scores regardless.
+// burst — so the classifier does not run and its feature is absent. A
+// genuine paste (pasteEventCount > 0) still runs it regardless.
 const MIN_PASTE_KEYSTROKES = 12
 
-function isAnomalousPasteScore(s: number): boolean {
-  return s >= PASTE_ANOMALY_THRESHOLD
-}
-function isCriticalPasteScore(s: number): boolean {
-  return s >= PASTE_ANOMALY_CRITICAL_THRESHOLD
-}
-
 /**
- * Sentinel Engine — Client-side integrity monitoring composable.
+ * Sentinel Engine — the integrity collector.
  *
  * Tauri v2 implementation (no server HTTP — all via IPC).
  *
- * PRIVACY GUARANTEE: All biometric and behavioral data is processed entirely
- * within this composable. Only derived scores (0-1) cross to the Rust backend
- * via Tauri IPC. Raw keystroke timings, mouse coordinates, and video frames
- * are NEVER transmitted or stored beyond in-memory buffers.
+ * The composable buffers events and, once per snapshot window, submits raw
+ * window features (`WindowFeatures`: counts, means, native probe readings,
+ * model outputs). The backend derives every score and flag and decides the
+ * session's status (`alexandria_studio::integrity`); nothing here scores.
  *
- * Two parallel scoring systems:
- *   1. RULE-BASED — Deterministic threshold checks, always active
- *   2. AI-BASED — Per-user trained models (keystroke AE, mouse CNN, face LBP)
+ * PRIVACY GUARANTEE: Raw keystroke timings, mouse coordinates, and video
+ * frames stay in in-memory buffers. Only per-window aggregates are persisted.
  */
 
 // ============================================================================
@@ -169,8 +151,10 @@ function emptySentinelDebug() {
     hotkeysPermission: false,
     nativeHotkeys: 0,
     phantomHotkeys: [] as string[],
-    // Full rule + AI signal snapshot (computed each window).
-    signals: null as SignalData | null,
+    // Raw features submitted for the last window, and what the backend
+    // derived from them (scores, flags, advisory signals).
+    features: null as WindowFeatures | null,
+    lastSnapshot: null as IntegritySnapshot | null,
     // Live session-gaze mirror (every camera tick, not just at snapshot) —
     // lets the dev PiP show the real session sampling rate + latest read.
     sessionGazeChecks: 0,
@@ -217,12 +201,36 @@ let liveTimer: ReturnType<typeof setInterval> | null = null
 const pendingEvidenceConsent = ref<{ sessionId: string; reasons: string[] } | null>(null)
 const cameraOptedIn = ref(false)
 
+/**
+ * The trust profile the backend chose for the live session (locked for the
+ * session), with the inputs it judged and the policy floor result. Null
+ * when no session is live or the choice failed.
+ */
+const trustProfile = ref<SelectedProfile | null>(null)
+
+/** Options for `start` beyond the enrollment, camera and purpose. */
+export interface SentinelStartOptions {
+  /** Assessments only: the sponsor role whose policy floor applies. */
+  roleAssessmentId?: string | null
+  /**
+   * The learner allowed voice checks on the microphone for this session
+   * (interviews held in Alexandria). Recorded as the session's microphone
+   * consent; voice checks refuse to listen without it.
+   */
+  microphone?: boolean
+  /**
+   * Desktop only: pair the learner's attested phone before the trust
+   * profile is chosen, so the session can be `device_attested`. Pairing is
+   * the learner's consent; a skipped or failed pairing continues without.
+   */
+  companionPhone?: boolean
+}
+
 // AI scoring is advisory until validated with labeled data (see
 // docs/sentinel.md §AI Models). Off by default; can be toggled per profile
-// via setAIScoringEnabled(). When enabled, each available AI signal
-// contributes a small advisory weight to the integrity score.
+// via setAIScoringEnabled(). The setting travels with each window's features;
+// the backend adds the small advisory weights.
 const AI_SCORING_STORAGE_KEY = 'sentinel_ai_scoring_enabled'
-const AI_ADVISORY_WEIGHT = 0.05
 const aiScoringEnabled = ref(false)
 
 // Per-signal opt-out for the paste classifier. Defaults to true so it
@@ -327,7 +335,7 @@ const displaySignature = (t: DisplayTopology): string =>
 
 /**
  * Fold a fresh topology sample into the per-window state. Returns the
- * sample so callers can derive flags. Exported for the snapshot path only.
+ * sample; the window's display features read the state it leaves.
  */
 const recordDisplaySample = (sample: DisplayTopology | null): DisplayTopology | null => {
   if (!sample || typeof sample.display_count !== 'number') return null
@@ -345,19 +353,6 @@ const recordDisplaySample = (sample: DisplayTopology | null): DisplayTopology | 
   return sample
 }
 
-/** Flags derived from the latest topology sample + transitions this window. */
-const displayAnomalies = (): string[] => {
-  const out: string[] = []
-  const t = displayLatest
-  if (t) {
-    if (t.external_display) out.push('external_display')
-    if (t.split_screen || displayNativeToggle) out.push('split_screen')
-    if (t.mirrored) out.push('screen_captured')
-  }
-  if (displayChangeCount > 0) out.push('display_change')
-  return out
-}
-
 // Android environment — sampled per snapshot window from the Rust
 // `sentinel_android_environment` IPC (null everywhere else). The
 // obscured-touch counter is drained with it. The assessment shield
@@ -368,42 +363,15 @@ let obscuredTouchesWindow = 0
 let shieldRequested = false
 let sessionPurpose: SentinelSessionPurpose = 'assessment'
 
-const environmentAnomalies = (): string[] => {
-  const out: string[] = []
-  const e = androidEnvLatest
-  if (e) {
-    if ((e.foreign_accessibility?.length ?? 0) > 0) out.push('foreign_accessibility_service')
-    if (e.adb_enabled) out.push('debug_bridge_enabled')
-  }
-  if (obscuredTouchesWindow > 0) out.push('obscured_touch')
-  return out
-}
-
 // Desktop hidden-overlay scan — windows excluded from screen capture
 // (Cluely-style), override-redirect (X11) or click-through topmost
 // (Windows), minus our own and an allowlist. Sampled per snapshot window.
 let overlayLatest: OverlayScan | null = null
 
-const overlayAnomalies = (): string[] =>
-  overlayLatest && (overlayLatest.suspicious?.length ?? 0) > 0 ? ['hidden_overlay'] : []
-
 // Desktop process watchlist — only watched entries cross IPC. Sampled
-// per snapshot window. Cheat tools are critical; remote desktop, virtual
-// cameras and VM guest agents are warnings; AI assistants and screen-share
-// apps are review context only.
+// per snapshot window; the window reports the categories seen and the
+// backend decides what each means.
 let processLatest: ProcessScan | null = null
-
-const WARNING_PROCESS_CATEGORIES: ReadonlySet<WatchCategory> = new Set(['remote_desktop', 'virtual_camera', 'virtual_machine'])
-
-const processAnomalies = (): string[] => {
-  const out: string[] = []
-  const cats = new Set(processLatest?.watched.map(w => w.category) ?? [])
-  if (cats.has('interview_cheat')) out.push('cheat_tool_process')
-  if ([...cats].some(c => WARNING_PROCESS_CATEGORIES.has(c))) out.push('unauthorized_process')
-  if (cats.has('ai_assistant')) out.push('ai_assistant_running')
-  if (cats.has('screen_share')) out.push('screen_share_running')
-  return out
-}
 
 // Global hotkeys — native listen-only monitor of modifier combos (desktop,
 // assessment purpose only, only when the OS already granted listening).
@@ -416,13 +384,9 @@ let webviewCombos: WebviewCombo[] = []    // combos the webview received this wi
 let blurIntervals: BlurInterval[] = []    // [start,end] in performance.now() space
 let phantomWindow: string[] = []
 let nativeHotkeyCount = 0
+// Native events drained since the last window that reached the backend.
+let unsentNativeHotkeys: HotkeyEvent[] = []
 const WEBVIEW_COMBO_CAP = 512
-
-const hotkeyAnomalies = (): string[] => {
-  if (phantomWindow.length >= 3) return ['phantom_hotkey_repeated', 'phantom_hotkey']
-  if (phantomWindow.length >= 1) return ['phantom_hotkey']
-  return []
-}
 
 // Camera device identity — the video track label the player / interview
 // session obtained from getUserMedia. Only the virtual-camera verdict
@@ -442,10 +406,6 @@ let gazeDownGlances = 0
 let livenessChecks = 0
 let livenessSpoofChecks = 0
 let livenessRealProbSum = 0
-/** Minimum liveness ticks in a window before a spoof ratio is trusted. */
-const LIVENESS_MIN_CHECKS = 3
-/** Fraction of ticks scored as spoof that raises `spoof_suspected`. */
-const LIVENESS_SPOOF_RATIO = 0.5
 // Reusable offscreen canvas for frame downscaling to the detector size.
 let gazeCanvas: HTMLCanvasElement | null = null
 
@@ -494,6 +454,9 @@ function createSentinelService() {
   let cameraGeneration = 0
   let lifecycleTransition: Promise<unknown> = Promise.resolve()
   let trainingKeystrokesCleanup: (() => void) | null = null
+  // Response-process timing per item (`responses.present` / `.input` /
+  // `.cue`); reset with every session.
+  const responseTracker = createResponseTracker()
   let trainingMouseCleanup: (() => void) | null = null
 
   const serializeTransition = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -607,7 +570,7 @@ function createSentinelService() {
 
   /**
    * Pull current per-user model status from the backend. Updates the
-   * module-scoped refs that gate AI scoring in `computeScores()`.
+   * module-scoped refs that decide whether a window runs the AE / CNN.
    */
   const refreshUserModelsStatus = async (signal?: AbortSignal) => {
     const requireCurrent = profileStateGuard(signal)
@@ -631,7 +594,8 @@ function createSentinelService() {
   }
 
   // =========================================================================
-  // Signal analyzers
+  // Calibration analyzers (wizard metrics and typing speed only; session
+  // scores are the backend's)
   // =========================================================================
 
   const analyzeKeystrokes = (): { consistency: number; speedWpm: number } => {
@@ -698,174 +662,125 @@ function createSentinelService() {
     return { consistency: Math.min(1, Math.max(0, consistency)), isHuman }
   }
 
-  const computeScores = (opts?: {
-    aiPasteAnomaly?: number
-    aiKeystrokeAnomaly?: number
-    aiMouseHumanProb?: number
-  }): { signals: SignalData; integrity: number; consistency: number; anomalies: string[] } => {
-    const { consistency: typingConsistency, speedWpm } = analyzeKeystrokes()
-    const { consistency: mouseConsistency, isHuman } = analyzeMouse()
-    const anomalies: string[] = []
+  const mean = (values: number[]): number =>
+    values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0
 
-    const signals: SignalData = {
-      typing_consistency: typingConsistency,
-      typing_speed_wpm: speedWpm,
-      mouse_consistency: mouseConsistency,
-      is_human_likely: isHuman,
-      tab_switches: tabSwitchCount,
-      unfocused_ms: totalUnfocusedMs,
-      paste_events: pasteEventCount,
-      pasted_chars: pastedCharCount,
-      environment_changed: environmentChanged,
+  /** A model score of -1 (or anything negative) means the model did not run. */
+  const modelScore = (score: number | undefined): number | null =>
+    score !== undefined && score >= 0 ? score : null
+
+  /**
+   * The raw features of the current window. Measurements only: the backend
+   * derives every score and flag from these (`integrity_submit_snapshot`).
+   */
+  const collectFeatures = (models?: {
+    pasteAnomaly?: number
+    keystrokeAnomaly?: number
+    mouseHumanProb?: number
+  }): WindowFeatures => {
+    const flights = keystrokeBuffer.filter(k => k.flightMs > 0).map(k => k.flightMs)
+    const moves = mouseBuffer.filter(m => m.type === 'move')
+    const velocities: number[] = []
+    for (let i = 1; i < moves.length; i++) {
+      const curr = moves[i]!
+      const prev = moves[i - 1]!
+      const dt = curr.t - prev.t
+      if (dt > 0) velocities.push(Math.hypot(curr.x - prev.x, curr.y - prev.y) / dt)
     }
-
-    if (displayLatest) {
-      signals.display_count = displayLatest.display_count
-      signals.external_display = displayLatest.external_display
-      signals.split_screen = displayLatest.split_screen
-      signals.screen_captured = displayLatest.mirrored
-      signals.display_changes = displayChangeCount
-    }
-    anomalies.push(...displayAnomalies())
-
-    if (androidEnvLatest) {
-      signals.foreign_accessibility_services = androidEnvLatest.foreign_accessibility?.length ?? 0
-      signals.adb_enabled = androidEnvLatest.adb_enabled
-    }
-    if (obscuredTouchesWindow > 0) signals.obscured_touches = obscuredTouchesWindow
-    anomalies.push(...environmentAnomalies())
-
-    if (overlayLatest) {
-      signals.hidden_overlays = overlayLatest.suspicious?.length ?? 0
-      signals.overlay_windows_scanned = overlayLatest.scanned
-      signals.overlay_windows_allowlisted = overlayLatest.allowlisted
-    }
-    anomalies.push(...overlayAnomalies())
-
-    if (cameraOptedIn.value && cameraDeviceLabel) {
-      signals.camera_device_virtual = cameraDeviceVirtual
-      if (cameraDeviceVirtual) anomalies.push('virtual_camera')
-    }
-
-    if (processLatest) {
-      const watched = processLatest.watched ?? []
-      signals.watched_processes = watched.length
-      signals.processes_scanned = processLatest.scanned
-      signals.watched_categories = [...new Set(watched.map(w => w.category))]
-    }
-    anomalies.push(...processAnomalies())
-
-    if (hotkeysRunning) {
-      signals.global_hotkeys = nativeHotkeyCount
-      signals.phantom_hotkeys = phantomWindow.length
-    }
-    anomalies.push(...hotkeyAnomalies())
-
-    if (cameraOptedIn.value && facePresent !== undefined) {
-      signals.face_present = facePresent
-      signals.face_count = faceCount
-      signals.face_consistency = faceConsistency
-    }
-
-    // AI scoring — all three signals are pre-computed by async IPC
-    // calls in `scheduleNextSnapshot` (the only consumer of this
-    // function that has access to the keystroke/mouse buffers). Other
-    // consumers (debug state, stop()) call with `opts === undefined`
-    // and simply skip the AI advisory terms.
-    if (opts?.aiKeystrokeAnomaly !== undefined && opts.aiKeystrokeAnomaly >= 0) {
-      signals.ai_keystroke_anomaly = Math.round(opts.aiKeystrokeAnomaly * 1000) / 1000
-      if (signals.ai_keystroke_anomaly >= KEYSTROKE_ANOMALY_THRESHOLD) {
-        anomalies.push('behavior_shift')
-      }
-    }
-    if (opts?.aiMouseHumanProb !== undefined && opts.aiMouseHumanProb >= 0) {
-      signals.ai_mouse_human_prob = Math.round(opts.aiMouseHumanProb * 1000) / 1000
-      if (signals.ai_mouse_human_prob < MOUSE_HUMAN_THRESHOLD) {
-        anomalies.push('bot_suspected')
-      }
-    }
-
-    if (cameraOptedIn.value && faceSimilarity !== undefined) {
-      signals.ai_face_similarity = Math.round(faceSimilarity * 1000) / 1000
-      signals.ai_face_match = faceMatch ?? false
-      if (faceMatch === false && facePresent) anomalies.push('face_mismatch')
-    }
-
-    if (opts?.aiPasteAnomaly !== undefined && opts.aiPasteAnomaly >= 0) {
-      signals.ai_paste_anomaly = Math.round(opts.aiPasteAnomaly * 1000) / 1000
-      if (isCriticalPasteScore(opts.aiPasteAnomaly)) {
-        anomalies.push('paste_classifier_critical')
-      } else if (isAnomalousPasteScore(opts.aiPasteAnomaly)) {
-        anomalies.push('paste_classifier_anomaly')
-      }
-    }
-
-    // Rule-based integrity score
-    let integrity = 0
-    let weights = 0
-
-    integrity += typingConsistency * 0.20; weights += 0.20
-    integrity += mouseConsistency * 0.15; weights += 0.15
-    integrity += (isHuman ? 1 : 0) * 0.15; weights += 0.15
-
-    const tabScore = Math.max(0, 1 - tabSwitchCount / 15)
-    integrity += tabScore * 0.15; weights += 0.15
-
-    const pasteScore = Math.max(0, 1 - pastedCharCount / 1000)
-    integrity += pasteScore * 0.10; weights += 0.10
-
-    if (cameraOptedIn.value && facePresent !== undefined) {
-      const faceScore = facePresent && faceCount === 1 ? (faceConsistency ?? 0.8) : 0.2
-      integrity += faceScore * 0.15; weights += 0.15
-    }
-
-    // Advisory AI contributions — opt-in, small weights. Each feeds through
-    // as "confidence this is a legit user" so the math stays consistent
-    // with the rule-based terms above.
-    if (aiScoringEnabled.value) {
-      if (signals.ai_keystroke_anomaly !== undefined) {
-        integrity += (1 - signals.ai_keystroke_anomaly) * AI_ADVISORY_WEIGHT
-        weights += AI_ADVISORY_WEIGHT
-      }
-      if (signals.ai_mouse_human_prob !== undefined) {
-        integrity += signals.ai_mouse_human_prob * AI_ADVISORY_WEIGHT
-        weights += AI_ADVISORY_WEIGHT
-      }
-      if (cameraOptedIn.value && signals.ai_face_similarity !== undefined) {
-        integrity += signals.ai_face_similarity * AI_ADVISORY_WEIGHT
-        weights += AI_ADVISORY_WEIGHT
-      }
-      if (signals.ai_paste_anomaly !== undefined && pasteClassifierEnabled.value) {
-        integrity += (1 - signals.ai_paste_anomaly) * AI_ADVISORY_WEIGHT
-        weights += AI_ADVISORY_WEIGHT
-      }
-    }
-
-    integrity = weights > 0 ? integrity / weights : 0.5
-
-    let consistencyVal = (typingConsistency + mouseConsistency) / 2
-    if (cameraOptedIn.value && faceConsistency !== undefined) {
-      consistencyVal = (typingConsistency + mouseConsistency + faceConsistency) / 3
-    }
-
-    // Rule-based anomaly flags (see docs/sentinel.md §Flagging Logic)
-    const boundedIntegrity = Math.min(1, Math.max(0, integrity))
-    const boundedConsistency = Math.min(1, Math.max(0, consistencyVal))
-    if (boundedIntegrity < 0.40) anomalies.push('low_integrity')
-    if (boundedConsistency < 0.35) anomalies.push('behavior_shift')
-    if (tabSwitchCount > 10) anomalies.push('tab_switching')
-    if (pastedCharCount > 500) anomalies.push('paste_detected')
-    if (!isHuman) anomalies.push('bot_suspected')
-    if (cameraOptedIn.value && facePresent === false) anomalies.push('no_face')
-    if (cameraOptedIn.value && faceCount !== undefined && faceCount > 1) anomalies.push('multiple_faces')
-    if (cameraOptedIn.value && consecutiveNoFaceChecks >= 5) anomalies.push('prolonged_absence')
-    if (cameraOptedIn.value && totalFaceChecks > 0 && faceAbsentChecks / totalFaceChecks > 0.5) anomalies.push('frequent_absence')
+    const meanVelocity = mean(velocities)
+    const watched = processLatest?.watched ?? []
 
     return {
-      signals,
-      integrity: boundedIntegrity,
-      consistency: boundedConsistency,
-      anomalies: [...new Set(anomalies)],
+      typing: {
+        keystrokes: keystrokeBuffer.length,
+        mean_dwell_ms: Math.max(0, mean(keystrokeBuffer.map(k => k.dwellMs))),
+        mean_flight_ms: flights.length > 0 ? mean(flights) : null,
+        speed_wpm: analyzeKeystrokes().speedWpm,
+      },
+      mouse: {
+        points: mouseBuffer.length,
+        velocity_samples: velocities.length,
+        mean_velocity: meanVelocity,
+        velocity_variance: mean(velocities.map(v => (v - meanVelocity) ** 2)),
+      },
+      baseline: profile
+        ? {
+            typing_samples: profile.typingPattern.sampleCount,
+            avg_dwell_ms: profile.typingPattern.avgDwellTime,
+            avg_flight_ms: profile.typingPattern.avgFlightTime,
+            speed_wpm: profile.typingPattern.speedWpm,
+            mouse_samples: profile.mousePattern.sampleCount,
+            avg_velocity: profile.mousePattern.avgVelocity,
+          }
+        : null,
+      focus: {
+        tab_switches: tabSwitchCount,
+        unfocused_ms: totalUnfocusedMs,
+        app_switches: appFocusLostCount,
+        app_unfocused_ms: appFocusLostMs,
+        environment_changed: environmentChanged,
+      },
+      clipboard: { paste_events: pasteEventCount, pasted_chars: pastedCharCount },
+      display: displayLatest
+        ? {
+            display_count: displayLatest.display_count,
+            external_display: displayLatest.external_display,
+            split_screen: displayLatest.split_screen,
+            screen_captured: displayLatest.mirrored,
+            native_toggle: displayNativeToggle,
+          }
+        : null,
+      display_changes: displayChangeCount,
+      android: androidEnvLatest
+        ? {
+            foreign_accessibility_services: androidEnvLatest.foreign_accessibility?.length ?? 0,
+            adb_enabled: androidEnvLatest.adb_enabled,
+          }
+        : null,
+      obscured_touches: obscuredTouchesWindow,
+      overlay: overlayLatest
+        ? {
+            suspicious: overlayLatest.suspicious?.length ?? 0,
+            scanned: overlayLatest.scanned,
+            allowlisted: overlayLatest.allowlisted,
+          }
+        : null,
+      processes: processLatest
+        ? {
+            categories: [...new Set(watched.map(w => w.category))],
+            watched: watched.length,
+            scanned: processLatest.scanned,
+          }
+        : null,
+      hotkeys: hotkeysRunning ? { native: nativeHotkeyCount, phantom: phantomWindow.length } : null,
+      camera: cameraOptedIn.value
+        ? {
+            device_virtual: cameraDeviceLabel ? cameraDeviceVirtual : null,
+            face_present: facePresent ?? null,
+            face_count: faceCount ?? null,
+            face_consistency: faceConsistency ?? null,
+            face_similarity: faceSimilarity ?? null,
+            face_match: faceMatch ?? null,
+            consecutive_no_face: consecutiveNoFaceChecks,
+            face_checks: totalFaceChecks,
+            face_absent_checks: faceAbsentChecks,
+            gaze_checks: gazeTotalChecks,
+            gaze_offscreen_checks: gazeOffscreenChecks,
+            gaze_occluded_checks: gazeOccludedChecks,
+            gaze_down_glances: gazeDownGlances,
+            liveness_checks: livenessChecks,
+            liveness_spoof_checks: livenessSpoofChecks,
+            liveness_real_prob: livenessChecks > 0 ? livenessRealProbSum / livenessChecks : null,
+          }
+        : null,
+      models: {
+        paste_anomaly: modelScore(models?.pasteAnomaly),
+        keystroke_anomaly: modelScore(models?.keystrokeAnomaly),
+        mouse_human_prob: modelScore(models?.mouseHumanProb),
+        advisory_enabled: aiScoringEnabled.value,
+        paste_classifier_enabled: pasteClassifierEnabled.value,
+      },
+      response: responseTracker.pending(),
     }
   }
 
@@ -919,6 +834,9 @@ function createSentinelService() {
       }
     }
 
+    const responseHistory = sessionPurpose === 'interview' ? [] : responseTracker.historyAfterSession()
+    if (responseHistory.length > 0) profile.responsePattern = { recent: responseHistory }
+
     profile.lastUpdated = Date.now()
     await saveProfile(profile.userId, deviceFp, profile)
   }
@@ -929,6 +847,41 @@ function createSentinelService() {
 
   let snapshotWork: Promise<void> | null = null
 
+  /**
+   * Start a new snapshot window: forget everything accumulated for the one
+   * just sent. Session-wide state (baselines, latest scans, the open face
+   * readings) is not touched.
+   */
+  const resetWindow = () => {
+    keystrokeBuffer = []
+    mouseBuffer = []
+    tabSwitchCount = 0
+    totalUnfocusedMs = 0
+    pasteEventCount = 0
+    pastedCharCount = 0
+    environmentChanged = false
+    appFocusLostCount = 0
+    appFocusLostMs = 0
+    displayChangeCount = 0
+    displayNativeToggle = false
+    obscuredTouchesWindow = 0
+    webviewCombos = []
+    blurIntervals = []
+    phantomWindow = []
+    nativeHotkeyCount = 0
+    unsentNativeHotkeys = []
+    totalFaceChecks = 0
+    faceAbsentChecks = 0
+    gazeTotalChecks = 0
+    gazeOffscreenChecks = 0
+    gazeOccludedChecks = 0
+    gazeDownGlances = 0
+    livenessChecks = 0
+    livenessSpoofChecks = 0
+    livenessRealProbSum = 0
+    responseTracker.clearWindow()
+  }
+
   const captureSnapshot = async (strict: boolean) => {
     const generation = lifecycleGeneration
     const snapshotSessionId = sessionId.value
@@ -936,11 +889,9 @@ function createSentinelService() {
       && generation === lifecycleGeneration && sessionId.value === snapshotSessionId
       if (!isCurrent()) return
 
-      // Run the ONNX paste classifier before the (sync) score path so the
-      // signal is folded into the weighted integrity calculation rather
-      // than tacked on after. A score of -1 means the model artifact
-      // wasn't available; the signal is then simply absent, mirroring
-      // the convention used by the other AI signals.
+      // The model outputs below travel with the window's features. A score
+      // of -1 means the model artifact wasn't available; the feature is then
+      // simply absent, mirroring the convention used by the other models.
       const windowMs = snapshotWindowStartMs > 0
         ? Math.max(1, Date.now() - snapshotWindowStartMs)
         : 30_000
@@ -1015,7 +966,7 @@ function createSentinelService() {
       // Native display topology: one sample per window. A transition
       // since the previous sample (monitor plugged in, Split View
       // entered, mirroring started) is counted; the latest state drives
-      // the per-window flags in computeScores().
+      // the window's display features.
       if (!isCurrent()) return
       try {
         const topo = await tauriInvoke<DisplayTopology | null>('sentinel_display_topology')
@@ -1061,8 +1012,11 @@ function createSentinelService() {
       if (hotkeysRunning && hotkeyStatus) {
         try {
           const drained = await tauriInvoke<HotkeyEvent[]>('sentinel_hotkeys_drain')
-          const native = Array.isArray(drained) ? drained : []
           if (!isCurrent()) return
+          // The ring is drained, so events from a window that failed to
+          // submit are kept here until one is sent.
+          if (Array.isArray(drained)) unsentNativeHotkeys = [...unsentNativeHotkeys, ...drained]
+          const native = unsentNativeHotkeys
           nativeHotkeyCount = native.length
           if (blurStartedAt) blurIntervals.push({ start: blurStartedAt, end: performance.now() })
           phantomWindow = phantomCombos({
@@ -1075,56 +1029,28 @@ function createSentinelService() {
       }
 
       if (!isCurrent()) return
-      const { signals, integrity, consistency, anomalies } = computeScores({
-        aiPasteAnomaly: pasteAnomaly,
-        aiKeystrokeAnomaly: keystrokeAnomaly,
-        aiMouseHumanProb: mouseHumanProb,
-      })
-
-      // Drain the gaze accumulators for this window and promote flags.
-      // Only meaningful when the camera is opted in and the backend
-      // returned at least one usable estimate this window.
-      let gazeOffscreenRatio: number | null = null
-      if (cameraOptedIn.value && gazeTotalChecks > 0) {
-        gazeOffscreenRatio = gazeOffscreenChecks / gazeTotalChecks
-        const occludedRatio = gazeOccludedChecks / gazeTotalChecks
-        if (gazeDownGlances >= GAZE_DOWN_GLANCE_COUNT) anomalies.push('device_glance')
-        if (gazeOffscreenRatio > GAZE_WANDER_RATIO) anomalies.push('gaze_wander')
-        if (occludedRatio > GAZE_OCCLUDED_RATIO) anomalies.push('gaze_occluded')
-      }
-      // Liveness: a single low tick is lighting as often as an attack, so
-      // the flag needs a majority of enough ticks in the window.
-      let livenessSpoofRatio: number | null = null
-      if (cameraOptedIn.value && livenessChecks > 0) {
-        livenessSpoofRatio = livenessSpoofChecks / livenessChecks
-        signals.liveness_checks = livenessChecks
-        signals.liveness_spoof_checks = livenessSpoofChecks
-        signals.liveness_real_prob = livenessRealProbSum / livenessChecks
-        if (livenessChecks >= LIVENESS_MIN_CHECKS && livenessSpoofRatio > LIVENESS_SPOOF_RATIO) {
-          anomalies.push('spoof_suspected')
-        }
-      }
-      sentinelDebug.livenessSpoofRatio = livenessSpoofRatio
-
-      // Native app-switch: the assessment window lost focus to another OS
-      // app this window. Roll any still-open blur into the elapsed total.
+      // The last item's visit ends with the attempt.
+      if (strict) responseTracker.settle()
+      // Native app-switch: roll any still-open blur into the elapsed total.
       if (focusLostAt) { appFocusLostMs += Date.now() - focusLostAt; focusLostAt = Date.now() }
-      if (appFocusLostCount > 0) anomalies.push('app_switch')
+      const features = collectFeatures({
+        pasteAnomaly,
+        keystrokeAnomaly,
+        mouseHumanProb,
+      })
+      const gazeOffscreenRatio = features.camera && gazeTotalChecks > 0
+        ? gazeOffscreenChecks / gazeTotalChecks
+        : null
+      sentinelDebug.livenessSpoofRatio = features.camera && livenessChecks > 0
+        ? livenessSpoofChecks / livenessChecks
+        : null
 
-      const deduped = [...new Set(anomalies)]
-
-      integrityScore.value = integrity
-      consistencyScore.value = consistency
-
-      // Mirror this snapshot into the live debug view (dev PiP).
+      // Mirror this window into the live debug view (dev PiP).
       sentinelDebug.active = isActive.value
       sentinelDebug.cameraOptedIn = cameraOptedIn.value
       sentinelDebug.lastSnapshotAt = Date.now()
-      sentinelDebug.integrity = integrity
-      sentinelDebug.consistency = consistency
-      sentinelDebug.flags = deduped
-      sentinelDebug.tabSwitches = signals.tab_switches
-      sentinelDebug.pastedChars = signals.pasted_chars
+      sentinelDebug.tabSwitches = tabSwitchCount
+      sentinelDebug.pastedChars = pastedCharCount
       sentinelDebug.keystrokeBufferLen = keystrokeBuffer.length
       sentinelDebug.mouseBufferLen = mouseBuffer.length
       sentinelDebug.gazeOffscreenRatio = gazeOffscreenRatio
@@ -1170,67 +1096,39 @@ function createSentinelService() {
       sentinelDebug.appFocusLostCount = appFocusLostCount
       sentinelDebug.appFocusLostMs = appFocusLostMs
       sentinelDebug.lastApp = lastFocusApp
-      sentinelDebug.signals = signals
+      sentinelDebug.features = features
 
+      let sent = false
       try {
-        const stored = await invoke<IntegritySnapshot>('integrity_submit_snapshot', {
+        // Features only: the backend derives the scores and flags, and says
+        // what the session's status became.
+        const stored = await invoke<IntegritySnapshot | null>('integrity_submit_snapshot', {
           req: {
             session_id: snapshotSessionId,
             element_id: currentElementId,
-            integrity_score: integrity,
-            consistency_score: consistency,
-            typing_score: signals.typing_consistency,
-            mouse_score: signals.mouse_consistency,
-            human_score: signals.is_human_likely ? 1.0 : 0.0,
-            tab_score: Math.max(0, 1 - signals.tab_switches / 15),
-            paste_score: Math.max(0, 1 - signals.pasted_chars / 1000),
-            devtools_score: null,
-            camera_score: signals.face_consistency ?? null,
-            ai_paste_anomaly: signals.ai_paste_anomaly ?? null,
-            gaze_offscreen_ratio: gazeOffscreenRatio,
-            anomaly_flags: deduped,
+            features,
           },
         })
+        if (stored) {
+          if (typeof stored.composite_score === 'number') integrityScore.value = stored.composite_score
+          if (typeof stored.consistency_score === 'number') consistencyScore.value = stored.consistency_score
+          sentinelDebug.integrity = integrityScore.value
+          sentinelDebug.consistency = consistencyScore.value
+          sentinelDebug.flags = stored.anomaly_flags ?? []
+          sentinelDebug.lastSnapshot = stored
+        }
         if (stored?.session_status === 'suspended') {
           suspended.value = true
           sentinelDebug.suspended = true
         }
+        sent = true
       } catch (error) { if (strict) throw error }
       if (!isCurrent()) return
+      // A window the backend never received stays open: its data goes out
+      // with the next one.
+      if (!sent) return
 
-      // Reset per-snapshot accumulators
-      gazeTotalChecks = 0
-      gazeOffscreenChecks = 0
-      gazeOccludedChecks = 0
-      gazeDownGlances = 0
-      livenessChecks = 0
-      livenessSpoofChecks = 0
-      livenessRealProbSum = 0
-      appFocusLostCount = 0
-      appFocusLostMs = 0
-      displayChangeCount = 0
-      displayNativeToggle = false
-      obscuredTouchesWindow = 0
-      webviewCombos = []
-      blurIntervals = []
-      phantomWindow = []
-      nativeHotkeyCount = 0
-      keystrokeBuffer = []
-      mouseBuffer = []
-      tabSwitchCount = 0
-      totalUnfocusedMs = 0
-      pasteEventCount = 0
-      pastedCharCount = 0
-      environmentChanged = false
-      totalFaceChecks = 0
-      faceAbsentChecks = 0
-      gazeTotalChecks = 0
-      gazeOffscreenChecks = 0
-      gazeOccludedChecks = 0
-      gazeDownGlances = 0
-      livenessChecks = 0
-      livenessSpoofChecks = 0
-      livenessRealProbSum = 0
+      resetWindow()
       snapshotWindowStartMs = Date.now()
 
   }
@@ -1319,6 +1217,7 @@ function createSentinelService() {
     optInCamera: boolean,
     purpose: SentinelSessionPurpose,
     generation: number,
+    options: SentinelStartOptions,
   ) => {
     if (isActive.value || generation !== lifecycleGeneration) return
     if (sessionId.value) throw new Error('Finish closing the previous Sentinel session before starting another')
@@ -1333,6 +1232,11 @@ function createSentinelService() {
     profile = userId ? await loadProfile(userId, deviceFp) : null
     if (profile) loadAIModels(profile)
     if (generation !== lifecycleGeneration) return
+    responseTracker.reset()
+    // Spoken interview turns and assessment clicks are different responses:
+    // an interview's baseline is its own first answers, and it leaves the
+    // device's assessment history alone.
+    responseTracker.setHistory(purpose === 'interview' ? [] : (profile?.responsePattern?.recent ?? []))
 
     try {
       const response = await invoke<StartSessionResponse>('integrity_start_session', { enrollmentId, purpose })
@@ -1345,11 +1249,29 @@ function createSentinelService() {
       Object.assign(sentinelDebug, emptySentinelDebug(), { cameraDeviceLabel, cameraDeviceVirtual })
       isActive.value = true
       // Device attestation (iOS App Attest / Android Play Integrity) binds
-      // the platform's word to this session's nonce. Fire-and-forget: the
-      // backend records the outcome and desktop reports unsupported.
-      void invoke<AttestSessionResponse>('integrity_attest_session', { sessionId: response.session_id })
-        .then(r => { sentinelDebug.attestation = r.supported ? (r.stored ? r.assurance_level : 'unavailable') : 'unsupported' })
-        .catch(err => { console.warn('[sentinel] device attestation failed', err); sentinelDebug.attestation = 'error' })
+      // the platform's word to this session's nonce. The backend records the
+      // outcome and desktop reports unsupported; a failure leaves it local.
+      try {
+        const r = await invoke<AttestSessionResponse>('integrity_attest_session', { sessionId: response.session_id })
+        sentinelDebug.attestation = r.supported ? (r.stored ? r.assurance_level : 'unavailable') : 'unsupported'
+      } catch (err) {
+        console.warn('[sentinel] device attestation failed', err)
+        sentinelDebug.attestation = 'error'
+      }
+      if (generation !== lifecycleGeneration) return
+      // Desktops have no attestation of their own; a paired phone lends its.
+      const companion = options.companionPhone && !isMobilePlatform
+        ? await useCompanionPhone().pairPhone(response.session_id)
+        : null
+      if (companion) sentinelDebug.attestation = `${companion.assurance_level} (phone)`
+      if (generation !== lifecycleGeneration) return
+      // The backend chooses the trust profile from the attestation result,
+      // this report, a device benchmark, the role's floor and the consent,
+      // and locks it before the first snapshot. The camera runs only when
+      // the chosen profile includes it.
+      trustProfile.value = await selectProfile(response.session_id, optInCamera, options, companion !== null)
+      if (generation !== lifecycleGeneration) return
+      if (optInCamera && trustProfile.value?.not_run.includes('camera')) setCameraOptedIn(false)
       // A queued stop owns cleanup of an already-created backend session.
       // Do not attach new listeners while that cleanup is pending.
       if (generation !== lifecycleGeneration) return
@@ -1422,6 +1344,7 @@ function createSentinelService() {
       blurIntervals = []
       phantomWindow = []
       nativeHotkeyCount = 0
+      unsentNativeHotkeys = []
       if (purpose === 'assessment') {
         try {
           const st = await tauriInvoke<HotkeyStatus>('sentinel_hotkeys_status')
@@ -1583,12 +1506,9 @@ function createSentinelService() {
     const userId = stakeAddress.value
     if (!userId) return null
     try {
-      // Cap the longest side at 224px — YuNet letterboxes into 640²
-      // internally, so a smaller frame only trims IPC payload, not
-      // detection (the model runs at a fixed input size regardless).
-      const scale = Math.min(1, 224 / Math.max(size.width, size.height))
-      const w = Math.max(1, Math.round(size.width * scale))
-      const h = Math.max(1, Math.round(size.height * scale))
+      // Cap the longest side at 224px — the backend detects at the
+      // frame's own size, so this sets both IPC payload and model cost.
+      const { width: w, height: h } = downscaledSize(size)
       if (!gazeCanvas) gazeCanvas = document.createElement('canvas')
       gazeCanvas.width = w
       gazeCanvas.height = h
@@ -1598,14 +1518,14 @@ function createSentinelService() {
       const img = ctx.getImageData(0, 0, w, h)
       const deviceFp = (await computeDeviceFingerprint()).substring(0, 16)
       if (!isCurrent()) return null
-      const resp = await tauriInvoke<ScoreGazeResponse>('sentinel_score_gaze', {
-        req: {
-          frame: { width: w, height: h, rgba: Array.from(img.data) },
-          user_address: userId,
-          device_fp_prefix: deviceFp,
-        },
-      })
-      if (!isCurrent()) return null
+      // Raw RGBA body, size + identity in headers. The backend may drop
+      // this frame for a newer one; a dropped frame is not a check.
+      const resp = await tauriInvoke<ScoreGazeReply>(
+        'sentinel_score_gaze',
+        rgbaBody(img),
+        frameHeaders(w, h, { user: userId, device: deviceFp }),
+      )
+      if (!isCurrent() || isDroppedGaze(resp)) return null
       const est = resp.estimate
       gazeTotalChecks++
       // Live mirror so the dev PiP shows the real session sampling rate
@@ -1631,7 +1551,10 @@ function createSentinelService() {
         // screen; uncalibrated → positive pitch proxy (head tilted down).
         const lookingDown =
           est.screenY != null ? est.screenY > 1.0 : est.pitch > 0.12
-        if (lookingDown) gazeDownGlances++
+        if (lookingDown) {
+          gazeDownGlances++
+          responseTracker.cue('gaze_down')
+        }
       }
       return est
     } catch (err) {
@@ -1651,11 +1574,10 @@ function createSentinelService() {
     const requireCurrent = profileStateGuard(signal)
     try {
       requireCurrent()
-      const vw = video.videoWidth || 640
-      const vh = video.videoHeight || 480
-      const scale = Math.min(1, 224 / Math.max(vw, vh))
-      const w = Math.max(1, Math.round(vw * scale))
-      const h = Math.max(1, Math.round(vh * scale))
+      const { width: w, height: h } = downscaledSize({
+        width: video.videoWidth || 640,
+        height: video.videoHeight || 480,
+      })
       if (!gazeCanvas) gazeCanvas = document.createElement('canvas')
       gazeCanvas.width = w
       gazeCanvas.height = h
@@ -1663,9 +1585,11 @@ function createSentinelService() {
       if (!ctx) return null
       ctx.drawImage(video, 0, 0, w, h)
       const img = ctx.getImageData(0, 0, w, h)
-      const features = await tauriInvoke<GazeFeatures | null>('sentinel_extract_gaze_features', {
-        frame: { width: w, height: h, rgba: Array.from(img.data) },
-      })
+      const features = await tauriInvoke<GazeFeatures | null>(
+        'sentinel_extract_gaze_features',
+        rgbaBody(img),
+        frameHeaders(w, h),
+      )
       requireCurrent()
       return features
     } catch (err) {
@@ -1733,27 +1657,20 @@ function createSentinelService() {
     detachMonitoringListeners()
     void setAssessmentShield(false)
 
-    const integrity = integrityScore.value
-    const consistency = consistencyScore.value
-
     const deviceFp = await computeDeviceFingerprint()
     await updateProfile(deviceFp)
 
     try {
       const ended = await invoke<{ id: string; status: string }>('integrity_end_session', {
         sessionId: sessionId.value,
-        req: {
-          overall_integrity_score: integrity,
-          overall_consistency_score: consistency,
-        },
       })
-      // A flagged session is the only case where evidence was staged, and the
-      // only case where the learner has anything to decide about. Surfacing it
-      // here rather than silently is the point: until this shipped, Sentinel
-      // could flag a session and the person it flagged was never told.
-      // Interview-purpose sessions never stage evidence, so there is nothing
-      // to keep and nothing to ask.
-      if (ended?.status === 'flagged' && sessionPurpose === 'assessment') {
+      // A session in review or flagged is the only case where evidence was
+      // staged, and the only case where the learner has anything to decide
+      // about. Surfacing it here rather than silently is the point: until
+      // this shipped, Sentinel could flag a session and the person it flagged
+      // was never told. Interview-purpose sessions never stage evidence, so
+      // there is nothing to keep and nothing to ask.
+      if ((ended?.status === 'review' || ended?.status === 'flagged') && sessionPurpose === 'assessment') {
         const snaps = await invoke<Array<{ anomaly_flags: string[] }>>(
           'integrity_list_snapshots',
           { sessionId: ended.id },
@@ -1768,15 +1685,10 @@ function createSentinelService() {
 
     const currentSessionId = sessionId.value
     sessionId.value = null
+    trustProfile.value = null
     cameraOptedIn.value = false
     sentinelDebug.cameraOptedIn = false
-    keystrokeBuffer = []
-    mouseBuffer = []
-    tabSwitchCount = 0
-    totalUnfocusedMs = 0
-    pasteEventCount = 0
-    pastedCharCount = 0
-    environmentChanged = false
+    resetWindow()
     lastKeystrokeTime = 0
     snapshotWindowStartMs = 0
     facePresent = undefined
@@ -1785,30 +1697,55 @@ function createSentinelService() {
     faceSimilarity = undefined
     faceMatch = undefined
     consecutiveNoFaceChecks = 0
-    totalFaceChecks = 0
-    faceAbsentChecks = 0
-    gazeTotalChecks = 0
-    gazeOffscreenChecks = 0
-    gazeOccludedChecks = 0
-    gazeDownGlances = 0
-    livenessChecks = 0
-    livenessSpoofChecks = 0
-    livenessRealProbSum = 0
 
     return currentSessionId
+  }
+
+  /**
+   * Ask the backend to choose and lock the session's trust profile. A camera
+   * stream the learner turned on is both the capability and the consent;
+   * so is a phone the learner paired.
+   * Null when the choice failed: the session then has no profile, and a
+   * role floor fails closed at attempt start.
+   */
+  const selectProfile = async (
+    id: string,
+    camera: boolean,
+    options: SentinelStartOptions,
+    companionPhone = false,
+  ): Promise<SelectedProfile | null> => {
+    const capabilities = {
+      camera,
+      microphone: options.microphone === true,
+      companion_phone: companionPhone,
+    }
+    const request: ProfileRequest = {
+      capabilities,
+      consent: capabilities,
+      role_assessment_id: options.roleAssessmentId ?? null,
+    }
+    try {
+      return (await invoke<SelectedProfile | null>('integrity_select_profile', { sessionId: id, request })) ?? null
+    } catch (err) {
+      console.warn('[sentinel] trust profile selection failed', err)
+      return null
+    }
   }
 
   const start = (
     enrollmentId: string | null,
     optInCamera = false,
     purpose: SentinelSessionPurpose = 'assessment',
+    options: SentinelStartOptions = {},
   ) => {
     const generation = lifecycleGeneration
-    return serializeTransition(() => startSession(enrollmentId, optInCamera, purpose, generation))
+    return serializeTransition(() => startSession(enrollmentId, optInCamera, purpose, generation, options))
   }
 
   const stop = () => {
     lifecycleGeneration++
+    // A start still waiting for a paired phone must not hold the stop.
+    void useCompanionPhone().skip().catch((err: unknown) => console.warn('[sentinel] companion cancel failed', err))
     return serializeTransition(stopSession)
   }
 
@@ -1828,34 +1765,19 @@ function createSentinelService() {
       gazeCanvas = null
       currentElementId = ''
       currentElementType = ''
-      keystrokeBuffer = []
-      mouseBuffer = []
+      resetWindow()
       lastKeystrokeTime = 0
       lastBlurTime = 0
       snapshotWindowStartMs = 0
-      tabSwitchCount = 0
-      totalUnfocusedMs = 0
-      pasteEventCount = 0
-      pastedCharCount = 0
-      environmentChanged = false
-      appFocusLostCount = 0
-      appFocusLostMs = 0
       focusLostAt = 0
       lastFocusApp = ''
       displayBaseline = null
       displayLatest = null
-      displayChangeCount = 0
       displayNativeTransitions = -1
-      displayNativeToggle = false
       androidEnvLatest = null
-      obscuredTouchesWindow = 0
       overlayLatest = null
       processLatest = null
       hotkeyStatus = null
-      webviewCombos = []
-      blurIntervals = []
-      phantomWindow = []
-      nativeHotkeyCount = 0
       blurStartedAt = 0
       cameraDeviceLabel = ''
       cameraDeviceVirtual = false
@@ -1865,15 +1787,6 @@ function createSentinelService() {
       faceSimilarity = undefined
       faceMatch = undefined
       consecutiveNoFaceChecks = 0
-      totalFaceChecks = 0
-      faceAbsentChecks = 0
-      gazeTotalChecks = 0
-      gazeOffscreenChecks = 0
-      gazeOccludedChecks = 0
-      gazeDownGlances = 0
-      livenessChecks = 0
-      livenessSpoofChecks = 0
-      livenessRealProbSum = 0
       keystrokeAeStatus.value = null
       mouseCnnStatus.value = null
       cameraOptedIn.value = false
@@ -1921,9 +1834,7 @@ function createSentinelService() {
         ? { enrolled: faceEmbedder.isEnrolled, progress: faceEmbedder.enrollmentProgress }
         : null,
     },
-    ...(keystrokeBuffer.length >= 5 || mouseBuffer.length >= 10
-      ? computeScores()
-      : { signals: null, integrity: null, consistency: null, anomalies: [] }),
+    features: collectFeatures(),
   })
 
   // =========================================================================
@@ -2390,7 +2301,7 @@ function createSentinelService() {
   /** Toggle camera opt-in mid-session. Caller is responsible for acquiring
    * the MediaStream, attaching an HTMLVideoElement, and driving the 3s
    * face-verification loop (see docs/sentinel.md §Camera). This only flips
-   * the flag that gates face-related signals in computeScores(). */
+   * the flag that gates the window's camera features. */
   /**
    * Record which camera device feeds the opted-in stream (the video
    * track's label). A known virtual-camera product raises `virtual_camera`
@@ -2427,6 +2338,7 @@ function createSentinelService() {
     integrityScore: readonly(integrityScore),
     consistencyScore: readonly(consistencyScore),
     cameraOptedIn: readonly(cameraOptedIn),
+    trustProfile: readonly(trustProfile),
     aiScoringEnabled: readonly(aiScoringEnabled),
     pasteClassifierEnabled: readonly(pasteClassifierEnabled),
     keystrokeAeStatus: readonly(keystrokeAeStatus),
@@ -2436,6 +2348,13 @@ function createSentinelService() {
     // Session controls
     start,
     stop,
+    /** Response-process events: item shown, response event, cross-modal cue. */
+    responses: {
+      present: responseTracker.present,
+      input: responseTracker.input,
+      cue: responseTracker.cue,
+      latest: responseTracker.latest,
+    },
     stopForProfileLock,
     setElement,
     isAssessmentElement,

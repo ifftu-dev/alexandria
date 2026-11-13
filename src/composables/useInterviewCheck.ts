@@ -7,11 +7,21 @@
 // organisation a signed summary — outcome, score, flag counts — built by the
 // backend from the stored session, never from anything held here.
 //
+// With voice checks also allowed, the check listens to the call's own
+// microphone stream for voice onsets (never recording or transcribing) and,
+// while the call runs, sends the panel each answer's timing against the
+// candidate's own earlier answers and any second voice it heard.
+//
+// When the panel marks an unscripted live segment as done, the check records
+// it as a verification result: the `live` verification rung's evidence.
+//
 // State is module-level because the check outlives the waiting room: it
 // starts there and ends in the call screen.
 import { readonly, ref } from 'vue'
 import { useLocalApi } from '@/composables/useLocalApi'
+import { liveSegment, markedQuestion, useInterviewSignals } from '@/composables/useInterviewSignals'
 import { useSentinel } from '@/composables/useSentinel'
+import { createInterviewFeed, type InterviewFeed } from '@/utils/sentinel/interviewFeed'
 import { errorMessage } from '@/utils/errorMessage'
 
 export interface IntegrityFlag {
@@ -35,6 +45,10 @@ export interface SentIntegrityReport {
     camera: boolean
     camera_coverage: number
     flags: IntegrityFlag[]
+    /** `local` or `device_attested`. */
+    assurance_level: string
+    /** `live` when the panel marked a live segment done, else `none`. */
+    verification_rung: 'none' | 'live'
   }
 }
 
@@ -42,6 +56,8 @@ interface RunningCheck {
   interviewId: string
   cloud: string
   camera: boolean
+  /** Voice checks allowed: listen for voice onsets and feed the panel. */
+  microphone?: boolean
 }
 
 interface UnsentCheck {
@@ -53,19 +69,96 @@ interface UnsentCheck {
 const running = ref<RunningCheck | null>(null)
 const unsent = ref<UnsentCheck | null>(null)
 const sendError = ref<string | null>(null)
+/** Voice checks are listening on the call's microphone. */
+const voiceChecks = ref(false)
+let stopSignals: Array<() => void> = []
+let stopVoice: Array<() => void> = []
 
 export function useInterviewCheck() {
   const { invoke } = useLocalApi()
   const sentinel = useSentinel()
+  const signals = useInterviewSignals()
 
   /** Start the check for this interview, before joining the call. */
   async function begin(check: RunningCheck) {
-    await sentinel.start(null, check.camera, 'interview')
+    await sentinel.start(null, check.camera, 'interview', { microphone: check.microphone === true })
     running.value = check
+  }
+
+  /** The panel marked a live segment done: record it in the running check. */
+  // Who marked it comes from the panelist's signature, which the backend kept.
+  async function recordLiveSegment(check: RunningCheck, sessionId: string, segmentId: string) {
+    if (running.value !== check) return
+    try {
+      await invoke('hiring_interview_live_segment', {
+        interviewId: check.interviewId,
+        integritySessionId: sessionId,
+        segmentId,
+      })
+    } catch (cause) {
+      console.warn('[interview] live segment not recorded', errorMessage(cause))
+    }
+  }
+
+  /**
+   * Once in the call: listen for the panel's live-segment marks, and start
+   * voice checks and the panel's live feed when the candidate allowed them.
+   * The backend refuses voice checks unless the session recorded that
+   * consent, and live segments unless the interview is held in Alexandria.
+   */
+  async function listen() {
+    const check = running.value
+    const sessionId = sentinel.getSessionId()
+    if (!check || !sessionId || stopSignals.length) return
+    let feed: InterviewFeed | null = check.microphone
+      ? createInterviewFeed({
+          responses: sentinel.responses,
+          send: signal => { void signals.send(signal).catch(() => undefined) },
+          now: () => Date.now(),
+        })
+      : null
+    stopSignals = [await signals.onSignal(message => {
+      const segment = liveSegment(message.signal)
+      if (segment) {
+        void recordLiveSegment(check, sessionId, segment)
+        return
+      }
+      const question = markedQuestion(message.signal)
+      if (question) feed?.question(question)
+    })]
+    if (!feed || voiceChecks.value) return
+    stopVoice = await Promise.all([
+      signals.onVoiceOnset(onset => feed?.voice(onset)),
+      signals.onAudioLevel(level => feed?.remoteLevel(level.output_level)),
+    ])
+    try {
+      await invoke('sentinel_voice_listen', { sessionId })
+      voiceChecks.value = true
+    } catch (cause) {
+      console.warn('[interview] voice checks did not start', errorMessage(cause))
+      feed = null
+      await stopVoiceChecks()
+    }
+  }
+
+  async function stopVoiceChecks() {
+    for (const unlisten of stopVoice) unlisten()
+    stopVoice = []
+    if (!voiceChecks.value) return
+    voiceChecks.value = false
+    await invoke('sentinel_voice_stop').catch(() => undefined)
+  }
+
+  /** Stop listening to the call: live-segment marks, voice checks and the feed. */
+  async function quiet() {
+    for (const unlisten of stopSignals) unlisten()
+    stopSignals = []
+    await stopVoiceChecks()
   }
 
   /** Joining failed: stop without sending anything. */
   async function abandon() {
+    await quiet()
     if (!running.value) return
     running.value = null
     if (sentinel.isActive.value) await sentinel.stop()
@@ -97,6 +190,7 @@ export function useInterviewCheck() {
     const check = running.value
     if (!check) return null
     running.value = null
+    await quiet()
     const sessionId = sentinel.isActive.value ? await sentinel.stop() : null
     if (sessionId) {
       unsent.value = { interviewId: check.interviewId, cloud: check.cloud, sessionId }
@@ -114,7 +208,9 @@ export function useInterviewCheck() {
     running: readonly(running),
     unsent: readonly(unsent),
     sendError: readonly(sendError),
+    voiceChecks: readonly(voiceChecks),
     begin,
+    listen,
     abandon,
     finish,
     send,

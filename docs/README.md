@@ -26,6 +26,7 @@ Start with the [project README](../README.md) for what Alexandria is and the qui
 | Doc | What it covers |
 |---|---|
 | [vision.md](vision.md) | Why Alexandria exists |
+| [../GLOSSARY.md](../GLOSSARY.md) | The app's domain vocabulary (trust profiles, verification rungs, coverage statements) |
 | [architecture.md](architecture.md) | How the pieces fit together |
 | [protocol-specification.md](protocol-specification.md) | Wire protocols, gossip topics, credential formats |
 | [skills-and-reputation.md](skills-and-reputation.md) | Taxonomy, assessments, credentials, reputation |
@@ -49,6 +50,7 @@ Start with the [project README](../README.md) for what Alexandria is and the qui
 | [default-network-genesis.md](default-network-genesis.md) | The preprod demo's single-operator governance genesis |
 | [stake-pubkey-registry-runbook.md](stake-pubkey-registry-runbook.md) | Pre-launch registry ceremony |
 | [sentinel-runbook.md](sentinel-runbook.md) | Retraining or rolling back the bundled paste classifier |
+| [sentinel-corpus-runbook.md](sentinel-corpus-runbook.md) | Red-team and consented clean sessions, the offline evaluator and signal certification |
 
 ## Specs and proposals
 
@@ -59,6 +61,7 @@ Open work, tracked as described in [agents/issue-tracker.md](agents/issue-tracke
 | [ai-chat-spec.md](ai-chat-spec.md) | AI chat and tutoring |
 | [personhood-trust-proposal.md](personhood-trust-proposal.md) | Personhood issuer trust and account binding |
 | [sentinel-federation.md](sentinel-federation.md) | Federated Sentinel threat model and privacy budget |
+| [sentinel-trust-profiles-spec.md](sentinel-trust-profiles-spec.md) | Sentinel trust profiles, verification rungs and measured signals, with [tickets](sentinel-trust-profiles/) |
 | [upstream/](upstream/) | Bug reports drafted for upstream crates, not yet filed |
 
 ## Decisions and audits

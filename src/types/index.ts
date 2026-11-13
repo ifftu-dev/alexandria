@@ -751,11 +751,18 @@ export type FlagType =
   | 'foreign_accessibility_service'
   | 'debug_bridge_enabled'
   | 'obscured_touch'
+  | 'response_below_reading_floor'
+  | 'response_relay_lag'
+  | 'response_idle_burst'
+  | 'answer_change_after_idle'
+  | 'gaze_down_then_response'
+  | 'voice_then_response'
+  | 'camera_degraded'
 
 export interface IntegritySession {
   id: string
   enrollment_id: string | null
-  status: string
+  status: IntegritySessionStatus
   integrity_score: number | null
   critical_count: number
   warning_count: number
@@ -763,6 +770,126 @@ export interface IntegritySession {
   ended_at: string | null
   /** `local`, or `device_attested` once a platform attestation verified. */
   assurance_level: string
+  /** Items whose first visit arrived with response-process timing. */
+  response_items: number
+  /** The locked trust profile; null until one is chosen. */
+  trust_profile: TrustProfile | null
+}
+
+/**
+ * Trust profile: the fixed signal set a session runs, chosen by the backend
+ * at session start and locked (`alexandria_studio::integrity::TrustProfile`).
+ */
+export type TrustProfile = 'core' | 'attested' | 'camera' | 'full'
+/** A signal a profile adds to the core set. */
+export type ProfileSignal = 'device_attestation' | 'camera'
+
+/**
+ * Verification rung: positive evidence that the learner did the work,
+ * independent of the device (`alexandria_studio::integrity::VerificationRung`).
+ * A ladder: each rung needs every rung below it.
+ */
+export type VerificationRung = 'none' | 'process' | 'probed' | 'consistent' | 'live'
+
+/** A signal's certified rates (`measurement::CertifiedSignal`). */
+export interface CertifiedSignal {
+  llr: number
+  precision: number
+  recall: number
+}
+
+/** The certification a coverage statement's rates come from. */
+export interface CoverageCertificationRef {
+  version: string
+  date: string
+  digest: string
+  corpus_digest: string
+}
+
+/**
+ * What a session under a trust profile and verification rung checked and did
+ * not check. Content-addressed: credentials carry its digest, resolved offline
+ * by `integrity_coverage_statement`.
+ */
+export interface CoverageStatement {
+  format: number
+  version: string
+  profile: TrustProfile
+  rung: VerificationRung
+  checked: string[]
+  not_checked: string[]
+  platform_ceilings: string[]
+  measurement: string
+  certification: CoverageCertificationRef | null
+  certified_signals: Record<string, CertifiedSignal>
+}
+export type ProfileExclusionReason =
+  | 'not_attested'
+  | 'no_camera'
+  | 'camera_not_consented'
+  | 'not_benchmarked'
+  | 'over_budget'
+
+/** One flag per capability: what the device has, or what was consented. */
+export interface SentinelCapabilities {
+  camera: boolean
+  microphone: boolean
+  companion_phone: boolean
+}
+
+/** Request for `integrity_select_profile`. */
+export interface ProfileRequest {
+  capabilities: SentinelCapabilities
+  consent: SentinelCapabilities
+  /** Assessments only: the sponsor role whose policy sets the floor. */
+  role_assessment_id: string | null
+}
+
+export interface ProfileExclusion {
+  profile: TrustProfile
+  reasons: ProfileExclusionReason[]
+}
+
+/** One device's camera benchmark, per pass (`sentinel::camera_budget`). */
+export interface DeviceBenchmark {
+  detect_ms: number
+  liveness_ms: number
+  track_ms: number
+}
+
+/** The most a camera profile may spend per pass, and its detection cadence. */
+export interface CameraBudget {
+  detect_ms: number
+  liveness_ms: number
+  track_ms: number
+  /** Longest gap between detector runs while a face is tracked, in ms. */
+  detect_interval: number
+}
+
+/** A policy floor judged against a session. */
+export interface PolicyFloor {
+  required: TrustProfile | null
+  profile: TrustProfile | null
+  satisfied: boolean
+  missing: ProfileSignal[]
+}
+
+/** Reply of `integrity_select_profile`. */
+export interface SelectedProfile {
+  profile: TrustProfile
+  inputs: {
+    device_attested: boolean
+    capabilities: SentinelCapabilities
+    consent: SentinelCapabilities
+    budget: { camera: boolean; full: boolean } | null
+    floor: TrustProfile | null
+  }
+  excluded: ProfileExclusion[]
+  not_run: ProfileSignal[]
+  benchmark: DeviceBenchmark | null
+  camera_budget: CameraBudget
+  full_budget: CameraBudget
+  policy_floor: PolicyFloor
 }
 
 /** Result of `integrity_attest_session` (mobile device attestation). */
@@ -771,6 +898,30 @@ export interface AttestSessionResponse {
   stored: boolean
   assurance_level: string
   unverified?: { outcome: 'no_trust_material' } | { outcome: 'failed'; reason: string } | null
+}
+
+/** Window camera scores; what a paired phone sends when it is the camera. */
+export type CameraFeatures = NonNullable<WindowFeatures['camera']>
+
+/** Desktop: the one-time code a paired phone joins with. */
+export interface CompanionOfferResponse {
+  code: string
+  /** Unix seconds. */
+  expires_at: number
+}
+
+/** Desktop: a phone joined the session and its attestation was stored. */
+export interface CompanionPaired {
+  assurance_level: string
+  camera: boolean
+  unverified?: AttestSessionResponse['unverified']
+}
+
+/** Phone: this phone joined a desktop session. */
+export interface CompanionJoined {
+  session_id: string
+  assurance_level: string
+  camera: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -835,8 +986,23 @@ export interface ScoreGazeResponse {
   faceCount: number
   /** Best detection for overlay — present when a face was found. */
   detection?: FaceDetection | null
-  /** Presentation-attack estimate for the detected face (advisory per tick). */
+  /**
+   * Presentation-attack estimate, present only on ticks a trigger ran it
+   * (new face track, confidence drop, slow refresh). Advisory per tick.
+   */
   liveness?: LivenessEstimate | null
+  /** True when the face was tracked from the last detection, not detected. */
+  tracked: boolean
+}
+
+/**
+ * `sentinel_score_gaze` reply: the tick, or `{ dropped: true }` when a newer
+ * frame replaced this one before the inference thread reached it.
+ */
+export type ScoreGazeReply = ScoreGazeResponse | { dropped: true }
+
+export function isDroppedGaze(reply: ScoreGazeReply | null | undefined): reply is { dropped: true } {
+  return typeof reply === 'object' && reply !== null && 'dropped' in reply && reply.dropped === true
 }
 
 export interface LivenessEstimate {
@@ -915,52 +1081,170 @@ export interface IntegritySnapshot {
   camera_score: number | null
   composite_score: number | null
   ai_paste_anomaly: number | null
+  gaze_offscreen_ratio: number | null
   anomaly_flags: string[]
   captured_at: string
   /** Session status once this snapshot counted; set only on submit. */
-  session_status?: string
+  session_status?: IntegritySessionStatus
+  /** The window's consistency score; set only on submit. */
+  consistency_score?: number
+  /** What the fusion saw once this snapshot counted; set only on submit. */
+  fusion?: FusionSummary
 }
 
-export interface SignalData {
-  typing_consistency: number
-  typing_speed_wpm: number
-  mouse_consistency: number
-  is_human_likely: boolean
-  face_present?: boolean
-  face_count?: number
-  face_consistency?: number
-  tab_switches: number
-  unfocused_ms: number
-  paste_events: number
-  pasted_chars: number
-  environment_changed: boolean
-  display_count?: number
-  external_display?: boolean
-  split_screen?: boolean
-  screen_captured?: boolean
-  display_changes?: number
-  foreign_accessibility_services?: number
-  adb_enabled?: boolean
-  obscured_touches?: number
-  hidden_overlays?: number
-  overlay_windows_scanned?: number
-  overlay_windows_allowlisted?: number
-  camera_device_virtual?: boolean
-  /** Liveness ticks this window and how many scored as a possible spoof. */
-  liveness_checks?: number
-  liveness_spoof_checks?: number
-  /** Mean real-face probability over the window's liveness ticks. */
-  liveness_real_prob?: number
-  watched_processes?: number
-  processes_scanned?: number
-  watched_categories?: WatchCategory[]
-  global_hotkeys?: number
-  phantom_hotkeys?: number
-  ai_keystroke_anomaly?: number
-  ai_mouse_human_prob?: number
-  ai_face_similarity?: number
-  ai_face_match?: boolean
-  ai_paste_anomaly?: number
+/**
+ * Integrity session status. A single flag sends a session to `review`;
+ * `flagged` needs two independent channels over threshold or a failed
+ * verification; only backend-recorded tamper flags `suspended` it.
+ */
+export type IntegritySessionStatus = 'active' | 'completed' | 'review' | 'flagged' | 'suspended'
+
+/** One evidence channel in a session's fusion (`alexandria_studio::integrity`). */
+export interface ChannelEvidence {
+  channel: string
+  /** Accumulated log-likelihood ratio; zero when no signal has a ratio. */
+  llr: number
+  over_threshold: boolean
+  signals: string[]
+}
+
+export interface FusionSummary {
+  manifest_version: string
+  profile: string
+  /** Null when the manifest certifies nothing for this profile. */
+  threshold: number | null
+  channels: ChannelEvidence[]
+  /** Observed signals with no measured ratio: they contributed zero. */
+  advisory: string[]
+}
+
+/**
+ * Raw features of one snapshot window, submitted by the collector. Mirrors
+ * `alexandria_studio::integrity::WindowFeatures`; measurements only.
+ */
+export interface WindowFeatures {
+  typing: {
+    keystrokes: number
+    mean_dwell_ms: number
+    mean_flight_ms: number | null
+    speed_wpm: number
+  }
+  mouse: {
+    points: number
+    velocity_samples: number
+    mean_velocity: number
+    velocity_variance: number
+  }
+  baseline: {
+    typing_samples: number
+    avg_dwell_ms: number
+    avg_flight_ms: number
+    speed_wpm: number
+    mouse_samples: number
+    avg_velocity: number
+  } | null
+  focus: {
+    tab_switches: number
+    unfocused_ms: number
+    app_switches: number
+    app_unfocused_ms: number
+    environment_changed: boolean
+  }
+  clipboard: { paste_events: number; pasted_chars: number }
+  /** Latest native display sample; null where the platform has no probe. */
+  display: {
+    display_count: number
+    external_display: boolean
+    split_screen: boolean
+    screen_captured: boolean
+    native_toggle: boolean
+  } | null
+  display_changes: number
+  /** Null off Android. */
+  android: { foreign_accessibility_services: number; adb_enabled: boolean } | null
+  obscured_touches: number
+  /** Null on mobile and Wayland. */
+  overlay: { suspicious: number; scanned: number; allowlisted: number } | null
+  /** Null on mobile. */
+  processes: { categories: WatchCategory[]; watched: number; scanned: number } | null
+  /** Null when the global hotkey monitor is not running. */
+  hotkeys: { native: number; phantom: number } | null
+  /** Present only while the camera is opted in. */
+  camera: {
+    device_virtual: boolean | null
+    face_present: boolean | null
+    face_count: number | null
+    face_consistency: number | null
+    face_similarity: number | null
+    face_match: boolean | null
+    consecutive_no_face: number
+    face_checks: number
+    face_absent_checks: number
+    gaze_checks: number
+    gaze_offscreen_checks: number
+    gaze_occluded_checks: number
+    gaze_down_glances: number
+    liveness_checks: number
+    liveness_spoof_checks: number
+    liveness_real_prob: number | null
+  } | null
+  models: {
+    paste_anomaly: number | null
+    keystroke_anomaly: number | null
+    mouse_human_prob: number | null
+    advisory_enabled: boolean
+    paste_classifier_enabled: boolean
+  }
+  /** Response-process timing per item; null where nothing is answered. */
+  response: ResponseFeatures | null
+}
+
+/**
+ * How a learner answers an item: the timing features are the same for each.
+ * `voice` is a spoken answer to a question heard in an interview.
+ */
+export type ResponseInputKind = 'choice' | 'text' | 'plugin' | 'voice'
+
+/**
+ * Mirrors `alexandria_studio::integrity::ResponseFeatures`: per-visit
+ * aggregates only; the input timeline stays on the client.
+ */
+export interface ResponseFeatures {
+  /** Item visits that ended in this window. */
+  items: ItemResponse[]
+  baseline: ResponseBaseline | null
+  /** Response events that followed a gaze-down within a few seconds. */
+  gaze_down_then_response: number
+  /** Response events that followed a second-voice event within a few seconds. */
+  voice_then_response: number
+}
+
+export interface ItemResponse {
+  item_id: string
+  input: ResponseInputKind
+  /** Characters to read: prompt plus options. */
+  chars: number
+  /** Bank difficulty 1 to 5, or null. */
+  difficulty: number | null
+  /** A return to an item already visited; never judged against the floor. */
+  revisit: boolean
+  first_input_ms: number
+  commit_ms: number
+  revisions: number
+  idle_bursts: number
+  changes_after_idle: number
+}
+
+/** First-visit timings from earlier sessions (`history`) or this attempt. */
+export interface ResponseBaseline {
+  source: 'attempt' | 'history'
+  items: ResponseBaselineItem[]
+}
+
+export interface ResponseBaselineItem {
+  chars: number
+  difficulty: number | null
+  first_input_ms: number
 }
 
 /** Native display arrangement reported by `sentinel_display_topology`. */
@@ -1049,6 +1333,8 @@ export interface BehavioralProfile {
     sampleCount: number
   }
   lastUpdated: number
+  /** Recent first-visit response timings: the learner's response baseline. */
+  responsePattern?: { recent: ResponseBaselineItem[] }
   aiModels?: {
     faceEnrollment?: {
       vector: number[]
@@ -1062,24 +1348,11 @@ export interface StartSessionResponse {
   session_id: string
 }
 
+/** `integrity_submit_snapshot` request: raw features only; the backend scores. */
 export interface SubmitSnapshotRequest {
   session_id: string
   element_id: string
-  integrity_score: number
-  consistency_score: number
-  typing_score: number | null
-  mouse_score: number | null
-  human_score: number | null
-  tab_score: number | null
-  paste_score: number | null
-  devtools_score: number | null
-  camera_score: number | null
-  anomaly_flags: string[]
-}
-
-export interface EndSessionRequest {
-  overall_integrity_score: number
-  overall_consistency_score: number
+  features: WindowFeatures
 }
 
 /** Content document structure returned from the content store */
@@ -1206,6 +1479,45 @@ export interface TutoringTranscriptMessage {
   timestamp: number
 }
 
+/** A voice the candidate's microphone heard start (`tutoring:voice-onset`). */
+export interface VoiceOnsetEvent {
+  /** Milliseconds since the Unix epoch. */
+  at_ms: number
+  /** `primary`: the voice heard on this device from the start; `other`: one pitched well apart from it. */
+  speaker: 'primary' | 'other'
+}
+
+/** The candidate's answer to a marked question, as their app timed it. */
+export interface InterviewAnswerSignal {
+  question_id: string
+  /** From the end of the question to the candidate's first speech. */
+  latency_ms: number
+  /** Median latency of the candidate's own first answers; null until three. */
+  baseline_ms: number | null
+  gaze_down_before: boolean
+  second_voice_before: boolean
+}
+
+/**
+ * Mirrors `tutoring::interview_signal::InterviewSignal` (serde's external
+ * tagging): the panel marks a question; the candidate's app sends an answer's
+ * timing or a second voice. Travels over the call's encrypted room channel.
+ */
+export type InterviewSignal =
+  | { question: { question_id: string } }
+  | { answer: InterviewAnswerSignal }
+  | 'second_voice'
+  /** Panel to candidate: an unscripted live segment was completed. */
+  | { live_segment: { segment_id: string } }
+
+/** `tutoring:interview-signal`: a signal from another participant in the call. */
+export interface InterviewSignalMessage {
+  sender: string
+  sender_name: string | null
+  signal: InterviewSignal
+  timestamp: number
+}
+
 export interface DeviceCheckResult {
   has_camera: boolean
   camera_name: string | null
@@ -1289,6 +1601,8 @@ export interface InterviewCriterion {
   position: number
   status: InterviewCriterionStatus
   notes: string | null
+  /** Follow-up questions authored for this criterion. */
+  follow_ups: string[]
 }
 
 export interface InterviewTranscriptSegment {
@@ -1349,8 +1663,12 @@ export interface CreateInterviewRequest {
     role: InterviewParticipantRole
     peer_id?: string
   }>
-  criteria: string[]
+  /** A label, or a label with follow-ups authored for it. */
+  criteria: Array<string | { label: string; follow_ups: string[] }>
 }
+
+/** A live signal on the candidate's answer that can suggest a follow-up. */
+export type InterviewSignalConcern = 'relay_lag' | 'gaze_down' | 'second_voice'
 
 export interface InterviewConsentRequest {
   consent_transcription: boolean
@@ -1641,6 +1959,29 @@ export interface IntegrityAssertion {
   /** Anchor reference (DHT/chain) for the commitment root, if anchored. */
   anchorRef?: string | null
   generatedAt: string
+  /** Locked trust profile; absent when the session never chose one. */
+  trustProfile?: TrustProfile | null
+  /** Verification rung, separate from the device axis (`assuranceLevel`). */
+  verificationRung?: VerificationRung | null
+  /** Digest of the coverage statement for this profile and rung. */
+  coverageStatementDigest?: string | null
+  /** Signal sets the profile ran: 'core', 'device_attestation', 'camera'. */
+  signalsRun?: string[]
+  /** Signals the profile ran that were lost or stopped counting. */
+  signalsDegraded?: string[]
+  /** Signals the profile does not include. */
+  signalsNotRun?: string[]
+  /** Outcome of the follow-up probes, when any probe step ran. */
+  probe?: IntegrityProbeSummary | null
+}
+
+/** The probe step of an integrity session, as a credential states it. */
+export interface IntegrityProbeSummary {
+  outcome: VerificationOutcome
+  policies: ProbePolicy[]
+  satisfied: number
+  failed: number
+  skipped: number
 }
 
 export interface VerifiableCredential {
@@ -1667,8 +2008,24 @@ export interface IssuancePolicy {
   max_warning?: number | null
   require_clean?: boolean
   required_assurance_level?: string | null
-  /** Minimum fraction of snapshots captured with the camera opted in. */
-  min_camera_coverage?: number | null
+  /**
+   * Probe policy for attempts made for this role; overrides the assessment's
+   * unless 'none'. At issuance anything but 'none' requires the probe step to
+   * have run under it with no failed probe.
+   */
+  probe_policy?: ProbePolicy | null
+  /**
+   * The saved model connection that writes follow-ups under the 'llm' probe
+   * policy. Without one a generated follow-up is skipped.
+   */
+  probe_connection_id?: string | null
+  /**
+   * Minimum trust profile, judged at attempt start and again at issuance. The
+   * camera profiles carry their own camera coverage minimum.
+   */
+  min_trust_profile?: TrustProfile | null
+  /** Minimum verification rung, judged at issuance. */
+  min_verification_rung?: VerificationRung | null
 }
 
 export interface IssueCredentialRequest {
@@ -1722,6 +2079,41 @@ export interface RoleAttemptSummary {
   graded_at?: string | null
   ended_at?: string | null
   end_reason?: string | null
+}
+
+/** One signal a reviewed session raised (`sentinel::surface::ReviewSignal`). */
+export interface ReviewSignal {
+  signal: string
+  channel: string
+  /** Committed windows it fired in. */
+  windows: number
+  /** No measured ratio: it added nothing to the posterior. */
+  advisory: boolean
+  /** The rates it was certified at, when admitted to the profile. */
+  certified: CertifiedSignal | null
+}
+
+/** A finished session rescored for a sponsor's review queue. */
+export interface SessionReview {
+  session_id: string
+  status: IntegritySessionStatus
+  trust_profile: TrustProfile | null
+  rung: VerificationRung
+  /** Summed log-likelihood ratio: posterior log-odds over the prior. */
+  posterior_llr: number
+  threshold: number | null
+  manifest_version: string
+  signals: ReviewSignal[]
+}
+
+/** A role attempt's session in `list_role_session_reviews`, most suspicious first. */
+export interface RoleSessionReview {
+  attempt_id: string
+  subject_did: string
+  integrity_session_id: string
+  score: number | null
+  passed: boolean | null
+  review: SessionReview
 }
 
 export interface CreateRoleAssessmentRequest {
@@ -1832,6 +2224,8 @@ export interface CredentialBundle {
   key_registry: KeyRegistryRow[]
   status_lists: StatusListRow[]
   status_list_credentials?: VerifiableCredential[]
+  /** The coverage statements the credentials' integrity assertions name. */
+  coverage_statements?: CoverageStatement[]
 }
 
 // --- Selective-disclosure presentations (§18) ----------------------------
@@ -2205,6 +2599,8 @@ export interface ServedQuestion {
   options: string[]
   /** More than one option may be correct; otherwise exactly one must be chosen. */
   multiple: boolean
+  /** Bank difficulty, 1 to 5; with the item's length it sets the reading floor. */
+  difficulty: number
 }
 
 export interface StartedAttempt {
@@ -2215,6 +2611,8 @@ export interface StartedAttempt {
   draft_answers: SubmittedAnswer[]
   /** The sponsor role the attempt is for, when the learner chose one. */
   role?: AttemptRoleTarget | null
+  /** The role's minimum trust profile judged before the first item. */
+  policy_floor: PolicyFloor
 }
 
 /** A published sponsor role a learner can assess a skill for. */
@@ -2222,9 +2620,12 @@ export interface AttemptRoleTarget {
   role_assessment_id: string
   role_title: string
   org_name: string
-  /** The role's policy sets `min_camera_coverage > 0`: camera on for the whole attempt. */
+  /** The role's minimum trust profile runs the camera. */
   camera_required: boolean
-  min_camera_coverage?: number | null
+  /** The role's follow-ups are written by its model connection ('llm'); the
+   *  learner is asked before the attempt whether their answers may leave the
+   *  device for that. */
+  generated_probes: boolean
 }
 
 /** One submitted answer: the served option positions the learner selected. */
@@ -2237,6 +2638,80 @@ export interface GradeResult {
   score: number
   passed: boolean
   credential_id: string | null
+}
+
+/** Where an attempt's follow-up probes come from (assessment or role policy). */
+export type ProbePolicy = 'none' | 'reseed' | 'authored' | 'plugin' | 'llm'
+
+/** A probe as served after submission: the public half only. For a choice
+ *  item `content` carries `prompt`, `options` (this probe's own order) and
+ *  `kind`; `probe: 'complement'` asks for every option that is not correct. */
+export interface ServedProbe {
+  id: string
+  item_kind: 'mcq' | 'plugin'
+  content: Record<string, unknown>
+  time_box_ms: number
+  /** Time left once rendered; null before the first render. */
+  remaining_ms: number | null
+}
+
+export interface ProbeAnswerReceipt {
+  probe_id: string
+  /** False when the answer arrived after the time box (recorded as skipped). */
+  in_time: boolean
+}
+
+export type VerificationOutcome = 'satisfied' | 'failed' | 'skipped'
+
+/** One verification result in a session's commitment chain. */
+export interface VerificationResult {
+  id: string
+  session_id: string
+  attempt_id: string | null
+  step: string
+  policy: string
+  outcome: VerificationOutcome
+  reason: string | null
+  subject_ref: string | null
+  detail: Record<string, unknown>
+  commitment_hash: string
+  recorded_at: string
+}
+
+/** Every verification result of a session; `outcome` null when none ran. */
+export interface VerificationSummary {
+  session_id: string
+  outcome: VerificationOutcome | null
+  policies: string[]
+  satisfied: number
+  failed: number
+  skipped: number
+  results: VerificationResult[]
+}
+
+export type ItemProbeKind = 'follow_up' | 'variant'
+
+/** An instructor-authored follow-up or seeded variant of an item. */
+export interface ItemProbe {
+  id: string
+  item_id: string
+  probe_kind: ItemProbeKind
+  content_public: Record<string, unknown>
+  /** Present only on probes the viewer wrote. */
+  grader_private: Record<string, unknown> | null
+  time_box_ms: number | null
+  author_did: string
+  mine: boolean
+  created_at: string
+}
+
+export interface ItemProbeInput {
+  id?: string | null
+  item_id: string
+  probe_kind: ItemProbeKind
+  content_public: Record<string, unknown>
+  grader_private?: Record<string, unknown> | null
+  time_box_ms?: number | null
 }
 
 /** One skill in a goal assessment plan, with assessability resolved. */

@@ -205,7 +205,11 @@
       "none": "Aucune",
       "sharedNote": "C'est tout ce qui a été envoyé. Ni vidéo, ni audio, ni frappe, ni captures d'écran.",
       "running": "Vérification d'intégrité active",
-      "runningHint": "Se termine quand vous quittez l'appel. L'organisation reçoit alors un résumé, jamais d'enregistrement."
+      "runningHint": "Se termine quand vous quittez l'appel. L'organisation reçoit alors un résumé, jamais d'enregistrement.",
+      "voice": "Autoriser aussi les vérifications vocales",
+      "voiceHint": "Écoute le micro que vous utilisez déjà dans l'appel pour savoir quand vous commencez à répondre et s'il y a une autre voix dans la pièce. Rien n'est enregistré ni transcrit. Pendant l'appel, le jury voit combien de temps chaque réponse a mis à commencer par rapport à vos propres réponses précédentes, si vous avez baissé les yeux juste avant (avec les vérifications par caméra) et quand une autre voix a été entendue.",
+      "voiceRunning": "Vérifications vocales actives",
+      "voiceRunningHint": "Le jury voit quand vos réponses commencent et si une autre voix a été entendue. Rien n'est enregistré."
     }
   }
 }

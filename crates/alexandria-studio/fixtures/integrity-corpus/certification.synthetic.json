@@ -1,0 +1,25 @@
+{
+  "format": 1,
+  "version": "synthetic-fixture-1",
+  "date": "2026-11-12",
+  "synthetic": true,
+  "corpus_id": "sentinel-synthetic-fixture",
+  "corpus_digest": "blake3:28649b90556632ef845595df37aa9e510d83052a5bc9cfef71265818d90ff79e",
+  "profiles": {
+    "camera": {
+      "threshold": 2.0,
+      "signals": {
+        "device_glance": { "llr": 0.5108, "precision": 0.5, "recall": 0.5 },
+        "multiple_faces": { "llr": 1.0986, "precision": 1.0, "recall": 0.5 }
+      }
+    },
+    "core": {
+      "threshold": 2.0,
+      "signals": {
+        "app_switch": { "llr": 0.6242, "precision": 0.6666, "recall": 0.4 },
+        "cheat_tool_process": { "llr": 1.7227, "precision": 1.0, "recall": 0.2 },
+        "paste_detected": { "llr": 1.7227, "precision": 1.0, "recall": 0.4 }
+      }
+    }
+  }
+}

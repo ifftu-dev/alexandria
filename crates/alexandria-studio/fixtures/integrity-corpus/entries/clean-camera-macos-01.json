@@ -1,0 +1,31 @@
+{
+  "id": "clean-camera-macos-01",
+  "label": "clean",
+  "provenance": "synthetic",
+  "profile": "camera",
+  "platform": "macos",
+  "device_class": "desktop",
+  "windows": [
+    {
+      "features": {
+        "camera": {
+          "face_present": true,
+          "face_count": 1,
+          "face_checks": 10,
+          "gaze_checks": 10,
+          "gaze_down_glances": 1
+        }
+      }
+    },
+    {
+      "features": {
+        "camera": {
+          "face_present": true,
+          "face_count": 1,
+          "face_checks": 10,
+          "gaze_checks": 10
+        }
+      }
+    }
+  ]
+}

@@ -7,6 +7,7 @@ import { useSentinel } from '@/composables/useSentinel'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { getLoadedClassifierInfo } from '@/composables/useSentinel'
 import SentinelTrainingWizard from '@/components/integrity/SentinelTrainingWizard.vue'
+import { isMobilePlatform } from '@/composables/usePlatform'
 import type {
   IntegritySession,
   SentinelHoldoutRef,
@@ -96,6 +97,15 @@ const FLAG_CATALOG: ReadonlyArray<{ type: FlagType; key: string; severity: FlagS
   { type: 'foreign_accessibility_service', key: 'foreignAccessibilityService', severity: 'warning' },
   { type: 'debug_bridge_enabled', key: 'debugBridgeEnabled', severity: 'warning' },
   { type: 'obscured_touch', key: 'obscuredTouch', severity: 'critical' },
+  // Response-process signals: advisory (info) until a certified ratio.
+  { type: 'response_below_reading_floor', key: 'responseBelowReadingFloor', severity: 'info' },
+  { type: 'response_relay_lag', key: 'responseRelayLag', severity: 'info' },
+  { type: 'response_idle_burst', key: 'responseIdleBurst', severity: 'info' },
+  { type: 'answer_change_after_idle', key: 'answerChangeAfterIdle', severity: 'info' },
+  { type: 'gaze_down_then_response', key: 'gazeDownThenResponse', severity: 'info' },
+  { type: 'voice_then_response', key: 'voiceThenResponse', severity: 'info' },
+  // Trust-profile degradation: a signal the locked profile runs was lost.
+  { type: 'camera_degraded', key: 'cameraDegraded', severity: 'warning' },
 ]
 const anomalyFlagTypes = computed(() => FLAG_CATALOG.map(f => ({
   type: f.type,
@@ -109,10 +119,10 @@ const anomalyFlagTypes = computed(() => FLAG_CATALOG.map(f => ({
 // ---------------------------------------------------------------------------
 
 function getOutcome(session: IntegritySession): 'clean' | 'flagged' | 'suspended' {
-  // Server-authoritative: backend computes status from cumulative anomaly
-  // severity + running integrity score. Clean == active|completed.
+  // Server-authoritative: the backend's decision rule sets the status.
+  // Clean == active|completed; a session in review is counted with flagged.
   if (session.status === 'suspended') return 'suspended'
-  if (session.status === 'flagged') return 'flagged'
+  if (session.status === 'flagged' || session.status === 'review') return 'flagged'
   return 'clean'
 }
 
@@ -442,6 +452,19 @@ function severityBadgeVariant(severity: string): 'primary' | 'warning' | 'error'
           <div v-else class="mt-3">
             <AppButton size="sm" variant="secondary" @click="router.push('/dashboard/sentinel/holdout-evaluate')">
               {{ $t('sentinel.holdout.run') }}
+            </AppButton>
+          </div>
+        </div>
+
+        <!-- Join a desktop session as its attested phone -->
+        <div v-if="isMobilePlatform" class="card p-5">
+          <div class="flex items-center justify-between">
+            <div>
+              <h2 class="text-sm font-semibold text-foreground">{{ $t('sentinel.companion.joinTitle') }}</h2>
+              <p class="mt-1 text-xs text-muted-foreground">{{ $t('sentinel.companion.cardDescription') }}</p>
+            </div>
+            <AppButton size="sm" variant="secondary" @click="router.push('/dashboard/sentinel/companion')">
+              {{ $t('sentinel.companion.join') }}
             </AppButton>
           </div>
         </div>

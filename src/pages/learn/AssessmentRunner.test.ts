@@ -1,23 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import AssessmentRunner from './AssessmentRunner.vue'
-import type { AttemptRoleTarget, GradeResult, StartedAttempt, SubmittedAnswer } from '@/types'
+import type { AttemptRoleTarget, GradeResult, SelectedProfile, ServedProbe, StartedAttempt, SubmittedAnswer } from '@/types'
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
-  start: vi.fn<(enrollment: string | null, camera?: boolean) => Promise<void>>(),
+  start: vi.fn<(enrollment: string | null, camera?: boolean, purpose?: string, options?: { roleAssessmentId?: string | null }) => Promise<void>>(),
   setCameraOptedIn: vi.fn<(on: boolean) => void>(),
   reportCameraDevice: vi.fn<(label: string | null) => void>(),
   openRoles: vi.fn<(skill: string) => Promise<AttemptRoleTarget[]>>(),
   stop: vi.fn<() => Promise<string | undefined>>(),
-  startAttempt: vi.fn<(skill: string, session: string, role: string | null) => Promise<StartedAttempt>>(),
+  startAttempt: vi.fn<(skill: string, session: string, role: string | null, llmProbeConsent: boolean) => Promise<StartedAttempt>>(),
   submitAnswers: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<void>>(),
   saveDraft: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<void>>(),
   grade: vi.fn<(attempt: string, answers: SubmittedAnswer[]) => Promise<GradeResult>>(),
+  startProbes: vi.fn<(attempt: string) => Promise<ServedProbe[]>>(),
+  renderProbe: vi.fn<(probe: string) => Promise<ServedProbe>>(),
+  answerProbe: vi.fn(),
+  finishProbes: vi.fn(),
   active: { value: false },
   suspended: { value: false },
+  trustProfile: { value: null as SelectedProfile | null },
   push: vi.fn(),
   go: vi.fn(),
+  present: vi.fn<(item: string, meta: { chars: number; difficulty: number | null; input: string }) => void>(),
+  input: vi.fn<(item: string, event: { changesAnswer: boolean }) => void>(),
 }))
 
 vi.mock('@/composables/useLocalApi', () => ({ useLocalApi: () => ({ invoke: mocks.invoke }) }))
@@ -38,10 +45,15 @@ vi.mock('@/composables/useSentinel', () => ({
     reportCameraDevice: mocks.reportCameraDevice,
     verifyFace: () => ({ present: true, count: 1, consistency: 1 }),
     scoreGaze: async () => null,
+    responses: { present: mocks.present, input: mocks.input, cue: vi.fn() },
+    trustProfile: mocks.trustProfile,
   }),
 }))
 vi.mock('@/composables/useAssessment', () => ({
-  useAssessment: () => ({ openRoles: mocks.openRoles, startAttempt: mocks.startAttempt, saveDraft: mocks.saveDraft, submitAnswers: mocks.submitAnswers, grade: mocks.grade }),
+  useAssessment: () => ({
+    openRoles: mocks.openRoles, startAttempt: mocks.startAttempt, saveDraft: mocks.saveDraft, submitAnswers: mocks.submitAnswers, grade: mocks.grade,
+    startProbes: mocks.startProbes, renderProbe: mocks.renderProbe, answerProbe: mocks.answerProbe, finishProbes: mocks.finishProbes,
+  }),
 }))
 vi.mock('@/composables/useDiagnostics', () => ({
   useDiagnostics: () => ({ registerEntryPreparation: () => () => undefined }),
@@ -58,8 +70,9 @@ function deferred<T>() {
 
 const attempt: StartedAttempt = {
   attempt_id: 'attempt-1', skill_id: 'skill_test', pass_threshold: 0.7,
-  questions: [{ id: 'question-1', prompt: 'Question', options: ['One', 'Two'], multiple: true }],
+  questions: [{ id: 'question-1', prompt: 'Question', options: ['One', 'Two'], multiple: true, difficulty: 2 }],
   draft_answers: [],
+  policy_floor: { required: null, profile: 'core', satisfied: true, missing: [] },
 }
 const result: GradeResult = { score: 0.5, passed: false, credential_id: null }
 const mounted: ReturnType<typeof mount>[] = []
@@ -75,11 +88,14 @@ beforeEach(() => {
   mocks.invoke.mockReset().mockResolvedValue(null)
   mocks.active.value = false
   mocks.suspended.value = false
+  mocks.trustProfile.value = null
   mocks.start.mockReset().mockImplementation(async () => { mocks.active.value = true })
   mocks.stop.mockReset().mockImplementation(async () => { mocks.active.value = false; return 'session-1' })
   mocks.openRoles.mockReset().mockResolvedValue([])
   mocks.startAttempt.mockReset().mockResolvedValue(attempt)
   mocks.grade.mockReset().mockResolvedValue(result)
+  mocks.startProbes.mockReset().mockResolvedValue([])
+  mocks.finishProbes.mockReset().mockResolvedValue({})
 })
 
 afterEach(async () => {
@@ -98,6 +114,29 @@ describe('standalone assessment monitoring', () => {
     expect(mocks.startAttempt).not.toHaveBeenCalled()
   })
 
+  it('runs follow-up probes after submission and before monitoring stops', async () => {
+    const order: string[] = []
+    mocks.submitAnswers.mockImplementation(async () => { order.push('submit') })
+    mocks.startProbes.mockImplementation(async () => {
+      order.push(`probes:${mocks.active.value ? 'monitored' : 'unmonitored'}`)
+      return [{ id: 'probe-1', item_kind: 'mcq', content: { kind: 'single', prompt: 'Follow-up', options: ['x', 'y'] }, time_box_ms: 30_000, remaining_ms: null }]
+    })
+    mocks.renderProbe.mockImplementation(async () => ({ id: 'probe-1', item_kind: 'mcq', content: { kind: 'single', prompt: 'Follow-up', options: ['x', 'y'] }, time_box_ms: 30_000, remaining_ms: 30_000 }))
+    mocks.answerProbe.mockImplementation(async () => { order.push('answer'); return { in_time: true } })
+    mocks.finishProbes.mockImplementation(async () => { order.push('finish'); return {} })
+    mocks.stop.mockImplementation(async () => { order.push('stop'); mocks.active.value = false; return 'session-1' })
+    mocks.grade.mockImplementation(async () => { order.push('grade'); return result })
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'learn.assessment.submit')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Follow-up')
+    await wrapper.findAll('button').find(button => button.text() === 'learn.assessment.probeAnswer')!.trigger('click')
+    await flushPromises()
+    expect(order).toEqual(['submit', 'probes:monitored', 'answer', 'finish', 'stop', 'grade'])
+    expect(wrapper.text()).toContain('learn.assessment.notPassedYet')
+  })
+
   it('keeps frozen answers on grading failure and retries without reopening monitoring', async () => {
     mocks.grade.mockRejectedValueOnce(new Error('grading unavailable'))
     const wrapper = render()
@@ -111,7 +150,7 @@ describe('standalone assessment monitoring', () => {
     expect((wrapper.get('input').element as HTMLInputElement).checked).toBe(true)
     await wrapper.findAll('button').find(button => button.text() === 'learn.assessment.submit')!.trigger('click')
     await flushPromises()
-    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', null)
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', null, false)
     expect(mocks.grade.mock.calls).toEqual([
       ['attempt-1', [{ question_id: 'question-1', selected: [0] }]],
       ['attempt-1', [{ question_id: 'question-1', selected: [0] }]],
@@ -244,10 +283,10 @@ describe('standalone assessment monitoring', () => {
 
 describe('role targeting', () => {
   const plainRole: AttemptRoleTarget = {
-    role_assessment_id: 'role-plain', role_title: 'Analyst', org_name: 'Acme', camera_required: false,
+    role_assessment_id: 'role-plain', role_title: 'Analyst', org_name: 'Acme', camera_required: false, generated_probes: false,
   }
   const cameraRole: AttemptRoleTarget = {
-    role_assessment_id: 'role-cam', role_title: 'SRE', org_name: 'Acme', camera_required: true, min_camera_coverage: 0.9,
+    role_assessment_id: 'role-cam', role_title: 'SRE', org_name: 'Acme', camera_required: true, generated_probes: false,
   }
 
   function mockCamera(impl: () => Promise<MediaStream>) {
@@ -271,7 +310,7 @@ describe('role targeting', () => {
     const wrapper = render()
     await flushPromises()
     expect(wrapper.find('[data-testid="role-chooser"]').exists()).toBe(false)
-    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', null)
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', null, false)
   })
 
   it('waits for a role choice and passes the chosen role to the attempt', async () => {
@@ -285,10 +324,91 @@ describe('role targeting', () => {
     await wrapper.get('[data-testid="role-role-plain"]').setValue(true)
     await wrapper.get('[data-testid="start-attempt"]').trigger('click')
     await flushPromises()
-    expect(mocks.start).toHaveBeenCalledExactlyOnceWith(null, false)
-    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-plain')
+    expect(mocks.start).toHaveBeenCalledExactlyOnceWith(null, false, 'assessment', { roleAssessmentId: 'role-plain', companionPhone: false })
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-plain', false)
     expect(wrapper.get('[data-testid="role-banner"]').text()).toContain('learn.assessment.roleBanner')
     expect(mocks.setCameraOptedIn).not.toHaveBeenCalled()
+  })
+
+  /** A desktop session the backend put on `core` against `floor`. */
+  function coreSelection(floor: SelectedProfile['policy_floor']): SelectedProfile {
+    const budget = { detect_ms: 250, liveness_ms: 60, track_ms: 15, detect_interval: 3000 }
+    return {
+      profile: 'core',
+      inputs: {
+        device_attested: false,
+        capabilities: { camera: false, microphone: false, companion_phone: false },
+        consent: { camera: false, microphone: false, companion_phone: false },
+        budget: null,
+        floor: floor.required,
+      },
+      excluded: [
+        { profile: 'attested', reasons: ['not_attested'] },
+        { profile: 'camera', reasons: ['no_camera'] },
+        { profile: 'full', reasons: ['not_attested', 'no_camera'] },
+      ],
+      not_run: ['device_attestation', 'camera'],
+      benchmark: null,
+      camera_budget: budget,
+      full_budget: budget,
+      policy_floor: floor,
+    }
+  }
+
+  it('tells the learner the chosen trust profile alongside the first item', async () => {
+    mocks.openRoles.mockResolvedValue([plainRole])
+    mocks.start.mockImplementation(async () => {
+      mocks.active.value = true
+      mocks.trustProfile.value = coreSelection({ required: 'core', profile: 'core', satisfied: true, missing: [] })
+    })
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-testid="role-role-plain"]').setValue(true)
+    await wrapper.get('[data-testid="start-attempt"]').trigger('click')
+    await flushPromises()
+    const notice = wrapper.get('[data-testid="trust-profile-notice"]')
+    expect(notice.text()).toContain('sentinel.trust.notice.title')
+    expect(notice.text()).toContain('sentinel.trust.notice.floorMet')
+    expect(notice.text()).toContain('sentinel.trust.raise.connect_camera')
+    expect(wrapper.text()).toContain('Question')
+  })
+
+  it('stops before any item is served when the profile misses the sponsor minimum', async () => {
+    mocks.openRoles.mockResolvedValue([plainRole])
+    mocks.start.mockImplementation(async () => {
+      mocks.active.value = true
+      mocks.trustProfile.value = coreSelection({ required: 'attested', profile: 'core', satisfied: false, missing: ['device_attestation'] })
+    })
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-testid="role-role-plain"]').setValue(true)
+    await wrapper.get('[data-testid="start-attempt"]').trigger('click')
+    await flushPromises()
+    expect(mocks.startAttempt).not.toHaveBeenCalled()
+    expect(mocks.stop).toHaveBeenCalledOnce()
+    const notice = wrapper.get('[data-testid="trust-profile-notice"]')
+    expect(notice.text()).toContain('sentinel.trust.notice.floorUnmet')
+    expect(notice.text()).toContain('sentinel.trust.raise.pair_phone')
+    expect(notice.text()).not.toContain('sentinel.trust.raise.connect_camera')
+    expect(wrapper.text()).not.toContain('Question')
+    await wrapper.get('[data-testid="trust-profile-retry"]').trigger('click')
+    expect(mocks.go).toHaveBeenCalledWith(0)
+  })
+
+  it('asks before generated follow-ups may use the learner answers', async () => {
+    const generatedRole: AttemptRoleTarget = { ...plainRole, role_assessment_id: 'role-gen', generated_probes: true }
+    mocks.openRoles.mockResolvedValue([plainRole, generatedRole])
+    mocks.startAttempt.mockResolvedValue({ ...attempt, role: generatedRole })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="generated-probe-consent"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="role-role-gen"]').setValue(true)
+    const consent = wrapper.get('[data-testid="generated-probe-consent"] input')
+    expect((consent.element as HTMLInputElement).checked).toBe(false)
+    await consent.setValue(true)
+    await wrapper.get('[data-testid="start-attempt"]').trigger('click')
+    await flushPromises()
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-gen', true)
   })
 
   it('lets the learner decline a role and starts without one', async () => {
@@ -298,7 +418,7 @@ describe('role targeting', () => {
     await wrapper.get('[data-testid="role-none"]').setValue(true)
     await wrapper.get('[data-testid="start-attempt"]').trigger('click')
     await flushPromises()
-    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', null)
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', null, false)
   })
 
   it('blocks a camera-required role until the camera is on, then opts the session in', async () => {
@@ -322,8 +442,8 @@ describe('role targeting', () => {
     expect(mocks.setCameraOptedIn).not.toHaveBeenCalled()
     await wrapper.get('[data-testid="start-attempt"]').trigger('click')
     await flushPromises()
-    expect(mocks.start).toHaveBeenCalledExactlyOnceWith(null, true)
-    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-cam')
+    expect(mocks.start).toHaveBeenCalledExactlyOnceWith(null, true, 'assessment', { roleAssessmentId: 'role-cam', companionPhone: false })
+    expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-cam', false)
     expect(mocks.setCameraOptedIn).toHaveBeenCalledWith(true)
     expect(wrapper.find('[data-testid="camera-lost"]').exists()).toBe(false)
     wrapper.unmount()
@@ -363,7 +483,7 @@ describe('question rendering', () => {
   it('keeps one selection for a single-answer question', async () => {
     mocks.startAttempt.mockResolvedValue({
       ...attempt,
-      questions: [{ id: 'question-1', prompt: 'Question', options: ['One', 'Two'], multiple: false }],
+      questions: [{ id: 'question-1', prompt: 'Question', options: ['One', 'Two'], multiple: false, difficulty: 2 }],
     })
     const wrapper = render()
     await flushPromises()
@@ -375,6 +495,35 @@ describe('question rendering', () => {
     await wrapper.findAll('button').find(button => button.text() === 'learn.assessment.submit')!.trigger('click')
     await flushPromises()
     expect(mocks.grade.mock.calls[0]?.[1]).toEqual([{ question_id: 'question-1', selected: [1] }])
+  })
+
+  it('reports each served item and every selection as response events', async () => {
+    mocks.startAttempt.mockResolvedValue({
+      ...attempt,
+      questions: [
+        { id: 'single', prompt: 'Pick one', options: ['Alpha', 'Beta'], multiple: false, difficulty: 4 },
+        { id: 'multi', prompt: 'Pick all', options: ['A', 'B'], multiple: true, difficulty: 1 },
+      ],
+    })
+    const wrapper = render()
+    await flushPromises()
+    expect(mocks.present.mock.calls).toEqual([
+      ['single', { chars: 17, difficulty: 4, input: 'choice' }],
+      ['multi', { chars: 10, difficulty: 1, input: 'choice' }],
+    ])
+    const inputs = wrapper.findAll('input')
+    await inputs[0]!.trigger('change')
+    await inputs[1]!.trigger('change')
+    await inputs[2]!.trigger('change')
+    await inputs[3]!.trigger('change')
+    await inputs[2]!.trigger('change')
+    expect(mocks.input.mock.calls).toEqual([
+      ['single', { changesAnswer: false }],
+      ['single', { changesAnswer: true }],
+      ['multi', { changesAnswer: false }],
+      ['multi', { changesAnswer: false }],
+      ['multi', { changesAnswer: true }],
+    ])
   })
 
   it('names the skill from the taxonomy on the result screen', async () => {

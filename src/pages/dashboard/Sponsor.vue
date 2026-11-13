@@ -5,13 +5,20 @@
  * role-specific assessments tied to a job description with an issuance
  * policy + required assurance level, and issues gated RoleCredentials to
  * candidates from a completed integrity session.
+ *
+ * A role's integrity minimums (trust profile, verification rung, follow-up
+ * questions) sit beside the coverage statement they imply, and the issue tab
+ * ranks the role's finished sessions for review by fusion posterior.
  */
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AppButton, AppBadge, AppModal, AppInput, AppTextarea, AppTabs, EmptyState, AppAlert } from '@/components/ui'
 import { useSponsor } from '@/composables/useSponsor'
 import { useAuth } from '@/composables/useAuth'
-import type { IssuancePolicy, RoleAttemptSummary, VerifiableCredential } from '@/types'
+import RoleIntegrityPolicy from '@/components/integrity/RoleIntegrityPolicy.vue'
+import SessionReviewList from '@/components/integrity/SessionReviewList.vue'
+import { integrityChoiceReady, integrityPolicyFields, noIntegrityMinimums, type RoleIntegrityChoice } from '@/utils/sentinel/rolePolicy'
+import type { IssuancePolicy, RoleAttemptSummary, RoleSessionReview, VerifiableCredential } from '@/types'
 
 const { t } = useI18n()
 const sponsor = useSponsor()
@@ -55,11 +62,11 @@ const roleForm = ref({
   min_integrity: '',
   max_critical: '',
   max_warning: '',
-  min_camera_coverage: '',
   require_clean: false,
   required_assurance_level: '',
 })
 const roleBusy = ref(false)
+const roleIntegrity = ref<RoleIntegrityChoice>(noIntegrityMinimums())
 
 function openRoleModal() {
   roleForm.value.org_id = sponsor.organizations.value[0]?.id ?? ''
@@ -67,11 +74,10 @@ function openRoleModal() {
 }
 
 function buildPolicy(): IssuancePolicy | null {
-  const p: IssuancePolicy = {}
+  const p: IssuancePolicy = { ...integrityPolicyFields(roleIntegrity.value) }
   if (roleForm.value.min_integrity !== '') p.min_integrity = Number(roleForm.value.min_integrity)
   if (roleForm.value.max_critical !== '') p.max_critical = Number(roleForm.value.max_critical)
   if (roleForm.value.max_warning !== '') p.max_warning = Number(roleForm.value.max_warning)
-  if (roleForm.value.min_camera_coverage !== '') p.min_camera_coverage = Number(roleForm.value.min_camera_coverage)
   if (roleForm.value.require_clean) p.require_clean = true
   // required_assurance_level is folded in backend-side from the column.
   return Object.keys(p).length > 0 ? p : null
@@ -93,9 +99,10 @@ async function createRole() {
   if (ra) {
     roleForm.value = {
       org_id: '', role_title: '', job_description: '', skill_ids: '',
-      min_integrity: '', max_critical: '', max_warning: '', min_camera_coverage: '',
+      min_integrity: '', max_critical: '', max_warning: '',
       require_clean: false, required_assurance_level: '',
     }
+    roleIntegrity.value = noIntegrityMinimums()
     roleModalOpen.value = false
   }
 }
@@ -129,22 +136,31 @@ const publishedRoles = computed(() => sponsor.roleAssessments.value.filter(r => 
 // Attempts learners made for the selected role, so issuance starts from a
 // real attempt rather than a hand-typed session id.
 const roleAttempts = ref<RoleAttemptSummary[]>([])
+// The same role's finished sessions, most suspicious first.
+const sessionReviews = ref<RoleSessionReview[]>([])
 const roleAttemptsBusy = ref(false)
 let roleAttemptsRequest = 0
 watch(() => issueForm.value.role_assessment_id, async id => {
   roleAttempts.value = []
+  sessionReviews.value = []
   const request = ++roleAttemptsRequest
   if (!id) {
     roleAttemptsBusy.value = false
     return
   }
   roleAttemptsBusy.value = true
-  const list = await sponsor.listRoleAttempts(id)
+  const [list, reviews] = await Promise.all([sponsor.listRoleAttempts(id), sponsor.listRoleSessionReviews(id)])
   // Only the newest request may settle the busy flag and the list.
   if (request !== roleAttemptsRequest) return
   roleAttemptsBusy.value = false
   if (list) roleAttempts.value = list
+  if (reviews) sessionReviews.value = reviews
 })
+
+function useReview(r: RoleSessionReview) {
+  issueForm.value.subject = r.subject_did
+  issueForm.value.integrity_session_id = r.integrity_session_id
+}
 
 function useAttempt(a: RoleAttemptSummary) {
   issueForm.value.subject = a.subject_did
@@ -223,8 +239,14 @@ onMounted(async () => {
             <span v-if="ra.issuance_policy?.min_integrity != null" class="text-muted-foreground">
               {{ $t('dashboard.sponsor.roles.minIntegrity', { value: ra.issuance_policy.min_integrity }) }}
             </span>
-            <span v-if="ra.issuance_policy?.min_camera_coverage != null" class="text-muted-foreground">
-              {{ $t('dashboard.sponsor.roles.minCameraCoverage', { value: ra.issuance_policy.min_camera_coverage }) }}
+            <span v-if="ra.issuance_policy?.min_trust_profile" class="text-muted-foreground">
+              {{ $t('dashboard.sponsor.roles.minProfile', { value: $t(`sentinel.trust.profile.${ra.issuance_policy.min_trust_profile}`) }) }}
+            </span>
+            <span v-if="ra.issuance_policy?.min_verification_rung" class="text-muted-foreground">
+              {{ $t('dashboard.sponsor.roles.minRung', { value: $t(`sentinel.trust.rung.${ra.issuance_policy.min_verification_rung}`) }) }}
+            </span>
+            <span v-if="ra.issuance_policy?.probe_policy && ra.issuance_policy.probe_policy !== 'none'" class="text-muted-foreground">
+              {{ $t('dashboard.sponsor.roles.probes', { value: $t(`sentinel.trust.probePolicy.${ra.issuance_policy.probe_policy}`) }) }}
             </span>
             <span v-for="s in ra.skill_ids" :key="s" class="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{{ s }}</span>
           </div>
@@ -260,6 +282,13 @@ onMounted(async () => {
               <AppButton v-if="a.integrity_session_id" variant="ghost" size="sm" @click="useAttempt(a)">{{ $t('dashboard.sponsor.issue.attemptUse') }}</AppButton>
             </li>
           </ul>
+        </div>
+        <div v-if="issueForm.role_assessment_id" class="rounded-md border border-border/70 p-3" data-testid="role-session-reviews">
+          <p class="text-xs font-medium text-muted-foreground">{{ $t('dashboard.sponsor.review.title') }}</p>
+          <p class="mt-0.5 text-[0.7rem] text-muted-foreground">{{ $t('dashboard.sponsor.review.hint') }}</p>
+          <p v-if="roleAttemptsBusy" class="mt-1 text-xs text-muted-foreground">{{ $t('dashboard.sponsor.review.loading') }}</p>
+          <p v-else-if="sessionReviews.length === 0" class="mt-1 text-xs text-muted-foreground">{{ $t('dashboard.sponsor.review.empty') }}</p>
+          <SessionReviewList v-else class="mt-2" :reviews="sessionReviews" @use="useReview" />
         </div>
         <AppInput v-model="issueForm.subject" :label="$t('dashboard.sponsor.issue.candidateLabel')" placeholder="did:key:z6Mk…" />
         <AppInput v-model="issueForm.integrity_session_id" :label="$t('dashboard.sponsor.issue.sessionLabel')" placeholder="isess_…" />
@@ -309,7 +338,6 @@ onMounted(async () => {
           <AppInput v-model="roleForm.max_critical" :label="$t('dashboard.sponsor.roleModal.maxCritical')" placeholder="0" type="number" />
           <AppInput v-model="roleForm.max_warning" :label="$t('dashboard.sponsor.roleModal.maxWarning')" placeholder="2" type="number" />
         </div>
-        <AppInput v-model="roleForm.min_camera_coverage" :label="$t('dashboard.sponsor.roleModal.minCameraCoverage')" placeholder="0.90" type="number" />
         <label class="flex items-center gap-2 text-sm text-foreground">
           <input v-model="roleForm.require_clean" type="checkbox" /> {{ $t('dashboard.sponsor.roleModal.requireClean') }}
         </label>
@@ -319,9 +347,10 @@ onMounted(async () => {
             <option v-for="l in ASSURANCE_LEVELS" :key="l" :value="l">{{ l }}</option>
           </select>
         </label>
+        <RoleIntegrityPolicy v-model="roleIntegrity" />
         <div class="flex justify-end gap-2">
           <AppButton variant="ghost" size="sm" @click="roleModalOpen = false">{{ $t('common.actions.cancel') }}</AppButton>
-          <AppButton variant="primary" size="sm" :disabled="roleBusy || !roleForm.role_title.trim() || !roleForm.org_id" @click="createRole">{{ $t('dashboard.sponsor.actions.create') }}</AppButton>
+          <AppButton variant="primary" size="sm" :disabled="roleBusy || !roleForm.role_title.trim() || !roleForm.org_id || !integrityChoiceReady(roleIntegrity)" @click="createRole">{{ $t('dashboard.sponsor.actions.create') }}</AppButton>
         </div>
       </div>
     </AppModal>

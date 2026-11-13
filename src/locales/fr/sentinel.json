@@ -240,6 +240,34 @@
       "mcpCallDuringAttempt": {
         "description": "Un assistant externe connecté a demandé des données pendant la tentative",
         "trigger": "Un assistant ayant accès à ce profil a fait une demande pendant que la tentative était ouverte"
+      },
+      "responseBelowReadingFloor": {
+        "description": "Réponse avant que l'item ait pu être lu",
+        "trigger": "La première réponse est arrivée plus tôt que ne le permettent la longueur et la difficulté de l'item ; indicatif tant qu'il n'est pas mesuré"
+      },
+      "responseRelayLag": {
+        "description": "Les réponses arrivent avec un délai supplémentaire constant",
+        "trigger": "Plusieurs items ont pris à peu près le même temps supplémentaire par rapport au rythme habituel de l'apprenant ; indicatif tant qu'il n'est pas mesuré"
+      },
+      "responseIdleBurst": {
+        "description": "Inactivité, puis la réponse d'un coup",
+        "trigger": "Une longue pause sans saisie, suivie d'une rafale rapide qui a complété la réponse ; indicatif tant qu'il n'est pas mesuré"
+      },
+      "answerChangeAfterIdle": {
+        "description": "Une réponse modifiée après une pause",
+        "trigger": "Une réponse déjà donnée a été modifiée juste après une longue période d'inactivité ; indicatif tant qu'il n'est pas mesuré"
+      },
+      "gazeDownThenResponse": {
+        "description": "Regard vers le bas, puis réponse",
+        "trigger": "Un regard vers le bas a été suivi d'une réponse en quelques secondes (caméra) ; indicatif tant qu'il n'est pas mesuré"
+      },
+      "voiceThenResponse": {
+        "description": "Une autre voix, puis une réponse",
+        "trigger": "Une seconde voix a été entendue et une réponse a suivi en quelques secondes (micro) ; indicatif tant qu'il n'est pas mesuré"
+      },
+      "cameraDegraded": {
+        "description": "Les vérifications caméra se sont arrêtées dans une session avec caméra",
+        "trigger": "Le profil de la session utilise la caméra, mais une fenêtre n'a eu aucune vérification du visage (caméra masquée, autorisation retirée ou inférence arrêtée) ; la session garde son profil et consigne la perte"
       }
     }
   },
@@ -530,5 +558,103 @@
     "noticeOpen": "See what they have",
     "noticeLater": "Not now",
     "liveSuspended": "Session suspendue"
+  },
+  "companion": {
+    "pairToggle": "Associer d'abord mon téléphone, pour que cette tentative soit attestée par l'appareil",
+    "offerTitle": "Associer votre téléphone",
+    "offerBody": "Sur votre téléphone, ouvrez Alexandria avec votre compte, allez dans Sentinel, choisissez Rejoindre depuis le téléphone et collez ce code. Il ne sert qu'une fois et expire dans cinq minutes.",
+    "copy": "Copier le code",
+    "copied": "Copié",
+    "waiting": "En attente de votre téléphone…",
+    "skip": "Continuer sans le téléphone",
+    "failed": "Votre téléphone n'a pas pu s'associer : {reason}",
+    "joinTitle": "Rejoindre depuis le téléphone",
+    "cardDescription": "Prêtez l'attestation de ce téléphone à une évaluation passée sur votre ordinateur.",
+    "joinBody": "Collez le code affiché par votre ordinateur. Ce téléphone atteste qu'il est une application Alexandria authentique connectée à votre compte ; il n'accepte que les codes de vos propres sessions.",
+    "joinPlaceholder": "Code d'association",
+    "join": "Rejoindre",
+    "joined": "Associé à la session de votre ordinateur. Gardez Alexandria ouverte sur ce téléphone jusqu'à la fin de la tentative.",
+    "leave": "Quitter",
+    "unsupported": "Seul un iPhone ou un téléphone Android peut être associé."
+  },
+  "trust": {
+    "profile": {
+      "core": "Base",
+      "attested": "Appareil attesté",
+      "camera": "Caméra",
+      "full": "Appareil attesté et caméra"
+    },
+    "profileHint": {
+      "core": "Vérifications de la saisie, du pointeur, du focus et de l'écran dans la fenêtre d'évaluation. Pas de caméra, et les chiffres de l'appareil sont son propre rapport.",
+      "attested": "Vérifications de base sur un appareil dont la plateforme prouve qu'il exécute une copie authentique et non modifiée de l'application.",
+      "camera": "Vérifications de base, plus la présence du visage, la vivacité et le regard via la caméra, sur un appareil assez rapide pour les exécuter.",
+      "full": "Vérifications de base avec à la fois l'attestation de l'appareil et la caméra."
+    },
+    "rung": {
+      "none": "Aucun",
+      "process": "Processus de réponse",
+      "probed": "Questions de suivi",
+      "consistent": "Cohérent avec l'historique",
+      "live": "Entretien en direct"
+    },
+    "rungHint": {
+      "none": "Aucune vérification au-delà de la surveillance.",
+      "process": "Le rythme de réponse à chaque question a été observé et n'a montré aucune anomalie mesurée.",
+      "probed": "Aussi de courtes questions de suivi sur les propres réponses de l'apprenant, toutes réussies.",
+      "consistent": "Aussi la cohérence avec la pratique, les leçons et les tentatives précédentes de l'apprenant sur la compétence.",
+      "live": "Aussi un segment en direct non scénarisé lors d'un entretien tenu dans Alexandria."
+    },
+    "signal": {
+      "core": "Vérifications de base",
+      "device_attestation": "Attestation de l'appareil",
+      "camera": "Vérifications par caméra"
+    },
+    "reason": {
+      "not_attested": "cet appareil n'a pas pu prouver qu'il exécute une application authentique et non modifiée",
+      "no_camera": "aucune caméra n'a été trouvée",
+      "camera_not_consented": "la caméra n'a pas été activée",
+      "not_benchmarked": "le test de l'appareil pour la caméra n'a pas abouti",
+      "over_budget": "cet appareil ne peut pas exécuter les vérifications par caméra de façon fluide"
+    },
+    "raise": {
+      "pair_phone": "Associez votre téléphone avant de commencer.",
+      "attested_device": "Utilisez un téléphone ou une tablette qui réussit l'attestation de l'appareil.",
+      "connect_camera": "Branchez une caméra.",
+      "allow_camera": "Activez la caméra avant de commencer.",
+      "faster_device": "Utilisez un appareil plus rapide, ou fermez d'abord les autres applications."
+    },
+    "probePolicy": {
+      "none": "Aucune",
+      "reseed": "Même question avec de nouvelles valeurs",
+      "authored": "Questions de suivi rédigées par l'enseignant",
+      "plugin": "Créées par le correcteur de la question",
+      "llm": "Rédigées par la connexion de modèle du poste"
+    },
+    "notice": {
+      "title": "Cette tentative se déroule sous le profil {profile}",
+      "notRun": "{signal} non exécuté : {reason}.",
+      "floorMet": "Atteint le minimum du sponsor : {required}.",
+      "floorUnmet": "N'atteint pas le minimum du sponsor : {required}. La tentative ne peut pas commencer avec cette configuration.",
+      "raiseTitle": "Pour relever le profil la prochaine fois",
+      "tryAgain": "Modifier la configuration et réessayer",
+      "monitoringLimit": "La surveillance ne peut voir ni une deuxième personne ni un deuxième appareil, quel que soit le profil."
+    },
+    "coverage": {
+      "title": "Ce que cela couvre",
+      "checked": "Vérifié",
+      "notChecked": "Non vérifié",
+      "ceilings": "Limites de la plateforme",
+      "measurement": "Mesure",
+      "certified": "Taux certifiés de la version {version} ({date})",
+      "rates": "{signal} : précision {precision}, rappel {recall}",
+      "unresolved": "Cette déclaration de couverture n'est pas incluse dans cette version de l'application.",
+      "digest": "Empreinte de la déclaration",
+      "quoted": "Citée exactement telle que la certification la nomme."
+    },
+    "live": {
+      "mark": "Segment en direct terminé",
+      "hint": "Après une série de questions non scénarisées, marquez-la comme terminée. La vérification d'intégrité du candidat l'enregistre comme une vérification en direct.",
+      "marked": "Marqué terminé à {time}"
+    }
   }
 }

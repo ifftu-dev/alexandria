@@ -4,6 +4,7 @@ pub mod broker;
 pub mod credentials;
 pub mod gate;
 pub mod grants;
+pub mod integrity;
 pub mod jd_parser;
 pub mod learning;
 pub mod model;

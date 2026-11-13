@@ -237,6 +237,43 @@ pub async fn tutoring_send_transcript(
     state.tutoring.send_transcript(text, confidence).await
 }
 
+/// Broadcast an interview signal to the call: the panel's question marker,
+/// or the candidate's answer timing or second voice.
+#[tauri::command]
+pub async fn tutoring_send_interview_signal(
+    signal: crate::tutoring::interview_signal::InterviewSignal,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.tutoring.send_interview_signal(signal).await
+}
+
+/// Turn on voice checks for the candidate's interview integrity check: the
+/// call's microphone stream is listened to for voice onsets, never recorded
+/// or transcribed. Refused unless the check is an interview's, still running,
+/// and its microphone consent is recorded.
+#[tauri::command]
+pub async fn sentinel_voice_listen(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "sentinel.voice-listen",
+            move |db| crate::sentinel::voice_activity::may_listen(db.conn(), &session_id),
+        )
+        .await?;
+    state.tutoring.set_voice_listening(true).await
+}
+
+/// Turn voice checks off.
+#[tauri::command]
+pub async fn sentinel_voice_stop(state: State<'_, AppState>) -> Result<(), String> {
+    state.tutoring.set_voice_listening(false).await
+}
+
 /// Get the current session status (or null if not in a session).
 #[tauri::command]
 pub async fn tutoring_status(

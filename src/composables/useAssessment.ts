@@ -10,6 +10,9 @@ import type {
   SubmittedAnswer,
   GradeResult,
   GoalAssessmentPlan,
+  ProbeAnswerReceipt,
+  ServedProbe,
+  VerificationSummary,
 } from '@/types'
 
 export function useAssessment() {
@@ -21,15 +24,20 @@ export function useAssessment() {
     return invoke<AttemptRoleTarget[]>('assessment_open_roles', { skillId })
   }
 
+  /** `llmProbeConsent`: the learner agreed that, for a role whose
+   *  follow-ups are generated, their chosen answers and the skill description
+   *  may leave the device after submission. Recorded on the first start. */
   function startAttempt(
     skillId: string,
     integritySessionId: string,
     roleAssessmentId: string | null = null,
+    llmProbeConsent = false,
   ): Promise<StartedAttempt> {
     return invoke<StartedAttempt>('assessment_start_attempt', {
       skillId,
       integritySessionId,
       roleAssessmentId,
+      llmProbeConsent,
     })
   }
 
@@ -51,5 +59,32 @@ export function useAssessment() {
     return invoke<GoalAssessmentPlan>('assessment_plan_goal', { goalSkillIds })
   }
 
-  return { openRoles, startAttempt, saveDraft, submitAnswers, grade, planGoal }
+  /** Probes run after submission and before monitoring ends. Start serves
+   *  the attempt's probes (idempotent); render starts a probe's time box;
+   *  answer grades it host-side; finish records whatever was left pending
+   *  as skipped. Skipped never counts against the learner. */
+  function startProbes(attemptId: string): Promise<ServedProbe[]> {
+    return invoke<ServedProbe[]>('assessment_probes_start', { attemptId })
+  }
+
+  function renderProbe(probeId: string): Promise<ServedProbe> {
+    return invoke<ServedProbe>('assessment_probe_render', { probeId })
+  }
+
+  function answerProbe(
+    probeId: string,
+    response: Record<string, unknown>,
+    firstInputMs: number | null,
+  ): Promise<ProbeAnswerReceipt> {
+    return invoke<ProbeAnswerReceipt>('assessment_probe_answer', { probeId, response, firstInputMs })
+  }
+
+  function finishProbes(attemptId: string): Promise<VerificationSummary> {
+    return invoke<VerificationSummary>('assessment_probes_finish', { attemptId })
+  }
+
+  return {
+    openRoles, startAttempt, saveDraft, submitAnswers, grade, planGoal,
+    startProbes, renderProbe, answerProbe, finishProbes,
+  }
 }

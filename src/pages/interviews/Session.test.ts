@@ -75,3 +75,52 @@ it('does not replace an unreachable room while another panelist remains live', a
   expect(mocks.invoke.mock.calls.filter(([cmd]) => cmd === 'interview_panel_status')).toHaveLength(3)
   wrapper.unmount()
 })
+
+it('asks a suggested follow-up through the call and turns a live signal on its answer into an authored follow-up', async () => {
+  const handlers = new Map<string, (event: { payload: unknown }) => void>()
+  const { listen } = await import('@tauri-apps/api/event')
+  vi.mocked(listen).mockImplementation(async (name, handler) => {
+    handlers.set(name, handler as (event: { payload: unknown }) => void)
+    return () => undefined
+  })
+  const followup = { id: 'f1', session_id: 'seat', source_segment_id: null, criterion_id: 'c1', question: 'Which part would fail first?', reason: 'Authored', status: 'suggested', created_at: '' }
+  const bundle = {
+    session: { id: 'seat', title: 'Panel', status: 'live', sentinel_enabled: false, started_at: null },
+    participants: [], notes: [], transcript: [], followups: [followup],
+    criteria: [{ id: 'c1', session_id: 'seat', label: 'Design', position: 0, status: 'not_covered', notes: null, follow_ups: ['Which part would fail first?'] }],
+  }
+  mocks.invoke.mockImplementation(async (command: string) => {
+    if (command === 'interview_get') return bundle
+    if (command === 'interview_panel_status') return null
+    if (command === 'tutoring_status') return null
+    if (command === 'tutoring_list_sessions') return []
+    if (command === 'interview_followups_for_signal') return [followup]
+    return undefined
+  })
+  const wrapper = shallowMount(Session, { global: {
+    plugins: [createI18n({ legacy: false, locale: 'en', messages: { en: {} }, missingWarn: false, fallbackWarn: false })],
+    stubs: { AppButton: false },
+  } })
+  await flushPromises()
+  const ask = wrapper.findAllComponents(AppButton).find(button => button.text() === 'interviews.session.askNow')
+  expect(ask).toBeDefined()
+  await ask!.trigger('click'); await flushPromises()
+  expect(mocks.invoke).toHaveBeenCalledWith('tutoring_send_interview_signal', { signal: { question: { question_id: 'f1' } } })
+  expect(mocks.invoke).toHaveBeenCalledWith('interview_set_followup_status', { id: 'f1', status: 'asked' })
+
+  handlers.get('tutoring:interview-signal')!({ payload: {
+    sender: 'candidate-node', sender_name: 'Candidate', timestamp: Date.now(),
+    signal: { answer: { question_id: 'f1', latency_ms: 5_200, baseline_ms: 900, gaze_down_before: false, second_voice_before: false } },
+  } })
+  await flushPromises()
+  expect(mocks.invoke).toHaveBeenCalledWith('interview_followups_for_signal', { sessionId: 'seat', criterionId: 'c1', signal: 'relay_lag' })
+  // An answer with nothing unusual suggests nothing.
+  const asked = mocks.invoke.mock.calls.filter(([cmd]) => cmd === 'interview_followups_for_signal').length
+  handlers.get('tutoring:interview-signal')!({ payload: {
+    sender: 'candidate-node', sender_name: 'Candidate', timestamp: Date.now(),
+    signal: { answer: { question_id: 'q2', latency_ms: 1_000, baseline_ms: 900, gaze_down_before: false, second_voice_before: false } },
+  } })
+  await flushPromises()
+  expect(mocks.invoke.mock.calls.filter(([cmd]) => cmd === 'interview_followups_for_signal')).toHaveLength(asked)
+  wrapper.unmount()
+})

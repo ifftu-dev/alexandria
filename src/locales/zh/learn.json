@@ -27,7 +27,10 @@
     "chooseOne": "选择一个答案。",
     "chooseAll": "选择所有适用的答案。",
     "integritySuspended": "完整性检查已暂停此次作答。",
-    "integritySuspendedNote": "不会再进行检查。你仍可提交；结果会记录此会话曾被暂停。"
+    "integritySuspendedNote": "不会再进行检查。你仍可提交；结果会记录此会话曾被暂停。",
+    "generatedProbeConsent": "允许该职位的模型连接为我编写追问",
+    "generatedProbeConsentNote": "提交后，你所选的选项和技能描述会发送到发起方为该职位设置的模型连接，由其编写最多两道简短追问。评估题目不会被发送。如果不开启，将跳过追问，且不会对你不利。",
+    "probePreparing": "正在准备追问…"
   },
   "player": {
     "courseFallback": "课程",

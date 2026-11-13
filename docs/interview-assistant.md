@@ -1,7 +1,7 @@
 # Interview Assistant
 
 Status: live
-Updated: 2026-10-12
+Updated: 2026-11-13
 
 > Local-first support for planning, conducting, transcribing, and reviewing
 > structured interviews — for instructors, and for panelists on an
@@ -123,9 +123,23 @@ off. The organisation can ask for it there: an invitation with
 `integrity_check` makes the waiting room ask the candidate, before **Join**,
 whether to run the check and whether to allow camera checks. If they run it,
 the summary their app sends when they leave the call (outcome, score, flag
-counts, camera coverage) appears on the panel seat, on the scorecard page and
-in Cloud, marked as the candidate's app's own report. See
-[Sentinel](sentinel.md#candidate-integrity-check).
+counts, camera coverage, assurance level and verification rung) appears on the
+panel seat, on the scorecard page and in Cloud, marked as the candidate's app's
+own report. See [Sentinel](sentinel.md#candidate-integrity-check).
+
+**Live signals.** If the candidate also allowed voice checks, the panel seat
+shows a live feed from the candidate's app. A panelist presses **Mark question
+asked**; the candidate's app times the candidate's next answer in their own
+voice and sends back the delay, the candidate's usual delay, and whether a
+look down or another voice came just before. Voice checks are signal
+processing on the call's own microphone stream: no transcription, no model and
+nothing stored. Each signal is signed by the sending node, and the candidate's
+app accepts question markers only from the panel. Signals are a reason to ask,
+not a verdict.
+
+**Live segments.** After an unscripted stretch of questions, a panelist can
+press **Live segment done**. The candidate's integrity check records it as a
+live verification, and the report then carries the `live` rung.
 
 ## Architecture
 
@@ -181,6 +195,12 @@ It can ask for:
 - a concrete, step-by-step example after a short answer; or
 - evidence for the next criterion still marked `not_covered`.
 
+Each criterion can carry follow-ups written in the preparation view. An
+uncovered criterion suggests its next authored follow-up ahead of the generic
+one. When a live signal comes with a concern (an answer much later than the
+candidate's usual, or a look down or another voice just before), the panel gets
+a suggestion for the criterion that question was about.
+
 At most three suggestions are added for a trigger, and each can be marked
 `asked` or `dismissed`. The summary generator produces an editable draft from
 criterion coverage and the five latest timestamped transcript highlights. It
@@ -196,9 +216,10 @@ is monitored first, with a candidate-only session as the fallback.
 
 Sentinel starts only when that participant has accepted Sentinel processing.
 Camera-derived checks additionally require their camera choice. An integrity
-session is stored with `purpose = 'interview'`. During the live interview,
-warnings and critical findings can mark the integrity session `flagged`, but do
-not suspend or end the interview assistant workflow. Interview-purpose sessions
+session is stored with `purpose = 'interview'`. During the live interview, a
+warning or critical finding moves the integrity session to `review`, and
+findings on two independent channels mark it `flagged`; neither suspends or
+ends the interview assistant workflow. Interview-purpose sessions
 also do not stage camera frames for the assessment appeal-evidence flow.
 
 ## PII and privacy boundaries
@@ -238,7 +259,8 @@ Migration 16 (`interview_panel_link`) adds `cloud_url`, `cloud_interview_id`,
 `cloud_panelist_id`, `cloud_panel_token` and `cloud_org` to
 `interview_sessions`, with one session per Cloud interview and seat.
 Migration 17 (`interview_integrity_reports`) keeps the candidate's copy of each
-integrity result they sent.
+integrity result they sent. Migration 37 (`interview_criterion_followups`) adds
+`follow_ups_json` to `interview_criteria`.
 
 The `commands/interview.rs` module exposes create/list/get, consent, transcript,
 follow-up, criterion, note, lifecycle, summary/review, deletion, and expiry-purge

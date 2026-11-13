@@ -18,7 +18,7 @@
 //!
 //! Bounds on what consent can authorise:
 //!
-//! - only sessions that were flagged,
+//! - only sessions that were flagged or sent to review,
 //! - only the snapshots that carried a flag, not the whole session,
 //! - an absolute `expires_at`, enforced on unlock and on a timer,
 //! - deletable by the learner at any moment, before or after expiry.
@@ -191,7 +191,7 @@ impl EvidenceStaging {
 pub enum EvidenceError {
     #[error("db error: {0}")]
     Db(#[from] rusqlite::Error),
-    #[error("session {0} is not flagged; only flagged sessions may retain evidence")]
+    #[error("session {0} is not flagged; only flagged or in-review sessions may retain evidence")]
     NotFlagged(String),
     #[error("consent for session {0} was already decided")]
     AlreadyDecided(String),
@@ -237,7 +237,7 @@ pub fn decide(
         params![session_id],
         |r| r.get(0),
     )?;
-    if status != "flagged" {
+    if status != "flagged" && status != "review" {
         return Err(EvidenceError::NotFlagged(session_id.to_string()));
     }
 
@@ -540,6 +540,18 @@ mod tests {
         let s = stored_summary(db.conn(), "s1").expect("summary");
         assert_eq!(s.camera_frames, 2);
         assert_eq!(s.total_bytes, 256);
+    }
+
+    #[test]
+    fn a_session_in_review_may_retain_evidence() {
+        // A single flag now sends a session to review rather than flagging
+        // it; the learner still answers that flag.
+        let db = db_with_session("review");
+        let staging = EvidenceStaging::new();
+        staging.stage("s1", frame(1));
+
+        assert_eq!(decide(db.conn(), &staging, "s1", true, NOW).unwrap(), 1);
+        assert_eq!(stored_rows(&db), 1);
     }
 
     #[test]

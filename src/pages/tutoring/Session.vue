@@ -531,6 +531,12 @@ function peerInitials(nodeId: string): string {
             :title="$t('tutoring.interviewRoom.check.runningHint')"
             data-testid="integrity-check-on"
           >{{ $t('tutoring.interviewRoom.check.running') }}</span>
+          <span
+            v-if="checkRunning && interviewCheck.voiceChecks.value"
+            class="rounded-full bg-primary/10 px-2 py-0.5 text-[0.65rem] sm:text-xs font-medium text-primary whitespace-nowrap"
+            :title="$t('tutoring.interviewRoom.check.voiceRunningHint')"
+            data-testid="voice-checks-on"
+          >{{ $t('tutoring.interviewRoom.check.voiceRunning') }}</span>
           <!-- Duration timer -->
           <span v-if="isActive" class="rounded bg-muted px-1 sm:px-1.5 py-0.5 text-[0.65rem] sm:text-xs font-mono text-muted-foreground tabular-nums">
             {{ formattedDuration }}

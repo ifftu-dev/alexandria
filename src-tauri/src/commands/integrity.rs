@@ -1,5 +1,5 @@
 use crate::sentinel::snapshots::{
-    compute_outcome, flag_severity, map_snapshot, persist_snapshot, IntegritySnapshot, Severity,
+    flag_severity, map_snapshot, persist_snapshot, IntegritySnapshot, Severity,
     SubmitSnapshotRequest,
 };
 
@@ -28,23 +28,15 @@ pub struct IntegritySession {
     /// `local`, or `device_attested` once the platform attestation stored
     /// for this session verified. Re-verified at issuance.
     pub assurance_level: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct EndSessionRequest {
-    pub overall_integrity_score: f64,
-    pub overall_consistency_score: f64,
+    /// Items whose first visit arrived with response-process timing.
+    pub response_items: i64,
+    /// The locked trust profile; `None` until one is chosen.
+    pub trust_profile: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct StartSessionResponse {
     pub session_id: String,
-}
-
-/// Weighted severity penalty per spec §Trust Factor Integration — each
-/// critical subtracts 0.20, each warning 0.10, info contributes nothing.
-fn trust_penalty(critical_count: i64, warning_count: i64) -> f64 {
-    (critical_count as f64) * 0.20 + (warning_count as f64) * 0.10
 }
 
 /// The assurance every session has. `device_attested` is reached only
@@ -177,6 +169,7 @@ pub async fn integrity_attest_session(
         app_id: captured.app_id,
         payload: captured.payload,
         captured_at: crate::clock::now_rfc3339(),
+        companion: None,
     };
     // Verify what we just captured (the end-of-session assertion is not
     // required yet: no commitment root exists).
@@ -214,6 +207,79 @@ pub async fn integrity_attest_session(
     })
 }
 
+/// Choose and lock the session's trust profile.
+///
+/// Called once, after `integrity_attest_session` has settled and before the
+/// first snapshot. The backend decides: the stored attestation result, the
+/// reported capabilities, the device benchmark (run here only when a camera
+/// was reported and consented), the role's policy floor and the consent. The
+/// reply carries the floor as judged now, so the learner is told before the
+/// first item.
+#[tauri::command]
+pub async fn integrity_select_profile(
+    state: State<'_, AppState>,
+    session_id: String,
+    request: crate::sentinel::trust_profile::ProfileRequest,
+) -> Result<crate::sentinel::trust_profile::SelectedProfile, String> {
+    use crate::sentinel::trust_profile::select_for_session;
+    // When a paired phone is the camera, its benchmark is the one that
+    // matters; the desktop's own camera is not used. Without companion
+    // consent the phone is dropped from the session here, before anything
+    // it reported is read.
+    let phone = state
+        .content_node
+        .companion()
+        .consented_role(&session_id, request.consent.companion_phone)
+        .filter(|role| role.camera);
+    let benchmark = if let Some(role) = phone {
+        role.benchmark.filter(|_| request.needs_benchmark())
+    } else if request.needs_benchmark() {
+        // A benchmark that fails is not a pass: the camera profiles are then
+        // excluded as not benchmarked.
+        tokio::task::spawn_blocking(crate::sentinel::camera_budget::benchmark)
+            .await
+            .map_err(|e| format!("benchmark worker failed: {e}"))?
+            .map_err(|e| log::warn!(target: "sentinel", "device benchmark failed: {e}"))
+            .ok()
+    } else {
+        None
+    };
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "integrity.select-profile",
+            move |db| select_for_session(db.conn(), &session_id, &request, benchmark.as_ref()),
+        )
+        .await
+}
+
+/// The coverage statement a credential's integrity assertion names by
+/// digest, resolved offline from the statements bundled with the app.
+/// `None` when no bundled statement has that digest (another version, or a
+/// certification this build does not carry).
+#[tauri::command]
+pub async fn integrity_coverage_statement(
+    digest: String,
+) -> Result<Option<crate::sentinel::scoring::CoverageStatement>, String> {
+    Ok(crate::sentinel::scoring::resolve_coverage_statement(
+        &digest,
+    ))
+}
+
+/// Every coverage statement bundled with the app under the certification in
+/// force, one per trust profile and verification rung, so a sponsor reads
+/// what a policy's minimums cover before choosing them.
+#[tauri::command]
+pub async fn integrity_coverage_statements(
+) -> Result<Vec<crate::sentinel::scoring::CoverageStatement>, String> {
+    let certification = crate::sentinel::scoring::active_certification();
+    Ok(crate::sentinel::scoring::coverage_statements(
+        certification.as_ref().map(|(c, d)| (c, d.as_str())),
+    ))
+}
+
 /// iOS: extend a stored App Attest record with an assertion over the
 /// terminal commitment root, so the attested key vouches for the snapshot
 /// stream as well as the start nonce. Best effort; returns the JSON to
@@ -222,11 +288,37 @@ fn assert_commitment_for(
     attestation_json: Option<&str>,
     commitment_root: Option<&str>,
 ) -> Option<String> {
-    use crate::sentinel::attestation::{native, AttestationPayload, DeviceAttestation};
+    let (key_id, root) = needs_assertion(attestation_json, commitment_root)?;
+    let assertion = crate::sentinel::attestation::native::assert_commitment(&key_id, &root)
+        .map_err(|e| log::warn!(target: "sentinel", "app attest assertion failed: {e}"))
+        .ok()??;
+    with_assertion(attestation_json, &root, assertion)
+}
+
+/// The App Attest key id and root to assert, when a stored record has no
+/// assertion yet and the session has a root.
+fn needs_assertion(
+    attestation_json: Option<&str>,
+    commitment_root: Option<&str>,
+) -> Option<(String, String)> {
+    use crate::sentinel::attestation::{AttestationPayload, DeviceAttestation};
     let root = commitment_root?;
+    let record: DeviceAttestation = serde_json::from_str(attestation_json?).ok()?;
+    match record.payload {
+        AttestationPayload::AppAttest {
+            key_id_b64,
+            assertion_b64: None,
+            ..
+        } => Some((key_id_b64, root.to_string())),
+        _ => None,
+    }
+}
+
+/// The stored record extended with `assertion` over `root`.
+fn with_assertion(attestation_json: Option<&str>, root: &str, assertion: String) -> Option<String> {
+    use crate::sentinel::attestation::{AttestationPayload, DeviceAttestation};
     let mut record: DeviceAttestation = serde_json::from_str(attestation_json?).ok()?;
     let AttestationPayload::AppAttest {
-        key_id_b64,
         assertion_b64,
         asserted_root,
         ..
@@ -234,12 +326,6 @@ fn assert_commitment_for(
     else {
         return None;
     };
-    if assertion_b64.is_some() {
-        return None;
-    }
-    let assertion = native::assert_commitment(key_id_b64, root)
-        .map_err(|e| log::warn!(target: "sentinel", "app attest assertion failed: {e}"))
-        .ok()??;
     *assertion_b64 = Some(assertion);
     *asserted_root = Some(root.to_string());
     serde_json::to_string(&record).ok()
@@ -252,6 +338,18 @@ pub async fn integrity_submit_snapshot(
     req: SubmitSnapshotRequest,
 ) -> Result<IntegritySnapshot, String> {
     let staging_session_id = req.session_id.clone();
+    // A paired phone that is the camera supplies the window's camera
+    // scores; the desktop client's camera group is not used.
+    let mut req = req;
+    let companion = state.content_node.companion();
+    if companion
+        .role(&req.session_id)
+        .is_some_and(|role| role.camera)
+    {
+        if let Some(features) = req.features.as_mut() {
+            features.camera = companion.take_camera_window(&req.session_id);
+        }
+    }
     let (snapshot, purpose) = state
         .db_executor
         .execute(
@@ -288,12 +386,12 @@ pub async fn integrity_submit_snapshot(
     Ok(snapshot)
 }
 
-/// End an integrity session and record final scores.
+/// End an integrity session. Its score and status are the backend's own,
+/// derived from the committed snapshots; the client sends no scores.
 #[tauri::command]
 pub async fn integrity_end_session(
     state: State<'_, AppState>,
     session_id: String,
-    req: EndSessionRequest,
 ) -> Result<IntegritySession, String> {
     // On iOS, let the attested key sign the terminal commitment root before
     // the row is finalised. Platform work stays off the DB thread.
@@ -317,7 +415,24 @@ pub async fn integrity_end_session(
             },
         )
         .await?;
+    let companion = state.content_node.companion();
     let asserted = match pending {
+        // A paired phone signs the desktop's root with its attested key.
+        Some((json, root))
+            if crate::sentinel::companion::session::stored_binding(json.as_deref()).is_some() =>
+        {
+            match needs_assertion(json.as_deref(), root.as_deref()) {
+                Some((_, root)) => match companion.request_assertion(&session_id, &root).await {
+                    Ok(Some(assertion)) => with_assertion(json.as_deref(), &root, assertion),
+                    Ok(None) => None,
+                    Err(e) => {
+                        log::warn!(target: "sentinel", "companion assertion failed: {e}");
+                        None
+                    }
+                },
+                None => None,
+            }
+        }
         Some((json, root)) => tokio::task::spawn_blocking(move || {
             assert_commitment_for(json.as_deref(), root.as_deref())
         })
@@ -325,6 +440,7 @@ pub async fn integrity_end_session(
         .map_err(|e| format!("attestation worker failed: {e}"))?,
         None => None,
     };
+    let closing = session_id.clone();
     state
         .db_executor
         .execute(
@@ -341,37 +457,29 @@ pub async fn integrity_end_session(
                         )
                         .map_err(|e| e.to_string())?;
                 }
-                finish_session(db.conn(), &session_id, &req)
+                finish_session(db.conn(), &session_id)
             },
         )
         .await
+        .inspect(|_| companion.close(&closing))
 }
 
 fn finish_session(
     connection: &rusqlite::Connection,
     session_id: &str,
-    req: &EndSessionRequest,
 ) -> Result<IntegritySession, String> {
-    for score in [req.overall_integrity_score, req.overall_consistency_score] {
-        if !score.is_finite() || !(0.0..=1.0).contains(&score) {
-            return Err("integrity scores must be finite values between zero and one".into());
-        }
-    }
+    // Backend flags still waiting for the chain to start are committed
+    // before the session closes.
+    crate::sentinel::snapshots::flush_pending_flags(connection, session_id)?;
     let tx =
         rusqlite::Transaction::new_unchecked(connection, rusqlite::TransactionBehavior::Immediate)
             .map_err(|e| e.to_string())?;
     let conn = &tx;
-    let (current_status, cumulative_critical, cumulative_warning, ended_at): (
-        String,
-        i64,
-        i64,
-        Option<String>,
-    ) = conn
+    let (current_status, ended_at): (String, Option<String>) = conn
         .query_row(
-            "SELECT status, critical_count, warning_count, ended_at
-             FROM integrity_sessions WHERE id = ?1",
+            "SELECT status, ended_at FROM integrity_sessions WHERE id = ?1",
             params![session_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|e| match e {
             rusqlite::Error::QueryReturnedNoRows => "session not found".to_string(),
@@ -384,45 +492,28 @@ fn finish_session(
         return read_session(conn, session_id);
     }
 
-    let final_status = compute_outcome(
-        cumulative_critical,
-        cumulative_warning,
-        req.overall_integrity_score,
-        // `ending=true` maps clean sessions to "completed" rather than leaving
-        // them at "active". Flagged/suspended states stick regardless.
-        true,
-    );
-
+    // Every committed snapshot already moved the status as far as the
+    // decision rule allows. Ending only turns a clean session completed;
+    // review, flagged and suspended stand. Nothing is rescored.
     conn.execute(
         "UPDATE integrity_sessions SET
-                status = ?2,
-                integrity_score = ?3,
+                status = CASE status WHEN 'active' THEN 'completed' ELSE status END,
                 ended_at = datetime('now')
              WHERE id = ?1",
-        params![session_id, final_status, req.overall_integrity_score],
+        params![session_id],
     )
     .map_err(|e| e.to_string())?;
 
     let session = read_session(conn, session_id)?;
     tx.commit().map_err(|e| e.to_string())?;
-
-    // Surface the trust impact when a session ends in a non-clean state.
-    // The legacy per-evidence `trust_factor` decay was retired with the
-    // `evidence_records` table (migration 040, VC-first cutover). The
-    // trust signal now lives on this `integrity_sessions` row — its
-    // terminal `status` + `integrity_score` — which downstream credential
-    // issuance reads. The spec-pinned penalty (0.20/critical, 0.10/warning)
-    // is computed here for observability.
-    if final_status == "flagged" || final_status == "suspended" {
-        let penalty = trust_penalty(cumulative_critical, cumulative_warning);
-        if penalty > 0.0 {
-            log::warn!(
-                "integrity session {session_id} ended '{final_status}': trust penalty {penalty:.2} \
-                 (criticals={cumulative_critical}, warnings={cumulative_warning})"
-            );
-        }
+    if session.status != "completed" {
+        log::warn!(
+            "integrity session {session_id} ended '{}' (criticals={}, warnings={})",
+            session.status,
+            session.critical_count,
+            session.warning_count
+        );
     }
-
     Ok(session)
 }
 
@@ -504,7 +595,7 @@ pub async fn integrity_list_snapshots(
 /// The columns `map_session` reads, in order. Every session query selects
 /// exactly these, so a field added to one cannot be missing from another.
 const SESSION_COLUMNS: &str = "id, enrollment_id, status, integrity_score, critical_count, \
-     warning_count, started_at, ended_at, assurance_level";
+     warning_count, started_at, ended_at, assurance_level, response_items, trust_profile";
 
 fn map_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySession> {
     Ok(IntegritySession {
@@ -517,6 +608,8 @@ fn map_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<IntegritySession> {
         started_at: row.get(6)?,
         ended_at: row.get(7)?,
         assurance_level: row.get(8)?,
+        response_items: row.get(9)?,
+        trust_profile: row.get(10)?,
     })
 }
 
@@ -575,66 +668,13 @@ fn list_sessions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sentinel::snapshots::read_snapshot;
-
-    #[test]
-    fn severity_mapping_matches_spec() {
-        assert_eq!(flag_severity("devtools_detected"), Severity::Info);
-        assert_eq!(flag_severity("bot_suspected"), Severity::Critical);
-        assert_eq!(flag_severity("face_mismatch"), Severity::Critical);
-
-        assert_eq!(flag_severity("behavior_shift"), Severity::Warning);
-        assert_eq!(flag_severity("paste_detected"), Severity::Warning);
-        assert_eq!(flag_severity("multiple_faces"), Severity::Warning);
-        assert_eq!(flag_severity("prolonged_absence"), Severity::Warning);
-        assert_eq!(flag_severity("low_integrity"), Severity::Warning);
-
-        assert_eq!(flag_severity("tab_switching"), Severity::Info);
-        assert_eq!(flag_severity("no_face"), Severity::Info);
-        assert_eq!(flag_severity("frequent_absence"), Severity::Info);
-
-        // Display topology (docs/sentinel.md §Flagging Logic 17–20).
-        assert_eq!(flag_severity("split_screen"), Severity::Critical);
-        assert_eq!(flag_severity("screen_captured"), Severity::Critical);
-        assert_eq!(flag_severity("display_change"), Severity::Warning);
-        assert_eq!(flag_severity("external_display"), Severity::Info);
-
-        // Android environment (docs/sentinel.md §Flagging Logic 21–23).
-        assert_eq!(flag_severity("obscured_touch"), Severity::Critical);
-        assert_eq!(
-            flag_severity("foreign_accessibility_service"),
-            Severity::Warning
-        );
-        assert_eq!(flag_severity("debug_bridge_enabled"), Severity::Warning);
-
-        // Desktop hidden-overlay scan (docs/sentinel.md §Flagging Logic 24).
-        assert_eq!(flag_severity("hidden_overlay"), Severity::Critical);
-
-        // Virtual-camera label heuristic (docs/sentinel.md §Flagging Logic 25).
-        assert_eq!(flag_severity("virtual_camera"), Severity::Warning);
-        assert_eq!(flag_severity("spoof_suspected"), Severity::Warning);
-
-        // Process watchlist (docs/sentinel.md §Flagging Logic 26–29).
-        assert_eq!(flag_severity("cheat_tool_process"), Severity::Critical);
-        assert_eq!(flag_severity("unauthorized_process"), Severity::Warning);
-        assert_eq!(flag_severity("ai_assistant_running"), Severity::Info);
-        assert_eq!(flag_severity("screen_share_running"), Severity::Info);
-
-        // Phantom hotkeys (docs/sentinel.md §Flagging Logic 30–31).
-        assert_eq!(flag_severity("phantom_hotkey"), Severity::Warning);
-        assert_eq!(flag_severity("phantom_hotkey_repeated"), Severity::Critical);
-
-        assert_eq!(flag_severity("paste_classifier_anomaly"), Severity::Warning);
-        assert_eq!(
-            flag_severity("paste_classifier_critical"),
-            Severity::Critical
-        );
-
-        // Unknown flags default to Info rather than auto-escalating.
-        assert_eq!(flag_severity("totally_made_up"), Severity::Info);
-    }
 
     use crate::db::Database;
+    use crate::sentinel::scoring::{
+        DisplayFeatures, ProcessFeatures, ProfileRatios, RatioManifest, WindowFeatures,
+        DEFAULT_PROFILE,
+    };
+    use crate::sentinel::snapshots::{persist_snapshot_with, record_backend_flag};
 
     fn snapshot_db() -> Database {
         let db = Database::open_in_memory().unwrap();
@@ -648,23 +688,430 @@ mod tests {
         db
     }
 
-    fn snapshot_request() -> SubmitSnapshotRequest {
-        SubmitSnapshotRequest {
-            session_id: "snapshot-session".into(),
-            element_id: "element".into(),
-            integrity_score: 0.9,
-            consistency_score: 0.8,
-            typing_score: Some(0.9),
-            mouse_score: Some(0.9),
-            human_score: Some(1.0),
-            tab_score: Some(1.0),
-            paste_score: Some(1.0),
-            devtools_score: None,
-            camera_score: None,
-            ai_paste_anomaly: None,
-            gaze_offscreen_ratio: Some(0.0),
-            anomaly_flags: Vec::new(),
+    fn window(features: WindowFeatures) -> SubmitSnapshotRequest {
+        SubmitSnapshotRequest::from_features("snapshot-session", "element", features)
+    }
+
+    fn split_screen() -> WindowFeatures {
+        WindowFeatures {
+            display: Some(DisplayFeatures {
+                display_count: 1,
+                split_screen: true,
+                ..Default::default()
+            }),
+            ..Default::default()
         }
+    }
+
+    fn cheat_tool() -> WindowFeatures {
+        WindowFeatures {
+            processes: Some(ProcessFeatures {
+                categories: vec!["interview_cheat".into()],
+                watched: 1,
+                scanned: 200,
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// A manifest that has measured `split_screen` and `cheat_tool_process`
+    /// (two independent channels) and `screen_captured` (the display channel
+    /// again), each over the threshold on its own.
+    fn measured() -> RatioManifest {
+        let mut manifest = RatioManifest::uncertified();
+        manifest.version = "test-certified".into();
+        manifest.profiles.insert(
+            DEFAULT_PROFILE.into(),
+            ProfileRatios {
+                threshold: 2.0,
+                ratios: [
+                    ("split_screen".to_string(), 2.5),
+                    ("screen_captured".to_string(), 2.5),
+                    ("cheat_tool_process".to_string(), 3.0),
+                ]
+                .into(),
+            },
+        );
+        manifest
+    }
+
+    fn status(db: &Database) -> String {
+        read_session(db.conn(), "snapshot-session").unwrap().status
+    }
+
+    #[test]
+    fn a_single_flag_of_any_severity_puts_the_session_in_review_never_suspended() {
+        let db = snapshot_db();
+        // `split_screen` is critical. Under the old rule a second critical
+        // window suspended the attempt.
+        for _ in 0..3 {
+            let snapshot = persist_snapshot(db.conn(), &window(split_screen())).unwrap();
+            assert_eq!(snapshot.anomaly_flags, vec!["split_screen".to_string()]);
+            assert_eq!(snapshot.session_status.as_deref(), Some("review"));
+        }
+        let ended = finish_session(db.conn(), "snapshot-session").unwrap();
+        assert_eq!(ended.status, "review");
+    }
+
+    #[test]
+    fn two_independent_channels_over_threshold_flag_the_session() {
+        let db = snapshot_db();
+        let manifest = measured();
+        let first = persist_snapshot_with(db.conn(), &window(split_screen()), &manifest).unwrap();
+        assert_eq!(first.session_status.as_deref(), Some("review"));
+        let second = persist_snapshot_with(db.conn(), &window(cheat_tool()), &manifest).unwrap();
+        assert_eq!(second.anomaly_flags, vec!["cheat_tool_process".to_string()]);
+        assert_eq!(second.session_status.as_deref(), Some("flagged"));
+        let fusion = second.fusion.unwrap();
+        assert_eq!(fusion.manifest_version, "test-certified");
+        let over: Vec<_> = fusion
+            .channels
+            .iter()
+            .filter(|c| c.over_threshold)
+            .map(|c| c.channel.as_str())
+            .collect();
+        assert_eq!(over, ["display", "process"]);
+        assert!(fusion.advisory.is_empty());
+        assert_eq!(
+            finish_session(db.conn(), "snapshot-session")
+                .unwrap()
+                .status,
+            "flagged"
+        );
+    }
+
+    #[test]
+    fn two_measured_signals_in_one_channel_are_one_piece_of_evidence() {
+        let db = snapshot_db();
+        let both = WindowFeatures {
+            display: Some(DisplayFeatures {
+                display_count: 1,
+                split_screen: true,
+                screen_captured: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        for _ in 0..3 {
+            let snapshot =
+                persist_snapshot_with(db.conn(), &window(both.clone()), &measured()).unwrap();
+            assert_eq!(snapshot.session_status.as_deref(), Some("review"));
+        }
+    }
+
+    #[test]
+    fn unmeasured_signals_contribute_zero_and_are_reported_advisory() {
+        let db = snapshot_db();
+        // Every window raises flags in several channels, which under the old
+        // counting rule suspended the session at the second snapshot.
+        let mut noisy = split_screen();
+        noisy.processes = cheat_tool().processes;
+        noisy.obscured_touches = 2;
+        for _ in 0..4 {
+            let snapshot = persist_snapshot(db.conn(), &window(noisy.clone())).unwrap();
+            assert_eq!(snapshot.session_status.as_deref(), Some("review"));
+            let fusion = snapshot.fusion.unwrap();
+            assert_eq!(fusion.manifest_version, "uncertified");
+            assert_eq!(fusion.threshold, None);
+            assert!(fusion
+                .channels
+                .iter()
+                .all(|c| c.llr == 0.0 && !c.over_threshold));
+            assert_eq!(
+                fusion.advisory,
+                ["cheat_tool_process", "obscured_touch", "split_screen"]
+            );
+        }
+        // A measured manifest that does not cover these signals is the same.
+        let mut partial = measured();
+        partial
+            .profiles
+            .get_mut(DEFAULT_PROFILE)
+            .unwrap()
+            .ratios
+            .retain(|signal, _| signal == "screen_captured");
+        let snapshot = persist_snapshot_with(db.conn(), &window(noisy), &partial).unwrap();
+        assert_eq!(snapshot.session_status.as_deref(), Some("review"));
+    }
+
+    #[test]
+    fn a_backend_tamper_flag_suspends_and_the_session_takes_no_more_snapshots() {
+        let db = snapshot_db();
+        let clean = persist_snapshot(db.conn(), &window(WindowFeatures::default())).unwrap();
+        assert_eq!(clean.session_status.as_deref(), Some("active"));
+        assert!(clean.anomaly_flags.is_empty());
+        persist_snapshot(db.conn(), &window(split_screen())).unwrap();
+        assert_eq!(status(&db), "review");
+
+        assert_eq!(
+            record_backend_flag(db.conn(), "mcp_call_during_attempt").unwrap(),
+            1
+        );
+        assert_eq!(status(&db), "suspended");
+        assert!(
+            persist_snapshot(db.conn(), &window(WindowFeatures::default()))
+                .unwrap_err()
+                .contains("status: suspended")
+        );
+        assert_eq!(
+            finish_session(db.conn(), "snapshot-session")
+                .unwrap()
+                .status,
+            "suspended"
+        );
+    }
+
+    #[test]
+    fn an_interview_check_is_flagged_by_a_tamper_flag_never_suspended() {
+        let db = snapshot_db();
+        db.conn()
+            .execute("UPDATE integrity_sessions SET purpose = 'interview'", [])
+            .unwrap();
+        crate::sentinel::trust_profile::select_for_session(
+            db.conn(),
+            "snapshot-session",
+            &Default::default(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            record_backend_flag(db.conn(), "mcp_call_during_attempt").unwrap(),
+            1
+        );
+        assert_eq!(status(&db), "flagged");
+    }
+
+    #[test]
+    fn the_backend_derives_scores_and_flags_from_raw_features() {
+        let db = snapshot_db();
+        let mut features = WindowFeatures::default();
+        features.clipboard.paste_events = 1;
+        features.clipboard.pasted_chars = 600;
+        let snapshot = persist_snapshot(db.conn(), &window(features)).unwrap();
+        assert_eq!(snapshot.anomaly_flags, vec!["paste_detected".to_string()]);
+        assert_eq!(snapshot.paste_score, Some(0.4));
+        assert_eq!(snapshot.devtools_score, None);
+        let ended = finish_session(db.conn(), "snapshot-session").unwrap();
+        assert_eq!(ended.integrity_score, snapshot.composite_score);
+    }
+
+    #[test]
+    fn flag_rules_moved_from_the_client_hold_at_the_snapshot_boundary() {
+        use crate::sentinel::scoring::{
+            AndroidFeatures, CameraFeatures, HotkeyFeatures, OverlayFeatures,
+        };
+        let display = |external, split, captured, toggle, changes| WindowFeatures {
+            display: Some(DisplayFeatures {
+                display_count: if external { 2 } else { 1 },
+                external_display: external,
+                split_screen: split,
+                screen_captured: captured,
+                native_toggle: toggle,
+            }),
+            display_changes: changes,
+            ..Default::default()
+        };
+        let processes = |categories: &[&str]| WindowFeatures {
+            processes: Some(ProcessFeatures {
+                categories: categories.iter().map(|c| c.to_string()).collect(),
+                watched: categories.len() as u32,
+                scanned: 300,
+            }),
+            ..Default::default()
+        };
+        let hotkeys = |phantom| WindowFeatures {
+            hotkeys: Some(HotkeyFeatures { native: 5, phantom }),
+            ..Default::default()
+        };
+        let camera = |camera: CameraFeatures| WindowFeatures {
+            camera: Some(camera),
+            ..Default::default()
+        };
+        let mut android = WindowFeatures {
+            android: Some(AndroidFeatures {
+                foreign_accessibility_services: 1,
+                adb_enabled: true,
+            }),
+            obscured_touches: 3,
+            ..Default::default()
+        };
+        let mut models = WindowFeatures::default();
+        models.models.keystroke_anomaly = Some(0.7);
+        models.models.mouse_human_prob = Some(0.3);
+        models.models.paste_anomaly = Some(0.96);
+        // The keystroke and mouse models flag only with advisory AI scoring on.
+        let mut advisory = models.clone();
+        advisory.models.advisory_enabled = true;
+        let mut critical_paste = WindowFeatures::default();
+        critical_paste.models.paste_anomaly = Some(0.995);
+        let mut focus = WindowFeatures::default();
+        focus.focus.app_switches = 1;
+        focus.focus.tab_switches = 11;
+
+        let cases: Vec<(WindowFeatures, &[&str])> = vec![
+            (display(true, false, false, false, 0), &["external_display"]),
+            (
+                display(true, false, false, false, 1),
+                &["external_display", "display_change"],
+            ),
+            (
+                display(false, true, true, false, 0),
+                &["split_screen", "screen_captured"],
+            ),
+            (
+                display(false, false, false, true, 2),
+                &["split_screen", "display_change"],
+            ),
+            (
+                android.clone(),
+                &[
+                    "foreign_accessibility_service",
+                    "debug_bridge_enabled",
+                    "obscured_touch",
+                ],
+            ),
+            (
+                WindowFeatures {
+                    overlay: Some(OverlayFeatures {
+                        suspicious: 1,
+                        scanned: 12,
+                        allowlisted: 0,
+                    }),
+                    ..Default::default()
+                },
+                &["hidden_overlay"],
+            ),
+            (
+                WindowFeatures {
+                    overlay: Some(OverlayFeatures {
+                        suspicious: 0,
+                        scanned: 17,
+                        allowlisted: 1,
+                    }),
+                    ..Default::default()
+                },
+                &[],
+            ),
+            (
+                processes(&[
+                    "interview_cheat",
+                    "remote_desktop",
+                    "ai_assistant",
+                    "screen_share",
+                ]),
+                &[
+                    "cheat_tool_process",
+                    "unauthorized_process",
+                    "ai_assistant_running",
+                    "screen_share_running",
+                ],
+            ),
+            (
+                processes(&["virtual_camera", "virtual_machine"]),
+                &["unauthorized_process"],
+            ),
+            (hotkeys(1), &["phantom_hotkey"]),
+            (hotkeys(3), &["phantom_hotkey_repeated", "phantom_hotkey"]),
+            (
+                camera(CameraFeatures {
+                    device_virtual: Some(true),
+                    ..Default::default()
+                }),
+                &["virtual_camera"],
+            ),
+            (
+                camera(CameraFeatures {
+                    gaze_checks: 10,
+                    gaze_down_glances: 3,
+                    gaze_offscreen_checks: 4,
+                    gaze_occluded_checks: 5,
+                    ..Default::default()
+                }),
+                &["device_glance", "gaze_wander", "gaze_occluded"],
+            ),
+            (
+                camera(CameraFeatures {
+                    liveness_checks: 4,
+                    liveness_spoof_checks: 3,
+                    ..Default::default()
+                }),
+                &["spoof_suspected"],
+            ),
+            // Too few liveness ticks to trust a spoof ratio.
+            (
+                camera(CameraFeatures {
+                    liveness_checks: 2,
+                    liveness_spoof_checks: 2,
+                    ..Default::default()
+                }),
+                &[],
+            ),
+            (models, &["paste_classifier_anomaly"]),
+            (
+                advisory,
+                &[
+                    "behavior_shift",
+                    "bot_suspected",
+                    "paste_classifier_anomaly",
+                ],
+            ),
+            (critical_paste, &["paste_classifier_critical"]),
+            (focus, &["tab_switching", "app_switch"]),
+        ];
+        for (features, expected) in cases {
+            let db = snapshot_db();
+            let snapshot = persist_snapshot(db.conn(), &window(features.clone())).unwrap();
+            assert_eq!(snapshot.anomaly_flags, expected, "{features:?}");
+        }
+        // Off Android the same counters are simply absent.
+        android.android = None;
+        android.obscured_touches = 0;
+        let db = snapshot_db();
+        assert!(persist_snapshot(db.conn(), &window(android))
+            .unwrap()
+            .anomaly_flags
+            .is_empty());
+    }
+
+    #[test]
+    fn severity_mapping_matches_spec() {
+        assert_eq!(flag_severity("devtools_detected"), Severity::Info);
+        assert_eq!(flag_severity("bot_suspected"), Severity::Critical);
+        assert_eq!(flag_severity("face_mismatch"), Severity::Critical);
+        assert_eq!(flag_severity("behavior_shift"), Severity::Warning);
+        assert_eq!(flag_severity("paste_detected"), Severity::Warning);
+        assert_eq!(flag_severity("multiple_faces"), Severity::Warning);
+        assert_eq!(flag_severity("prolonged_absence"), Severity::Warning);
+        assert_eq!(flag_severity("low_integrity"), Severity::Warning);
+        assert_eq!(flag_severity("tab_switching"), Severity::Info);
+        assert_eq!(flag_severity("no_face"), Severity::Info);
+        assert_eq!(flag_severity("frequent_absence"), Severity::Info);
+        assert_eq!(flag_severity("split_screen"), Severity::Critical);
+        assert_eq!(flag_severity("screen_captured"), Severity::Critical);
+        assert_eq!(flag_severity("display_change"), Severity::Warning);
+        assert_eq!(flag_severity("external_display"), Severity::Info);
+        assert_eq!(flag_severity("obscured_touch"), Severity::Critical);
+        assert_eq!(
+            flag_severity("foreign_accessibility_service"),
+            Severity::Warning
+        );
+        assert_eq!(flag_severity("debug_bridge_enabled"), Severity::Warning);
+        assert_eq!(flag_severity("hidden_overlay"), Severity::Critical);
+        assert_eq!(flag_severity("virtual_camera"), Severity::Warning);
+        assert_eq!(flag_severity("spoof_suspected"), Severity::Warning);
+        assert_eq!(flag_severity("cheat_tool_process"), Severity::Critical);
+        assert_eq!(flag_severity("unauthorized_process"), Severity::Warning);
+        assert_eq!(flag_severity("ai_assistant_running"), Severity::Info);
+        assert_eq!(flag_severity("screen_share_running"), Severity::Info);
+        assert_eq!(flag_severity("phantom_hotkey"), Severity::Warning);
+        assert_eq!(flag_severity("phantom_hotkey_repeated"), Severity::Critical);
+        assert_eq!(flag_severity("paste_classifier_anomaly"), Severity::Warning);
+        assert_eq!(
+            flag_severity("paste_classifier_critical"),
+            Severity::Critical
+        );
+        // Unknown flags default to Info rather than auto-escalating.
+        assert_eq!(flag_severity("totally_made_up"), Severity::Info);
     }
 
     #[test]
@@ -700,58 +1147,24 @@ mod tests {
 
     #[test]
     fn standalone_session_finish_is_retryable_without_rewriting_terminal_evidence() {
-        for flags in [Vec::new(), vec!["bot_suspected".to_owned()]] {
+        for (features, expected) in [
+            (WindowFeatures::default(), "completed"),
+            (split_screen(), "review"),
+        ] {
             let db = snapshot_db();
-            let mut request = snapshot_request();
-            request.anomaly_flags = flags;
-            persist_snapshot(db.conn(), &request).unwrap();
-            let first = finish_session(
-                db.conn(),
-                &request.session_id,
-                &EndSessionRequest {
-                    overall_integrity_score: 0.9,
-                    overall_consistency_score: 0.8,
-                },
-            )
-            .unwrap();
+            let request = window(features);
+            let committed = persist_snapshot(db.conn(), &request).unwrap();
+            let first = finish_session(db.conn(), &request.session_id).unwrap();
             assert_eq!(first.enrollment_id, None);
             assert!(first.ended_at.is_some());
-            assert_eq!(first.integrity_score, Some(0.9));
-            assert_eq!(
-                first.status,
-                if request.anomaly_flags.is_empty() {
-                    "completed"
-                } else {
-                    "flagged"
-                }
-            );
-            let retry = finish_session(
-                db.conn(),
-                &request.session_id,
-                &EndSessionRequest {
-                    overall_integrity_score: 0.1,
-                    overall_consistency_score: 0.1,
-                },
-            )
-            .unwrap();
+            assert_eq!(first.integrity_score, committed.composite_score);
+            assert_eq!(first.status, expected);
+            let retry = finish_session(db.conn(), &request.session_id).unwrap();
             assert_eq!(
                 serde_json::to_value(first).unwrap(),
                 serde_json::to_value(retry).unwrap()
             );
             assert!(persist_snapshot(db.conn(), &request).is_err());
-        }
-    }
-
-    #[test]
-    fn invalid_final_scores_cannot_end_a_session() {
-        let db = snapshot_db();
-        for score in [f64::NAN, f64::INFINITY, -0.1, 1.1] {
-            let ending = EndSessionRequest {
-                overall_integrity_score: score,
-                overall_consistency_score: 0.8,
-            };
-            assert!(finish_session(db.conn(), "snapshot-session", &ending).is_err());
-            assert_empty_snapshot_session(db.conn());
         }
     }
 
@@ -774,40 +1187,64 @@ mod tests {
         assert!(unchanged);
     }
 
-    #[test]
-    fn retired_devtools_inputs_cannot_create_scores_flags_or_penalties() {
-        let db = snapshot_db();
-        for score in [0.0, 1.0] {
-            let mut request = snapshot_request();
-            request.devtools_score = Some(score);
-            assert!(persist_snapshot(db.conn(), &request)
-                .unwrap_err()
-                .contains("no longer supported"));
-            assert_empty_snapshot_session(db.conn());
-        }
-        let mut request = snapshot_request();
-        request.anomaly_flags.push("devtools_detected".into());
-        assert!(persist_snapshot(db.conn(), &request).is_err());
-        assert_empty_snapshot_session(db.conn());
-        assert_eq!(trust_penalty(0, 0), 0.0);
+    fn legacy_request(extra: serde_json::Value) -> SubmitSnapshotRequest {
+        let mut body =
+            serde_json::json!({ "session_id": "snapshot-session", "element_id": "element" });
+        body.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value(body).unwrap()
     }
 
     #[test]
-    fn snapshot_rejects_invalid_scores_and_duplicate_anomalies_without_writes() {
+    fn client_computed_scores_and_flags_are_refused_without_writes() {
         let db = snapshot_db();
-        for score in [f64::NAN, f64::INFINITY, -0.1, 1.1] {
-            let mut request = snapshot_request();
-            request.integrity_score = score;
-            assert!(persist_snapshot(db.conn(), &request).is_err());
-            request = snapshot_request();
-            request.ai_paste_anomaly = Some(score);
-            assert!(persist_snapshot(db.conn(), &request).is_err());
+        // The pre-collector client sent its own scores and flags; the
+        // retired resize/devtools scorer sent a devtools score.
+        let old_client = serde_json::json!({
+            "integrity_score": 0.9, "consistency_score": 0.8, "typing_score": 0.9,
+            "mouse_score": 0.9, "human_score": 1.0, "tab_score": 1.0, "paste_score": 1.0,
+            "devtools_score": null, "camera_score": null, "ai_paste_anomaly": null,
+            "anomaly_flags": [],
+        });
+        for extra in [
+            old_client.clone(),
+            serde_json::json!({ "devtools_score": 0.0 }),
+            serde_json::json!({ "anomaly_flags": ["devtools_detected"] }),
+            serde_json::json!({ "features": {}, "integrity_score": 1.0 }),
+        ] {
+            assert!(persist_snapshot(db.conn(), &legacy_request(extra))
+                .unwrap_err()
+                .contains("no longer accepted"));
             assert_empty_snapshot_session(db.conn());
         }
-        let mut request = snapshot_request();
-        request.anomaly_flags = vec!["bot_suspected".into(), "bot_suspected".into()];
-        assert!(persist_snapshot(db.conn(), &request).is_err());
-        assert_empty_snapshot_session(db.conn());
+        // Raw features are accepted.
+        assert!(persist_snapshot(
+            db.conn(),
+            &legacy_request(serde_json::json!({ "features": {} }))
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn features_no_honest_collector_produces_are_refused_without_writes() {
+        let db = snapshot_db();
+        let mut nan = WindowFeatures::default();
+        nan.typing.mean_dwell_ms = f64::NAN;
+        let mut negative = WindowFeatures::default();
+        negative.focus.unfocused_ms = -1.0;
+        let mut probability = WindowFeatures::default();
+        probability.models.paste_anomaly = Some(1.1);
+        let mut inconsistent = WindowFeatures::default();
+        inconsistent.mouse.velocity_samples = 5;
+        for features in [nan, negative, probability, inconsistent] {
+            assert!(persist_snapshot(db.conn(), &window(features)).is_err());
+            assert_empty_snapshot_session(db.conn());
+        }
+        let unknown = serde_json::from_value::<SubmitSnapshotRequest>(serde_json::json!({
+            "session_id": "snapshot-session", "element_id": "e", "features": { "typing_score": 1.0 },
+        }));
+        assert!(unknown.is_err(), "features take measurements only");
     }
 
     #[test]
@@ -817,8 +1254,7 @@ mod tests {
             "CREATE TEMP TRIGGER fail_snapshot_outcome BEFORE UPDATE OF status ON integrity_sessions
              BEGIN SELECT RAISE(ABORT, 'injected outcome failure'); END;",
         ).unwrap();
-        let mut request = snapshot_request();
-        request.anomaly_flags = vec!["bot_suspected".into()];
+        let request = window(split_screen());
         assert!(persist_snapshot(db.conn(), &request)
             .unwrap_err()
             .contains("injected outcome failure"));
@@ -827,7 +1263,7 @@ mod tests {
             .execute_batch("DROP TRIGGER fail_snapshot_outcome;")
             .unwrap();
         let snapshot = persist_snapshot(db.conn(), &request).unwrap();
-        assert_eq!(snapshot.anomaly_flags, request.anomaly_flags);
+        assert_eq!(snapshot.anomaly_flags, vec!["split_screen".to_string()]);
         let (status, critical, warning, score, root): (String, i64, i64, f64, String) = db
             .conn()
             .query_row(
@@ -845,12 +1281,10 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(
-            (status.as_str(), critical, warning, score),
-            ("flagged", 1, 0, 0.9)
-        );
-        assert_eq!(trust_penalty(critical, warning), 0.2);
-        let canonical = format!("{}|0.9|[\"bot_suspected\"]", snapshot.id);
+        let composite = snapshot.composite_score.unwrap();
+        assert_eq!((status.as_str(), critical, warning), ("review", 1, 0));
+        assert_eq!(score, composite);
+        let canonical = format!("{}|{composite}|[\"split_screen\"]", snapshot.id);
         assert_eq!(
             root,
             crate::domain::integrity_commitment::fold_commitment("", canonical.as_bytes())
@@ -867,9 +1301,11 @@ mod tests {
                 [],
             )
             .unwrap();
-        assert!(persist_snapshot(db.conn(), &snapshot_request())
-            .unwrap_err()
-            .contains("not accepting"));
+        assert!(
+            persist_snapshot(db.conn(), &window(WindowFeatures::default()))
+                .unwrap_err()
+                .contains("not accepting")
+        );
         let root: String = db
             .conn()
             .query_row(
@@ -887,62 +1323,8 @@ mod tests {
             .unwrap();
         assert_eq!(count, 0);
     }
-
-    #[test]
-    fn each_snapshot_reports_the_session_status_it_left_behind() {
-        let db = snapshot_db();
-        let clean = persist_snapshot(db.conn(), &snapshot_request()).unwrap();
-        assert_eq!(clean.session_status.as_deref(), Some("active"));
-
-        let critical = SubmitSnapshotRequest {
-            anomaly_flags: vec!["phantom_hotkey_repeated".into()],
-            ..snapshot_request()
-        };
-        let first = persist_snapshot(db.conn(), &critical).unwrap();
-        assert_eq!(first.session_status.as_deref(), Some("flagged"));
-        // The second critical suspends the session. The snapshot that did it
-        // still lands and says so; that is the only way the learner hears.
-        let second = persist_snapshot(db.conn(), &critical).unwrap();
-        assert_eq!(second.session_status.as_deref(), Some("suspended"));
-
-        assert!(persist_snapshot(db.conn(), &snapshot_request())
-            .unwrap_err()
-            .contains("status: suspended"));
-        // Listing snapshots is not a status report.
-        let listed = read_snapshot(db.conn(), &second.id).unwrap();
-        assert_eq!(listed.session_status, None);
-    }
-
-    #[test]
-    fn outcome_respects_spec_thresholds() {
-        // Clean baseline
-        assert_eq!(compute_outcome(0, 0, 1.0, false), "active");
-        assert_eq!(compute_outcome(0, 0, 1.0, true), "completed");
-
-        // Flagged: 1 critical
-        assert_eq!(compute_outcome(1, 0, 1.0, false), "flagged");
-        // Flagged: 3+ warnings
-        assert_eq!(compute_outcome(0, 3, 1.0, false), "flagged");
-        // Flagged: low integrity alone
-        assert_eq!(compute_outcome(0, 0, 0.39, false), "flagged");
-
-        // Suspended: 2+ critical
-        assert_eq!(compute_outcome(2, 0, 1.0, false), "suspended");
-        // Suspended: 1 critical + 2 warnings
-        assert_eq!(compute_outcome(1, 2, 1.0, false), "suspended");
-        // Suspended outranks low-integrity flagged
-        assert_eq!(compute_outcome(2, 0, 0.20, false), "suspended");
-
-        // Ending doesn't downgrade flagged/suspended
-        assert_eq!(compute_outcome(1, 0, 1.0, true), "flagged");
-        assert_eq!(compute_outcome(2, 0, 1.0, true), "suspended");
-    }
-
-    #[test]
-    fn trust_penalty_matches_spec_weights() {
-        assert!((trust_penalty(0, 0) - 0.0).abs() < 1e-9);
-        assert!((trust_penalty(1, 0) - 0.20).abs() < 1e-9);
-        assert!((trust_penalty(0, 1) - 0.10).abs() < 1e-9);
-        assert!((trust_penalty(2, 3) - (0.40 + 0.30)).abs() < 1e-9);
-    }
 }
+
+#[cfg(test)]
+#[path = "integrity_response_tests.rs"]
+mod response_process_tests;

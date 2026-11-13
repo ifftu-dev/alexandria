@@ -6,6 +6,7 @@ import type {
   Organization,
   RoleAssessment,
   RoleAttemptSummary,
+  RoleSessionReview,
   VerifiableCredential,
 } from '@/types'
 import { errorMessage } from '@/utils/errorMessage'
@@ -88,6 +89,13 @@ export function useSponsor() {
     )
   }
 
+  /** The role's finished sessions, ranked for review by fusion posterior. */
+  async function listRoleSessionReviews(roleAssessmentId: string) {
+    return run(() =>
+      invoke<RoleSessionReview[]>('list_role_session_reviews', { roleAssessmentId }),
+    )
+  }
+
   async function issueRoleCredential(
     roleAssessmentId: string,
     subject: string,
@@ -116,6 +124,7 @@ export function useSponsor() {
     createRoleAssessment,
     setRoleAssessmentStatus,
     listRoleAttempts,
+    listRoleSessionReviews,
     issueRoleCredential,
   }
 }

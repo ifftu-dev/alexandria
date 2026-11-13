@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   listDevices: vi.fn(),
   push: vi.fn(),
   begin: vi.fn(),
+  listen: vi.fn(),
   abandon: vi.fn(),
   send: vi.fn(),
   sent: vi.fn(),
@@ -22,7 +23,7 @@ vi.mock('@/composables/useTutoringRoom', () => ({
 }))
 vi.mock('@/composables/useInterviewCheck', () => ({
   useInterviewCheck: () => ({
-    unsent, sendError, begin: mocks.begin, abandon: mocks.abandon, send: mocks.send, sent: mocks.sent,
+    unsent, sendError, begin: mocks.begin, listen: mocks.listen, abandon: mocks.abandon, send: mocks.send, sent: mocks.sent,
   }),
 }))
 vi.mock('vue-router', () => ({
@@ -49,6 +50,7 @@ beforeEach(() => {
   localStorage.clear()
   mocks.push.mockReset()
   mocks.begin.mockReset().mockResolvedValue(undefined)
+  mocks.listen.mockReset().mockResolvedValue(undefined)
   mocks.abandon.mockReset().mockResolvedValue(undefined)
   mocks.send.mockReset().mockResolvedValue(null)
   mocks.sent.mockReset().mockResolvedValue([])
@@ -120,10 +122,23 @@ describe('CandidateRoom', () => {
     await wrapper.get('[data-testid=check-run]').setValue(true)
     expect((wrapper.get('[data-testid=check-camera]').element as HTMLInputElement).checked).toBe(false)
     await wrapper.get('[data-testid=check-camera]').setValue(true)
+    // Voice checks are a separate choice, also off until chosen.
+    expect((wrapper.get('[data-testid=check-microphone]').element as HTMLInputElement).checked).toBe(false)
     await wrapper.get('[data-testid=join-interview]').trigger('click'); await flushPromises()
-    expect(mocks.begin).toHaveBeenCalledWith({ interviewId: 'int-1', cloud: 'http://127.0.0.1:8787', camera: true })
+    expect(mocks.begin).toHaveBeenCalledWith({ interviewId: 'int-1', cloud: 'http://127.0.0.1:8787', camera: true, microphone: false })
     expect(mocks.begin.mock.invocationCallOrder[0]!).toBeLessThan(mocks.joinRoom.mock.invocationCallOrder[0]!)
+    // Voice checks (when chosen) listen to the call's own stream, so after joining.
+    expect(mocks.joinRoom.mock.invocationCallOrder[0]!).toBeLessThan(mocks.listen.mock.invocationCallOrder[0]!)
     expect(mocks.push).toHaveBeenCalledWith(`/interview-call/room-7?cloud=${encodeURIComponent('http://127.0.0.1:8787')}`)
+  })
+
+  it('passes the voice-check choice to the check', async () => {
+    mocks.invoke.mockResolvedValue({ ticket: 'ticket-abc', openedAt: null, integrityCheck: true })
+    const wrapper = mountRoom(); await flushPromises()
+    await wrapper.get('[data-testid=check-run]').setValue(true)
+    await wrapper.get('[data-testid=check-microphone]').setValue(true)
+    await wrapper.get('[data-testid=join-interview]').trigger('click'); await flushPromises()
+    expect(mocks.begin).toHaveBeenCalledWith({ interviewId: 'int-1', cloud: 'http://127.0.0.1:8787', camera: false, microphone: true })
   })
 
   it('joins without the check when the candidate says no', async () => {
@@ -154,6 +169,7 @@ describe('CandidateRoom', () => {
         outcome: 'flagged', score: 71, started_at: 1_000, ended_at: 1_000 + 31 * 60, snapshots: 60,
         camera: false, camera_coverage: 0,
         flags: [{ flag: 'app_switch', severity: 'warning', count: 2 }],
+        assurance_level: 'local', verification_rung: 'live',
       },
     }])
     const wrapper = mountRoom(); await flushPromises()
@@ -162,6 +178,7 @@ describe('CandidateRoom', () => {
     expect(card.text()).toContain('{"org":"IFFTU"}')
     expect(card.text()).toContain('tutoring.interviewRoom.check.flagged')
     expect(card.text()).toContain('71 / 100')
+    expect(card.get('[data-testid=integrity-shared-rung]').text()).toBe('sentinel.trust.rung.live')
     expect(card.text()).toContain('{"minutes":31,"snapshots":60}')
     expect(card.text()).toContain('app_switch × 2')
     expect(card.text()).toContain('tutoring.interviewRoom.check.cameraOff')

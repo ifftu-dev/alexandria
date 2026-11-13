@@ -1,0 +1,33 @@
+{
+  "id": "paste-answer-core-android-01",
+  "label": "paste_answer",
+  "provenance": "synthetic",
+  "profile": "core",
+  "platform": "android",
+  "device_class": "phone",
+  "windows": [
+    {
+      "features": {
+        "android": {},
+        "clipboard": {
+          "paste_events": 1,
+          "pasted_chars": 900
+        }
+      }
+    },
+    {
+      "features": {
+        "android": {},
+        "clipboard": {
+          "paste_events": 2,
+          "pasted_chars": 1200
+        }
+      }
+    },
+    {
+      "features": {
+        "android": {}
+      }
+    }
+  ]
+}

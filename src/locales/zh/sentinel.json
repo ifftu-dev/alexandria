@@ -240,6 +240,34 @@
       "mcpCallDuringAttempt": {
         "description": "作答期间，一个已连接的外部助手请求了数据",
         "trigger": "作答进行中时，一个可以访问此个人资料的助手发出了请求"
+      },
+      "responseBelowReadingFloor": {
+        "description": "在读完题目之前就作答了",
+        "trigger": "首次作答早于题目长度和难度所允许的时间；在完成测量前仅供参考"
+      },
+      "responseRelayLag": {
+        "description": "作答总带有一段稳定的额外延迟",
+        "trigger": "多道题都比学习者平时的节奏多出几乎相同的时间；在完成测量前仅供参考"
+      },
+      "responseIdleBurst": {
+        "description": "长时间无操作后一次性作答",
+        "trigger": "长时间没有任何输入，随后快速连续操作完成了作答；在完成测量前仅供参考"
+      },
+      "answerChangeAfterIdle": {
+        "description": "停顿后更改了答案",
+        "trigger": "在长时间无操作后立即更改了已给出的答案；在完成测量前仅供参考"
+      },
+      "gazeDownThenResponse": {
+        "description": "低头之后作答",
+        "trigger": "向下看之后几秒内即作答（摄像头）；在完成测量前仅供参考"
+      },
+      "voiceThenResponse": {
+        "description": "出现另一个声音后作答",
+        "trigger": "听到第二个人的声音后几秒内即作答（麦克风）；在完成测量前仅供参考"
+      },
+      "cameraDegraded": {
+        "description": "摄像头会话中摄像头检查已停止",
+        "trigger": "会话的配置使用摄像头，但某个时间窗内没有任何人脸检查（摄像头被遮挡、权限被撤销或推理停止）；会话保持原配置并记录这一缺失"
       }
     }
   },
@@ -530,5 +558,103 @@
     "noticeOpen": "See what they have",
     "noticeLater": "Not now",
     "liveSuspended": "会话已暂停"
+  },
+  "companion": {
+    "pairToggle": "先配对我的手机，让这次尝试获得设备认证",
+    "offerTitle": "配对你的手机",
+    "offerBody": "在手机上以你的身份打开 Alexandria，进入 Sentinel，选择“从手机加入”并粘贴此代码。代码只能使用一次，五分钟后失效。",
+    "copy": "复制代码",
+    "copied": "已复制",
+    "waiting": "正在等待你的手机…",
+    "skip": "不使用手机继续",
+    "failed": "你的手机无法配对：{reason}",
+    "joinTitle": "从手机加入",
+    "cardDescription": "把这部手机的设备认证借给你在电脑上进行的测评。",
+    "joinBody": "粘贴电脑上显示的代码。这部手机会证明它是以你的身份登录的正版 Alexandria 应用；它只接受你自己会话的代码。",
+    "joinPlaceholder": "配对代码",
+    "join": "加入",
+    "joined": "已与电脑上的会话配对。在尝试结束前，请让 Alexandria 在这部手机上保持打开。",
+    "leave": "离开",
+    "unsupported": "只有 iPhone 或 Android 手机可以配对。"
+  },
+  "trust": {
+    "profile": {
+      "core": "基础",
+      "attested": "已认证设备",
+      "camera": "摄像头",
+      "full": "已认证设备和摄像头"
+    },
+    "profileHint": {
+      "core": "在测评窗口中检查打字、指针、焦点和屏幕。不使用摄像头，设备的数据由设备自行报告。",
+      "attested": "在平台可证明其运行的是正版、未经修改的应用副本的设备上进行基础检查。",
+      "camera": "基础检查，加上通过摄像头检查人脸在场、活体和视线，设备须足够快以运行这些检查。",
+      "full": "同时使用设备认证和摄像头的基础检查。"
+    },
+    "rung": {
+      "none": "无",
+      "process": "作答过程",
+      "probed": "追问",
+      "consistent": "与历史一致",
+      "live": "实时面试"
+    },
+    "rungHint": {
+      "none": "除监测外没有其他验证。",
+      "process": "观察了每道题的作答时间，未发现经测量的异常。",
+      "probed": "另有针对学习者本人答案的简短追问，全部通过。",
+      "consistent": "另有与学习者在该技能上的练习、课程和以往尝试相一致。",
+      "live": "另有在 Alexandria 内进行的面试中的一段无脚本实时环节。"
+    },
+    "signal": {
+      "core": "基础检查",
+      "device_attestation": "设备认证",
+      "camera": "摄像头检查"
+    },
+    "reason": {
+      "not_attested": "该设备无法证明其运行的是正版、未经修改的应用",
+      "no_camera": "未找到摄像头",
+      "camera_not_consented": "未开启摄像头",
+      "not_benchmarked": "针对摄像头的设备测试未完成",
+      "over_budget": "该设备无法流畅运行摄像头检查"
+    },
+    "raise": {
+      "pair_phone": "开始前先配对你的手机。",
+      "attested_device": "使用能通过设备认证的手机或平板。",
+      "connect_camera": "连接一个摄像头。",
+      "allow_camera": "开始前开启摄像头。",
+      "faster_device": "使用更快的设备，或先关闭其他应用。"
+    },
+    "probePolicy": {
+      "none": "无",
+      "reseed": "同一题目换新数值",
+      "authored": "讲师编写的追问",
+      "plugin": "由题目的评分器生成",
+      "llm": "由该职位的模型连接编写"
+    },
+    "notice": {
+      "title": "本次尝试在 {profile} 档案下进行",
+      "notRun": "{signal}未运行：{reason}。",
+      "floorMet": "达到赞助方的最低要求：{required}。",
+      "floorUnmet": "未达到赞助方的最低要求：{required}。在当前设置下无法开始本次尝试。",
+      "raiseTitle": "下次如何提高档案",
+      "tryAgain": "更改设置后重试",
+      "monitoringLimit": "无论哪个档案，监测都看不到第二个人或第二台设备。"
+    },
+    "coverage": {
+      "title": "涵盖范围",
+      "checked": "已检查",
+      "notChecked": "未检查",
+      "ceilings": "平台限制",
+      "measurement": "测量",
+      "certified": "来自版本 {version}（{date}）的认证比率",
+      "rates": "{signal}：精确率 {precision}，召回率 {recall}",
+      "unresolved": "此版本的应用未包含这份覆盖声明。",
+      "digest": "声明摘要",
+      "quoted": "按凭证所指名称原文引用。"
+    },
+    "live": {
+      "mark": "实时环节完成",
+      "hint": "在一段无脚本的提问之后，将其标记为完成。候选人的诚信检查会将其记录为一次实时验证。",
+      "marked": "已于 {time} 标记完成"
+    }
   }
 }

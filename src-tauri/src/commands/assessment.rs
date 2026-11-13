@@ -24,9 +24,10 @@ use crate::assessment::items::{self, GradeEngine};
 use crate::assessment::policy::{
     evaluate_attempt_policy, AttemptPolicy, AttemptRecord, PolicyDecision, ScorePolicy,
 };
-use crate::assessment::randomizer::{draw, QuestionMeta};
+use crate::assessment::randomizer::{draw, DifficultyBand, DrawContext, QuestionMeta};
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
+use crate::sentinel::trust_profile::{self, PolicyFloor};
 use crate::settings::{registry::keys, SettingsStore};
 use crate::AppState;
 
@@ -40,6 +41,9 @@ pub struct ServedQuestion {
     /// unless exactly one option is selected, so the client must know which
     /// control to render.
     pub multiple: bool,
+    /// Bank difficulty (1 to 5). Not a secret: the collector uses it with
+    /// the item's length for the response-process reading floor.
+    pub difficulty: u8,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -55,6 +59,10 @@ pub struct StartedAttempt {
     /// Fixed at the first start; a resumed attempt reports the stored role
     /// regardless of what the retry asked for.
     pub role: Option<AttemptRoleTarget>,
+    /// The role's minimum trust profile judged against the session, before
+    /// the first item. An attempt is only started when it is satisfied;
+    /// issuance judges it again and must agree.
+    pub policy_floor: PolicyFloor,
 }
 
 /// A published sponsor role a learner can assess for. Chosen before the
@@ -65,9 +73,12 @@ pub struct AttemptRoleTarget {
     pub role_assessment_id: String,
     pub role_title: String,
     pub org_name: String,
-    /// True when the role's issuance policy sets `min_camera_coverage > 0`.
+    /// True when the role's minimum trust profile runs the camera.
     pub camera_required: bool,
-    pub min_camera_coverage: Option<f64>,
+    /// True when the role's follow-up probes are written by its model
+    /// connection (`llm` probe policy). The learner is asked before the
+    /// attempt whether their chosen answers may leave the device for that.
+    pub generated_probes: bool,
 }
 
 /// `(id, question_ids, option_orders, draft_answers_json, role_assessment_id)`
@@ -100,14 +111,17 @@ fn map_role_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleRow> {
             })
         })
         .transpose()?;
-    let min_camera_coverage = policy.and_then(|p| p.min_camera_coverage);
+    let floor = policy.as_ref().and_then(|p| p.min_trust_profile);
+    let generated_probes = policy.as_ref().and_then(|p| p.probe_policy)
+        == Some(crate::assessment::probes::ProbePolicy::Llm);
     Ok(RoleRow {
         target: AttemptRoleTarget {
             role_assessment_id: r.get(0)?,
             role_title: r.get(1)?,
             org_name: r.get(2)?,
-            camera_required: min_camera_coverage.is_some_and(|c| c > 0.0),
-            min_camera_coverage,
+            camera_required: floor
+                .is_some_and(|f| f.includes(crate::sentinel::scoring::ProfileSignal::Camera)),
+            generated_probes,
         },
         status: r.get(4)?,
         skill_ids: r
@@ -311,7 +325,7 @@ pub(crate) fn end_interrupted_attempts(
             AND integrity_session_id IS NOT ?4
             AND NOT (submitted_at IS NOT NULL AND EXISTS (
                 SELECT 1 FROM integrity_sessions s WHERE s.id=assessment_attempts.integrity_session_id
-                  AND s.ended_at IS NOT NULL AND s.status IN ('completed','flagged','suspended')))",
+                  AND s.ended_at IS NOT NULL AND s.status IN ('completed','review','flagged','suspended')))",
         params![now, subject_did, skill_id, current_integrity_session_id],
     )
     .map(|changed| changed as u32)
@@ -417,13 +431,16 @@ pub fn plan_goal_impl(
 
 /// Begin an attempt for `skill_id`: pick a ratified bank, draw a randomized,
 /// difficulty-stratified subset with shuffled options, persist the attempt, and
-/// return the served questions (without answers).
+/// return the served questions (without answers). The draw skips items this
+/// profile has seen, adds the bank's transfer items, and centres on the
+/// learner's difficulty band; see [`crate::assessment::randomizer`].
 #[tauri::command]
 pub async fn assessment_start_attempt(
     state: State<'_, AppState>,
     skill_id: String,
     integrity_session_id: Option<String>,
     role_assessment_id: Option<String>,
+    llm_probe_consent: Option<bool>,
 ) -> Result<StartedAttempt, String> {
     let seed: u64 = rand::random();
     let attempt_id = crate::clock::now_rfc3339() + "-" + &seed.to_string();
@@ -435,7 +452,7 @@ pub async fn assessment_start_attempt(
             state.profile_lease(),
             "assessment.start_attempt",
             move |db| {
-                start_attempt_db(
+                start_attempt_with_consent_db(
                     db,
                     skill_id,
                     integrity_session_id,
@@ -443,6 +460,7 @@ pub async fn assessment_start_attempt(
                     seed,
                     attempt_id,
                     now,
+                    llm_probe_consent.unwrap_or(false),
                 )
             },
         )
@@ -476,7 +494,7 @@ pub async fn assessment_recover(
         db.conn().query_row(
             "SELECT a.id,a.submitted_answers_json FROM assessment_attempts a JOIN integrity_sessions s ON s.id=a.integrity_session_id
              WHERE a.subject_did=?1 AND a.skill_id=?2 AND a.submitted_at IS NOT NULL AND a.graded_at IS NULL AND a.ended_at IS NULL
-             AND s.ended_at IS NOT NULL AND s.status IN ('completed','flagged','suspended')
+             AND s.ended_at IS NOT NULL AND s.status IN ('completed','review','flagged','suspended')
              AND ((?3 IS NULL AND a.exchange_binding IS NULL) OR a.exchange_binding LIKE ?3)
              ORDER BY a.started_at DESC LIMIT 1",
             params![did, skill_id, binding], |r| Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))
@@ -497,6 +515,33 @@ pub(crate) fn start_attempt_db(
     seed: u64,
     attempt_id: String,
     now: String,
+) -> Result<StartedAttempt, String> {
+    start_attempt_with_consent_db(
+        db,
+        skill_id,
+        integrity_session_id,
+        role_assessment_id,
+        seed,
+        attempt_id,
+        now,
+        false,
+    )
+}
+
+/// [`start_attempt_db`] with the learner's answer to the generated-probe
+/// consent (`llm` probe policy): whether their chosen answers and the skill
+/// description may leave the device after submission. Recorded when the
+/// attempt is first started; a resumed attempt keeps the first answer.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn start_attempt_with_consent_db(
+    db: &crate::db::Database,
+    skill_id: String,
+    integrity_session_id: Option<String>,
+    role_assessment_id: Option<String>,
+    seed: u64,
+    attempt_id: String,
+    now: String,
+    llm_probe_consent: bool,
 ) -> Result<StartedAttempt, String> {
     if crate::commands::diagnostics::is_enabled() {
         return Err("exit diagnostics before starting an assessment".into());
@@ -571,6 +616,7 @@ pub(crate) fn start_attempt_db(
         multiple: bool,
         difficulty: u8,
         bloom: crate::domain::bloom::BloomLevel,
+        transfer: bool,
     }
     let all: Vec<Q> = stmt
         .query_map(params![bank_id], |r| {
@@ -594,6 +640,9 @@ pub(crate) fn start_attempt_db(
                     })
                     .unwrap_or_default(),
                 multiple: content.get("kind").and_then(|v| v.as_str()) != Some("single"),
+                // Part of the ratified item content, so the item fingerprint
+                // covers it and it cannot be toggled without changing the item.
+                transfer: content.get("transfer").and_then(|v| v.as_bool()) == Some(true),
                 difficulty: r.get::<_, i64>(2)? as u8,
                 // Credential-bearing assessments require an explicit cognitive level.
                 bloom: r.get::<_, String>(3)?.parse().map_err(|e: String| {
@@ -619,6 +668,7 @@ pub(crate) fn start_attempt_db(
             difficulty: q.difficulty,
             option_count: q.options.len(),
             bloom: q.bloom,
+            transfer: q.transfer,
         })
         .collect();
     // Resume the one open attempt verbatim. Re-drawing here would let a
@@ -636,7 +686,7 @@ pub(crate) fn start_attempt_db(
         .optional()
         .map_err(|e| e.to_string())?;
 
-    let (attempt_id, drawn, draft_answers, role, is_resumed) = if let Some((
+    let (attempt_id, drawn, draft_answers, role, policy_floor, is_resumed) = if let Some((
         existing_id,
         question_ids_json,
         option_orders_json,
@@ -644,6 +694,9 @@ pub(crate) fn start_attempt_db(
         stored_role_id,
     )) = resumed
     {
+        let role = stored_role_target(conn, stored_role_id.as_deref())?;
+        // Judged again: the session may have lost what the floor needs.
+        let policy_floor = require_policy_floor(conn, &integrity_session_id, role.as_ref())?;
         (
             existing_id,
             crate::assessment::randomizer::Draw {
@@ -654,7 +707,8 @@ pub(crate) fn start_attempt_db(
                 .as_deref()
                 .map(parse_json_vec)
                 .unwrap_or_default(),
-            stored_role_target(conn, stored_role_id.as_deref())?,
+            role,
+            policy_floor,
             true,
         )
     } else {
@@ -664,11 +718,15 @@ pub(crate) fn start_attempt_db(
             .as_deref()
             .map(|id| resolve_role_target(conn, &skill_id, id))
             .transpose()?;
+        // Judge the floor before anything is drawn, for the same reason.
+        let policy_floor = require_policy_floor(conn, &integrity_session_id, role.as_ref())?;
+        let ctx = load_draw_context(conn, &subject_did, &skill_id)?;
         (
             attempt_id,
-            draw(&metas, draw_count.max(1) as usize, seed),
+            draw(&metas, draw_count.max(1) as usize, seed, &ctx),
             Vec::new(),
             role,
+            policy_floor,
             false,
         )
     };
@@ -688,6 +746,7 @@ pub(crate) fn start_attempt_db(
             prompt: q.prompt.clone(),
             options,
             multiple: q.multiple,
+            difficulty: q.difficulty,
         });
     }
 
@@ -707,8 +766,9 @@ pub(crate) fn start_attempt_db(
             "INSERT INTO assessment_attempts \
              (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
               integrity_session_id, started_at, attempt_ordinal, role_assessment_id, \
-              assessed_bloom_level, pass_threshold_snapshot, item_fingerprints) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+              assessed_bloom_level, pass_threshold_snapshot, item_fingerprints, \
+              llm_probe_consent) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 attempt_id,
                 subject_did,
@@ -724,6 +784,7 @@ pub(crate) fn start_attempt_db(
                 assessed_bloom,
                 pass_threshold,
                 serde_json::to_string(&fingerprints).map_err(|e| e.to_string())?,
+                llm_probe_consent,
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -736,8 +797,97 @@ pub(crate) fn start_attempt_db(
         questions: served,
         draft_answers,
         role,
+        policy_floor,
     })
 }
+
+/// Judge the role's policy floor against the monitoring session, record the
+/// judgement on the session for issuance to compare with, and refuse when
+/// the session does not meet it.
+fn require_policy_floor(
+    conn: &rusqlite::Connection,
+    integrity_session_id: &str,
+    role: Option<&AttemptRoleTarget>,
+) -> Result<PolicyFloor, String> {
+    let floor = match role {
+        Some(role) => trust_profile::role_floor(conn, &role.role_assessment_id)?,
+        None => None,
+    };
+    let judged = trust_profile::record_policy_floor(conn, integrity_session_id, floor)?;
+    if judged.satisfied {
+        return Ok(judged);
+    }
+    let missing: Vec<&str> = judged.missing.iter().map(|s| s.as_str()).collect();
+    Err(format!(
+        "policy floor not met: the role requires the '{}' trust profile, this session runs '{}' (missing: {})",
+        judged.required.map_or("none", |p| p.as_str()),
+        judged.profile.map_or("none", |p| p.as_str()),
+        if missing.is_empty() { "a selected profile".to_string() } else { missing.join(", ") },
+    ))
+}
+
+/// What the draw needs to know about this learner's history on `skill_id`:
+/// how many earlier attempts served each item, and the difficulty band their
+/// most recent graded answers point to. Fixed-form attempts list their
+/// items in `question_ids`; adaptive attempts store `[]` there and record
+/// each served item in `attempt_items`, so both are read and an item counts
+/// once per attempt. Ungraded and interrupted attempts count too: the
+/// learner still saw the items.
+pub(crate) fn load_draw_context(
+    conn: &rusqlite::Connection,
+    subject_did: &str,
+    skill_id: &str,
+) -> Result<DrawContext, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT item_id, COUNT(*) FROM ( \
+                 SELECT a.id AS attempt_id, j.value AS item_id \
+                   FROM assessment_attempts a, json_each(a.question_ids) j \
+                  WHERE a.subject_did = ?1 AND a.skill_id = ?2 \
+                 UNION \
+                 SELECT ai.attempt_id, ai.item_id \
+                   FROM attempt_items ai \
+                   JOIN assessment_attempts a ON a.id = ai.attempt_id \
+                  WHERE a.subject_did = ?1 AND a.skill_id = ?2 \
+             ) GROUP BY item_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let exposure = stmt
+        .query_map(params![subject_did, skill_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?.max(0) as u32))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT i.difficulty, ai.score \
+               FROM attempt_items ai \
+               JOIN assessment_attempts a ON a.id = ai.attempt_id \
+               JOIN assessment_items i ON i.id = ai.item_id \
+              WHERE a.subject_did = ?1 AND a.skill_id = ?2 AND ai.score IS NOT NULL \
+              ORDER BY ai.graded_at DESC LIMIT ?3",
+        )
+        .map_err(|e| e.to_string())?;
+    let prior: Vec<(u8, f64)> = stmt
+        .query_map(
+            params![subject_did, skill_id, PRIOR_ANSWERS_FOR_BAND],
+            |r| Ok((r.get::<_, i64>(0)?.clamp(1, 5) as u8, r.get::<_, f64>(1)?)),
+        )
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(DrawContext {
+        exposure,
+        band: DifficultyBand::from_prior(&prior),
+    })
+}
+
+/// How many of the learner's most recent graded answers on a skill set the
+/// difficulty band of the next draw. Recent enough to follow improvement,
+/// long enough that one bad attempt does not swing the band.
+const PRIOR_ANSWERS_FOR_BAND: i64 = 30;
 
 /// Published sponsor roles the learner can assess `skill_id` for. Drives
 /// the pre-attempt role chooser; an empty list means no chooser.
@@ -971,6 +1121,28 @@ pub fn grade_attempt_impl(
     answers: &[SubmittedAnswer],
     now: &str,
 ) -> Result<GradeResult, String> {
+    grade_attempt_with_manifest(
+        db,
+        engine,
+        issuer,
+        attempt_id,
+        answers,
+        now,
+        &crate::sentinel::scoring::active_manifest(),
+    )
+}
+
+/// [`grade_attempt_impl`] against an explicit ratio manifest, which scores
+/// the attempt's longitudinal consistency before a credential is issued.
+pub(crate) fn grade_attempt_with_manifest(
+    db: &crate::db::Database,
+    engine: &GradeEngine<'_>,
+    issuer: &Issuer,
+    attempt_id: &str,
+    answers: &[SubmittedAnswer],
+    now: &str,
+    manifest: &crate::sentinel::scoring::RatioManifest,
+) -> Result<GradeResult, String> {
     let issuer_did = issuer.did();
     let conn = db.conn();
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
@@ -1058,7 +1230,7 @@ pub fn grade_attempt_impl(
         return Err("assessment items changed during the attempt; answers were not graded".into());
     }
     let finalized: bool = conn.query_row(
-        "SELECT ended_at IS NOT NULL AND status IN ('completed','flagged','suspended') FROM integrity_sessions WHERE id=?1",
+        "SELECT ended_at IS NOT NULL AND status IN ('completed','review','flagged','suspended') FROM integrity_sessions WHERE id=?1",
         [integrity_session_id.as_deref().ok_or("assessment has no integrity session")?], |r|r.get(0))
         .map_err(|e|e.to_string())?;
     if !finalized {
@@ -1109,6 +1281,19 @@ pub fn grade_attempt_impl(
         0.0
     };
     let passed = score >= threshold;
+
+    // The score is on the row before issuance (inside this transaction), so
+    // the integrity assertion derives the attempt's consistency rung from
+    // the attempt itself.
+    conn.execute(
+        "UPDATE assessment_attempts SET score = ?1 WHERE id = ?2",
+        params![score, attempt_id],
+    )
+    .map_err(|e| e.to_string())?;
+
+    // The outcome against the learner's own history, before the assertion
+    // is built: a measured divergence can move the session to review.
+    crate::sentinel::consistency::apply_at_grading(conn, attempt_id, score, manifest)?;
 
     // Persist per-item results, including the reproducibility triple for
     // each one — an attempt total alone cannot be re-derived.
@@ -1461,6 +1646,135 @@ mod tests {
         assert!(
             r.credential_id.is_some(),
             "a passing attempt must credential"
+        );
+    }
+
+    /// An earlier attempt on the skill, the day before, with every item wrong.
+    fn failed_earlier_attempt(ctx: &Ctx) {
+        let conn = ctx.db.conn();
+        conn.execute(
+            "INSERT INTO assessment_attempts \
+             (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
+              started_at, graded_at, score, passed) \
+             VALUES ('att_0', ?1, 'bank_t', 'skill_rust', 1, '[]', '[]', \
+                     '2026-07-21T00:00:00Z', '2026-07-21T00:00:00Z', 0.0, 0)",
+            [&ctx.did.0],
+        )
+        .unwrap();
+        for ordinal in 0..6 {
+            conn.execute(
+                "INSERT INTO attempt_items (attempt_id, ordinal, item_id, score, graded_at) \
+                 VALUES ('att_0', ?1, 'q1', 0.0, '2026-07-21T00:00:00Z')",
+                [ordinal],
+            )
+            .unwrap();
+        }
+    }
+
+    fn integrity_status(ctx: &Ctx, credential_id: Option<String>) -> serde_json::Value {
+        let json: String = ctx
+            .db
+            .conn()
+            .query_row(
+                "SELECT signed_vc_json FROM credentials WHERE id=?1",
+                [credential_id.expect("a credential")],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let vc: serde_json::Value = serde_json::from_str(&json).unwrap();
+        vc.pointer("/integrity/status").cloned().unwrap()
+    }
+
+    #[test]
+    fn a_pass_that_outruns_the_learners_history_is_reviewed_once_divergence_is_measured() {
+        use crate::sentinel::scoring::{ProfileRatios, RatioManifest, DEFAULT_PROFILE};
+        let ctx = setup();
+        failed_earlier_attempt(&ctx);
+        let mut measured = RatioManifest::uncertified();
+        measured.version = "test-certified".into();
+        measured.profiles.insert(
+            DEFAULT_PROFILE.into(),
+            ProfileRatios {
+                threshold: 2.0,
+                ratios: [("longitudinal_divergence".to_string(), 3.0)].into(),
+            },
+        );
+        let answers = [answer("q1", &[0]), answer("q2", &[1])];
+        prepare(&ctx, &answers);
+        let result = grade_attempt_with_manifest(
+            &ctx.db,
+            &ctx.engine(),
+            &ctx.issuer,
+            "att_1",
+            &answers,
+            NOW,
+            &measured,
+        )
+        .unwrap();
+        assert!(result.passed, "review is not a verdict");
+        assert_eq!(
+            integrity_status(&ctx, result.credential_id),
+            serde_json::json!("review")
+        );
+    }
+
+    #[test]
+    fn a_pass_in_step_with_the_learners_history_is_issued_on_the_consistent_rung() {
+        use crate::sentinel::verification::{
+            record_verification, NewVerification, VerificationOutcome,
+        };
+        let ctx = setup();
+        let conn = ctx.db.conn();
+        // The day before: an attempt on the skill with every item right.
+        failed_earlier_attempt(&ctx);
+        conn.execute("UPDATE attempt_items SET score = 1.0", [])
+            .unwrap();
+        // Both items observed, and a probe on them satisfied in the session.
+        conn.execute(
+            "INSERT INTO integrity_observed_items (session_id, item_id)
+             SELECT 'test-session', value FROM assessment_attempts, json_each(question_ids)
+              WHERE assessment_attempts.id = 'att_1'",
+            [],
+        )
+        .unwrap();
+        record_verification(
+            conn,
+            &NewVerification {
+                session_id: "test-session",
+                attempt_id: Some("att_1"),
+                step: "probe",
+                policy: "reseed",
+                outcome: VerificationOutcome::Satisfied,
+                reason: None,
+                subject_ref: None,
+                detail: serde_json::json!({}),
+            },
+        )
+        .unwrap();
+
+        let result = grade(&ctx, &[answer("q1", &[0]), answer("q2", &[1])]);
+        let json: String = conn
+            .query_row(
+                "SELECT signed_vc_json FROM credentials WHERE id=?1",
+                [result.credential_id.expect("a credential")],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let vc: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            vc.pointer("/integrity/verificationRung"),
+            Some(&serde_json::json!("consistent"))
+        );
+    }
+
+    #[test]
+    fn an_unmeasured_divergence_does_not_change_the_issued_integrity() {
+        let ctx = setup();
+        failed_earlier_attempt(&ctx);
+        let result = grade(&ctx, &[answer("q1", &[0]), answer("q2", &[1])]);
+        assert_eq!(
+            integrity_status(&ctx, result.credential_id),
+            serde_json::json!("completed")
         );
     }
 
@@ -1953,7 +2267,7 @@ mod tests {
             .conn()
             .execute(
                 "UPDATE assessment_attempts SET ended_at = ?1, end_reason = 'diagnostics' \
-                  WHERE id = 'att_1'",
+                  WHERE assessment_attempts.id = 'att_1'",
                 [NOW],
             )
             .unwrap();
@@ -2166,6 +2480,9 @@ mod role_target_tests {
     };
     use crate::credentials::IssuancePolicy;
     use crate::db::Database;
+    use crate::sentinel::trust_profile::{
+        select_for_session, BenchmarkResult, Capabilities, ProfileRequest, TrustProfile,
+    };
 
     const NOW: &str = "2026-10-09T00:00:00Z";
 
@@ -2199,7 +2516,7 @@ mod role_target_tests {
         org_id: &str,
         title: &str,
         skills: &[&str],
-        camera: Option<f64>,
+        floor: Option<TrustProfile>,
     ) -> String {
         let req = CreateRoleAssessmentRequest {
             org_id: org_id.into(),
@@ -2208,7 +2525,7 @@ mod role_target_tests {
             course_id: None,
             skill_ids: skills.iter().map(|s| (*s).to_string()).collect(),
             issuance_policy: Some(IssuancePolicy {
-                min_camera_coverage: camera,
+                min_trust_profile: floor,
                 ..Default::default()
             }),
             required_assurance_level: None,
@@ -2228,7 +2545,7 @@ mod role_target_tests {
             &org.id,
             "Rust Dev",
             &["skill_rust", "skill_go"],
-            Some(0.8),
+            Some(TrustProfile::Camera),
         );
         let _go_only = role(conn, &org.id, "Go Dev", &["skill_go"], None);
         let archived = role(conn, &org.id, "Old Rust", &["skill_rust"], None);
@@ -2239,7 +2556,6 @@ mod role_target_tests {
         assert_eq!(open[0].role_assessment_id, rust);
         assert_eq!(open[0].org_name, "Acme");
         assert!(open[0].camera_required);
-        assert_eq!(open[0].min_camera_coverage, Some(0.8));
         assert!(open_roles_for_skill(conn, "skill_py").unwrap().is_empty());
     }
 
@@ -2248,7 +2564,13 @@ mod role_target_tests {
         let db = setup();
         let conn = db.conn();
         let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
-        let id = role(conn, &org.id, "Rust Dev", &["skill_rust"], Some(0.8));
+        let id = role(
+            conn,
+            &org.id,
+            "Rust Dev",
+            &["skill_rust"],
+            Some(TrustProfile::Camera),
+        );
         conn.execute(
             "UPDATE role_assessments SET issuance_policy_json = '{not json' WHERE id = ?1",
             params![id],
@@ -2259,11 +2581,17 @@ mod role_target_tests {
     }
 
     #[test]
-    fn a_zero_coverage_policy_does_not_require_the_camera() {
+    fn a_floor_without_the_camera_does_not_require_it() {
         let db = setup();
         let conn = db.conn();
         let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
-        role(conn, &org.id, "Rust Dev", &["skill_rust"], Some(0.0));
+        role(
+            conn,
+            &org.id,
+            "Rust Dev",
+            &["skill_rust"],
+            Some(TrustProfile::Attested),
+        );
         let open = open_roles_for_skill(conn, "skill_rust").unwrap();
         assert!(!open[0].camera_required);
     }
@@ -2293,7 +2621,7 @@ mod role_target_tests {
     fn a_new_attempt_stores_the_chosen_role_and_a_resume_reports_it() {
         let db = setup();
         let org = create_organization_impl(db.conn(), "Acme", "stake_owner", None, NOW).unwrap();
-        let rust = role(db.conn(), &org.id, "Rust Dev", &["skill_rust"], Some(0.9));
+        let rust = role(db.conn(), &org.id, "Rust Dev", &["skill_rust"], None);
 
         let started = start_attempt_db(
             &db,
@@ -2307,7 +2635,6 @@ mod role_target_tests {
         .unwrap();
         let role = started.role.expect("role target");
         assert_eq!(role.role_assessment_id, rust);
-        assert!(role.camera_required);
         let stored: Option<String> = db
             .conn()
             .query_row(
@@ -2373,6 +2700,178 @@ mod role_target_tests {
         .unwrap();
         assert!(started.role.is_none());
     }
+
+    fn floor_role(conn: &rusqlite::Connection, org_id: &str, floor: TrustProfile) -> String {
+        let req = CreateRoleAssessmentRequest {
+            org_id: org_id.into(),
+            role_title: format!("{} floor", floor.as_str()),
+            job_description: None,
+            course_id: None,
+            skill_ids: vec!["skill_rust".into()],
+            issuance_policy: Some(IssuancePolicy {
+                min_trust_profile: Some(floor),
+                ..Default::default()
+            }),
+            required_assurance_level: None,
+        };
+        let ra = create_role_assessment_impl(conn, &req, NOW).unwrap();
+        set_role_assessment_status_impl(conn, &ra.id, "published", NOW).unwrap();
+        ra.id
+    }
+
+    fn camera_request(role: Option<String>) -> ProfileRequest {
+        let camera = Capabilities {
+            camera: true,
+            ..Default::default()
+        };
+        ProfileRequest {
+            capabilities: camera,
+            consent: camera,
+            role_assessment_id: role,
+        }
+    }
+
+    #[test]
+    fn a_policy_floor_the_session_misses_refuses_the_attempt_before_any_item() {
+        let db = setup();
+        let org = create_organization_impl(db.conn(), "Acme", "stake_owner", None, NOW).unwrap();
+        let camera_role = floor_role(db.conn(), &org.id, TrustProfile::Camera);
+        // No camera consent: the session runs `core`.
+        let chosen = select_for_session(
+            db.conn(),
+            "isess_live",
+            &ProfileRequest {
+                role_assessment_id: Some(camera_role.clone()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(chosen.record.selection.profile, TrustProfile::Core);
+        assert!(!chosen.policy_floor.satisfied, "told at selection");
+
+        let err = start_attempt_db(
+            &db,
+            "skill_rust".into(),
+            Some("isess_live".into()),
+            Some(camera_role),
+            7,
+            "att_1".into(),
+            NOW.into(),
+        )
+        .unwrap_err();
+        assert!(err.contains("policy floor"), "{err}");
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM assessment_attempts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "a refused floor costs no attempt");
+
+        // Without a role there is no floor to miss.
+        let started = start_attempt_db(
+            &db,
+            "skill_rust".into(),
+            Some("isess_live".into()),
+            None,
+            7,
+            "att_1".into(),
+            NOW.into(),
+        )
+        .unwrap();
+        assert!(started.policy_floor.satisfied);
+        assert_eq!(started.policy_floor.required, None);
+        assert_eq!(started.policy_floor.profile, Some(TrustProfile::Core));
+    }
+
+    #[test]
+    fn a_generated_probe_role_is_announced_and_the_first_starts_consent_is_kept() {
+        use crate::assessment::probes::ProbePolicy;
+        let db = setup();
+        let org = create_organization_impl(db.conn(), "Acme", "stake_owner", None, NOW).unwrap();
+        let req = CreateRoleAssessmentRequest {
+            org_id: org.id.clone(),
+            role_title: "Generated follow-ups".into(),
+            job_description: None,
+            course_id: None,
+            skill_ids: vec!["skill_rust".into()],
+            issuance_policy: Some(IssuancePolicy {
+                probe_policy: Some(ProbePolicy::Llm),
+                probe_connection_id: Some("conn".into()),
+                ..Default::default()
+            }),
+            required_assurance_level: None,
+        };
+        let role = create_role_assessment_impl(db.conn(), &req, NOW)
+            .unwrap()
+            .id;
+        set_role_assessment_status_impl(db.conn(), &role, "published", NOW).unwrap();
+        let open = open_roles_for_skill(db.conn(), "skill_rust").unwrap();
+        assert!(open
+            .iter()
+            .any(|r| r.role_assessment_id == role && r.generated_probes));
+
+        let consent = || -> bool {
+            db.conn()
+                .query_row(
+                    "SELECT llm_probe_consent FROM assessment_attempts WHERE id = 'att_1'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+        let start = |id: &str, consent: bool| {
+            start_attempt_with_consent_db(
+                &db,
+                "skill_rust".into(),
+                Some("isess_live".into()),
+                Some(role.clone()),
+                7,
+                id.into(),
+                NOW.into(),
+                consent,
+            )
+            .unwrap()
+        };
+        assert!(start("att_1", true).role.unwrap().generated_probes);
+        assert!(consent());
+        // A retry resumes the same attempt and keeps the first answer.
+        assert_eq!(start("att_2", false).attempt_id, "att_1");
+        assert!(consent());
+    }
+
+    #[test]
+    fn a_session_running_the_camera_meets_a_camera_floor_at_attempt_start() {
+        let db = setup();
+        let org = create_organization_impl(db.conn(), "Acme", "stake_owner", None, NOW).unwrap();
+        let camera_role = floor_role(db.conn(), &org.id, TrustProfile::Camera);
+        let fast = BenchmarkResult {
+            detect_ms: 10.0,
+            liveness_ms: 5.0,
+            track_ms: 1.0,
+        };
+        select_for_session(
+            db.conn(),
+            "isess_live",
+            &camera_request(Some(camera_role.clone())),
+            Some(&fast),
+        )
+        .unwrap();
+        let started = start_attempt_db(
+            &db,
+            "skill_rust".into(),
+            Some("isess_live".into()),
+            Some(camera_role),
+            7,
+            "att_1".into(),
+            NOW.into(),
+        )
+        .unwrap();
+        assert!(started.policy_floor.satisfied);
+        assert_eq!(started.policy_floor.required, Some(TrustProfile::Camera));
+        // Unattested, so `full` is out and `camera` is the highest permitted.
+        assert_eq!(started.policy_floor.profile, Some(TrustProfile::Camera));
+    }
+
     #[test]
     fn served_questions_say_whether_several_answers_count() {
         let db = setup();
@@ -2404,5 +2903,259 @@ mod role_target_tests {
             .collect();
         assert_eq!(multiple.get("q1"), Some(&false));
         assert_eq!(multiple.get("q2"), Some(&true));
+    }
+}
+
+#[cfg(test)]
+mod adaptive_draw_tests {
+    //! The fixed-form draw adapts to the learner: it skips items this profile
+    //! has already been served, always includes the bank's transfer items,
+    //! and centres on the difficulty band their earlier answers suggest.
+    use super::*;
+    use crate::db::Database;
+    use std::collections::HashSet;
+
+    const NOW: &str = "2026-10-09T00:00:00Z";
+    const DID: &str = "did:key:zLearner";
+
+    /// A ratified bank with no cooldown, so successive attempts are allowed.
+    fn setup(draw_count: i64) -> Database {
+        let db = Database::open_in_memory().expect("db");
+        db.run_migrations().expect("migrations");
+        SettingsStore::set(db.conn(), keys::IDENTITY_LOCAL_DID, DID.to_string()).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO question_banks (id, skill_id, label, ratified, draw_count, cooldown_hours)
+                 VALUES ('bank_d', 'skill_rust', 'D', 1, ?1, '[0]')",
+                params![draw_count],
+            )
+            .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO integrity_sessions (id, status) VALUES ('isess_live', 'active')",
+                [],
+            )
+            .unwrap();
+        db
+    }
+
+    fn add_item(db: &Database, id: &str, difficulty: u8, transfer: bool) {
+        let content = serde_json::json!({
+            "kind": "single",
+            "prompt": format!("{id}?"),
+            "options": ["a", "b", "c"],
+            "transfer": transfer,
+        });
+        db.conn()
+            .execute(
+                "INSERT INTO assessment_items
+                     (id, item_kind, skill_id, content_public, grader_private, difficulty,
+                      bank_id, ratified, bloom_level)
+                 VALUES (?1, 'mcq', 'skill_rust', ?2, '{\"correct_indices\":[0]}', ?3,
+                         'bank_d', 1, 'remember')",
+                params![id, content.to_string(), difficulty],
+            )
+            .unwrap();
+    }
+
+    /// A finished earlier attempt that served `items` with the given scores.
+    fn prior_attempt(db: &Database, id: &str, items: &[(&str, f64)]) {
+        let ids: Vec<&str> = items.iter().map(|(q, _)| *q).collect();
+        let orders: Vec<Vec<usize>> = items.iter().map(|_| vec![0, 1, 2]).collect();
+        db.conn()
+            .execute(
+                "INSERT INTO assessment_attempts
+                     (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders,
+                      started_at, graded_at, score, passed, attempt_ordinal)
+                 VALUES (?1, ?2, 'bank_d', 'skill_rust', 1, ?3, ?4,
+                         '2026-10-01T00:00:00Z', '2026-10-01T00:10:00Z', 0.5, 0, 1)",
+                params![
+                    id,
+                    DID,
+                    serde_json::to_string(&ids).unwrap(),
+                    serde_json::to_string(&orders).unwrap()
+                ],
+            )
+            .unwrap();
+        for (ordinal, (item, score)) in items.iter().enumerate() {
+            db.conn()
+                .execute(
+                    "INSERT INTO attempt_items (attempt_id, ordinal, item_id, score, graded_at)
+                     VALUES (?1, ?2, ?3, ?4, '2026-10-01T00:10:00Z')",
+                    params![id, ordinal as i64, item, score],
+                )
+                .unwrap();
+        }
+    }
+
+    fn start(db: &Database, seed: u64) -> StartedAttempt {
+        start_attempt_db(
+            db,
+            "skill_rust".into(),
+            Some("isess_live".into()),
+            None,
+            seed,
+            format!("att_{seed}"),
+            NOW.into(),
+        )
+        .unwrap()
+    }
+
+    fn drawn(started: &StartedAttempt) -> HashSet<String> {
+        started.questions.iter().map(|q| q.id.clone()).collect()
+    }
+
+    /// Start a fresh attempt in a fresh database for every seed, so each
+    /// draw sees the same history.
+    fn draws_over_seeds(build: impl Fn() -> Database) -> Vec<HashSet<String>> {
+        (0..12u64)
+            .map(|seed| drawn(&start(&build(), seed)))
+            .collect()
+    }
+
+    #[test]
+    fn items_already_served_to_the_profile_are_excluded_while_unseen_ones_remain() {
+        let build = || {
+            let db = setup(3);
+            for i in 0..10 {
+                add_item(&db, &format!("q{i}"), 3, false);
+            }
+            prior_attempt(&db, "prior", &[("q0", 1.0), ("q1", 0.0), ("q2", 1.0)]);
+            db
+        };
+        for set in draws_over_seeds(build) {
+            assert_eq!(set.len(), 3);
+            for seen in ["q0", "q1", "q2"] {
+                assert!(!set.contains(seen), "{seen} was served before: {set:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_exhausted_bank_falls_back_to_the_least_exposed_items() {
+        let build = || {
+            let db = setup(2);
+            for i in 0..4 {
+                add_item(&db, &format!("q{i}"), 3, false);
+            }
+            // q0 and q1 served twice, q2 once, q3 never.
+            prior_attempt(&db, "p1", &[("q0", 1.0), ("q1", 1.0)]);
+            prior_attempt(&db, "p2", &[("q0", 0.0), ("q1", 0.0), ("q2", 1.0)]);
+            db
+        };
+        let expected: HashSet<String> = ["q2", "q3"].map(String::from).into();
+        for set in draws_over_seeds(build) {
+            assert_eq!(set, expected);
+        }
+    }
+
+    #[test]
+    fn every_draw_includes_the_banks_transfer_items_on_top_of_the_standard_draw() {
+        let build = || {
+            let db = setup(3);
+            for i in 0..10 {
+                add_item(&db, &format!("q{i}"), 3, false);
+            }
+            add_item(&db, "t1", 3, true);
+            // Served before, yet still required.
+            prior_attempt(&db, "prior", &[("t1", 1.0)]);
+            db
+        };
+        for set in draws_over_seeds(build) {
+            assert_eq!(
+                set.len(),
+                4,
+                "three standard items plus the transfer item: {set:?}"
+            );
+            assert!(set.contains("t1"), "transfer item missing: {set:?}");
+        }
+    }
+
+    /// Four unseen items at every difficulty 1–5 (ids `d<difficulty>_<n>`),
+    /// plus six difficulty-3 items an earlier attempt served and scored
+    /// `prior_score`.
+    fn banded_bank(prior_score: f64) -> Database {
+        let db = setup(3);
+        for d in 1..=5u8 {
+            for n in 0..4 {
+                add_item(&db, &format!("d{d}_{n}"), d, false);
+            }
+        }
+        let history: Vec<(String, f64)> = (0..6)
+            .map(|n| {
+                let id = format!("h{n}");
+                add_item(&db, &id, 3, false);
+                (id, prior_score)
+            })
+            .collect();
+        let history: Vec<(&str, f64)> = history.iter().map(|(id, s)| (id.as_str(), *s)).collect();
+        prior_attempt(&db, "prior", &history);
+        db
+    }
+
+    fn difficulties(set: &HashSet<String>) -> Vec<u8> {
+        set.iter().map(|id| id[1..2].parse().unwrap()).collect()
+    }
+
+    #[test]
+    fn a_learner_who_answered_correctly_before_draws_from_a_harder_band() {
+        for set in draws_over_seeds(|| banded_bank(1.0)) {
+            let ds = difficulties(&set);
+            assert_eq!(ds.len(), 3);
+            assert!(ds.iter().all(|&d| d >= 4), "easy item drawn: {set:?}");
+        }
+    }
+
+    #[test]
+    fn a_learner_who_answered_wrongly_before_draws_from_an_easier_band() {
+        for set in draws_over_seeds(|| banded_bank(0.0)) {
+            let ds = difficulties(&set);
+            assert_eq!(ds.len(), 3);
+            assert!(ds.iter().all(|&d| d <= 2), "hard item drawn: {set:?}");
+        }
+    }
+
+    /// Served order, ids and option order: everything a learner sees.
+    fn served(started: &StartedAttempt) -> Vec<(String, Vec<String>)> {
+        started
+            .questions
+            .iter()
+            .map(|q| (q.id.clone(), q.options.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn a_seed_reproduces_the_adapted_draw_exactly() {
+        let build = || {
+            let db = banded_bank(1.0);
+            add_item(&db, "t1", 2, true);
+            db
+        };
+        for seed in [3, 41, 977] {
+            assert_eq!(
+                served(&start(&build(), seed)),
+                served(&start(&build(), seed))
+            );
+        }
+        let distinct: HashSet<Vec<(String, Vec<String>)>> =
+            (0..8).map(|seed| served(&start(&build(), seed))).collect();
+        assert!(
+            distinct.len() > 1,
+            "different seeds should draw differently"
+        );
+    }
+
+    #[test]
+    fn a_resumed_attempt_keeps_its_original_draw() {
+        let db = setup(3);
+        for i in 0..10 {
+            add_item(&db, &format!("q{i}"), 3, false);
+        }
+        let first = start(&db, 5);
+        // The open attempt's items now count as served; a fresh draw would
+        // avoid them. The retry must return the same attempt instead.
+        let retry = start(&db, 6);
+        assert_eq!(retry.attempt_id, first.attempt_id);
+        assert_eq!(served(&retry), served(&first));
     }
 }

@@ -121,6 +121,29 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // Batched credential anchors: Merkle-root batches, per-credential
     // receipts, and cached ledger observations of anchor transactions.
     (33, "anchor_batches", include_str!("anchor_batches.sql")),
+    // Sentinel probes: per-assessment probe policy, authored follow-ups and
+    // variants, served probes, and verification results in the commitment
+    // chain. See `crate::assessment::probes`.
+    (34, "probe_contract", include_str!("probe_contract.sql")),
+    // How many items each integrity session saw with response timing.
+    (35, "integrity_response_items", include_str!("integrity_response_items.sql")),
+    // Sentinel trust profiles: the locked profile per integrity session, the
+    // inputs to its selection, consent per capability, and the policy floor
+    // judged before the first item. See `crate::sentinel::trust_profile`.
+    (36, "trust_profiles", include_str!("trust_profiles.sql")),
+    // Follow-up questions authored per interview criterion, suggested to the
+    // interviewer during the interview.
+    (37, "interview_criterion_followups", include_str!("interview_criterion_followups.sql")),
+    // Generated probes: the learner's consent at attempt start, the `llm`
+    // probe source and each generated probe's record. See
+    // `crate::assessment::llm_probe`.
+    (38, "llm_probes", include_str!("llm_probes.sql")),
+    // The item ids each integrity session's response tracker reported, so
+    // the `process` rung counts served items, not visits.
+    (39, "integrity_observed_items", include_str!("integrity_observed_items.sql")),
+    // Backend flags raised before a session's chain starts, committed after
+    // the trust profile selection. See `crate::sentinel::snapshots`.
+    (40, "integrity_pending_flags", include_str!("integrity_pending_flags.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

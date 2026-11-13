@@ -193,7 +193,7 @@ pub fn attach_session(
             // panelist's; the panel seat never starts it.
             sentinel_enabled: false,
             participants,
-            criteria: interview.criteria.clone(),
+            criteria: interview.criteria.iter().cloned().map(Into::into).collect(),
         },
         now,
     )?;

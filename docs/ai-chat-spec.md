@@ -1,7 +1,7 @@
 # Alexandria AI Chat and Tutoring — Feature Architecture
 
 Status: active
-Updated: 2026-10-27
+Updated: 2026-11-12
 
 Phases 1 and 2 are implemented; section 26 records where the implementation differs from earlier revisions. Phase 3 items remain proposals.
 
@@ -488,6 +488,7 @@ Sentinel already detects external help: overlays, cheat-tool processes, global h
 - A short post-attempt cooldown (default 15 minutes, per skill) keeps chat and the tutor from attaching material or practice for the skill just attempted. This blocks "submit, ask chat to explain the questions I just saw, retake tomorrow".
 - Clear the clipboard at attempt start and end.
 - Android assessment activity sets `FLAG_SECURE`; iOS already reports `screen_captured`; macOS remains detection only.
+- The one model call inside a live session is a generated probe under a sponsor's `llm` probe policy: a separate one-shot run type, not chat, made only for a submitted attempt the caller owns, with the learner's consent at attempt start. Chat, the tutor, practice and the broker stay refused. See [sentinel.md](sentinel.md) §Probes.
 
 ### New integrity flags
 
@@ -498,8 +499,8 @@ Added to the catalog in `integrity.rs` with the given severity:
 | `in_app_assistant_during_attempt` | Critical | A chat, tutor, or practice command reached the backend while an attempt was open. Should never fire; if it does, the client is tampered. |
 | `mcp_call_during_attempt` | Critical | An MCP broker tool call arrived while an attempt was open. |
 | `item_text_in_chat` | Critical | Text submitted to chat, a memory proposal, or an artifact fuzzy-matched a ratified bank item. |
-| `impossible_speed` | Warning | Correct answers delivered faster than a reading-time floor for the item. |
-| `practice_assessment_divergence` | Info | Independent practice checks fail consistently, then an assessment on the same skill passes within hours. |
+| `impossible_speed` | Warning | **Superseded** by `response_below_reading_floor` (info, advisory until certified): time to first input below a reading floor from item length and difficulty, not conditioned on correctness. See [sentinel.md](sentinel.md) §Response-process signals. |
+| `practice_assessment_divergence` | Info | **Superseded** by `longitudinal_divergence` (info, advisory until certified): the attempt outcome sits well above what the learner's practice, lessons and earlier attempts on the skill predict. See [sentinel.md](sentinel.md) §Longitudinal consistency. |
 
 Raise `ai_assistant_running` from Info to Warning for high-stakes roles on desktop. With an in-app assistant available, an external AI tool running during an attempt is more suspicious, not less.
 
@@ -513,6 +514,7 @@ Raise `ai_assistant_running` from Info to Warning for high-stakes roles on deskt
 - The randomized draw excludes question IDs previously served to the profile; a pass requires at least some items never seen before by that learner. `drawn.question_ids` is already stored per attempt, so this is a filter, not a schema change.
 - Each bank carries a small set of transfer items: same skill, different surface form. A pass requires the transfer items as well as the standard draw.
 - Track per-item exposure across profiles through Cloud or grader attestations and retire or rotate items over a threshold. The draw becomes exposure-weighted.
+- Built so far (fixed-form draw, see [skills-and-reputation.md](skills-and-reputation.md) §6.2): unseen items first, then the least-exposed on this profile, preferring the difficulty band prior answers suggest; items marked `"transfer": true` are served on top of the standard draw. Grading does not yet require transfer items or unseen items, no bundled bank carries transfer items, and exposure is this profile's only.
 - Cooldown escalates on failed attempts that also carried integrity warnings.
 
 ### Credential semantics
@@ -778,7 +780,7 @@ Phase 1 is implemented. Where it differs from earlier revisions of this document
 - **Phase 1 UI choices** (additive to the existing app): a topbar button with a ⌘J shortcut and no sidebar entry; review as a bottom sheet inside the panel; a floating button and a sheet on narrow windows; Learn and Practice shown as coming soon. A later visual pass made the panel calmer: three header controls (the title opens history; history, saved notes, learning memory, and full width sit in a More menu), the Ask / Learn / Practice mode and the model as pills in the message box, attachments behind a "+" (and as chips above the box on desktop), message actions shown on hover except for the latest answer and on touch screens, suggestions as single compact rows, nothing under 12 px, and connecting a model as one decision per screen (sign in, or set one up with an API key or a model the user runs, with rarely needed fields under Advanced). The expanded view keeps the conversation in a 720 px column; phones get a near full-height sheet with a grab handle.
 - **Review before sending is opt-in** (deviation from section 9's review events): learners found a review on every new chat tiring, so chat now sends without the review sheet unless the learner turns on "Review before sending" (setting `chat.review_before_send`, off by default; in the chat's More menu and Settings → Advanced). The destination stays visible in the model menu, attachments in the message box, and a request too large for the model always opens review so the learner chooses what to trim. Every send still goes through prepare, so what is sent is exactly the prepared request, and stale context is still refused.
 - **Minors** are refused remote connections unless a linked guardian approved the connection at its current endpoint (section 17). The learner asks from the chat; the request travels sealed over the existing guardian link on the next sync, and the guardian approves or declines it on the child's overview page. The decision is bound to the connection and endpoint, so changing the endpoint needs a new approval. Guardians see the connection's name, endpoint, and model, never chat content.
-- **Integrity flags**: `in_app_assistant_during_attempt` (chat or tutor) and `mcp_call_during_attempt` (external assistant) are recorded by the backend when it refuses a request during an attempt, written into the session's committed snapshot chain once per session at the session's current score. Studio run steps are refused but not flagged, since a run may have started before the attempt. `item_text_in_chat`, `impossible_speed`, and `practice_assessment_divergence` are not recorded: outside an attempt there is no live session to attach them to, and the last two belong to grading.
+- **Integrity flags**: `in_app_assistant_during_attempt` (chat or tutor) and `mcp_call_during_attempt` (external assistant) are recorded by the backend when it refuses a request during an attempt, written into the session's committed snapshot chain once per session at the session's current score. Studio run steps are refused but not flagged, since a run may have started before the attempt. `item_text_in_chat` is not recorded: outside an attempt there is no live session to attach it to. `impossible_speed` and `practice_assessment_divergence` were superseded by `response_below_reading_floor` and `longitudinal_divergence` (section 13A).
 - **Learn and Practice** (Phase 2): per-mode instructions (policy version 3). Practice questions arrive as a fenced JSON block, are validated and stored, and are checked locally (numeric with tolerance, multiple choice, short text); hints and a shown answer mark later attempts assisted. Messages and generated questions that resemble a stored assessment item are refused by a shingle-containment check over item prompts and options.
 - **Learning memory** (Phase 2): model suggestions arrive as a fenced block and wait for the learner; saved, active items are sent as data, listed in review, and bound to their revision.
 - **Native Anthropic adapter** (Phase 2): connections declare a protocol, `compatible` (the default, and what older documents read as) or `anthropic`. The Messages adapter uses API version `2026-10-21`, so sampling parameters are never sent. History is replayed as text only, without thinking blocks, which the protocol accepts. Because current models think by default and thinking counts against `max_tokens`, the adapter adds a fixed 8,192-token allowance to the requested output; the visible answer stays bounded by the output byte limit. Server-side refusal fallbacks are not requested. The chat connection form offers the choice; Studio's own connection editor keeps whatever a document already declares.

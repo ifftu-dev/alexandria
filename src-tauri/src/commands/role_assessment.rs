@@ -304,6 +304,56 @@ pub fn list_role_attempts_impl(
         .map_err(|e| e.to_string())
 }
 
+/// A role attempt's finished integrity session, rescored for review.
+#[derive(Debug, Clone, Serialize)]
+pub struct RoleSessionReview {
+    pub attempt_id: String,
+    pub subject_did: String,
+    pub integrity_session_id: String,
+    pub score: Option<f64>,
+    pub passed: Option<bool>,
+    pub review: crate::sentinel::surface::SessionReview,
+}
+
+/// The finished sessions of `role_assessment_id`'s attempts, most suspicious
+/// first: by fusion posterior, then session status, then how many windows
+/// raised a signal. Under a shared prior the posterior order is the summed
+/// log-likelihood ratio order, so no prior is assumed here.
+pub fn list_role_session_reviews_impl(
+    conn: &Connection,
+    role_assessment_id: &str,
+    manifest: &crate::sentinel::scoring::RatioManifest,
+    certification: Option<&crate::sentinel::scoring::measurement::Certification>,
+) -> Result<Vec<RoleSessionReview>, String> {
+    use crate::sentinel::scoring::SessionStatus;
+    let mut reviews = Vec::new();
+    for attempt in list_role_attempts_impl(conn, role_assessment_id)? {
+        let Some(session_id) = attempt.integrity_session_id else {
+            continue;
+        };
+        let review =
+            crate::sentinel::surface::session_review(conn, &session_id, manifest, certification)?;
+        reviews.push(RoleSessionReview {
+            attempt_id: attempt.attempt_id,
+            subject_did: attempt.subject_did,
+            integrity_session_id: session_id,
+            score: attempt.score,
+            passed: attempt.passed,
+            review,
+        });
+    }
+    let status = |r: &RoleSessionReview| SessionStatus::parse(&r.review.status);
+    let firings = |r: &RoleSessionReview| r.review.signals.iter().map(|s| s.windows).sum::<u32>();
+    reviews.sort_by(|a, b| {
+        b.review
+            .posterior_llr
+            .total_cmp(&a.review.posterior_llr)
+            .then(status(b).cmp(&status(a)))
+            .then(firings(b).cmp(&firings(a)))
+    });
+    Ok(reviews)
+}
+
 fn map_role_assessment(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleAssessment> {
     let skill_ids_json: Option<String> = r.get(5)?;
     let policy_json: Option<String> = r.get(6)?;
@@ -526,6 +576,33 @@ pub async fn list_role_attempts(
         .await
 }
 
+/// The role's finished sessions ranked for review by fusion posterior, with
+/// each raised signal's certified rates or its advisory status.
+#[tauri::command]
+pub async fn list_role_session_reviews(
+    state: State<'_, AppState>,
+    role_assessment_id: String,
+) -> Result<Vec<RoleSessionReview>, String> {
+    use crate::sentinel::scoring::{active_certification, active_manifest};
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Instructor,
+            state.profile_lease(),
+            "role-assessment.session_reviews",
+            move |db| {
+                let certification = active_certification();
+                list_role_session_reviews_impl(
+                    db.conn(),
+                    &role_assessment_id,
+                    &active_manifest(),
+                    certification.as_ref().map(|(c, _)| c),
+                )
+            },
+        )
+        .await
+}
+
 #[tauri::command]
 pub async fn get_role_assessment(
     state: State<'_, AppState>,
@@ -706,6 +783,168 @@ mod tests {
         assert_eq!(listed[1].passed, Some(false));
         assert_eq!(listed[0].integrity_session_id.as_deref(), Some("isess"));
         assert_eq!(list_role_attempts_impl(conn, &b).unwrap().len(), 1);
+    }
+
+    /// A role with one finished `core` session and attempt per entry of
+    /// `sessions`: (session id, status, flags of each committed window).
+    fn role_with_sessions(conn: &Connection, sessions: &[(&str, &str, &[&str])]) -> String {
+        let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
+        let role = create_role_assessment_impl(
+            conn,
+            &CreateRoleAssessmentRequest {
+                org_id: org.id,
+                role_title: "SRE".into(),
+                job_description: None,
+                course_id: None,
+                skill_ids: vec!["skill_rust".into()],
+                issuance_policy: None,
+                required_assurance_level: None,
+            },
+            NOW,
+        )
+        .unwrap()
+        .id;
+        conn.execute_batch(
+            "INSERT INTO question_banks (id, skill_id, label, ratified) VALUES ('bank', 'skill_rust', 'T', 1);",
+        )
+        .unwrap();
+        for (session, status, windows) in sessions {
+            conn.execute(
+                "INSERT INTO integrity_sessions (id, status, trust_profile, started_at, ended_at)
+                 VALUES (?1, ?2, 'core', ?3, ?3)",
+                params![session, status, NOW],
+            )
+            .unwrap();
+            for (i, flags) in windows.iter().enumerate() {
+                conn.execute(
+                    "INSERT INTO integrity_snapshots (id, session_id, composite_score, captured_at, anomaly_flags)
+                     VALUES (?1, ?2, 0.9, ?3, ?4)",
+                    params![format!("{session}-w{i}"), session, format!("2026-04-13T00:00:0{i}Z"), flags],
+                )
+                .unwrap();
+            }
+            conn.execute(
+                "INSERT INTO assessment_attempts \
+                 (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
+                  integrity_session_id, started_at, role_assessment_id) \
+                 VALUES (?1, 'did:key:zL', 'bank', 'skill_rust', 1, '[]', '[]', ?2, ?3, ?4)",
+                params![format!("att-{session}"), session, NOW, role],
+            )
+            .unwrap();
+        }
+        role
+    }
+
+    fn certification() -> crate::sentinel::scoring::measurement::Certification {
+        use crate::sentinel::scoring::measurement::{
+            Certification, CertifiedProfile, CertifiedSignal,
+        };
+        Certification {
+            format: 1,
+            version: "cert-test".into(),
+            date: "2026-11-12".into(),
+            synthetic: false,
+            corpus_id: "corpus".into(),
+            corpus_digest: "blake3:00".into(),
+            profiles: [(
+                "core".to_string(),
+                CertifiedProfile {
+                    threshold: 2.0,
+                    signals: [(
+                        "response_idle_burst".to_string(),
+                        CertifiedSignal {
+                            llr: 1.5,
+                            precision: 0.8,
+                            recall: 0.6,
+                        },
+                    )]
+                    .into(),
+                },
+            )]
+            .into(),
+        }
+    }
+
+    fn ranked(reviews: &[RoleSessionReview]) -> Vec<&str> {
+        reviews
+            .iter()
+            .map(|r| r.integrity_session_id.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn sponsor_sees_sessions_ranked_by_fusion_posterior_with_certified_rates() {
+        let (db, ..) = setup();
+        let conn = db.conn();
+        let role = role_with_sessions(
+            conn,
+            &[
+                ("clean", "completed", &["[]", "[]"]),
+                (
+                    "once",
+                    "completed",
+                    &[r#"["response_idle_burst","gaze_down_then_response"]"#, "[]"],
+                ),
+                (
+                    "twice",
+                    "review",
+                    &[r#"["response_idle_burst"]"#, r#"["response_idle_burst"]"#],
+                ),
+            ],
+        );
+        let cert = certification();
+        let reviews =
+            list_role_session_reviews_impl(conn, &role, &cert.ratio_manifest(), Some(&cert))
+                .unwrap();
+        assert_eq!(ranked(&reviews), vec!["twice", "once", "clean"]);
+
+        let twice = &reviews[0].review;
+        assert_eq!(twice.posterior_llr, 3.0);
+        assert_eq!(twice.threshold, Some(2.0));
+        assert_eq!(twice.signals.len(), 1);
+        let burst = &twice.signals[0];
+        assert_eq!(burst.signal, "response_idle_burst");
+        assert_eq!(burst.windows, 2);
+        assert!(!burst.advisory);
+        assert_eq!(burst.certified.as_ref().map(|c| c.precision), Some(0.8));
+        assert_eq!(burst.certified.as_ref().map(|c| c.recall), Some(0.6));
+
+        let once = &reviews[1].review;
+        assert_eq!(once.posterior_llr, 1.5);
+        let gaze = once
+            .signals
+            .iter()
+            .find(|s| s.signal == "gaze_down_then_response")
+            .unwrap();
+        assert!(gaze.advisory);
+        assert!(gaze.certified.is_none());
+
+        assert_eq!(reviews[2].review.posterior_llr, 0.0);
+        assert!(reviews[2].review.signals.is_empty());
+    }
+
+    #[test]
+    fn with_no_certified_rates_every_signal_is_advisory_and_status_breaks_the_tie() {
+        let (db, ..) = setup();
+        let conn = db.conn();
+        let role = role_with_sessions(
+            conn,
+            &[
+                ("quiet", "completed", &["[]"]),
+                ("noisy", "completed", &[r#"["response_idle_burst"]"#]),
+                ("flagged", "flagged", &["[]"]),
+            ],
+        );
+        let reviews = list_role_session_reviews_impl(
+            conn,
+            &role,
+            &crate::sentinel::scoring::RatioManifest::uncertified(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(ranked(&reviews), vec!["flagged", "noisy", "quiet"]);
+        assert!(reviews.iter().all(|r| r.review.posterior_llr == 0.0));
+        assert!(reviews[1].review.signals.iter().all(|s| s.advisory));
     }
 
     #[test]

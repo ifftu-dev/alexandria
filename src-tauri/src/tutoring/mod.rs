@@ -19,12 +19,14 @@
 
 pub(crate) mod call_kind;
 pub mod events;
+pub mod interview_signal;
 pub mod manager;
 pub mod media;
 pub(crate) mod panel_presence;
 pub(crate) mod presence;
 pub mod records;
 mod tasks;
+pub mod voice_tap;
 
 #[cfg(tutoring_video)]
 mod preview_jpeg;

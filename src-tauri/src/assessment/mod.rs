@@ -10,8 +10,10 @@ pub mod goal_plan;
 pub mod grader;
 pub mod irt;
 pub mod items;
+pub mod llm_probe;
 pub mod mcq;
 pub mod policy;
+pub mod probes;
 pub mod randomizer;
 
 /// A tiny deterministic PRNG (SplitMix64) so a stored `seed` reproduces the

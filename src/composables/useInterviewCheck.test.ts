@@ -1,28 +1,57 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 
-const mocks = vi.hoisted(() => ({ invoke: vi.fn(), start: vi.fn(), stop: vi.fn() }))
+const mocks = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  start: vi.fn(),
+  stop: vi.fn(),
+  handlers: new Map<string, (event: { payload: unknown }) => void>(),
+}))
 const active = ref(false)
 vi.mock('@/composables/useLocalApi', () => ({ useLocalApi: () => ({ invoke: mocks.invoke }) }))
-vi.mock('@/composables/useSentinel', () => ({
-  useSentinel: () => ({ start: mocks.start, stop: mocks.stop, isActive: active }),
+vi.mock('@tauri-apps/api/event', () => ({
+  listen: vi.fn(async (name: string, handler: (event: { payload: unknown }) => void) => {
+    mocks.handlers.set(name, handler)
+    return () => mocks.handlers.delete(name)
+  }),
 }))
+vi.mock('@/composables/useSentinel', async () => {
+  const { createResponseTracker } = await import('@/utils/sentinel/responseProcess')
+  const responses = createResponseTracker()
+  return {
+    useSentinel: () => ({
+      start: mocks.start,
+      stop: mocks.stop,
+      isActive: active,
+      getSessionId: () => (active.value ? 'session-9' : null),
+      responses,
+    }),
+  }
+})
 
 import { useInterviewCheck } from './useInterviewCheck'
 
+const emit = (name: string, payload: unknown) => mocks.handlers.get(name)?.({ payload })
+const commands = () => mocks.invoke.mock.calls.map(([name]) => name as string)
+
 beforeEach(async () => {
   mocks.invoke.mockReset()
+  mocks.handlers.clear()
   mocks.start.mockReset().mockImplementation(async () => { active.value = true })
   mocks.stop.mockReset().mockImplementation(async () => { active.value = false; return 'session-9' })
   // Module state carries over between tests; settle it.
   await useInterviewCheck().abandon()
 })
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('useInterviewCheck', () => {
   it('runs Sentinel for the call as an interview, then sends the stored session', async () => {
     const check = useInterviewCheck()
     await check.begin({ interviewId: 'int-1', cloud: 'http://cloud.test', camera: true })
-    expect(mocks.start).toHaveBeenCalledWith(null, true, 'interview')
+    expect(mocks.start).toHaveBeenCalledWith(null, true, 'interview', { microphone: false })
     expect(check.running.value?.interviewId).toBe('int-1')
 
     mocks.invoke.mockResolvedValueOnce({ integrity_session_id: 'session-9' })
@@ -60,5 +89,79 @@ describe('useInterviewCheck', () => {
     expect(mocks.stop).toHaveBeenCalled()
     expect(mocks.invoke).not.toHaveBeenCalled()
     expect(check.running.value).toBeNull()
+  })
+
+  it('never listens for voices without the candidate\'s microphone choice', async () => {
+    const check = useInterviewCheck()
+    await check.begin({ interviewId: 'int-4', cloud: 'http://cloud.test', camera: false })
+    await check.listen()
+    expect(commands()).not.toContain('sentinel_voice_listen')
+    expect(check.voiceChecks.value).toBe(false)
+    // Only the panel's signals (for live-segment marks), never the microphone.
+    expect([...mocks.handlers.keys()]).toEqual(['tutoring:interview-signal'])
+  })
+
+  it('records a live segment the panel marks in the running check', async () => {
+    mocks.invoke.mockResolvedValue(undefined)
+    const check = useInterviewCheck()
+    await check.begin({ interviewId: 'int-6', cloud: 'http://cloud.test', camera: false })
+    await check.listen()
+    emit('tutoring:interview-signal', { sender: 'panel-node', sender_name: 'Priya', signal: { live_segment: { segment_id: 'live-1' } }, timestamp: Date.now() })
+    await Promise.resolve()
+    expect(mocks.invoke).toHaveBeenCalledWith('hiring_interview_live_segment', {
+      interviewId: 'int-6',
+      integritySessionId: 'session-9',
+      segmentId: 'live-1',
+    })
+  })
+
+  it('records no live segment for other signals or once the check has finished', async () => {
+    mocks.invoke.mockResolvedValue({ integrity_session_id: 'session-9' })
+    const check = useInterviewCheck()
+    await check.begin({ interviewId: 'int-7', cloud: 'http://cloud.test', camera: false })
+    await check.listen()
+    emit('tutoring:interview-signal', { sender: 'panel-node', sender_name: null, signal: { question: { question_id: 'q1' } }, timestamp: Date.now() })
+    await check.finish()
+    emit('tutoring:interview-signal', { sender: 'panel-node', sender_name: null, signal: { live_segment: { segment_id: 'live-2' } }, timestamp: Date.now() })
+    await Promise.resolve()
+    expect(commands()).not.toContain('hiring_interview_live_segment')
+    expect(mocks.handlers.size).toBe(0)
+  })
+
+  it('with voice checks allowed, times answers for the panel and stops listening before the check ends', async () => {
+    vi.useFakeTimers()
+    mocks.invoke.mockResolvedValue(undefined)
+    const check = useInterviewCheck()
+    await check.begin({ interviewId: 'int-5', cloud: 'http://cloud.test', camera: false, microphone: true })
+    expect(mocks.start).toHaveBeenCalledWith(null, false, 'interview', { microphone: true })
+    await check.listen()
+    expect(mocks.invoke).toHaveBeenCalledWith('sentinel_voice_listen', { sessionId: 'session-9' })
+    expect(check.voiceChecks.value).toBe(true)
+
+    // The panel asks; the question plays for a second and ends; the
+    // candidate starts answering 900 ms later.
+    emit('tutoring:interview-signal', { sender: 'panel', sender_name: 'Panel', signal: { question: { question_id: 'q1' } }, timestamp: Date.now() })
+    for (let t = 0; t < 1_000; t += 50) {
+      emit('tutoring:audio-level', { mic_level: 0, output_level: 0.4 })
+      vi.advanceTimersByTime(50)
+    }
+    const questionEnded = Date.now() - 50
+    for (let t = 0; t < 600; t += 50) {
+      emit('tutoring:audio-level', { mic_level: 0, output_level: 0 })
+      vi.advanceTimersByTime(50)
+    }
+    emit('tutoring:voice-onset', { at_ms: questionEnded + 900, speaker: 'primary' })
+    expect(mocks.invoke).toHaveBeenCalledWith('tutoring_send_interview_signal', {
+      signal: { answer: { question_id: 'q1', latency_ms: 900, baseline_ms: null, gaze_down_before: false, second_voice_before: false } },
+    })
+
+    mocks.invoke.mockImplementation(async (name: string) => (name === 'hiring_interview_integrity_send' ? { integrity_session_id: 'session-9' } : undefined))
+    const stopOrder: string[] = []
+    mocks.stop.mockImplementation(async () => { stopOrder.push('sentinel.stop'); active.value = false; return 'session-9' })
+    mocks.invoke.mockImplementationOnce(async (name: string) => { stopOrder.push(name) })
+    await check.finish()
+    expect(stopOrder).toEqual(['sentinel_voice_stop', 'sentinel.stop'])
+    expect(check.voiceChecks.value).toBe(false)
+    expect(mocks.handlers.size).toBe(0)
   })
 })

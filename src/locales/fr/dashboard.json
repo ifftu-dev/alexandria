@@ -127,9 +127,11 @@
       "emptyBody": "Créez-en une pour une organisation.",
       "requiresClean": "nécessite une session sans anomalie",
       "minIntegrity": "intégrité min. {value}",
-      "minCameraCoverage": "couverture caméra min. {value}",
       "publish": "Publier",
-      "archive": "Archiver"
+      "archive": "Archiver",
+      "minProfile": "profil au moins {value}",
+      "minRung": "vérification au moins {value}",
+      "probes": "questions de suivi : {value}"
     },
     "issue": {
       "roleLabel": "Évaluation de rôle",
@@ -167,13 +169,33 @@
       "minIntegrity": "Intégrité min.",
       "maxCritical": "Critiques max.",
       "maxWarning": "Avertissements max.",
-      "minCameraCoverage": "Couverture caméra minimale (0–1)",
       "requireClean": "Exiger une session sans anomalie",
       "assuranceLabel": "Niveau d'assurance requis",
-      "assuranceNone": "(aucun)"
+      "assuranceNone": "(aucun)",
+      "minProfile": "Profil de confiance minimum",
+      "minRung": "Échelon de vérification minimum",
+      "probePolicy": "Questions de suivi",
+      "noMinimum": "Pas de minimum",
+      "coverageTitle": "Ce que couvre une certification émise selon cette politique",
+      "generatedProbeLabel": "Connexion de modèle",
+      "generatedProbeOff": "Désactivées",
+      "generatedProbeNone": "Aucune connexion de modèle n'est configurée sur cet appareil.",
+      "generatedProbeNote": "Une connexion de modèle enregistrée rédige de courtes questions de suivi à partir des réponses choisies par chaque candidat et de la description de la compétence. Les candidats sont d'abord sollicités ; sans leur consentement, ou si le modèle est indisponible, la question de suivi est ignorée."
     },
     "actions": {
       "create": "Créer"
+    },
+    "review": {
+      "title": "Sessions classées pour examen",
+      "hint": "Les plus suspectes d'abord, selon le poids combiné des signaux mesurés. Les signaux indicatifs n'ont pas de taux d'erreur mesuré et n'ajoutent aucun poids.",
+      "loading": "Évaluation des sessions…",
+      "empty": "Aucune session terminée pour ce rôle pour l'instant.",
+      "weight": "poids {value}",
+      "threshold": "seuil {value}",
+      "noSignals": "Aucun signal relevé.",
+      "windows": "{count} fenêtres",
+      "advisory": "Indicatif",
+      "rates": "précision {precision}, rappel {recall}"
     }
   },
   "sync": {

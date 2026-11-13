@@ -27,7 +27,17 @@
     "chooseOne": "Choose one answer.",
     "chooseAll": "Choose all that apply.",
     "integritySuspended": "Integrity checks suspended this attempt.",
-    "integritySuspendedNote": "No more checks are taken. You can still submit; the result will record that the session was suspended."
+    "integritySuspendedNote": "No more checks are taken. You can still submit; the result will record that the session was suspended.",
+    "probeTitle": "A quick follow-up",
+    "probeIntro": "Before grading, a short follow-up on one of your answers. It has a time limit; running out of time or skipping never counts against you.",
+    "probeProgress": "Follow-up {current} of {total}",
+    "probeComplement": "Select every option that is not a correct answer.",
+    "probeTimeLeft": "{seconds}s left",
+    "probeAnswer": "Answer",
+    "probeSkip": "Skip",
+    "generatedProbeConsent": "Let this role's model connection write my follow-up questions",
+    "generatedProbeConsentNote": "After you submit, the options you chose and the skill description are sent to the model connection the sponsor set up for this role, which writes up to two short follow-up questions. The assessment questions are not sent. If you leave this off, the follow-ups are skipped and that does not count against you.",
+    "probePreparing": "Preparing follow-up questions…"
   },
   "player": {
     "courseFallback": "Course",

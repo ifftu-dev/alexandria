@@ -311,6 +311,8 @@ jobs:
           # corruption or accidental swap fails here loudly. Bump both
           # file + lockfile together when rolling a new bundled model.
           shasum -a 256 -c paste-v1.onnx.sha256
+          shasum -a 256 -c yunet.onnx.sha256
+          shasum -a 256 -c minifasnet-v2-80.onnx.sha256
 
       - name: Sentinel synthetic golden hash
         if: needs.changes.outputs.backend == 'true'
@@ -322,6 +324,20 @@ jobs:
           # Runs as part of `cargo test`, but call out explicitly so the
           # log surfaces it clearly.
           cargo test -p alexandria --quiet synth::generators::tests::golden_hashes_match_synth_v2
+
+      - name: Sentinel certification gate
+        if: needs.changes.outputs.backend == 'true'
+        working-directory: alexandria
+        run: |
+          # Replays the committed measurement corpus through the scoring code
+          # and fails if any signal a certification admits falls below its
+          # certified precision or recall (docs/sentinel-corpus-runbook.md).
+          # The fixture is synthetic, so it proves the gate, never a rate;
+          # each real certification adds its own check line here.
+          set -euo pipefail
+          fixture=crates/alexandria-studio/fixtures/integrity-corpus
+          cargo run -q -p alexandria-studio --example integrity_evaluate -- \
+            check "$fixture/manifest.json" "$fixture/certification.synthetic.json"
 
   # Type-check the mobile targets on every PR. `Lint & Test` runs on Linux
   # only, so `#[cfg(mobile)]` / `#[cfg(not(desktop))]` code is otherwise never

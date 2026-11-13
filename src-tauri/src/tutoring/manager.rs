@@ -46,6 +46,7 @@ use tokio::sync::{broadcast, mpsc, Mutex};
 
 use super::call_kind::{self, CallKind};
 use super::events::{emit, CallEvents};
+use super::interview_signal::{self, InterviewSignal};
 pub use super::media::DeviceCheckResult;
 #[cfg(not(tutoring_video))]
 use super::media::VIDEO_DISABLED_ERROR;
@@ -57,6 +58,7 @@ use super::media::{
 use super::media::{FrameTuning, OpenedVideo};
 use super::records::SessionRecords;
 use super::tasks::{SessionTasks, TaskHandle};
+use super::voice_tap::{VoiceListener, VoiceTap};
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -304,6 +306,8 @@ pub(super) struct ActiveSession<M: MediaDevices> {
     /// empty neighbour set and messages never propagate).
     names_sender: Option<iroh_gossip::api::GossipSender>,
     our_node_id: String,
+    /// This node's key, which signs the interview signals it sends.
+    signal_key: iroh::SecretKey,
     our_display_name: String,
     /// Session start time (millis since epoch).
     started_at: u64,
@@ -334,6 +338,10 @@ pub(super) struct ActiveSession<M: MediaDevices> {
     _repair_broadcast_keys: HashSet<String>,
     _subscribed_audio_keys: HashSet<String>,
     _subscribed_video_keys: HashSet<String>,
+    /// Live segments the interview's panel marked done in this call, by
+    /// segment id: the signing panelist's node id and display name. The
+    /// candidate's check records only these.
+    live_segments: HashMap<String, (String, Option<String>)>,
 }
 
 impl<M: MediaDevices> ActiveSession<M> {
@@ -379,6 +387,9 @@ struct Core<M: MediaDevices> {
     /// media. Leaving ends the media only if no later session has started
     /// it again, so a slow leave never ends the next call's media.
     generation: Arc<AtomicU64>,
+    /// Voice checks on the microphone stream, off unless the candidate's
+    /// integrity check turned them on.
+    voice: Arc<VoiceListener>,
 }
 
 impl<M: MediaDevices> Clone for Core<M> {
@@ -390,6 +401,7 @@ impl<M: MediaDevices> Clone for Core<M> {
             tasks: self.tasks.clone(),
             inner: self.inner.clone(),
             generation: self.generation.clone(),
+            voice: self.voice.clone(),
         }
     }
 }
@@ -406,11 +418,13 @@ pub struct CallManager<M: MediaDevices> {
 impl<M: MediaDevices> CallManager<M> {
     pub fn new(media: M, events: impl CallEvents) -> Self {
         let profile = media.profile();
+        let events: Arc<dyn CallEvents> = Arc::new(events);
         Self {
             core: Core {
                 media: Arc::new(media),
                 profile,
-                events: Arc::new(events),
+                voice: Arc::new(VoiceListener::new(events.clone())),
+                events,
                 tasks: Arc::new(SessionTasks::default()),
                 inner: Arc::new(Mutex::new(None)),
                 generation: Arc::new(AtomicU64::new(0)),
@@ -526,6 +540,16 @@ impl<M: MediaDevices> CallManager<M> {
                     .map_err(|e| format!("invalid room ticket: {e}"))?,
                 None => RoomTicket::generate(),
             };
+            // On the candidate's side the interview's panel is whoever
+            // published the room ticket the organisation handed over: its
+            // bootstrap peers. Only they may send question markers and live
+            // segments.
+            let panel: interview_signal::Panel = match (kind, join_ticket) {
+                (CallKind::InterviewCandidate, Some(_)) => {
+                    ticket.bootstrap.iter().map(|id| id.to_string()).collect()
+                }
+                _ => interview_signal::Panel::new(),
+            };
             let room = within(
                 core.profile.room_open_timeout,
                 Room::new(endpoint, network.gossip.clone(), network.live, ticket),
@@ -560,7 +584,7 @@ impl<M: MediaDevices> CallManager<M> {
             // device's copy names itself as the bootstrap peer.
             let topic_seed = handle.ticket().topic_id.as_bytes().to_vec();
             let chat_sender = core
-                .setup_chat(&network.gossip, &topic_seed, &our_node_id)
+                .setup_chat(&network.gossip, &topic_seed, &our_node_id, panel)
                 .await;
             let (names_sender, names_task) = match core
                 .setup_names(&network.gossip, &topic_seed, &our_node_id, &display_name)
@@ -606,6 +630,7 @@ impl<M: MediaDevices> CallManager<M> {
                 chat_sender,
                 names_sender,
                 our_node_id,
+                signal_key: endpoint.secret_key().clone(),
                 our_display_name: display_name,
                 started_at: Self::now_millis(),
                 last_chat_sent: Instant::now() - Duration::from_secs(10),
@@ -622,6 +647,7 @@ impl<M: MediaDevices> CallManager<M> {
                 _repair_broadcast_keys: HashSet::new(),
                 _subscribed_audio_keys: HashSet::new(),
                 _subscribed_video_keys: HashSet::new(),
+                live_segments: HashMap::new(),
             });
 
             // Tasks that read the stored session start after it is stored.
@@ -791,6 +817,8 @@ impl<M: MediaDevices> CallManager<M> {
             inner.take()
         };
         let ended = session.as_ref().map(|s| s.generation);
+        core.voice.set_listening(false);
+        core.voice.set_muted(false);
         crate::diag::log("leave: session taken, stopping media");
         if let Some(session) = session.as_ref() {
             if let Some(preview) = &session.self_preview_task {
@@ -906,7 +934,10 @@ impl<M: MediaDevices> CallManager<M> {
                     .await
                     .map_err(|e| format!("microphone unavailable: {e}"))?;
                 session.mic_input = Some(mic.clone());
-                let renditions = AudioRenditions::new::<PureOpusEncoder>(mic, [AudioPreset::Hq]);
+                let renditions = AudioRenditions::new::<PureOpusEncoder>(
+                    VoiceTap::new(mic, self.core.voice.clone()),
+                    [AudioPreset::Hq],
+                );
                 session
                     .broadcast
                     .set_audio(Some(renditions))
@@ -920,6 +951,7 @@ impl<M: MediaDevices> CallManager<M> {
             session.broadcast.set_audio_muted(true);
             session.audio_enabled = false;
         }
+        self.core.voice.set_muted(!session.audio_enabled);
 
         Ok(session.audio_enabled)
     }
@@ -1128,6 +1160,44 @@ impl<M: MediaDevices> CallManager<M> {
             .map_err(|e| format!("failed to send transcript: {e}"))
     }
 
+    /// Broadcast an interview signal: a question marker from the panel, or
+    /// the candidate's answer timing or second voice. See
+    /// [`interview_signal`].
+    pub async fn send_interview_signal(&self, signal: InterviewSignal) -> Result<(), String> {
+        let inner = self.core.inner.lock().await;
+        let session = inner.as_ref().ok_or("not in a tutoring session")?;
+        let sender = session.chat_sender.as_ref().ok_or("chat not available")?;
+        let encoded = interview_signal::encode(
+            signal,
+            Some(session.our_display_name.clone()),
+            Self::now_millis(),
+            &session.signal_key,
+            session.handle.ticket().topic_id.as_bytes(),
+        )?;
+        sender
+            .broadcast(Bytes::from(encoded))
+            .await
+            .map_err(|e| format!("failed to send interview signal: {e}"))
+    }
+
+    /// Who marked live segment `segment_id` done in the current call: the
+    /// panelist's node id (whose key signed the mark) and display name.
+    /// `None` unless a panel member of this interview sent it.
+    pub async fn panel_live_segment(&self, segment_id: &str) -> Option<(String, Option<String>)> {
+        let inner = self.core.inner.lock().await;
+        inner.as_ref()?.live_segments.get(segment_id).cloned()
+    }
+
+    /// Turn voice checks on the call's microphone stream on or off. On needs
+    /// a live call; the call ending turns them off.
+    pub async fn set_voice_listening(&self, on: bool) -> Result<(), String> {
+        if on && self.status().await.is_none() {
+            return Err("not in a tutoring session".into());
+        }
+        self.core.voice.set_listening(on);
+        Ok(())
+    }
+
     // ── Query ──────────────────────────────────────────────────────
 
     /// Get the current session status.
@@ -1257,6 +1327,21 @@ impl<M: MediaDevices> Core<M> {
 
     fn emit<T: Serialize>(&self, event: &str, payload: T) {
         emit(self.events.as_ref(), event, payload);
+    }
+
+    /// Keep a live segment the panel signed, so the candidate's check can
+    /// record it (see [`CallManager::panel_live_segment`]). Bounded: a call
+    /// has a handful of segments.
+    async fn note_live_segment(&self, segment_id: &str, message: &interview_signal::SignalMessage) {
+        const MAX_LIVE_SEGMENTS: usize = 64;
+        if let Some(session) = self.inner.lock().await.as_mut() {
+            if session.live_segments.len() < MAX_LIVE_SEGMENTS {
+                session
+                    .live_segments
+                    .entry(segment_id.to_string())
+                    .or_insert_with(|| (message.sender.clone(), message.sender_name.clone()));
+            }
+        }
     }
 
     async fn push_log(&self, msg: String) {
@@ -1402,8 +1487,10 @@ impl<M: MediaDevices> Core<M> {
             match audio.input().await {
                 Ok(mic) => {
                     mic_input = Some(mic.clone());
-                    let renditions =
-                        AudioRenditions::new::<PureOpusEncoder>(mic, [AudioPreset::Hq]);
+                    let renditions = AudioRenditions::new::<PureOpusEncoder>(
+                        VoiceTap::new(mic, self.voice.clone()),
+                        [AudioPreset::Hq],
+                    );
                     broadcast
                         .set_audio(Some(renditions))
                         .map_err(|e| format!("failed to set audio: {e}"))?;
@@ -1727,6 +1814,7 @@ impl<M: MediaDevices> Core<M> {
                         None => break,
                     }
                 };
+                core.voice.set_remote_level(output_level);
                 core.emit(
                     "tutoring:audio-level",
                     AudioLevelEvent {
@@ -1923,8 +2011,10 @@ impl<M: MediaDevices> Core<M> {
         gossip: &Gossip,
         topic_seed: &[u8],
         our_node_id: &str,
+        panel: interview_signal::Panel,
     ) -> Option<iroh_gossip::api::GossipSender> {
         let topic_id = derived_topic(topic_seed, b"/chat");
+        let room_topic = topic_seed.to_vec();
         let topic = match gossip.subscribe(topic_id, vec![]).await {
             Ok(topic) => topic,
             Err(e) => {
@@ -1941,6 +2031,20 @@ impl<M: MediaDevices> Core<M> {
                 let iroh_gossip::api::Event::Received(msg) = event else {
                     continue;
                 };
+                if let Some(decoded) = interview_signal::receive(&msg.content, &room_topic, &panel)
+                {
+                    match decoded {
+                        Ok(signal) if signal.sender != our_id => {
+                            if let InterviewSignal::LiveSegment { segment_id } = &signal.signal {
+                                core.note_live_segment(segment_id, &signal).await;
+                            }
+                            core.emit("tutoring:interview-signal", signal)
+                        }
+                        Ok(_) => {}
+                        Err(e) => log::warn!("tutoring: refused an interview signal: {e}"),
+                    }
+                    continue;
+                }
                 if let Some(payload) = msg.content.strip_prefix(TRANSCRIPT_PREFIX) {
                     match postcard::from_bytes::<TranscriptMessage>(payload) {
                         Ok(transcript) if transcript.sender != our_id => core.emit(

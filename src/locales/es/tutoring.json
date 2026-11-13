@@ -205,7 +205,11 @@
       "none": "Ninguna",
       "sharedNote": "Esto es todo lo que se envió. Sin vídeo, audio, escritura ni capturas de pantalla.",
       "running": "Comprobación de integridad activa",
-      "runningHint": "Termina cuando sales de la llamada. Después la organización recibe un resumen, nunca grabaciones."
+      "runningHint": "Termina cuando sales de la llamada. Después la organización recibe un resumen, nunca grabaciones.",
+      "voice": "Permitir también las comprobaciones de voz",
+      "voiceHint": "Escucha el micrófono que ya usas en la llamada para saber cuándo empiezas a responder y si hay otra voz en la sala. No se graba ni se transcribe nada. Mientras dura la llamada, el panel ve cuánto tardó en empezar cada respuesta comparado con tus propias respuestas anteriores, si miraste hacia abajo justo antes (con las comprobaciones con cámara) y cuándo se oyó otra voz.",
+      "voiceRunning": "Comprobaciones de voz activadas",
+      "voiceRunningHint": "El panel ve cuándo empiezan tus respuestas y si se oyó otra voz. No se graba nada."
     }
   }
 }

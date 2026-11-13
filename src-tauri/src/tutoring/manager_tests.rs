@@ -10,6 +10,7 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 
 use super::events::RecordedEvents;
+use super::interview_signal::InterviewSignal;
 use super::manager::CallManager;
 use super::media::synthetic::SyntheticMedia;
 
@@ -279,15 +280,16 @@ async fn chat_transcript_and_names_reach_the_other_device_and_never_echo() {
 
     let ticket = host
         .create_room(
-            request("Host", CallKind::Tutoring, None),
+            request("Host", CallKind::InterviewPanel, Some("int-1")),
             host_node.network(),
             &host_records,
         )
         .await
         .expect("host creates");
+    // The candidate joins with the ticket the panel published.
     guest
         .join_room(
-            request("Guest", CallKind::Tutoring, None),
+            request("Guest", CallKind::InterviewCandidate, Some("int-1")),
             &ticket,
             guest_node.network(),
             &guest_records,
@@ -345,6 +347,80 @@ async fn chat_transcript_and_names_reach_the_other_device_and_never_echo() {
             .all(|p| p["text"] != "a caption"),
         "a transcript is never shown as chat"
     );
+
+    // The panel marks a question; the candidate's app answers with timing.
+    host.send_interview_signal(InterviewSignal::Question {
+        question_id: "q-1".into(),
+    })
+    .await
+    .expect("question marker");
+    guest_events
+        .wait_for("tutoring:interview-signal", Duration::from_secs(10), |p| {
+            p["signal"]["question"]["question_id"] == "q-1"
+        })
+        .await
+        .expect("the marker reaches the candidate");
+    host.send_interview_signal(InterviewSignal::LiveSegment {
+        segment_id: "live-1".into(),
+    })
+    .await
+    .expect("live segment");
+    let live = guest_events
+        .wait_for("tutoring:interview-signal", Duration::from_secs(10), |p| {
+            p["signal"]["live_segment"]["segment_id"] == "live-1"
+        })
+        .await
+        .expect("the live segment reaches the candidate");
+    assert_eq!(
+        live["sender"],
+        host_node.endpoint.id().to_string(),
+        "attributed to the panelist whose key signed it"
+    );
+    assert_eq!(
+        guest.panel_live_segment("live-1").await.map(|(by, _)| by),
+        Some(host_node.endpoint.id().to_string()),
+        "the candidate's check can record it"
+    );
+    assert_eq!(guest.panel_live_segment("never-sent").await, None);
+    // The candidate is not on the panel: its markers never reach the panel.
+    guest
+        .send_interview_signal(InterviewSignal::Question {
+            question_id: "forged".into(),
+        })
+        .await
+        .expect("sent");
+    guest
+        .send_interview_signal(InterviewSignal::SecondVoice)
+        .await
+        .expect("second voice");
+    let voice = host_events
+        .wait_for("tutoring:interview-signal", Duration::from_secs(10), |p| {
+            p["signal"] == "second_voice"
+        })
+        .await
+        .expect("a second voice reaches the panel");
+    assert_eq!(voice["sender"], guest_node.endpoint.id().to_string());
+    assert!(
+        host_events
+            .payloads("tutoring:interview-signal")
+            .iter()
+            .all(|p| p["signal"].get("question").is_none()),
+        "a question marker from outside the panel is refused"
+    );
+    assert!(
+        host_events
+            .payloads("tutoring:chat")
+            .iter()
+            .chain(host_events.payloads("tutoring:transcript").iter())
+            .all(|p| p.get("signal").is_none()),
+        "a signal is never shown as chat or captions"
+    );
+    assert!(guest
+        .send_interview_signal(InterviewSignal::Question {
+            question_id: "not a token".into(),
+        })
+        .await
+        .is_err());
 
     let name = host_events
         // Names are re-announced every 15s; the first may go out before the

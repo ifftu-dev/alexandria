@@ -3,6 +3,8 @@
     "personhood_lab_status": "Explicit Android debug-only synthetic device experiment; no profile or credential data.",
     "personhood_lab_action": "Explicit Android debug-only synthetic device experiment; fixed artifacts and no profile or credential mutations.",
     "check_health": "Device readiness, including whether a database is open.",
+    "integrity_coverage_statement": "Resolves a coverage statement bundled with the app by digest; reads no profile data.",
+    "integrity_coverage_statements": "Lists the coverage statements bundled with the app; reads no profile data.",
     "read_diag_log": "Device diagnostics; diagnostics policy is handled separately.",
     "frontend_log": "Device logging bridge.",
     "release_secure_input": "Recover device input when no profile is available.",

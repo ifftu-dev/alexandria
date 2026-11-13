@@ -1,0 +1,46 @@
+{
+  "id": "cheat-overlay-core-windows-01",
+  "label": "cheat_overlay",
+  "provenance": "synthetic",
+  "profile": "core",
+  "platform": "windows",
+  "device_class": "desktop",
+  "windows": [
+    {
+      "features": {
+        "processes": {
+          "categories": [
+            "interview_cheat"
+          ],
+          "watched": 1,
+          "scanned": 200
+        }
+      }
+    },
+    {
+      "features": {
+        "focus": {
+          "app_switches": 2
+        },
+        "processes": {
+          "categories": [
+            "interview_cheat"
+          ],
+          "watched": 1,
+          "scanned": 200
+        }
+      }
+    },
+    {
+      "features": {
+        "processes": {
+          "categories": [
+            "interview_cheat"
+          ],
+          "watched": 1,
+          "scanned": 200
+        }
+      }
+    }
+  ]
+}

@@ -206,7 +206,10 @@ pub fn verify_share(
             || !vc.type_.iter().any(|t| t == "AssessmentCredential")
             || claim.rubric_version.as_deref() != Some(ASSESSMENT_RUBRIC)
             || !vc.integrity.as_ref().is_some_and(|i| {
-                matches!(i.status.as_str(), "completed" | "flagged" | "suspended")
+                matches!(
+                    i.status.as_str(),
+                    "completed" | "review" | "flagged" | "suspended"
+                )
             }))
     {
         return Err("request requires a completed assessment with the current rubric".into());

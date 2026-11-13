@@ -198,6 +198,8 @@
       "run": "Run the integrity check",
       "camera": "Also allow camera checks",
       "cameraHint": "Uses the camera you already share in the call. Frames are checked on this device and never kept.",
+      "voice": "Also allow voice checks",
+      "voiceHint": "Listens to the microphone you already use in the call for when you start to answer and for another voice in the room. Nothing is recorded or transcribed. While the call runs, the panel sees how long each answer took to start compared with your own earlier answers, whether you looked down just before it (with camera checks), and when another voice was heard.",
       "skip": "Don't run it",
       "choose": "Choose whether to run the integrity check",
       "unsentTitle": "Your integrity result has not been sent",
@@ -216,7 +218,9 @@
       "none": "None",
       "sharedNote": "This is everything that was sent. No video, audio, typing or screenshots.",
       "running": "Integrity check on",
-      "runningHint": "Ends when you leave the call. The organisation then gets a summary, never recordings."
+      "runningHint": "Ends when you leave the call. The organisation then gets a summary, never recordings.",
+      "voiceRunning": "Voice checks on",
+      "voiceRunningHint": "The panel sees when your answers start and whether another voice was heard. Nothing is recorded."
     }
   }
 }

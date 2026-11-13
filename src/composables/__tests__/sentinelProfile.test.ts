@@ -224,7 +224,7 @@ describe('Sentinel profile-lock boundary', () => {
       currentElementId: '', currentElementType: '', keystrokeBufferSize: 0, mouseBufferSize: 0,
       profile: null, facePresent: undefined, hasSnapshotTimer: false,
     })
-    expect(sentinel.debug).toMatchObject({ active: false, signals: null, flags: [], lastApp: '', lastSnapshotAt: 0 })
+    expect(sentinel.debug).toMatchObject({ active: false, features: null, lastSnapshot: null, flags: [], lastApp: '', lastSnapshotAt: 0 })
     expect(sentinel.pendingEvidenceConsent.value).toBeNull()
     expect(sentinel.aiScoringEnabled.value).toBe(false)
     expect(sentinel.pasteClassifierEnabled.value).toBe(true)

@@ -42,6 +42,7 @@ pub mod identity;
 pub mod import;
 pub mod instructor;
 pub mod integrity;
+pub mod integrity_companion;
 pub mod interview;
 #[cfg(test)]
 mod live_demo;
@@ -52,6 +53,7 @@ pub mod personhood_receipts;
 pub mod pinning;
 pub mod plugins;
 pub mod presentation;
+pub mod probes;
 pub mod profile;
 pub mod reputation;
 pub mod role_assessment;
