@@ -10,7 +10,7 @@ Status: live
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
 **Schema**: 40 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 137 tables, 132 indexes, 1 view, 6 triggers.
+**Objects**: 138 tables, 134 indexes, 1 view, 6 triggers.
 
 ---
 
@@ -636,7 +636,6 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `funding` TEXT NOT NULL
 - `status` TEXT NOT NULL default `'outcome_unknown'`
 - `tx_hash` TEXT NOT NULL
-- `invalid_from_slot` INTEGER NOT NULL
 - `created_at` TEXT NOT NULL default `datetime('now')`
 - `confirmed_at` TEXT
 
@@ -753,7 +752,19 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `nonce` TEXT PK
 - `seen_at` TEXT NOT NULL default `datetime('now')`
 
-### Chain journal (2)
+### Chain journal (3)
+
+#### `chain_submission_history`
+
+- `network` TEXT PK → `chain_submissions.network`
+- `operation_kind` TEXT NOT NULL → `chain_submissions.operation_kind`
+- `operation_id` TEXT NOT NULL → `chain_submissions.operation_id`
+- `tx_hash` TEXT PK
+- `signed_cbor` BLOB NOT NULL
+- `status` TEXT NOT NULL
+- `last_error` TEXT
+- `submitted_at` TEXT NOT NULL
+- `replaced_at` TEXT NOT NULL default `datetime('now')`
 
 #### `chain_submission_members`
 
@@ -770,6 +781,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `operation_id` TEXT PK
 - `tx_hash` TEXT NOT NULL
 - `signed_cbor` BLOB NOT NULL
+- `invalid_from_slot` INTEGER NOT NULL
 - `context_json` TEXT NOT NULL
 - `status` TEXT NOT NULL default `'outcome_unknown'`
 - `confirmed_slot` INTEGER
@@ -1779,6 +1791,9 @@ erDiagram
     question_banks ||--o{ assessment_items : bank_id
     assessment_attempts ||--o{ assessment_probes : attempt_id
     assessment_attempts ||--o{ attempt_items : attempt_id
+    chain_submissions ||--o{ chain_submission_history : network
+    chain_submissions ||--o{ chain_submission_history : operation_kind
+    chain_submissions ||--o{ chain_submission_history : operation_id
     chain_submissions ||--o{ chain_submission_members : network
     chain_submissions ||--o{ chain_submission_members : operation_kind
     chain_submissions ||--o{ chain_submission_members : operation_id

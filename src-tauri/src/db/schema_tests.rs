@@ -196,8 +196,10 @@ fn the_view_set_is_exact() {
 /// 4 tables (inbox, deduplication, registration, operation state) and 1 unread index.
 /// Subject-field atlas slots add 1 unique index. Batched credential anchors
 /// add 3 tables (batches, receipts, observations) and, net of the rebuilt
-/// anchor queue, 2 indexes. Response-process coverage by item adds 1 table
-/// (keyed by session and item, without rowid, so no index).
+/// anchor queue, 2 indexes. Submission history for replaced expired
+/// transactions adds 1 table and 1 index; the journal's validity-bound window
+/// adds 1 index. Response-process coverage by item adds 1 table (keyed by
+/// session and item, without rowid, so no index).
 #[test]
 fn the_schema_object_counts_are_pinned() {
     let db = migrated();
@@ -205,7 +207,7 @@ fn the_schema_object_counts_are_pinned() {
         .into_iter()
         .filter(|t| t != "_migrations" && t != "_schema_identity")
         .count();
-    assert_eq!(tables, 142, "table count changed");
+    assert_eq!(tables, 143, "table count changed");
     assert_eq!(names(db.conn(), "index").len(), 132, "index count changed");
     assert_eq!(
         names(db.conn(), "trigger").len(),

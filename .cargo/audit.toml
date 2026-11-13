@@ -163,4 +163,22 @@ ignore = [
     # (ECDSA signing, ECDH), or when p256/k256 release on elliptic-curve
     # with crypto-bigint >= 0.7.6.
     "RUSTSEC-2026-0387",
+
+    # hickory-proto 0.25.2 — panics in zone-file and SVCB/HTTPS text parsing
+    # (RUSTSEC-2026-0487, -0489, -0490) and memory amplification from DNS
+    # header record counts (RUSTSEC-2026-0491). The fix is >= 0.26.2; the
+    # 0.26 copy used by iroh and our resolver is on 0.26.3.
+    #
+    # 0.25.2 is only a lockfile entry: libp2p 0.56 pins it for its optional
+    # `dns` and `mdns` features, which no workspace crate enables, so it is
+    # never compiled (`cargo tree --all-features --target all -i
+    # hickory-proto@0.25.2` prints nothing). These ignores name the advisory
+    # IDs, so they also cover 0.26.x; the 0.26 copy must stay >= 0.26.2.
+    #
+    # Remove when libp2p moves to hickory 0.26, and immediately if anything
+    # enables libp2p's `dns` or `mdns` features.
+    "RUSTSEC-2026-0487",
+    "RUSTSEC-2026-0489",
+    "RUSTSEC-2026-0490",
+    "RUSTSEC-2026-0491",
 ]

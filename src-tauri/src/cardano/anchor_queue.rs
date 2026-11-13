@@ -29,8 +29,9 @@ use alexandria_verify::StoreLookup;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::cardano::anchor_tx::{self, AnchorRecord, Funding};
-use crate::cardano::ledger::{self, Ledger};
+use crate::cardano::anchor_tx::{self, AnchorBuildError, AnchorRecord, Funding};
+use crate::cardano::ledger::{self, Ledger, PassTip};
+use crate::cardano::reservations::ReservedOutpoints;
 use crate::cardano::submission::{
     self, Journal, Operation, Submission, SubmissionStatus, SubmitError,
 };
@@ -47,11 +48,6 @@ const NETWORK: &str = "cardano-preprod";
 /// Failed batch attempts before a credential is marked failed. A failure
 /// needs the user's retry after that.
 pub const MAX_ATTEMPTS: u32 = 5;
-
-/// Slots past a batch's validity interval before a transaction that was
-/// never seen counts as unable to land. Leaves room for the provider to
-/// catch up and for short rollbacks.
-pub const EXPIRY_MARGIN_SLOTS: u64 = 1_800;
 
 /// Wait before trying again to build a batch that could not be built or paid
 /// for.
@@ -88,7 +84,6 @@ struct BatchContext {
     root: String,
     leaf_count: u64,
     funding: String,
-    invalid_from_slot: u64,
     members: Vec<BatchMember>,
 }
 
@@ -113,12 +108,14 @@ pub(crate) async fn tick<L: Ledger>(
         log::debug!("anchor_queue::tick: no ledger, skipping");
         return Ok(0);
     };
+    // Reconciliation and the flush share one tip request.
+    let tip = PassTip::new(ledger);
     let mut changed = journal
         .run("anchor_queue.recover", |db| recover(db.conn()))
         .await?;
-    changed += reconcile_batches(journal, ledger, now).await?;
+    changed += reconcile_batches(journal, ledger, &tip, now).await?;
     if let Some(wallet) = wallet {
-        changed += flush(journal, ledger, wallet, sponsor, policy, now).await?;
+        changed += flush(journal, ledger, &tip, wallet, sponsor, policy, now).await?;
     }
     changed += observe_receipts(journal, ledger, now).await?;
     Ok(changed)
@@ -173,16 +170,15 @@ fn project_new_batch(
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     tx.execute(
         "INSERT OR IGNORE INTO anchor_batches
-         (id, issuer_did, root, leaf_count, funding, status, tx_hash, invalid_from_slot)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?1, ?7)",
+         (id, issuer_did, root, leaf_count, funding, status, tx_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?1)",
         params![
             tx_hash,
             context.issuer_did,
             context.root,
             context.leaf_count as i64,
             context.funding,
-            status,
-            context.invalid_from_slot as i64
+            status
         ],
     )
     .map_err(|e| format!("project batch: {e}"))?;
@@ -200,32 +196,23 @@ fn project_new_batch(
 
 // -- 2. reconciliation --------------------------------------------------------
 
-struct OpenBatch {
-    id: String,
-    invalid_from_slot: u64,
-}
-
 async fn reconcile_batches<L: Ledger>(
     journal: &Journal,
     ledger: &L,
+    tip: &PassTip<'_, L>,
     now: &str,
 ) -> Result<u32, String> {
-    let open = journal
+    let open: Vec<String> = journal
         .run("anchor_queue.open-batches", |db| {
             let mut stmt = db
                 .conn()
                 .prepare(
-                    "SELECT id, invalid_from_slot FROM anchor_batches
+                    "SELECT id FROM anchor_batches
                      WHERE status IN ('outcome_unknown', 'submitted') ORDER BY created_at, id",
                 )
                 .map_err(|e| e.to_string())?;
             let rows = stmt
-                .query_map([], |r| {
-                    Ok(OpenBatch {
-                        id: r.get(0)?,
-                        invalid_from_slot: r.get::<_, i64>(1)? as u64,
-                    })
-                })
+                .query_map([], |r| r.get(0))
                 .map_err(|e| e.to_string())?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| e.to_string());
@@ -235,23 +222,23 @@ async fn reconcile_batches<L: Ledger>(
     if open.is_empty() {
         return Ok(0);
     }
-    let tip = ledger.tip_slot().await.ok();
+    // Expiry is the journal's call, and only at a known tip.
+    let tip = tip.get().await.ok();
     let mut changed = 0;
     for batch in open {
         let operation = Operation {
             kind: BATCH_KIND,
-            id: &batch.id,
+            id: &batch,
         };
-        let submission = match submission::reconcile(journal, ledger, operation).await {
+        let submission = match submission::reconcile_at(journal, ledger, operation, tip).await {
             Ok(Some(submission)) => submission,
-            Ok(None) => return Err(format!("anchor batch {} has no journal entry", batch.id)),
+            Ok(None) => return Err(format!("anchor batch {batch} has no journal entry")),
             Err(error) => {
-                log::debug!("anchor batch {} reconciliation: {error}", batch.id);
+                log::debug!("anchor batch {batch} reconciliation: {error}");
                 continue;
             }
         };
-        let expired = tip.is_some_and(|tip| tip > batch.invalid_from_slot + EXPIRY_MARGIN_SLOTS);
-        let (id, now) = (batch.id.clone(), now.to_owned());
+        let (id, now) = (batch, now.to_owned());
         let outcome = match submission.status {
             SubmissionStatus::Confirmed if submission.confirmed_slot.is_some() => {
                 journal
@@ -269,12 +256,11 @@ async fn reconcile_batches<L: Ledger>(
                             "failed",
                             "the anchor transaction failed on chain",
                             &now,
-                            Some(&submission),
                         )
                     })
                     .await
             }
-            SubmissionStatus::OutcomeUnknown | SubmissionStatus::Submitted if expired => {
+            SubmissionStatus::Expired => {
                 journal
                     .run("anchor_queue.expire", move |db| {
                         release_batch(
@@ -283,7 +269,6 @@ async fn reconcile_batches<L: Ledger>(
                             "expired",
                             "the anchor transaction expired before it was included",
                             &now,
-                            None,
                         )
                     })
                     .await
@@ -401,15 +386,15 @@ fn confirm_batch(
     tx.commit().map_err(|e| e.to_string())
 }
 
-/// The batch will never anchor its credentials: put them back in the queue
-/// for a new batch, counting the attempt.
+/// The batch will never anchor its credentials (its journal entry failed on
+/// chain or expired): put them back in the queue for a new batch, counting
+/// the attempt.
 fn release_batch(
     conn: &Connection,
     batch_id: &str,
     batch_status: &str,
     reason: &str,
     now: &str,
-    final_submission: Option<&Submission>,
 ) -> Result<(), String> {
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     tx.execute(
@@ -437,15 +422,13 @@ fn release_batch(
     for id in members {
         record_failure(&tx, &id, reason, now)?;
     }
-    if final_submission.is_some() {
-        submission::mark_applied(
-            &tx,
-            Operation {
-                kind: BATCH_KIND,
-                id: batch_id,
-            },
-        )?;
-    }
+    submission::mark_applied(
+        &tx,
+        Operation {
+            kind: BATCH_KIND,
+            id: batch_id,
+        },
+    )?;
     tx.commit().map_err(|e| e.to_string())
 }
 
@@ -543,6 +526,7 @@ fn load_queued(
 async fn flush<L: Ledger>(
     journal: &Journal,
     ledger: &L,
+    tip: &PassTip<'_, L>,
     wallet: &Wallet,
     sponsor: Option<&AnchorSponsorProfile>,
     policy: &BatchPolicy,
@@ -561,7 +545,7 @@ async fn flush<L: Ledger>(
         return Ok(0);
     }
     let ids: Vec<String> = queued.iter().map(|q| q.credential_id.clone()).collect();
-    match build_and_submit(journal, ledger, wallet, &issuer, sponsor, &queued).await {
+    match build_and_submit(journal, ledger, tip, wallet, &issuer, sponsor, &queued).await {
         Ok(()) => Ok(1),
         Err(SubmitError::Retryable(error)) => {
             // Nothing was journaled or sent; try again next pass.
@@ -601,6 +585,7 @@ async fn flush<L: Ledger>(
 async fn build_and_submit<L: Ledger>(
     journal: &Journal,
     ledger: &L,
+    tip: &PassTip<'_, L>,
     wallet: &Wallet,
     issuer: &Did,
     sponsor: Option<&AnchorSponsorProfile>,
@@ -618,12 +603,26 @@ async fn build_and_submit<L: Ledger>(
         anchored_from: queued[0].issued_at.clone(),
     };
 
+    // What this node's in-flight transactions spend, read just before
+    // selecting: every earlier writer in the pass has journaled its bytes.
+    let tip = tip.get().await.map_err(SubmitError::Failed)?;
+    let reserved = journal
+        .before_send("anchor_queue.reserved", move |db| {
+            submission::reserved_outpoints(db.conn(), tip)
+        })
+        .await?;
+
     let mut sponsor_error = None;
     let mut built = None;
     if let Some(profile) = sponsor {
-        match sponsored(ledger, profile, &record, wallet).await {
+        match sponsored(ledger, profile, &record, wallet, tip, &reserved).await {
             Ok(Some((tx, funding))) => built = Some((tx, funding)),
             Ok(None) => {}
+            // Busy only with this node's own in-flight transactions: wait
+            // for them rather than pay from the issuer's wallet.
+            Err(busy @ AnchorBuildError::WalletBusy(_)) => {
+                return Err(SubmitError::Failed(busy.to_string()));
+            }
             Err(error) => {
                 log::warn!("sponsored anchor not built, trying the issuer's wallet: {error}");
                 sponsor_error = Some(error);
@@ -632,15 +631,21 @@ async fn build_and_submit<L: Ledger>(
     }
     let (anchor, funding) = match built {
         Some(built) => built,
-        None => match anchor_tx::build_anchor_tx(&record, Funding::Issuer, wallet, ledger).await {
-            Ok(tx) => (tx, Funding::Issuer.label()),
-            Err(error) => {
-                return Err(SubmitError::Failed(match sponsor_error {
-                    Some(sponsor) => format!("{sponsor}; {error}"),
-                    None => error,
-                }))
+        None => {
+            match anchor_tx::build_anchor_tx(
+                &record,
+                Funding::Issuer,
+                wallet,
+                ledger,
+                tip,
+                &reserved,
+            )
+            .await
+            {
+                Ok(tx) => (tx, Funding::Issuer.label()),
+                Err(error) => return Err(SubmitError::Failed(wait_reason(sponsor_error, error))),
             }
-        },
+        }
     };
 
     let context = BatchContext {
@@ -649,7 +654,6 @@ async fn build_and_submit<L: Ledger>(
         root: record.root.clone(),
         leaf_count: record.leaf_count,
         funding: funding.to_owned(),
-        invalid_from_slot: anchor.invalid_from_slot,
         members: queued
             .iter()
             .map(|q| BatchMember {
@@ -714,23 +718,46 @@ async fn build_and_submit<L: Ledger>(
     Ok(())
 }
 
+/// Why a batch waits once neither the sponsor nor the issuer's wallet could
+/// pay. A wallet that needs funds says so, whichever way found it. Otherwise a
+/// busy issuer wallet is the whole reason to wait (the sponsor's own error was
+/// logged), and anything else names both failures.
+fn wait_reason(sponsor: Option<AnchorBuildError>, issuer: AnchorBuildError) -> String {
+    match (sponsor, issuer) {
+        (Some(sponsor @ AnchorBuildError::NeedsFunds(_)), issuer) => format!("{sponsor}; {issuer}"),
+        (_, issuer @ AnchorBuildError::WalletBusy(_)) => issuer.to_string(),
+        (Some(sponsor), issuer) => format!("{sponsor}; {issuer}"),
+        (None, issuer) => issuer.to_string(),
+    }
+}
+
 /// Build a sponsored anchor when a sponsor UTxO is spendable now, with its
-/// funding label. `Ok(None)` when none is.
+/// funding label. `Ok(None)` when none is; [`AnchorBuildError::WalletBusy`]
+/// when only this node's own in-flight transactions stand in the way.
 async fn sponsored<L: Ledger>(
     ledger: &L,
     profile: &AnchorSponsorProfile,
     record: &AnchorRecord,
     wallet: &Wallet,
-) -> Result<Option<(anchor_tx::AnchorTx, &'static str)>, String> {
-    let (utxos, tip) = tokio::join!(ledger.utxos(&profile.address), ledger.tip_slot());
-    let (utxos, tip) = (utxos?, tip?);
-    let Some(utxo) = anchor_tx::select_sponsor_utxo(profile, &utxos, tip, &record.issuer_did)
-    else {
-        return Ok(None);
-    };
+    tip: u64,
+    reserved: &ReservedOutpoints,
+) -> Result<Option<(anchor_tx::AnchorTx, &'static str)>, AnchorBuildError> {
+    let utxos = ledger.utxos(&profile.address).await?;
+    let utxo =
+        match anchor_tx::select_sponsor_utxo(profile, &utxos, tip, &record.issuer_did, reserved) {
+            Ok(Some(utxo)) => utxo,
+            Ok(None) => return Ok(None),
+            Err(busy) => {
+                // A free sponsor UTxO would still need collateral. A wallet that
+                // could not pledge any needs funds, not patience.
+                let wallet_utxos = ledger.utxos(&wallet.payment_address).await?;
+                anchor_tx::sponsor_collateral(&wallet_utxos, reserved)?;
+                return Err(busy.into());
+            }
+        };
     let funding = Funding::Sponsor { profile, utxo };
     let label = funding.label();
-    anchor_tx::build_anchor_tx(record, funding, wallet, ledger)
+    anchor_tx::build_anchor_tx(record, funding, wallet, ledger, tip, reserved)
         .await
         .map(|tx| Some((tx, label)))
 }

@@ -38,6 +38,12 @@ pub enum TxBuildError {
     TxDecode(String),
     #[error("Blockfrost error: {0}")]
     Blockfrost(#[from] super::blockfrost::BlockfrostError),
+    /// A [`Ledger`](super::ledger::Ledger) read failed.
+    #[error("ledger error: {0}")]
+    Ledger(String),
+    /// Only UTxOs this node's in-flight transactions spend would do.
+    #[error(transparent)]
+    WalletBusy(#[from] super::reservations::WalletBusy),
 }
 
 /// Minimum ADA to send with an NFT output (2 ADA).

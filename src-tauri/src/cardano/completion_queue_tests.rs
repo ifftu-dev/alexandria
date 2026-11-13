@@ -1,6 +1,20 @@
+use pallas_traverse::{MultiEraInput, MultiEraTx};
+
 use super::*;
+use crate::cardano::blockfrost::BlockfrostClient;
+use crate::cardano::fake_ledger::{ada, FakeLedger};
 use crate::cardano::test_chain::TestProfile;
+use crate::cardano::tx_builder::TTL_OFFSET;
 use crate::db::Database;
+
+const TIP: u64 = 120_000_000;
+
+fn outpoints(inputs: Vec<MultiEraInput<'_>>) -> Vec<String> {
+    inputs
+        .iter()
+        .map(|input| format!("{}#{}", input.hash(), input.index()))
+        .collect()
+}
 
 fn wallet() -> Wallet {
     crate::crypto::wallet::wallet_from_mnemonic(
@@ -41,8 +55,8 @@ fn checkpoint(conn: &Connection, context: &CompletionContext, status: Submission
     )
     .then_some(42);
     conn.execute(
-        "INSERT INTO chain_submissions (network, operation_kind, operation_id, tx_hash, signed_cbor, context_json, status, confirmed_slot)
-         VALUES ('cardano-preprod', ?1, ?2, ?3, X'00', ?4, ?5, ?6)",
+        "INSERT INTO chain_submissions (network, operation_kind, operation_id, tx_hash, signed_cbor, invalid_from_slot, context_json, status, confirmed_slot)
+         VALUES ('cardano-preprod', ?1, ?2, ?3, X'00', 0, ?4, ?5, ?6)",
         params![KIND, context.operation_id(), "a".repeat(64), serde_json::to_string(context).unwrap(),
             serde_json::to_value(status).unwrap().as_str().unwrap(), slot],
     ).unwrap();
@@ -283,4 +297,164 @@ async fn cancelled_unsigned_build_preserves_intent_and_restart_backoff() {
         next_request(db.conn()).unwrap().is_some(),
         "unsigned intent may resume"
     );
+}
+
+#[tokio::test]
+async fn tick_mints_through_the_ledger_port_with_largest_input_and_separate_collateral() {
+    let db = test_db();
+    let context = context();
+    claim(db.conn(), "claim");
+    enqueue(db.conn(), "claim", &context).unwrap();
+    let profile = TestProfile::new(db);
+    let wallet = wallet();
+    let ledger = FakeLedger::at_tip(TIP);
+    ledger.set_utxos(
+        &wallet.payment_address,
+        vec![ada(0x22, 0, 6_000_000), ada(0x11, 1, 20_000_000)],
+    );
+
+    tick(&profile.background(), &ledger, &wallet).await.unwrap();
+
+    let submissions = ledger.submissions();
+    assert_eq!(submissions.len(), 1);
+    let (tx_hash, bytes) = &submissions[0];
+    let tx = MultiEraTx::decode(bytes).unwrap();
+    assert_eq!(
+        outpoints(tx.inputs()),
+        vec![format!("{}#1", "11".repeat(32))]
+    );
+    assert_eq!(
+        outpoints(tx.collateral()),
+        vec![format!("{}#0", "22".repeat(32))]
+    );
+    let witness = profile.with_conn(|conn| state(conn, "claim").unwrap());
+    assert_eq!(witness.status, WitnessStatus::Submitted);
+    assert_eq!(witness.tx_hash.as_deref(), Some(tx_hash.as_str()));
+}
+
+fn context_for(course: &str) -> CompletionContext {
+    CompletionContext {
+        course_id: course.into(),
+        ..context()
+    }
+}
+
+fn outpoint(byte: u8, index: u64) -> String {
+    format!("{}#{index}", format!("{byte:02x}").repeat(32))
+}
+
+/// `(inputs, collateral)` the signed bytes spend.
+fn spent_by(bytes: &[u8]) -> (Vec<String>, Vec<String>) {
+    let tx = MultiEraTx::decode(bytes).unwrap();
+    (outpoints(tx.inputs()), outpoints(tx.collateral()))
+}
+
+#[tokio::test]
+async fn mints_built_in_one_pass_behind_a_lagging_index_spend_different_utxos() {
+    let db = test_db();
+    for (claim_id, course) in [("first", "course-a"), ("second", "course-b")] {
+        claim(db.conn(), claim_id);
+        enqueue(db.conn(), claim_id, &context_for(course)).unwrap();
+    }
+    let profile = TestProfile::new(db);
+    let wallet = wallet();
+    let ledger = FakeLedger::at_tip(TIP);
+    ledger.set_utxos(
+        &wallet.payment_address,
+        vec![
+            ada(0x11, 0, 40_000_000),
+            ada(0x22, 0, 30_000_000),
+            ada(0x33, 0, 20_000_000),
+            ada(0x44, 0, 10_000_000),
+        ],
+    );
+
+    // One background pass: the index still lists everything the first mint
+    // spent when the second is built.
+    tick(&profile.background(), &ledger, &wallet).await.unwrap();
+    tick(&profile.background(), &ledger, &wallet).await.unwrap();
+
+    let submissions = ledger.submissions();
+    assert_eq!(submissions.len(), 2);
+    assert_eq!(
+        spent_by(&submissions[0].1),
+        (vec![outpoint(0x11, 0)], vec![outpoint(0x22, 0)])
+    );
+    assert_eq!(
+        spent_by(&submissions[1].1),
+        (vec![outpoint(0x33, 0)], vec![outpoint(0x44, 0)])
+    );
+    for claim_id in ["first", "second"] {
+        let witness = profile.with_conn(|conn| state(conn, claim_id).unwrap());
+        assert_eq!(witness.status, WitnessStatus::Submitted, "{claim_id}");
+    }
+}
+
+fn last_error(profile: &TestProfile, claim_id: &str) -> Option<String> {
+    profile.with_conn(|conn| {
+        conn.query_row(
+            "SELECT last_error FROM completion_witness_requests WHERE claim_id = ?1",
+            [claim_id],
+            |row| row.get(0),
+        )
+        .unwrap()
+    })
+}
+
+#[tokio::test]
+async fn mint_waits_while_every_eligible_utxo_is_reserved_then_submits_after_the_window() {
+    let db = test_db();
+    for (claim_id, course) in [("first", "course-a"), ("second", "course-b")] {
+        claim(db.conn(), claim_id);
+        enqueue(db.conn(), claim_id, &context_for(course)).unwrap();
+    }
+    let profile = TestProfile::new(db);
+    let journal = profile.background();
+    let wallet = wallet();
+    let ledger = FakeLedger::at_tip(TIP);
+    ledger.set_utxos(
+        &wallet.payment_address,
+        vec![ada(0x11, 0, 40_000_000), ada(0x22, 0, 30_000_000)],
+    );
+    tick(&journal, &ledger, &wallet).await.unwrap();
+    let (first_hash, _) = ledger.submissions().pop().unwrap();
+
+    // The first mint's input and collateral are the only eligible UTxOs.
+    tick(&journal, &ledger, &wallet).await.unwrap();
+    assert_eq!(
+        ledger.submissions().len(),
+        1,
+        "nothing known to fail is sent"
+    );
+    let waiting = profile.with_conn(|conn| state(conn, "second").unwrap());
+    assert_eq!(waiting.status, WitnessStatus::Pending);
+    assert!(waiting.tx_hash.is_none());
+    assert_eq!(
+        last_error(&profile, "second").as_deref(),
+        Some("wallet busy: inputs reserved by in-flight transactions")
+    );
+
+    // The first mint lands; its collateral stays reserved until its window
+    // ends, so the wallet is free only once the tip is past it.
+    ledger.include(&first_hash, TIP + 10);
+    ledger.catch_up();
+    ledger.set_tip(TIP + TTL_OFFSET + submission::EXPIRY_MARGIN_SLOTS + 1);
+    profile.with_conn(|conn| {
+        conn.execute(
+            "UPDATE completion_witness_requests SET next_attempt_at = 0",
+            [],
+        )
+        .unwrap()
+    });
+    tick(&journal, &ledger, &wallet).await.unwrap();
+    let submissions = ledger.submissions();
+    assert_eq!(submissions.len(), 2);
+    let (second_hash, second_bytes) = &submissions[1];
+    assert_eq!(
+        spent_by(second_bytes),
+        (vec![format!("{first_hash}#1")], vec![outpoint(0x22, 0)])
+    );
+    let witness = profile.with_conn(|conn| state(conn, "second").unwrap());
+    assert_eq!(witness.status, WitnessStatus::Submitted);
+    assert_eq!(witness.tx_hash.as_deref(), Some(second_hash.as_str()));
 }

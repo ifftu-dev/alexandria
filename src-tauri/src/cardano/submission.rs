@@ -13,9 +13,11 @@
 use std::fmt;
 use std::future::Future;
 
+use pallas_traverse::MultiEraTx;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+use super::reservations::{Outpoint, ReservedOutpoints};
 use super::{blockfrost::TransactionReceipt, ledger::Ledger, tx_builder};
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::db::Database;
@@ -25,6 +27,12 @@ use crate::profile::scope::ProfileLease;
 // preprod. Network identity is not a project/API key or a particular provider.
 const NETWORK: &str = "cardano-preprod";
 const MAX_ERROR_CHARS: usize = 2048;
+
+/// Slots past a transaction's validity upper bound before the journal treats
+/// it as settled: its outpoints are released and, with no receipt, it can be
+/// marked expired. Covers provider catch-up and short rollbacks. The only
+/// expiry margin; every feature uses this one.
+pub const EXPIRY_MARGIN_SLOTS: u64 = 1_800;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Operation<'a> {
@@ -45,6 +53,10 @@ pub enum SubmissionStatus {
     Submitted,
     Confirmed,
     FailedOnChain,
+    /// The tip passed the validity upper bound plus [`EXPIRY_MARGIN_SLOTS`]
+    /// with no receipt, so ledger rules forbid including it. Terminal; it
+    /// reserves nothing.
+    Expired,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -195,6 +207,7 @@ pub fn lookup(conn: &Connection, operation: Operation<'_>) -> Result<Option<Subm
                 "submitted" => SubmissionStatus::Submitted,
                 "confirmed" => SubmissionStatus::Confirmed,
                 "failed_on_chain" => SubmissionStatus::FailedOnChain,
+                "expired" => SubmissionStatus::Expired,
                 _ => return Err(rusqlite::Error::InvalidQuery),
             };
             Ok(Submission {
@@ -248,6 +261,8 @@ pub fn unapplied_operations(
     rows
 }
 
+/// Finish a final result's domain projection: a verified receipt, or proof
+/// of expiry.
 pub fn mark_applied(
     tx: &rusqlite::Transaction<'_>,
     operation: Operation<'_>,
@@ -256,13 +271,14 @@ pub fn mark_applied(
         .execute(
             "UPDATE chain_submissions SET applied_at = COALESCE(applied_at, datetime('now'))
          WHERE network = ?1 AND operation_kind = ?2 AND operation_id = ?3
-           AND status IN ('confirmed', 'failed_on_chain') AND confirmed_slot IS NOT NULL",
+           AND ((status IN ('confirmed', 'failed_on_chain') AND confirmed_slot IS NOT NULL)
+                OR status = 'expired')",
             params![NETWORK, operation.kind, operation.id],
         )
         .map_err(|e| e.to_string())?
         != 1
     {
-        return Err("cannot finish projection before a verified ledger receipt".into());
+        return Err("cannot finish projection before a verified ledger receipt or expiry".into());
     }
     Ok(())
 }
@@ -341,13 +357,14 @@ fn checkpoint(
     if synchronous < 2 {
         return Err("submission checkpoint requires SQLite synchronous FULL or stronger".into());
     }
+    let bound = stored_bound(signed_cbor)?;
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
     let inserted = tx
         .execute(
             "INSERT INTO chain_submissions
-             (network, operation_kind, operation_id, tx_hash, signed_cbor, context_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             (network, operation_kind, operation_id, tx_hash, signed_cbor, invalid_from_slot, context_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(network, operation_kind, operation_id) DO NOTHING",
             params![
                 NETWORK,
@@ -355,6 +372,7 @@ fn checkpoint(
                 operation.id,
                 tx_hash,
                 signed_cbor,
+                bound,
                 context_json
             ],
         )
@@ -370,46 +388,114 @@ fn checkpoint(
         return Err("duplicate submission member".into());
     }
     if inserted {
-        for member in members {
-            tx.execute(
-                "INSERT INTO chain_submission_members
-                 (network, member_kind, member_id, operation_kind, operation_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    NETWORK,
-                    member.kind,
-                    member.id,
-                    operation.kind,
-                    operation.id
-                ],
-            )
-            .map_err(|e| format!("submission member already reserved or invalid: {e}"))?;
-        }
+        insert_members(&tx, operation, members)?;
     } else {
-        let mut statement = tx
-            .prepare(
-                "SELECT member_kind, member_id FROM chain_submission_members WHERE network = ?1
-                 AND operation_kind = ?2 AND operation_id = ?3 ORDER BY member_kind, member_id",
-            )
-            .map_err(|e| e.to_string())?;
-        let actual = statement
-            .query_map(params![NETWORK, operation.kind, operation.id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        if actual
-            .iter()
-            .map(|(kind, id)| (kind.as_str(), id.as_str()))
-            .collect::<Vec<_>>()
-            != expected
-        {
-            return Err("operation is already bound to different members".into());
-        }
+        require_members(&tx, operation, &expected)?;
     }
     tx.commit().map_err(|e| e.to_string())?;
     Ok((inserted, original))
+}
+
+fn insert_members(
+    conn: &Connection,
+    operation: Operation<'_>,
+    members: &[Member<'_>],
+) -> Result<(), String> {
+    for member in members {
+        conn.execute(
+            "INSERT INTO chain_submission_members
+             (network, member_kind, member_id, operation_kind, operation_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                NETWORK,
+                member.kind,
+                member.id,
+                operation.kind,
+                operation.id
+            ],
+        )
+        .map_err(|e| format!("submission member already reserved or invalid: {e}"))?;
+    }
+    Ok(())
+}
+
+fn holds_members(conn: &Connection, operation: Operation<'_>) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM chain_submission_members WHERE network = ?1
+         AND operation_kind = ?2 AND operation_id = ?3)",
+        params![NETWORK, operation.kind, operation.id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Unbind the members of an expired operation, so another operation may take
+/// them, and finish its projection. The operation stays expired; a later
+/// [`replace_expired`] for it binds the members it names again.
+pub fn release_expired_members(
+    tx: &rusqlite::Transaction<'_>,
+    operation: Operation<'_>,
+) -> Result<(), String> {
+    let expired = lookup(tx, operation)?
+        .is_some_and(|submission| submission.status == SubmissionStatus::Expired);
+    if !expired {
+        return Err("only an expired operation can release its members".into());
+    }
+    tx.execute(
+        "DELETE FROM chain_submission_members
+         WHERE network = ?1 AND operation_kind = ?2 AND operation_id = ?3",
+        params![NETWORK, operation.kind, operation.id],
+    )
+    .map_err(|e| e.to_string())?;
+    mark_applied(tx, operation)
+}
+
+/// Refuse unless `operation` is bound to exactly `expected` (sorted) members.
+fn require_members(
+    conn: &Connection,
+    operation: Operation<'_>,
+    expected: &[(&str, &str)],
+) -> Result<(), String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT member_kind, member_id FROM chain_submission_members WHERE network = ?1
+             AND operation_kind = ?2 AND operation_id = ?3 ORDER BY member_kind, member_id",
+        )
+        .map_err(|e| e.to_string())?;
+    let actual = statement
+        .query_map(params![NETWORK, operation.kind, operation.id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    if actual
+        .iter()
+        .map(|(kind, id)| (kind.as_str(), id.as_str()))
+        .collect::<Vec<_>>()
+        != expected
+    {
+        return Err("operation is already bound to different members".into());
+    }
+    Ok(())
+}
+
+/// Validate producer output before persisting it; the hash is derived
+/// locally and never accepted on the authority of an HTTP response.
+fn validate_signed(signed_cbor: &[u8], context_json: &str) -> Result<String, SubmitError> {
+    let tx_hash =
+        tx_builder::compute_tx_hash(signed_cbor).map_err(|e| SubmitError::Failed(e.to_string()))?;
+    validity_upper_bound(signed_cbor).map_err(SubmitError::Failed)?;
+    serde_json::from_str::<serde_json::Value>(context_json)
+        .map_err(|e| SubmitError::Failed(e.to_string()))?;
+    Ok(tx_hash)
+}
+
+fn owned_members(members: &[Member<'_>]) -> Vec<(String, String)> {
+    members
+        .iter()
+        .map(|member| (member.kind.to_owned(), member.id.to_owned()))
+        .collect()
 }
 
 async fn submit_members_with<F, Fut>(
@@ -424,22 +510,14 @@ where
     F: FnOnce(Vec<u8>) -> Fut,
     Fut: Future<Output = Result<String, String>>,
 {
-    // Validate producer output before persisting it; the hash is derived
-    // locally and never accepted on the authority of an HTTP response.
-    let tx_hash =
-        tx_builder::compute_tx_hash(signed_cbor).map_err(|e| SubmitError::Failed(e.to_string()))?;
-    serde_json::from_str::<serde_json::Value>(context_json)
-        .map_err(|e| SubmitError::Failed(e.to_string()))?;
+    let tx_hash = validate_signed(signed_cbor, context_json)?;
     let owned = OwnedOperation::new(operation);
     let checkpoint_job = {
         let operation = owned.clone();
         let tx_hash = tx_hash.clone();
         let signed_cbor = signed_cbor.to_vec();
         let context_json = context_json.to_owned();
-        let members: Vec<(String, String)> = members
-            .iter()
-            .map(|member| (member.kind.to_owned(), member.id.to_owned()))
-            .collect();
+        let members = owned_members(members);
         move |database: &Database| {
             let members: Vec<Member<'_>> = members
                 .iter()
@@ -463,8 +541,24 @@ where
     if !inserted {
         return Ok(original);
     }
+    send_and_record(journal, owned, &tx_hash, signed_cbor, original, send).await
+}
 
-    // Cancellation anywhere after the durable INSERT leaves outcome_unknown.
+/// Send checkpointed bytes and record the response. Only called after the
+/// checkpoint committed.
+async fn send_and_record<F, Fut>(
+    journal: &Journal,
+    owned: OwnedOperation,
+    tx_hash: &str,
+    signed_cbor: &[u8],
+    original: Submission,
+    send: F,
+) -> Result<Submission, SubmitError>
+where
+    F: FnOnce(Vec<u8>) -> Fut,
+    Fut: Future<Output = Result<String, String>>,
+{
+    // Cancellation anywhere after the durable checkpoint leaves outcome_unknown.
     let response = send(signed_cbor.to_vec()).await;
     let (acknowledged, error) = match response {
         Ok(hash) if hash == tx_hash => (true, None),
@@ -486,7 +580,7 @@ where
                 "UPDATE chain_submissions SET
                  status = CASE WHEN status = 'outcome_unknown' AND ?4
                                THEN 'submitted' ELSE status END,
-                 last_error = CASE WHEN status IN ('confirmed', 'failed_on_chain') THEN last_error ELSE ?5 END,
+                 last_error = CASE WHEN status IN ('confirmed', 'failed_on_chain', 'expired') THEN last_error ELSE ?5 END,
                  updated_at = datetime('now')
              WHERE network = ?1 AND operation_kind = ?2 AND operation_id = ?3",
                 params![
@@ -516,29 +610,314 @@ where
     }))
 }
 
-/// Reconcile only the journaled identity. Not found, unavailable, or timed out
-/// is not proof of rejection and never makes the operation eligible to rebuild.
-pub(crate) async fn reconcile<L: Ledger>(
-    journal: &Journal,
-    blockfrost: &L,
+/// An expired transaction an operation once had, kept after replacement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpiredSubmission {
+    pub tx_hash: String,
+    pub signed_cbor: Vec<u8>,
+    pub last_error: Option<String>,
+}
+
+/// Expired transactions replaced for `operation`, oldest first.
+pub fn history(
+    conn: &Connection,
     operation: Operation<'_>,
+) -> Result<Vec<ExpiredSubmission>, String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT tx_hash, signed_cbor, last_error FROM chain_submission_history
+             WHERE network = ?1 AND operation_kind = ?2 AND operation_id = ?3
+             ORDER BY replaced_at, rowid",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map(params![NETWORK, operation.kind, operation.id], |row| {
+            Ok(ExpiredSubmission {
+                tx_hash: row.get(0)?,
+                signed_cbor: row.get(1)?,
+                last_error: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string());
+    rows
+}
+
+/// Give an operation whose journaled transaction is
+/// [`SubmissionStatus::Expired`] a new transaction, the one exception to
+/// "never rebuilt". The recovery context must be the one already bound, and
+/// so must the members, unless [`release_expired_members`] unbound them; then
+/// the members given are bound again. The expired bytes move to [`history`]
+/// and the new bytes are checkpointed in the same committed transaction
+/// before sending, as with a first submission. Anything else is refused
+/// without sending.
+pub(crate) async fn replace_expired<L: Ledger>(
+    journal: &Journal,
+    ledger: &L,
+    operation: Operation<'_>,
+    signed_cbor: &[u8],
+    context_json: &str,
+    members: &[Member<'_>],
+) -> Result<Submission, SubmitError> {
+    replace_with(
+        journal,
+        operation,
+        signed_cbor,
+        context_json,
+        members,
+        |bytes| async move { ledger.submit(&bytes).await },
+    )
+    .await
+}
+
+async fn replace_with<F, Fut>(
+    journal: &Journal,
+    operation: Operation<'_>,
+    signed_cbor: &[u8],
+    context_json: &str,
+    members: &[Member<'_>],
+    send: F,
+) -> Result<Submission, SubmitError>
+where
+    F: FnOnce(Vec<u8>) -> Fut,
+    Fut: Future<Output = Result<String, String>>,
+{
+    let tx_hash = validate_signed(signed_cbor, context_json)?;
+    let owned = OwnedOperation::new(operation);
+    let checkpoint_job = {
+        let operation = owned.clone();
+        let tx_hash = tx_hash.clone();
+        let signed_cbor = signed_cbor.to_vec();
+        let context_json = context_json.to_owned();
+        let members = owned_members(members);
+        move |database: &Database| {
+            let members: Vec<Member<'_>> = members
+                .iter()
+                .map(|(kind, id)| Member { kind, id })
+                .collect();
+            replace_checkpoint(
+                database.conn(),
+                operation.get(),
+                &tx_hash,
+                &signed_cbor,
+                &context_json,
+                &members,
+            )
+        }
+    };
+    let replaced = journal
+        .before_send("submission.replace-checkpoint", checkpoint_job)
+        .await?;
+    send_and_record(journal, owned, &tx_hash, signed_cbor, replaced, send).await
+}
+
+/// Durable pre-send checkpoint for a replacement, under the same rules as
+/// [`checkpoint`].
+fn replace_checkpoint(
+    conn: &Connection,
+    operation: Operation<'_>,
+    tx_hash: &str,
+    signed_cbor: &[u8],
+    context_json: &str,
+    members: &[Member<'_>],
+) -> Result<Submission, String> {
+    if !conn.is_autocommit() {
+        return Err("submission requires a committed database boundary".into());
+    }
+    let synchronous: i64 = conn
+        .pragma_query_value(None, "synchronous", |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+    if synchronous < 2 {
+        return Err("submission checkpoint requires SQLite synchronous FULL or stronger".into());
+    }
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    let current = lookup(&tx, operation)?.ok_or("no journaled transaction to replace")?;
+    if current.status != SubmissionStatus::Expired {
+        return Err(
+            "the operation's journaled transaction has not expired; it cannot be replaced".into(),
+        );
+    }
+    if current.context_json != context_json {
+        return Err("operation is already bound to different recovery context".into());
+    }
+    let mut expected: Vec<(&str, &str)> = members.iter().map(|m| (m.kind, m.id)).collect();
+    expected.sort_unstable();
+    if holds_members(&tx, operation)? {
+        require_members(&tx, operation, &expected)?;
+    } else {
+        // Its members were released; bind the same ones again, unless another
+        // operation has taken one of them since.
+        if expected.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err("duplicate submission member".into());
+        }
+        insert_members(&tx, operation, members)?;
+    }
+    if current.tx_hash == tx_hash {
+        return Err("a replacement must be a new transaction".into());
+    }
+    tx.execute(
+        "INSERT INTO chain_submission_history
+         (network, operation_kind, operation_id, tx_hash, signed_cbor, status, last_error, submitted_at)
+         SELECT network, operation_kind, operation_id, tx_hash, signed_cbor, status, last_error, created_at
+         FROM chain_submissions
+         WHERE network = ?1 AND operation_kind = ?2 AND operation_id = ?3 AND status = 'expired'",
+        params![NETWORK, operation.kind, operation.id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "UPDATE chain_submissions SET tx_hash = ?4, signed_cbor = ?5, invalid_from_slot = ?6,
+             status = 'outcome_unknown', confirmed_slot = NULL, applied_at = NULL, last_error = NULL,
+             created_at = datetime('now'), updated_at = datetime('now')
+         WHERE network = ?1 AND operation_kind = ?2 AND operation_id = ?3 AND status = 'expired'",
+        params![
+            NETWORK,
+            operation.kind,
+            operation.id,
+            tx_hash,
+            signed_cbor,
+            stored_bound(signed_cbor)?
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    let replaced = lookup(&tx, operation)?.ok_or("submission checkpoint missing")?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(replaced)
+}
+
+/// Outpoints reserved at `tip`: the inputs and collateral inputs of every
+/// journaled transaction on this network whose validity upper bound plus
+/// [`EXPIRY_MARGIN_SLOTS`] is at or after `tip`, whatever its status. Inside
+/// that window a transaction is on chain, so its inputs are spent, or may
+/// still land; after it, the provider's view of them is accurate either way.
+/// The window is read from the stored bound; only transactions inside it are
+/// decoded. No network request.
+pub fn reserved_outpoints(conn: &Connection, tip: u64) -> Result<ReservedOutpoints, String> {
+    let earliest_bound = i64::try_from(tip.saturating_sub(EXPIRY_MARGIN_SLOTS))
+        .map_err(|_| "tip exceeds storage range")?;
+    let mut statement = conn
+        .prepare(
+            "SELECT signed_cbor FROM chain_submissions
+             WHERE network = ?1 AND invalid_from_slot >= ?2 AND status != 'expired'",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = statement
+        .query_map(params![NETWORK, earliest_bound], |row| {
+            row.get::<_, Vec<u8>>(0)
+        })
+        .map_err(|e| e.to_string())?;
+    let mut reserved = ReservedOutpoints::default();
+    for bytes in rows {
+        let bytes = bytes.map_err(|e| e.to_string())?;
+        let tx = MultiEraTx::decode(&bytes).map_err(|e| format!("decode journaled tx: {e}"))?;
+        for input in tx.inputs().iter().chain(tx.collateral().iter()) {
+            reserved.insert(Outpoint {
+                tx_hash: input.hash().to_string(),
+                index: input.index(),
+            });
+        }
+    }
+    Ok(reserved)
+}
+
+/// Mark a transaction without a receipt expired once `tip` is past its
+/// validity upper bound plus the margin. Never touches a receipt-backed row.
+fn expire_if_past_window(
+    conn: &Connection,
+    operation: Operation<'_>,
+    tip: u64,
+) -> Result<(), String> {
+    let bound: Option<i64> = conn
+        .query_row(
+            "SELECT invalid_from_slot FROM chain_submissions
+             WHERE network = ?1 AND operation_kind = ?2 AND operation_id = ?3
+               AND status IN ('outcome_unknown', 'submitted') AND confirmed_slot IS NULL",
+            params![NETWORK, operation.kind, operation.id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some(bound) = bound else {
+        return Ok(());
+    };
+    let bound = u64::try_from(bound).map_err(|_| "stored validity bound is negative")?;
+    if tip <= bound.saturating_add(EXPIRY_MARGIN_SLOTS) {
+        return Ok(());
+    }
+    conn.execute(
+        "UPDATE chain_submissions SET status = 'expired', updated_at = datetime('now')
+         WHERE network = ?1 AND operation_kind = ?2 AND operation_id = ?3
+           AND status IN ('outcome_unknown', 'submitted') AND confirmed_slot IS NULL",
+        params![NETWORK, operation.kind, operation.id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// The slot from which `signed_cbor` can no longer be included. Every
+/// journaled transaction must have one, so each reservation ends and each
+/// transaction can expire.
+fn validity_upper_bound(signed_cbor: &[u8]) -> Result<u64, String> {
+    MultiEraTx::decode(signed_cbor)
+        .map_err(|e| format!("decode signed transaction: {e}"))?
+        .ttl()
+        .ok_or_else(|| "transaction has no validity upper bound; refusing to journal it".into())
+}
+
+/// [`validity_upper_bound`] as the journal stores it, in
+/// `chain_submissions.invalid_from_slot`.
+fn stored_bound(signed_cbor: &[u8]) -> Result<i64, String> {
+    i64::try_from(validity_upper_bound(signed_cbor)?)
+        .map_err(|_| "validity upper bound exceeds storage range".into())
+}
+
+/// Reconcile the journaled identity at `tip`, read from the ledger before
+/// this call (`None` when the tip is unavailable). A receipt confirms or fails
+/// the transaction. Not found, unavailable, or timed out is not proof of
+/// rejection and never makes the operation eligible to rebuild. With no
+/// receipt, and only when the tip is known and past the validity upper bound
+/// plus [`EXPIRY_MARGIN_SLOTS`], the transaction becomes
+/// [`SubmissionStatus::Expired`]. A provider error never expires anything.
+pub(crate) async fn reconcile_at<L: Ledger>(
+    journal: &Journal,
+    ledger: &L,
+    operation: Operation<'_>,
+    tip: Option<u64>,
 ) -> Result<Option<Submission>, String> {
-    reconcile_with(journal, operation, |hash| async move {
-        blockfrost.receipt(&hash).await
+    reconcile_at_with(journal, operation, tip, |hash| async move {
+        ledger.receipt(&hash).await
     })
     .await
 }
 
 fn is_final(submission: &Submission) -> bool {
-    matches!(
-        submission.status,
-        SubmissionStatus::Confirmed | SubmissionStatus::FailedOnChain
-    ) && submission.confirmed_slot.is_some()
+    match submission.status {
+        SubmissionStatus::Confirmed | SubmissionStatus::FailedOnChain => {
+            submission.confirmed_slot.is_some()
+        }
+        SubmissionStatus::Expired => true,
+        SubmissionStatus::OutcomeUnknown | SubmissionStatus::Submitted => false,
+    }
 }
 
+#[cfg(test)]
 async fn reconcile_with<F, Fut>(
     journal: &Journal,
     operation: Operation<'_>,
+    check: F,
+) -> Result<Option<Submission>, String>
+where
+    F: FnOnce(String) -> Fut,
+    Fut: Future<Output = Result<Option<TransactionReceipt>, String>>,
+{
+    reconcile_at_with(journal, operation, None, check).await
+}
+
+async fn reconcile_at_with<F, Fut>(
+    journal: &Journal,
+    operation: Operation<'_>,
+    tip: Option<u64>,
     check: F,
 ) -> Result<Option<Submission>, String>
 where
@@ -574,8 +953,13 @@ where
     }
     let Some(receipt) = check(original.tx_hash.clone()).await? else {
         return journal
-            .run("submission.reconcile-lookup", move |database| {
-                lookup(database.conn(), owned.get())
+            .run("submission.reconcile-expire", move |database| {
+                let conn = database.conn();
+                let operation = owned.get();
+                if let Some(tip) = tip {
+                    expire_if_past_window(conn, operation, tip)?;
+                }
+                lookup(conn, operation)
             })
             .await;
     };
@@ -607,6 +991,7 @@ mod tests {
     use std::task::{Context, Poll, Waker};
 
     use super::*;
+    use crate::cardano::fake_ledger::FakeLedger;
     use crate::cardano::test_chain::{self, FakeChain, Reply, TestProfile};
     use pallas_addresses::Address;
     use pallas_crypto::{hash::Hash, key::ed25519::SecretKey};
@@ -619,13 +1004,37 @@ mod tests {
     };
     const CONTEXT: &str = r#"{"version":1}"#;
 
+    /// Validity upper bound of the transactions these tests sign.
+    const TTL: u64 = 10_000;
+
     fn signed_transaction(fee: u64) -> Vec<u8> {
-        let built = StagingTransaction::new()
-            .input(Input::new(Hash::from([0x42; 32]), 0))
+        transaction(fee, Some(TTL), &[(0x42, 0)], &[])
+    }
+
+    /// Signed bytes spending `inputs` and pledging `collateral`, each given as
+    /// `(tx hash byte, output index)`.
+    fn transaction(
+        fee: u64,
+        ttl: Option<u64>,
+        inputs: &[(u8, u64)],
+        collateral: &[(u8, u64)],
+    ) -> Vec<u8> {
+        let mut staging = StagingTransaction::new()
             .output(Output::new(Address::from_bech32(
                 "addr_test1qz2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3jcu5d8ps7zex2k2xt3uqxgjqnnj83ws8lhrn648jjxtwq2ytjqp"
             ).unwrap(), 2_000_000))
-            .fee(fee).network_id(0).build_conway_raw().unwrap();
+            .fee(fee)
+            .network_id(0);
+        for (byte, index) in inputs {
+            staging = staging.input(Input::new(Hash::from([*byte; 32]), *index));
+        }
+        for (byte, index) in collateral {
+            staging = staging.collateral_input(Input::new(Hash::from([*byte; 32]), *index));
+        }
+        if let Some(ttl) = ttl {
+            staging = staging.invalid_from_slot(ttl);
+        }
+        let built = staging.build_conway_raw().unwrap();
         tx_builder::sign_raw_tx(
             &built.tx_bytes.0,
             &PrivateKey::Normal(SecretKey::from([7; 32])),
@@ -1020,7 +1429,7 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(retry, uncertain);
-        let recovered = reconcile(&journal, &client, OPERATION)
+        let recovered = reconcile_at(&journal, &client, OPERATION, None)
             .await
             .unwrap()
             .unwrap();
@@ -1311,7 +1720,7 @@ mod tests {
         assert_eq!(stored.tx_hash, expected);
         let recovered = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            reconcile(&journal, &client, OPERATION),
+            reconcile_at(&journal, &client, OPERATION, None),
         )
         .await
         .unwrap()
@@ -1325,5 +1734,434 @@ mod tests {
                 format!("GET /txs/{expected}")
             ]
         );
+    }
+    #[tokio::test]
+    async fn transaction_without_validity_upper_bound_is_never_journaled() {
+        let profile = TestProfile::migrated();
+        let journal = profile.background();
+        let unbounded = transaction(200_000, None, &[(0x42, 0)], &[]);
+        let error = submit_with(&journal, OPERATION, &unbounded, CONTEXT, |_| async {
+            panic!("an unbounded transaction must not send")
+        })
+        .await
+        .unwrap_err();
+        assert!(!error.is_retryable());
+        assert!(
+            error.to_string().contains("validity upper bound"),
+            "{error}"
+        );
+        assert!(saved(&profile, OPERATION).is_none());
+    }
+
+    fn outpoint(byte: u8, index: u64) -> Outpoint {
+        Outpoint {
+            tx_hash: format!("{byte:02x}").repeat(32),
+            index,
+        }
+    }
+
+    fn reserved_at(profile: &TestProfile, tip: u64) -> Vec<Outpoint> {
+        let reserved = with_database(&profile.db, |conn| reserved_outpoints(conn, tip)).unwrap();
+        let mut outpoints: Vec<Outpoint> = reserved.iter().cloned().collect();
+        outpoints.sort();
+        outpoints
+    }
+
+    async fn journal_spending(
+        journal: &Journal,
+        id: &'static str,
+        ttl: u64,
+        inputs: &[(u8, u64)],
+        collateral: &[(u8, u64)],
+        accepted: bool,
+    ) -> Submission {
+        let bytes = transaction(200_000, Some(ttl), inputs, collateral);
+        let hash = tx_builder::compute_tx_hash(&bytes).unwrap();
+        let operation = Operation { kind: "test", id };
+        submit_with(journal, operation, &bytes, CONTEXT, |_| async move {
+            if accepted {
+                Ok(hash)
+            } else {
+                Err("BadInputsUTxO".into())
+            }
+        })
+        .await
+        .unwrap()
+    }
+
+    async fn include(journal: &Journal, id: &'static str, valid_contract: bool) -> Submission {
+        reconcile_with(journal, Operation { kind: "test", id }, |hash| async move {
+            Ok(Some(TransactionReceipt {
+                hash,
+                slot: 42,
+                valid_contract,
+                block_time: None,
+            }))
+        })
+        .await
+        .unwrap()
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn every_status_reserves_inputs_and_collateral_until_its_window_ends() {
+        let profile = TestProfile::migrated();
+        let journal = profile.background();
+        let unknown = journal_spending(&journal, "unknown", TTL, &[(1, 0)], &[(2, 1)], false).await;
+        assert_eq!(unknown.status, SubmissionStatus::OutcomeUnknown);
+        let submitted = journal_spending(&journal, "submitted", TTL, &[(3, 0)], &[], true).await;
+        assert_eq!(submitted.status, SubmissionStatus::Submitted);
+        journal_spending(&journal, "confirmed", TTL, &[(4, 0)], &[], true).await;
+        assert_eq!(
+            include(&journal, "confirmed", true).await.status,
+            SubmissionStatus::Confirmed
+        );
+        journal_spending(&journal, "script-failed", TTL, &[(5, 0)], &[(6, 0)], true).await;
+        assert_eq!(
+            include(&journal, "script-failed", false).await.status,
+            SubmissionStatus::FailedOnChain
+        );
+        let later = TTL * 2;
+        journal_spending(&journal, "later", later, &[(7, 2)], &[], true).await;
+
+        let all = vec![
+            outpoint(1, 0),
+            outpoint(2, 1),
+            outpoint(3, 0),
+            outpoint(4, 0),
+            outpoint(5, 0),
+            outpoint(6, 0),
+            outpoint(7, 2),
+        ];
+        assert_eq!(reserved_at(&profile, 0), all);
+        // 1,800 slots past the bound is still inside the window.
+        assert_eq!(reserved_at(&profile, TTL + 1_800), all);
+        assert_eq!(reserved_at(&profile, TTL + 1_801), vec![outpoint(7, 2)]);
+        assert_eq!(reserved_at(&profile, later + 1_801), Vec::new());
+    }
+
+    #[tokio::test]
+    async fn reservations_decode_only_transactions_inside_their_window() {
+        let profile = TestProfile::migrated();
+        journal_spending(&profile.background(), "live", TTL, &[(1, 0)], &[], true).await;
+        // A long-settled row whose bytes no longer decode: outside the
+        // window, it is never read.
+        profile.with_conn(|conn| {
+            conn.execute(
+                "INSERT INTO chain_submissions (network, operation_kind, operation_id, tx_hash,
+                     signed_cbor, invalid_from_slot, context_json, status)
+                 VALUES ('cardano-preprod', 'test', 'settled', ?1, X'00', 10, '{}', 'confirmed')",
+                ["e".repeat(64)],
+            )
+            .unwrap()
+        });
+        assert_eq!(reserved_at(&profile, TTL), vec![outpoint(1, 0)]);
+    }
+
+    #[tokio::test]
+    async fn reservations_survive_a_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("profile.db");
+        let key = [9; 32];
+        let database = Database::open_encrypted(&path, &key).unwrap();
+        database.run_migrations().unwrap();
+        let before = TestProfile::new(database);
+        // The node crashes after sending, before any response is recorded.
+        let bytes = transaction(200_000, Some(TTL), &[(1, 0)], &[(2, 0)]);
+        let task_journal = before.background();
+        let (started, sending) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            submit_with(&task_journal, OPERATION, &bytes, CONTEXT, |_| async move {
+                started.send(()).unwrap();
+                std::future::pending::<Result<String, String>>().await
+            })
+            .await
+        });
+        sending.await.unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        drop(before);
+
+        let after = TestProfile::new(Database::open_encrypted(&path, &key).unwrap());
+        assert_eq!(
+            reserved_at(&after, TTL),
+            vec![outpoint(1, 0), outpoint(2, 0)]
+        );
+    }
+
+    #[tokio::test]
+    async fn rejected_transaction_expires_only_after_its_window_and_releases_its_outpoints() {
+        let profile = TestProfile::migrated();
+        let journal = profile.background();
+        let ledger = FakeLedger::at_tip(TTL - 100);
+        ledger.reject_submissions("BadInputsUTxO");
+        let bytes = transaction(200_000, Some(TTL), &[(1, 0)], &[(2, 0)]);
+        let rejected = submit_once(&journal, &ledger, OPERATION, &bytes, CONTEXT)
+            .await
+            .unwrap();
+        assert_eq!(rejected.status, SubmissionStatus::OutcomeUnknown);
+
+        for tip in [None, Some(TTL), Some(TTL + EXPIRY_MARGIN_SLOTS)] {
+            let pending = reconcile_at(&journal, &ledger, OPERATION, tip)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(pending.status, SubmissionStatus::OutcomeUnknown, "{tip:?}");
+        }
+        assert_eq!(
+            reserved_at(&profile, TTL),
+            vec![outpoint(1, 0), outpoint(2, 0)]
+        );
+
+        let expired = reconcile_at(
+            &journal,
+            &ledger,
+            OPERATION,
+            Some(TTL + EXPIRY_MARGIN_SLOTS + 1),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(expired.status, SubmissionStatus::Expired);
+        assert_eq!(expired.tx_hash, rejected.tx_hash);
+        // Released at once, even at a tip still inside the original window.
+        assert_eq!(reserved_at(&profile, TTL), Vec::new());
+
+        // Terminal: no more receipt queries, and the operation is not resent.
+        let again = reconcile_with(&journal, OPERATION, |_| async {
+            panic!("an expired transaction is not polled")
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(again, expired);
+        let repeated = submit_with(&journal, OPERATION, &bytes, CONTEXT, |_| async {
+            panic!("an expired operation is not resent by submit_once")
+        })
+        .await
+        .unwrap();
+        assert_eq!(repeated, expired);
+        assert_eq!(ledger.submissions().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn provider_error_never_expires() {
+        let profile = TestProfile::migrated();
+        let journal = profile.background();
+        let original = uncertain(&journal).await;
+        let result = reconcile_at_with(&journal, OPERATION, Some(TTL * 10), |_| async {
+            Err("provider timed out".into())
+        })
+        .await;
+        assert!(result.is_err());
+        assert_eq!(saved(&profile, OPERATION), Some(original));
+    }
+
+    #[tokio::test]
+    async fn receipt_inside_the_margin_confirms_instead_of_expiring() {
+        let profile = TestProfile::migrated();
+        let journal = profile.background();
+        let ledger = FakeLedger::at_tip(TTL - 100);
+        let bytes = signed_transaction(200_000);
+        let sent = submit_once(&journal, &ledger, OPERATION, &bytes, CONTEXT)
+            .await
+            .unwrap();
+        // Included late but before its bound; seen only once the tip is past
+        // the bound, inside the margin.
+        ledger.include(&sent.tx_hash, TTL - 1);
+        let confirmed = reconcile_at(&journal, &ledger, OPERATION, Some(TTL + 900))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(confirmed.status, SubmissionStatus::Confirmed);
+        assert_eq!(confirmed.confirmed_slot, Some(TTL - 1));
+        let later = reconcile_at(&journal, &ledger, OPERATION, Some(TTL * 10))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(later, confirmed);
+    }
+
+    #[tokio::test]
+    async fn expired_entry_leaves_the_recovery_scan_once_its_projection_commits() {
+        let profile = TestProfile::migrated();
+        let journal = profile.background();
+        uncertain(&journal).await;
+        let expired =
+            reconcile_at_with(&journal, OPERATION, Some(TTL * 10), |_| async { Ok(None) })
+                .await
+                .unwrap()
+                .unwrap();
+        assert_eq!(expired.status, SubmissionStatus::Expired);
+        let unapplied = |profile: &TestProfile| {
+            with_database(&profile.db, |conn| {
+                unapplied_operations(conn, OPERATION.kind, 10)
+            })
+            .unwrap()
+        };
+        assert_eq!(unapplied(&profile), vec![OPERATION.id.to_owned()]);
+        with_database(&profile.db, |conn| {
+            let tx = rusqlite::Transaction::new_unchecked(
+                conn,
+                rusqlite::TransactionBehavior::Immediate,
+            )
+            .map_err(|e| e.to_string())?;
+            mark_applied(&tx, OPERATION)?;
+            tx.commit().map_err(|e| e.to_string())
+        })
+        .unwrap();
+        assert!(unapplied(&profile).is_empty());
+    }
+
+    const CLAIM: Member<'static> = Member {
+        kind: "claim",
+        id: "alice",
+    };
+
+    /// Journal `bytes` with one member, rejected on send, then expire it.
+    async fn expired_with_member(journal: &Journal, bytes: &[u8]) -> Submission {
+        submit_members_with(journal, OPERATION, bytes, CONTEXT, &[CLAIM], |_| async {
+            Err("BadInputsUTxO".into())
+        })
+        .await
+        .unwrap();
+        let expired = reconcile_at_with(journal, OPERATION, Some(TTL * 10), |_| async { Ok(None) })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(expired.status, SubmissionStatus::Expired);
+        expired
+    }
+
+    #[tokio::test]
+    async fn replacing_an_expired_operation_keeps_the_expired_bytes_as_history() {
+        let profile = TestProfile::migrated();
+        let journal = profile.background();
+        let old_bytes = transaction(200_000, Some(TTL), &[(1, 0)], &[(2, 0)]);
+        let expired = expired_with_member(&journal, &old_bytes).await;
+
+        let ledger = FakeLedger::at_tip(TTL * 10);
+        let new_ttl = TTL * 20;
+        let new_bytes = transaction(200_000, Some(new_ttl), &[(3, 0)], &[(4, 0)]);
+        let replaced = replace_expired(&journal, &ledger, OPERATION, &new_bytes, CONTEXT, &[CLAIM])
+            .await
+            .unwrap();
+        assert_eq!(replaced.status, SubmissionStatus::Submitted);
+        assert_eq!(
+            replaced.tx_hash,
+            tx_builder::compute_tx_hash(&new_bytes).unwrap()
+        );
+        assert_eq!(replaced.context_json, CONTEXT);
+        assert_eq!(saved(&profile, OPERATION), Some(replaced.clone()));
+        assert_eq!(ledger.submissions(), vec![(replaced.tx_hash, new_bytes)]);
+
+        let history = with_database(&profile.db, |conn| history(conn, OPERATION)).unwrap();
+        assert_eq!(
+            history,
+            vec![ExpiredSubmission {
+                tx_hash: expired.tx_hash,
+                signed_cbor: old_bytes,
+                last_error: expired.last_error,
+            }]
+        );
+        // The replacement reserves its own outpoints; the expired ones stay free.
+        assert_eq!(
+            reserved_at(&profile, TTL),
+            vec![outpoint(3, 0), outpoint(4, 0)]
+        );
+        // Its member stays bound to the operation.
+        let other = Operation {
+            id: "other-batch",
+            ..OPERATION
+        };
+        assert!(submit_members_with(
+            &journal,
+            other,
+            &transaction(200_000, Some(new_ttl), &[(5, 0)], &[]),
+            CONTEXT,
+            &[CLAIM],
+            |_| async { panic!("a bound member must not send") },
+        )
+        .await
+        .unwrap_err()
+        .to_string()
+        .contains("already reserved"));
+    }
+
+    #[tokio::test]
+    async fn only_an_expired_operation_with_the_same_intent_can_be_replaced() {
+        let profile = TestProfile::migrated();
+        let journal = profile.background();
+        let ledger = FakeLedger::at_tip(TTL);
+        let new_bytes = transaction(200_000, Some(TTL * 20), &[(3, 0)], &[]);
+        let refused = |result: Result<Submission, SubmitError>, reason: &str| {
+            let error = result.unwrap_err();
+            assert!(!error.is_retryable(), "{error}");
+            assert!(error.to_string().contains(reason), "{error}");
+        };
+
+        refused(
+            replace_expired(&journal, &ledger, OPERATION, &new_bytes, CONTEXT, &[CLAIM]).await,
+            "no journaled transaction",
+        );
+        let old_bytes = transaction(200_000, Some(TTL), &[(1, 0)], &[]);
+        let pending = submit_members_with(
+            &journal,
+            OPERATION,
+            &old_bytes,
+            CONTEXT,
+            &[CLAIM],
+            |_| async { Err("response lost".into()) },
+        )
+        .await
+        .unwrap();
+        refused(
+            replace_expired(&journal, &ledger, OPERATION, &new_bytes, CONTEXT, &[CLAIM]).await,
+            "has not expired",
+        );
+        assert_eq!(saved(&profile, OPERATION), Some(pending));
+
+        let expired =
+            reconcile_at_with(&journal, OPERATION, Some(TTL * 10), |_| async { Ok(None) })
+                .await
+                .unwrap()
+                .unwrap();
+        refused(
+            replace_expired(
+                &journal,
+                &ledger,
+                OPERATION,
+                &new_bytes,
+                r#"{"version":2}"#,
+                &[CLAIM],
+            )
+            .await,
+            "different recovery context",
+        );
+        refused(
+            replace_expired(&journal, &ledger, OPERATION, &new_bytes, CONTEXT, &[]).await,
+            "different members",
+        );
+        refused(
+            replace_expired(&journal, &ledger, OPERATION, &old_bytes, CONTEXT, &[CLAIM]).await,
+            "new transaction",
+        );
+        refused(
+            replace_expired(
+                &journal,
+                &ledger,
+                OPERATION,
+                &transaction(200_000, None, &[(3, 0)], &[]),
+                CONTEXT,
+                &[CLAIM],
+            )
+            .await,
+            "validity upper bound",
+        );
+        assert_eq!(saved(&profile, OPERATION), Some(expired));
+        assert!(with_database(&profile.db, |conn| history(conn, OPERATION))
+            .unwrap()
+            .is_empty());
+        assert!(ledger.submissions().is_empty());
     }
 }

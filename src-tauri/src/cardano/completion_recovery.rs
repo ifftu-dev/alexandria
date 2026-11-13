@@ -1,9 +1,9 @@
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
-use super::blockfrost::BlockfrostClient;
 use super::completion::{self, CompletionObservation};
 use super::completion_tx_builder;
+use super::ledger::Ledger;
 use super::script_refs;
 use super::submission::{self, Journal, Operation, Submission, SubmissionStatus};
 use crate::domain::completion::merkle_root;
@@ -98,6 +98,9 @@ pub fn project(
     operation: Operation<'_>,
     submitted: &Submission,
 ) -> Result<(), String> {
+    if submitted.status == SubmissionStatus::Expired {
+        return release_for_replacement(conn, operation);
+    }
     if !matches!(
         submitted.status,
         SubmissionStatus::Confirmed | SubmissionStatus::FailedOnChain
@@ -156,6 +159,26 @@ pub fn project(
     tx.commit().map_err(|e| e.to_string())
 }
 
+/// The journaled mint can never land. Hand its request back to the queue,
+/// which rebuilds it from the preserved context through
+/// [`submission::replace_expired`], and stop polling the dead transaction.
+fn release_for_replacement(conn: &Connection, operation: Operation<'_>) -> Result<(), String> {
+    if operation.kind != KIND {
+        return Err("completion recovery context does not match operation".into());
+    }
+    let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
+        .map_err(|e| e.to_string())?;
+    tx.execute(
+        "UPDATE completion_witness_requests SET blocked = 0, next_attempt_at = unixepoch(),
+         last_error = 'Transaction expired without landing; a replacement will be built'
+         WHERE operation_id = ?1",
+        [operation.id],
+    )
+    .map_err(|e| e.to_string())?;
+    submission::mark_applied(&tx, operation)?;
+    tx.commit().map_err(|e| e.to_string())
+}
+
 pub fn ensure_unobserved(conn: &Connection, context: &CompletionContext) -> Result<(), String> {
     if completion::observation_exists(conn, &context.policy_id, &context.asset_name_hex())
         .map_err(|e| e.to_string())?
@@ -165,18 +188,29 @@ pub fn ensure_unobserved(conn: &Connection, context: &CompletionContext) -> Resu
     Ok(())
 }
 
-pub(crate) async fn tick(journal: &Journal, bf: &BlockfrostClient) -> Result<(), String> {
+pub(crate) async fn tick<L: Ledger>(journal: &Journal, ledger: &L) -> Result<(), String> {
     let ids = journal
         .run("completion_recovery.scan", |db| {
             submission::unapplied_operations(db.conn(), KIND, 10)
         })
         .await?;
+    if ids.is_empty() {
+        return Ok(());
+    }
+    // Expiry needs a known tip; without one nothing is expired.
+    let tip = match ledger.tip_slot().await {
+        Ok(tip) => Some(tip),
+        Err(error) => {
+            log::debug!("completion recovery without a tip, nothing expires: {error}");
+            None
+        }
+    };
     for id in ids {
         let operation = Operation {
             kind: KIND,
             id: &id,
         };
-        match submission::reconcile(journal, bf, operation).await {
+        match submission::reconcile_at(journal, ledger, operation, tip).await {
             Ok(Some(submitted)) => {
                 let id = id.clone();
                 if let Err(error) = journal
