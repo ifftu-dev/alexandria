@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId,
 import { useI18n } from 'vue-i18n'
 import { atlasLayout, MAP_HEIGHT, NARROW_MAP_WIDTH, NODE_HEIGHT, NODE_WIDTH, REGION_HEADING_BOX, REGION_WIDTH, regionCamera } from './atlasLayout'
 import { atlasFieldColor, createAtlasPresenter } from './atlasPresentation'
-import { isDenseLayer, SIMPLE_DISC_SIZE, simpleLayout } from './simpleLayout'
+import { isDenseLayer, SIMPLE_DISC_SIZE, SIMPLE_LABEL_MAX_WIDTH, simpleLayout } from './simpleLayout'
 import AtlasNodeLayer from './AtlasNodeLayer.vue'
 import { animateMotion, motionDuration, useMotion } from '@/composables/useMotion'
 import type { SkillGraphView } from '@/composables/useSkillGraphView'
@@ -85,8 +85,7 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
 // left untouched in Simple, so they are intact on the way back.
 const simple = computed(() => props.viewMode === 'simple')
 const simpleGeometry = computed(() => simpleLayout(props.model, width.value))
-/** A Simple node's box: its disc with room above for the ready-next halo, and its name below. */
-const SIMPLE_NODE_WIDTH = 120
+/** A Simple node's box: its disc with room above for the ready-next halo, and its name below, as wide as the layout lets the name grow. */
 const SIMPLE_RING_ROOM = 8
 const SIMPLE_NODE_HEIGHT = SIMPLE_RING_ROOM + SIMPLE_DISC_SIZE + 44
 interface NodeBox { x: number; y: number; width: number; height: number }
@@ -94,8 +93,10 @@ interface NodeBox { x: number; y: number; width: number; height: number }
 const nodeBoxes = computed(() => {
   const boxes = new Map<string, NodeBox>()
   if (simple.value) {
-    for (const [skillId, point] of simpleGeometry.value.positions) boxes.set(skillId,
-      { x: point.x - SIMPLE_NODE_WIDTH / 2, y: point.y - SIMPLE_DISC_SIZE / 2 - SIMPLE_RING_ROOM, width: SIMPLE_NODE_WIDTH, height: SIMPLE_NODE_HEIGHT })
+    for (const [skillId, point] of simpleGeometry.value.positions) {
+      const nodeWidth = simpleGeometry.value.labelWidths.get(skillId) ?? SIMPLE_LABEL_MAX_WIDTH
+      boxes.set(skillId, { x: point.x - nodeWidth / 2, y: point.y - SIMPLE_DISC_SIZE / 2 - SIMPLE_RING_ROOM, width: nodeWidth, height: SIMPLE_NODE_HEIGHT })
+    }
   } else {
     for (const [skillId, point] of layout.value.positions) boxes.set(skillId, { x: point.x, y: point.y, width: NODE_WIDTH, height: NODE_HEIGHT })
   }
@@ -784,7 +785,7 @@ function setBloom(event: Event): void {
 .map-node.is-selected .node-disc { box-shadow: 0 0 0 3px var(--app-background), 0 0 0 5.5px var(--app-primary); }
 .map-node.is-updated .node-disc { outline: 2px solid var(--app-primary); outline-offset: 3px; }
 .atlas:not(.motion-reduced) .map-node.is-updated .node-disc { animation: atlas-evidence var(--duration-reveal) ease-out 1; }
-.node-label { max-width: 100%; padding: 1px 4px; border-radius: 4px; background: color-mix(in srgb, var(--app-background) 88%, transparent); font-size: 12px; font-weight: 550; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.node-label { max-width: 100%; padding: 1px 4px; border-radius: 4px; background: color-mix(in srgb, var(--app-background) 88%, transparent); font-size: 12px; font-weight: 550; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .map-node.is-selected .node-label { color: var(--app-primary); font-weight: 650; }
 /* Dense layers: plain Ready names wait for hover or focus (the list and accessible name always carry them). */
 .node-label.is-label-quiet { opacity: 0; }

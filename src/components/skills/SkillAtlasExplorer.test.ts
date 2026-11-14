@@ -49,7 +49,17 @@ function button(wrapper: VueWrapper, name: string) {
   if (!found) throw new Error(`Missing button: ${name}`)
   return found
 }
-afterEach(() => { mounted.splice(0).forEach(w => w.unmount()); vi.useRealTimers() })
+afterEach(() => { mounted.splice(0).forEach(w => w.unmount()); vi.useRealTimers(); vi.unstubAllGlobals() })
+/** Mount the explorer as if its map were this many pixels wide. */
+function mapWidth(pixels: number) {
+  vi.stubGlobal('ResizeObserver', class {
+    readonly callback: ResizeObserverCallback
+    constructor(callback: ResizeObserverCallback) { this.callback = callback }
+    observe() { this.callback([{ contentRect: { width: pixels } } as ResizeObserverEntry], this as unknown as ResizeObserver) }
+    unobserve() {}
+    disconnect() {}
+  })
+}
 const simple = (view = initialView(), reducedMotion = true) => setup(view, reducedMotion, null, undefined, 'simple')
 const mapNames = (wrapper: VueWrapper) => wrapper.findAll('.map-node').map(item => item.attributes('aria-label'))
 const pressed = (wrapper: VueWrapper, name: string) => button(wrapper, name).attributes('aria-pressed')
@@ -147,6 +157,8 @@ describe('Simple and Detailed views', () => {
     const next = Array.from({ length: 10 }, (_, index) => skill(`d${pad(index)}`, `Next ${pad(index)}`, 'Wide', { prerequisite_count: 1 }))
     const edges = next.map((item, index) => ({ skill_id: item.id, skill_name: item.name, skill_bloom: 'create',
       prerequisite_id: index < 5 ? 'r00' : 'r01', prerequisite_name: '', prerequisite_bloom: 'create' }))
+    // Wide layers grow past crowding; a phone's rows are where names get held back.
+    mapWidth(360)
     const wrapper = simple()
     await wrapper.setProps({ model: buildSkillAtlas({ skills: [...roots, ...next], edges, activeCredentials: [credential('r00', 2)], subjectDid: 'did:me' }) })
     const quiet = () => wrapper.findAll('.map-node').filter(item => item.find('.node-label.is-label-quiet').exists()).map(item => item.text())

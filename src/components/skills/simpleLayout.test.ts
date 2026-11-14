@@ -30,6 +30,22 @@ const atlas = (skills = SKILLS, edges = EDGES, activeCredentials: VerifiableCred
   subjectFields: [{ id: 'math', name: 'Mathematics', atlas_slot: 0 }, { id: 'data', name: 'Data', atlas_slot: 1 }],
 })
 const WIDE = 1200
+/** Three layers of 40, 9 and 25 skills: each follower needs one root. */
+function crowded() {
+  const roots = Array.from({ length: 40 }, (_, index) => skill(`r${String(index).padStart(2, '0')}`, `Root ${index}`, index % 2 ? 'math' : 'data'))
+  const middle = Array.from({ length: 9 }, (_, index) => skill(`m${index}`, `Middle ${index}`, 'math'))
+  const leaves = Array.from({ length: 25 }, (_, index) => skill(`l${String(index).padStart(2, '0')}`, `Leaf ${index}`, 'data'))
+  const edges = [...middle.map((item, index) => edge(item.id, `r${String(index).padStart(2, '0')}`)), ...leaves.map((item, index) => edge(item.id, `m${index % 9}`))]
+  return atlas([...roots, ...middle, ...leaves], edges)
+}
+// A name starts 6px under its disc and runs to two 12px lines at 1.4 line
+// height plus 1px padding each side (stylesheet); a ready-next disc's dashed
+// halo reaches 6px past the disc.
+const NAME_TOP = SIMPLE_DISC_SIZE / 2 + 6
+const NAME_HEIGHT = 36
+const HALO = 6
+interface Rect { left: number; right: number; top: number; bottom: number }
+const intersects = (a: Rect, b: Rect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
 
 describe('Simple layout', () => {
   it('layers skills by longest prerequisite path, ordered by field slot then name within a layer', () => {
@@ -102,17 +118,12 @@ describe('Simple layout', () => {
     const small = layout.layers[1]!.map(id => at(id).y)
     expect(small[1]! - small[0]!).toBeCloseTo(SIMPLE_WIDE_HEIGHT / 2)
     expect(small[0]! + small[1]!).toBeCloseTo(extent)
-    // Dense, but legible enough not to overlap.
-    expect(isDenseLayer(14, WIDE)).toBe(true)
+    // A crowded wide layer grows rather than holding names back.
+    expect(isDenseLayer(14, WIDE)).toBe(false)
   })
 
   it('wraps a crowded narrow layer onto extra rows so no two discs overlap down to 320px', () => {
-    // Three layers of 40, 9 and 25 skills: each follower needs one root.
-    const roots = Array.from({ length: 40 }, (_, index) => skill(`r${String(index).padStart(2, '0')}`, `Root ${index}`, index % 2 ? 'math' : 'data'))
-    const middle = Array.from({ length: 9 }, (_, index) => skill(`m${index}`, `Middle ${index}`, 'math'))
-    const leaves = Array.from({ length: 25 }, (_, index) => skill(`l${String(index).padStart(2, '0')}`, `Leaf ${index}`, 'data'))
-    const edges = [...middle.map((item, index) => edge(item.id, `r${String(index).padStart(2, '0')}`)), ...leaves.map((item, index) => edge(item.id, `m${index % 9}`))]
-    const model = atlas([...roots, ...middle, ...leaves], edges)
+    const model = crowded()
     for (let width = 320; width < NARROW_MAP_WIDTH; width += 7) {
       const layout = simpleLayout(model, width)
       const points = [...layout.positions.values()]
@@ -127,6 +138,41 @@ describe('Simple layout', () => {
       for (let layer = 1; layer < ys.length; layer++) expect(Math.min(...ys[layer]!)).toBeGreaterThan(Math.max(...ys[layer - 1]!) + SIMPLE_DISC_SIZE)
       const lowest = Math.max(...points.map(point => point.y))
       expect(layout.height).toBeGreaterThan(lowest + SIMPLE_DISC_SIZE / 2)
+    }
+  })
+
+  it('gives every name a width that stays inside the map and clear of other discs and names, at every width', () => {
+    const chain = atlas(Array.from({ length: 7 }, (_, index) => skill(`c${index}`, `Chain ${index}`, 'math')),
+      Array.from({ length: 6 }, (_, index) => edge(`c${index + 1}`, `c${index}`)))
+    for (const model of [crowded(), atlas(), chain]) {
+      for (let width = 320; width <= 1400; width += 9) {
+        const layout = simpleLayout(model, width)
+        const ids = [...layout.positions.keys()]
+        const name = (id: string): Rect => {
+          const { x, y } = layout.positions.get(id)!
+          const half = (layout.labelWidths.get(id) ?? NaN) / 2
+          return { left: x - half, right: x + half, top: y + NAME_TOP, bottom: y + NAME_TOP + NAME_HEIGHT }
+        }
+        const disc = (id: string): Rect => {
+          const { x, y } = layout.positions.get(id)!
+          const reach = SIMPLE_DISC_SIZE / 2 + HALO
+          return { left: x - reach, right: x + reach, top: y - reach, bottom: y + reach }
+        }
+        const problems: string[] = []
+        for (const id of ids) {
+          // At least as wide as the disc, never past the map's sides.
+          if (!((layout.labelWidths.get(id) ?? 0) >= SIMPLE_DISC_SIZE)) problems.push(`${id} name narrower than its disc`)
+          // On a phone a name has room for a long word ("Accessibility" at 12px) rather than breaking inside it.
+          if (width < NARROW_MAP_WIDTH && !((layout.labelWidths.get(id) ?? 0) >= 88)) problems.push(`${id} name too narrow for a word`)
+          if (name(id).left < 0 || name(id).right > width) problems.push(`${id} name outside the map`)
+          for (const other of ids) {
+            if (other === id) continue
+            if (intersects(name(id), disc(other))) problems.push(`${id} name over ${other} disc`)
+            if (intersects(name(id), name(other))) problems.push(`${id} name over ${other} name`)
+          }
+        }
+        expect(problems.slice(0, 3), `at ${width}px`).toEqual([])
+      }
     }
   })
 
@@ -166,7 +212,8 @@ describe('Simple layout', () => {
         expect(isDenseLayer(count, width)).toBe(pitch < SIMPLE_LABEL_MIN_PITCH)
         verdicts.add(isDenseLayer(count, width))
       }
-      expect([...verdicts].sort()).toEqual([false, true])
+      // Wide layers grow past crowding instead, so only narrow rows ever thin their names.
+      expect([...verdicts].sort()).toEqual(width < NARROW_MAP_WIDTH ? [false, true] : [false])
     }
   })
 
