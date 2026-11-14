@@ -139,6 +139,9 @@ pub struct SettingKey<T: SettingValue + 'static> {
     pub category: &'static str,
     pub label: &'static str,
     pub description: &'static str,
+    /// The closed set of string values the key accepts, if it has one.
+    /// Local writes and inbound sync rows outside it are refused.
+    pub allowed_values: Option<&'static [&'static str]>,
     /// Function pointer to the default value — closures cannot be
     /// stored in `const`s.
     pub default: fn() -> T,
@@ -173,6 +176,7 @@ pub mod keys {
     pub const UI_THEME: SettingKey<String> = SettingKey {
         key: "ui.theme",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Appearance",
         label: "Theme",
         description: "Light, dark, or follow the operating system.",
@@ -182,6 +186,7 @@ pub mod keys {
     pub const UI_MOTION: SettingKey<String> = SettingKey {
         key: "ui.motion",
         scope: Scope::Device,
+        allowed_values: None,
         category: "Appearance",
         label: "Motion",
         description: "System, reduced or off. System follows the operating system's \
@@ -192,6 +197,7 @@ pub mod keys {
     pub const UI_SIDEBAR_COLLAPSED: SettingKey<bool> = SettingKey {
         key: "ui.sidebar_collapsed",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Appearance",
         label: "Collapse navigation sidebar",
         description: "When enabled, the main sidebar starts collapsed on launch.",
@@ -201,18 +207,17 @@ pub mod keys {
     pub const UI_SKILL_GRAPH_VIEW: SettingKey<String> = SettingKey {
         key: "ui.skill_graph_view",
         scope: Scope::Sync,
+        allowed_values: Some(&["simple", "detailed"]),
         category: "Appearance",
         label: "Skill graph view",
         description: "Simple or detailed. Every skill graph opens in the last view you chose.",
         default: || "simple".to_string(),
     };
 
-    /// The only values [`UI_SKILL_GRAPH_VIEW`] accepts.
-    pub const UI_SKILL_GRAPH_VIEW_VALUES: &[&str] = &["simple", "detailed"];
-
     pub const UI_ACTIVE_MODE: SettingKey<String> = SettingKey {
         key: "ui.active_mode",
         scope: Scope::Device,
+        allowed_values: None,
         category: "Appearance",
         label: "Active mode",
         description: "Whether the app presents the learner or the instructor surface. \
@@ -223,6 +228,7 @@ pub mod keys {
     pub const UI_SIDEBAR_SECTIONS: SettingKey<JsonSetting> = SettingKey {
         key: "ui.sidebar_sections",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Appearance",
         label: "Sidebar section expand state",
         description: "Which sidebar sections (tutoring, classrooms, ...) are expanded.",
@@ -233,6 +239,7 @@ pub mod keys {
     pub const UI_KEYBOARD_SHORTCUTS: SettingKey<JsonSetting> = SettingKey {
         key: "input.keyboard_shortcuts",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Input",
         label: "Custom keyboard shortcuts",
         description: "User-overridden bindings, keyed by action id.",
@@ -243,6 +250,7 @@ pub mod keys {
     pub const UI_OMNI_RECENTS: SettingKey<JsonSetting> = SettingKey {
         key: "ui.omni_recents",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Search",
         label: "Omni-search recent queries",
         description: "Recently used search terms shown when the omni-search opens.",
@@ -253,6 +261,7 @@ pub mod keys {
     pub const SENTINEL_AI_SCORING: SettingKey<bool> = SettingKey {
         key: "sentinel.ai_scoring_enabled",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Integrity",
         label: "Enable Sentinel AI scoring",
         description: "Run the per-user keystroke + mouse models during sessions.",
@@ -262,6 +271,7 @@ pub mod keys {
     pub const SENTINEL_PASTE_CLASSIFIER: SettingKey<bool> = SettingKey {
         key: "sentinel.paste_classifier_enabled",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Integrity",
         label: "Enable paste classifier",
         description: "Run the bundled tract ONNX paste classifier on text input.",
@@ -271,6 +281,7 @@ pub mod keys {
     pub const SENTINEL_CAMERA_ENABLED: SettingKey<bool> = SettingKey {
         key: "sentinel.camera_enabled",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Integrity",
         label: "Allow webcam access during assessments",
         description: "If disabled, Sentinel skips face-embedding signals.",
@@ -280,6 +291,7 @@ pub mod keys {
     pub const SENTINEL_KEYBOARD_ENABLED: SettingKey<bool> = SettingKey {
         key: "sentinel.keyboard_enabled",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Integrity",
         label: "Allow keystroke capture during assessments",
         description: "If disabled, Sentinel skips per-user keystroke autoencoder scoring.",
@@ -290,6 +302,7 @@ pub mod keys {
     pub const NOTIFICATIONS_ENABLED: SettingKey<bool> = SettingKey {
         key: "notifications.enabled",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Notifications",
         label: "Show in-app notifications",
         description: "Surface badges and toasts for new credentials, classroom invites, etc.",
@@ -304,6 +317,7 @@ pub mod keys {
     pub const NOTIFICATIONS_PUSH_ENABLED: SettingKey<bool> = SettingKey {
         key: "notifications.push_enabled",
         scope: Scope::Device,
+        allowed_values: None,
         category: "Notifications",
         label: "Push notifications on this device",
         description: "Let Alexandria Cloud wake this device for interview invitations, offers and requests while the app is closed. Mobile only.",
@@ -313,6 +327,7 @@ pub mod keys {
     pub const SYNC_AUTO: SettingKey<bool> = SettingKey {
         key: "sync.auto",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Sync",
         label: "Automatic cross-device sync",
         description: "If disabled, the user must trigger sync manually.",
@@ -322,6 +337,7 @@ pub mod keys {
     pub const USER_LANGUAGE: SettingKey<String> = SettingKey {
         key: "user.language",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Locale",
         label: "Display language",
         description: "Interface language. `system` follows the operating system; \
@@ -335,6 +351,7 @@ pub mod keys {
     pub const UI_DISMISSED_LOCALE_NOTICES: SettingKey<JsonSetting> = SettingKey {
         key: "ui.dismissed_locale_notices",
         scope: Scope::Device,
+        allowed_values: None,
         category: "Locale",
         label: "Dismissed translation notices",
         description: "Languages whose machine-translation review banner has been dismissed.",
@@ -345,6 +362,7 @@ pub mod keys {
     pub const VIDEO_DEFAULT_VOLUME: SettingKey<f64> = SettingKey {
         key: "video.default_volume",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Video",
         label: "Default playback volume",
         description: "Initial volume (0.0–1.0) applied when a video element mounts.",
@@ -354,6 +372,7 @@ pub mod keys {
     pub const VIDEO_DEFAULT_MUTED: SettingKey<bool> = SettingKey {
         key: "video.default_muted",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Video",
         label: "Start videos muted",
         description: "When enabled, new video elements start muted by default.",
@@ -364,6 +383,7 @@ pub mod keys {
     pub const CARDANO_BLOCKFROST_KEY: SettingKey<String> = SettingKey {
         key: "cardano.blockfrost_project_id",
         scope: Scope::Device,
+        allowed_values: None,
         category: "Cardano",
         label: "Blockfrost project id",
         description:
@@ -374,6 +394,7 @@ pub mod keys {
     pub const CARDANO_COMPLETION_POLICY: SettingKey<String> = SettingKey {
         key: "cardano.completion_policy_id",
         scope: Scope::Device,
+        allowed_values: None,
         category: "Cardano",
         label: "Completion validator policy id",
         description:
@@ -384,6 +405,7 @@ pub mod keys {
     pub const REGISTRY_REFRESH_SECS: SettingKey<u64> = SettingKey {
         key: "registry.refresh_secs",
         scope: Scope::Device,
+        allowed_values: None,
         category: "Cardano",
         label: "Stake-pubkey registry refresh interval (seconds)",
         description: "Cadence at which the stake-pubkey registry reconciles against on-chain \
@@ -396,6 +418,7 @@ pub mod keys {
     pub const DEVICE_LABEL: SettingKey<String> = SettingKey {
         key: "device.label",
         scope: Scope::Device,
+        allowed_values: None,
         category: "Device",
         label: "Device label",
         description: "Friendly name shown for this device in cross-device sync.",
@@ -405,6 +428,7 @@ pub mod keys {
     pub const STORAGE_QUOTA_BYTES: SettingKey<u64> = SettingKey {
         key: "storage.quota_bytes",
         scope: Scope::Device,
+        allowed_values: None,
         category: "Storage",
         label: "Local content quota (bytes)",
         description: "Maximum bytes Alexandria may pin on this device. 0 means unlimited.",
@@ -414,6 +438,7 @@ pub mod keys {
     pub const WINDOW_GEOMETRY: SettingKey<JsonSetting> = SettingKey {
         key: "ui.window_geometry",
         scope: Scope::Device,
+        allowed_values: None,
         category: "Window",
         label: "Window position and size",
         description: "Persisted across launches as {x, y, width, height} JSON.",
@@ -437,6 +462,7 @@ pub mod keys {
     pub const TALENT_INDEX_CONSENT: SettingKey<JsonSetting> = SettingKey {
         key: "talent_index.consent",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Privacy",
         label: "Talent index publication",
         description: "Which verified skills you have agreed to publish to a talent index.",
@@ -453,6 +479,7 @@ pub mod keys {
     pub const CREDENTIAL_STATUS_HOST: SettingKey<String> = SettingKey {
         key: "credentials.status_host",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Privacy",
         label: "Status list host",
         description: "Service that serves the revocation lists for credentials you issue. Leave empty to publish lists only in exported bundles.",
@@ -469,6 +496,7 @@ pub mod keys {
     pub const ORGANISATIONS_ENABLED: SettingKey<bool> = SettingKey {
         key: "organisations.enabled",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Privacy",
         label: "Receive requests from organisations",
         description: "Let organisations ask for access to your skills, invite you to assessments and interviews, and send offers.",
@@ -480,6 +508,7 @@ pub mod keys {
     pub const CLOUD_ORIGIN: SettingKey<String> = SettingKey {
         key: "organisations.cloud_origin",
         scope: Scope::Device,
+        allowed_values: None,
         category: "Developer",
         label: "Alexandria Cloud address",
         description: "Use a different Alexandria Cloud, such as one running locally. Leave empty for the network's.",
@@ -492,6 +521,7 @@ pub mod keys {
     pub const TALENT_INDEX_SYNC: SettingKey<bool> = SettingKey {
         key: "talent_index.sync",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Privacy",
         label: "Keep my listing up to date",
         description: "Republish your listing automatically when your skills change.",
@@ -501,6 +531,7 @@ pub mod keys {
     pub const INSTRUCTOR_GRAPH_PREFS: SettingKey<JsonSetting> = SettingKey {
         key: "instructor.graph_prefs",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Skill graph",
         label: "Skill graph visibility",
         description: "Which earned skills are public and which you teach, keyed by skill id.",
@@ -514,6 +545,7 @@ pub mod keys {
     pub const CHAT_REVIEW_BEFORE_SEND: SettingKey<bool> = SettingKey {
         key: "chat.review_before_send",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Chat",
         label: "Review before sending",
         description: "Show what chat will send, and to which provider, before the first message of each chat and whenever that changes.",
@@ -525,6 +557,7 @@ pub mod keys {
     pub const LEARNER_TARGETS: SettingKey<JsonSetting> = SettingKey {
         key: "learner.targets",
         scope: Scope::Sync,
+        allowed_values: None,
         category: "Skill graph",
         label: "Learning goals",
         description: "Skill graphs you are working toward, with their goal skills.",
@@ -538,6 +571,7 @@ pub mod keys {
     pub const P2P_EXTRA_RELAYS: SettingKey<JsonSetting> = SettingKey {
         key: "p2p.extra_relays",
         scope: Scope::Device,
+        allowed_values: None,
         category: "Network",
         label: "Additional relay nodes",
         description: "Extra alexandria-relay servers to bootstrap through, as JSON: [{\"peer_id\", \"host\", \"port\"}].",
@@ -553,6 +587,7 @@ pub mod keys {
     pub const P2P_DHT_SERVER: SettingKey<bool> = SettingKey {
         key: "p2p.dht_server",
         scope: Scope::Device,
+        allowed_values: None,
         category: "Network",
         label: "Help run the network",
         description: "Relay traffic for peers behind NAT and serve the directory (DHT). Uses some bandwidth and keeps connections open while the app is running, and peers you relay can see your IP address. Desktop only — turning this off still lets you use the network normally.",
@@ -567,6 +602,7 @@ pub mod keys {
     pub const P2P_RELAY_REGISTRY_CACHE: SettingKey<JsonSetting> = SettingKey {
         key: "p2p.relay_registry_cache",
         scope: Scope::Device,
+        allowed_values: None,
         category: "Network",
         label: "Relay registry cache",
         description: "Cached on-chain relay registry (internal).",
@@ -579,6 +615,7 @@ pub mod keys {
     pub const IDENTITY_LOCAL_DID: SettingKey<String> = SettingKey {
         key: "identity.local_did",
         scope: Scope::Device,
+        allowed_values: None,
         category: "Identity",
         label: "Local DID cache",
         description: "Cached did:key of the active profile (internal).",
@@ -656,15 +693,35 @@ pub fn all_entries(
     ]
 }
 
+/// What validation needs to know about a registered key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyMeta {
+    pub scope: Scope,
+    /// `"bool" | "int" | "float" | "string" | "json"`.
+    pub kind: &'static str,
+    /// The key's closed value set, if it declares one.
+    pub allowed_values: Option<&'static [&'static str]>,
+}
+
 /// Lookup the registered scope + kind for a key, used by the
 /// `set_setting` IPC to refuse unknown keys (so a stale frontend
 /// cannot smuggle arbitrary rows into `app_settings`).
 pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
+    lookup(key).map(|meta| (meta.scope, meta.kind))
+}
+
+/// Everything validation needs for a registered key, or `None` for
+/// an unknown one.
+pub fn lookup(key: &str) -> Option<KeyMeta> {
     use keys::*;
     macro_rules! check {
         ($k:expr) => {
             if $k.key == key {
-                return Some(($k.scope, kind_of_default(&$k)));
+                return Some(KeyMeta {
+                    scope: $k.scope,
+                    kind: kind_of_default(&$k),
+                    allowed_values: $k.allowed_values,
+                });
             }
         };
     }
@@ -705,16 +762,6 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
     check!(LEARNER_TARGETS);
     check!(CHAT_REVIEW_BEFORE_SEND);
     check!(IDENTITY_LOCAL_DID);
-    None
-}
-
-/// The closed set of values a string setting accepts, for keys that
-/// declare one. `SettingsStore::set_raw` refuses anything outside it.
-pub fn allowed_values(key: &str) -> Option<&'static [&'static str]> {
-    use keys::*;
-    if key == UI_SKILL_GRAPH_VIEW.key {
-        return Some(UI_SKILL_GRAPH_VIEW_VALUES);
-    }
     None
 }
 
@@ -824,6 +871,15 @@ mod tests {
         assert_eq!(
             lookup_meta("ui.skill_graph_view"),
             Some((Scope::Sync, "string"))
+        );
+        // The closed value set lives on the key definition.
+        assert_eq!(
+            lookup("ui.skill_graph_view").and_then(|meta| meta.allowed_values),
+            Some(&["simple", "detailed"][..])
+        );
+        assert_eq!(
+            lookup("ui.theme").and_then(|meta| meta.allowed_values),
+            None
         );
     }
 
