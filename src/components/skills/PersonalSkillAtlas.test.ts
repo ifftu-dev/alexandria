@@ -218,6 +218,24 @@ it('keeps Ready learning accessible, updates the skill filter on route reuse and
   expect(backend.state.unexpected).toEqual([])
 })
 
+it('reports settings that fail to load in the modal and loads the remembered view on retry', async () => {
+  const { atlas, backend } = await setup({ views: { 'profile-a': 'detailed' } })
+  const { clearSettingsCache } = await import('@/composables/useSettings')
+  clearSettingsCache()
+  let failing = true
+  ipc.mockImplementation((command: string, args?: Record<string, unknown>) => {
+    if (command === 'list_settings' && failing) return Promise.reject(new Error('Settings are unavailable'))
+    return backend.invoke(command, args)
+  })
+  atlas.setModalOpen(true)
+  await flushPromises()
+  expect(dialog().querySelector('[role="alert"]')?.textContent).toContain('Settings are unavailable')
+  failing = false
+  await click('Retry', dialog())
+  expect(dialog().querySelector('[role="alert"]')).toBeNull()
+  expect(showing('Detailed', dialog())).toBe(true)
+})
+
 it('keeps the modal open with an actionable error when learning navigation fails and allows retry', async () => {
   const { atlas, router } = await setup()
   atlas.setModalOpen(true)
