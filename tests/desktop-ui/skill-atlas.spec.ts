@@ -179,7 +179,22 @@ for (const theme of ['light', 'dark']) {
       await expect(atlas.getByRole('status').filter({ hasText: 'Showing the Detailed view' })).toBeAttached()
       await expect(atlas.getByRole('searchbox')).toBeVisible()
       await expect(inspector.getByRole('heading', { name: 'Sorting Algorithms' })).toBeVisible()
-      await atlas.getByRole('button', { name: 'Simple', exact: true }).click()
+      // Focusing its field puts the Detailed map on screen for the trip back.
+      await atlas.getByRole('button', { name: 'Explore Computer Science', exact: true }).click()
+      await expect(map.locator('foreignObject[data-skill]').first()).toBeAttached()
+      // One frame into the switch: the old edges fade out on a copy, the new ones wait hidden, and nodes travel and resize.
+      expect(await atlas.getByRole('button', { name: 'Simple', exact: true }).evaluate(async element => {
+        (element as HTMLButtonElement).click()
+        await new Promise(resolve => requestAnimationFrame(resolve))
+        const mapElement = document.querySelector('.atlas-map')!
+        return {
+          leaving: mapElement.querySelectorAll('.atlas-canvas-leaving').length,
+          edgesHidden: getComputedStyle(mapElement.querySelector('.atlas-canvas:not(.atlas-canvas-leaving) .map-edges')!).opacity === '0',
+          resizing: [...mapElement.querySelectorAll('foreignObject[data-skill]')].some(node => node.getAnimations()
+            .some(animation => JSON.stringify((animation.effect as KeyframeEffect).getKeyframes()).includes('scale('))),
+        }
+      })).toEqual({ leaving: 1, edgesHidden: true, resizing: true })
+      await expect(map.locator('.atlas-canvas-leaving')).toHaveCount(0)
       await expect(atlas.getByRole('searchbox')).toHaveCount(0)
       await expect(sorting).toHaveAttribute('aria-pressed', 'true')
       expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)

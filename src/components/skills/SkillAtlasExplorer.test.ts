@@ -247,6 +247,26 @@ describe('Simple and Detailed views', () => {
     expect(vi.getTimerCount()).toBe(pending)
   })
 
+  it('fades the edges as drawn before a switch out while the nodes travel, in both directions', async () => {
+    vi.useFakeTimers()
+    const wrapper = simple({ ...initialView(), focusedFieldId: 'Engineering', camera: { x: 400, y: 300, zoom: 1 } }, false)
+    const leaving = () => wrapper.findAll('.atlas-map .atlas-canvas-leaving')
+    const drawn = () => wrapper.get('.atlas-canvas:not(.atlas-canvas-leaving) .map-edge:not(.map-edge-active):not(.map-edge-faded)').attributes('d')
+    for (const target of ['Detailed', 'Simple']) {
+      const before = drawn()
+      expect(leaving()).toHaveLength(0)
+      await button(wrapper, target).trigger('click')
+      // The old curves stay where they were, out of reach of pointers and assistive technology.
+      expect(leaving()).toHaveLength(1)
+      expect(leaving()[0]!.attributes('aria-hidden')).toBe('true')
+      expect(leaving()[0]!.get('.map-edge:not(.map-edge-active):not(.map-edge-faded)').attributes('d')).toBe(before)
+      expect(drawn()).not.toBe(before)
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(leaving()).toHaveLength(0)
+      expect(wrapper.get('.atlas-map').classes()).not.toContain('is-switching')
+    }
+  })
+
   it('highlights new evidence on Simple discs and announces a switch in the status region', async () => {
     const wrapper = simple()
     await wrapper.setProps({ feedback: { revision: 2, earnedIds: ['b'], improvedIds: [] } })

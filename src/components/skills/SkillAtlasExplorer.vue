@@ -445,29 +445,52 @@ function chooseView(mode: SkillGraphView): void {
   emit('update:viewMode', mode)
 }
 // The learner's own switch is announced. In full motion the nodes travel from
-// their old places to their new ones while the edges, hidden, wait and then fade back in.
+// their old places and sizes to their new ones while the old edges fade out;
+// the new edges, hidden meanwhile, then fade back in.
 const viewAnnouncement = ref('')
 const switching = ref(false)
 let switchTimer: ReturnType<typeof setTimeout> | undefined
+/** A still copy of the edges as drawn before the switch, fading out while the nodes travel. */
+let leavingEdges: SVGSVGElement | undefined
 function finishSwitch(): void {
   if (switchTimer !== undefined) clearTimeout(switchTimer)
   switchTimer = undefined
   switching.value = false
+  leavingEdges?.remove()
+  leavingEdges = undefined
 }
 onBeforeUnmount(finishSwitch)
 function nodeElements(): SVGForeignObjectElement[] {
   return [...canvas.value?.querySelectorAll<SVGForeignObjectElement>('foreignObject[data-skill]') ?? []]
 }
-/** Slides each node that was on the canvas before the switch from its old place to its new one. */
+/**
+ * Copies the canvas as it stands, edges only, over the map and fades it out.
+ * The copy keeps the old view box, size and placement, so the old curves stay
+ * where they were while the canvas beneath re-renders for the new view.
+ */
+function holdLeavingEdges(): void {
+  const source = canvas.value, edges = source?.querySelector('.map-edges'), map = source?.parentElement
+  if (!source || !edges || !map) return
+  const copy = source.cloneNode(false) as SVGSVGElement
+  copy.classList.add('atlas-canvas-leaving')
+  copy.setAttribute('aria-hidden', 'true')
+  copy.appendChild(edges.cloneNode(true))
+  map.appendChild(copy)
+  leavingEdges = copy
+  animateMotion(copy, [{ opacity: 1 }, { opacity: 0 }], 'slow')
+}
+/** Moves and resizes each node that was on the canvas before the switch from its old box to its new one. */
 function travel(before: Map<string, DOMRect>): void {
   for (const element of nodeElements()) {
     const from = before.get(element.dataset.skill ?? ''), to = element.getBoundingClientRect()
-    if (!from || !to.width) continue
+    if (!from || !to.width || !to.height) continue
     // Canvas units per screen pixel differ by view (Detailed zooms).
     const scale = to.width / (Number(element.getAttribute('width')) || to.width)
     const dx = (from.left + from.width / 2 - to.left - to.width / 2) / scale
     const dy = (from.top + from.height / 2 - to.top - to.height / 2) / scale
-    if (dx || dy) animateMotion(element, [{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], 'slow')
+    // Scaled about the box's centre (see .map-node-box), so the centre travels by dx, dy.
+    const sx = from.width / to.width, sy = from.height / to.height
+    if (dx || dy || sx !== 1 || sy !== 1) animateMotion(element, [{ transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` }, { transform: 'none' }], 'slow')
   }
 }
 watch(() => props.viewMode, mode => {
@@ -479,6 +502,7 @@ watch(() => props.viewMode, mode => {
   if (motionReduced.value) return
   // Read before the re-render (a pre-flush watcher), so the old places are known.
   const before = new Map(nodeElements().map(element => [element.dataset.skill ?? '', element.getBoundingClientRect()]))
+  holdLeavingEdges()
   switching.value = true
   switchTimer = setTimeout(finishSwitch, motionDuration('slow'))
   void nextTick(() => travel(before))
@@ -753,9 +777,12 @@ function setBloom(event: Event): void {
 .map-help { padding: 10px 14px; color: var(--app-muted-foreground); font-size: 12px; border-block-start: 1px solid var(--app-border); }
 /* Simple: the same node elements wear a disc skin on a still canvas. */
 .atlas-map.is-simple { cursor: default; touch-action: auto; user-select: auto; background-size: 22px 22px; }
-.atlas-map.is-simple .map-edges { transition: opacity var(--transition-base); }
-/* Hidden at once while nodes travel, then faded back in at their new places. */
+/* In both views the edges are hidden at once while nodes travel (their old curves fade out on a copy), then fade back in at their new places. */
+.atlas-map .map-edges { transition: opacity var(--transition-base); }
 .atlas-map.is-switching .map-edges { opacity: 0; transition: none; }
+.atlas-canvas-leaving { pointer-events: none; }
+/* A travelling node resizes about its centre. */
+.map-node-box { transform-box: fill-box; transform-origin: center; }
 .map-edge.map-edge-faded, .map-edge-head.map-edge-faded { opacity: .07; }
 .atlas-map.is-simple .map-node-box { pointer-events: none; overflow: visible; }
 .atlas .atlas-map.is-simple .map-node { pointer-events: auto; box-sizing: border-box; margin: 0 auto; width: auto; max-width: 100%; height: auto; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px; padding: 8px 4px 2px; border: 0; border-radius: 10px; background: transparent; box-shadow: none; text-align: center; transition: opacity var(--transition-base); }
