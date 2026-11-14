@@ -1,7 +1,7 @@
 # App Settings
 
 Status: implemented
-Updated: 2026-10-27
+Updated: 2026-11-14
 
 Every user-controlled preference Alexandria has — theme, sidebar
 collapsed, keyboard shortcuts, sentinel toggles, video defaults,
@@ -85,6 +85,11 @@ Then add it to `all_entries()` and `lookup_meta()` in the same file
 (both are exhaustive macros against the keys list — a CI check could
 be added, but for now they are reviewed manually).
 
+To limit a string setting to a fixed set of values, declare the allowed
+values on its `SettingKey`. Local writes and inbound sync rows with any
+other value are then refused. The frontend accessor should still narrow
+unknown values to the default, since an older build may have written one.
+
 That's it:
 
 - The setting appears in the "All settings" section of the settings
@@ -102,7 +107,7 @@ These keys back the skill-graph surfaces and the reputation home surface (see
 
 | Key | Scope | Kind | Use |
 |---|---|---|---|
-| `ui.skill_graph_view` | sync | string | `simple` (default) or `detailed`: the remembered skill graph view, shared by every surface that shows the graph. `set_setting` refuses any other value; the frontend reads it through `useSkillGraphView()`. |
+| `ui.skill_graph_view` | sync | string | `simple` (default) or `detailed`: the remembered skill graph view, shared by every surface that shows the graph. Local writes and inbound sync rows with any other value are refused; the frontend reads it through `useSkillGraphView()`, which treats anything unknown as `simple`. |
 | `instructor.graph_prefs` | sync | json | `{ skill_id: { public, teaching } }` — per-skill visibility + teaching highlight. Read by `p2p::graph_fetch` when serving the owner's public graph. |
 | `learner.targets` | sync | json | `Goal[]` the user is working toward. Each goal carries `kind`, optional `source_key` / `source_url`, `resolution_provenance`, and `taxonomy_version` — resolved from the bundled `goal_templates` (exam/curriculum/job-role) or on-device job-description parsing. |
 | `identity.local_did` | device | string | Cached `did:key` of the active profile, written by `get_local_did`. Lets the swarm event loop (no keystore access) answer `graph-fetch` requests for its own owner. Internal — not user-facing. |
@@ -145,6 +150,9 @@ All of these now live in one table, with one API, with sync.
   about, and we ignore them).
 - The receiver refuses inbound rows for keys whose registered scope
   is `Device`. A peer cannot smuggle device-scoped settings.
+- The receiver refuses inbound rows whose value has the wrong type or
+  falls outside a key's declared allowed values; the local value stands.
+  Local writes and inbound sync share one validator.
 
 ## Code references
 
