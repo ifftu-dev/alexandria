@@ -31,6 +31,13 @@ const SIMPLE_LABEL_BAND = 44
 /** Narrow viewports: the first row's centre, and the side margin nodes spread within. */
 const SIMPLE_NARROW_TOP = 56
 const SIMPLE_NARROW_INSET = 12
+/**
+ * Narrow rows never pack neighbours closer than a disc and its ready-next
+ * halo: a layer that would wraps onto extra rows instead.
+ */
+const SIMPLE_MIN_NARROW_PITCH = SIMPLE_DISC_SIZE + 12
+/** A wrapped row of the same layer sits this far below the row before: clear of its staggered discs and their names. */
+const SIMPLE_WRAP_PITCH = SIMPLE_STAGGER + SIMPLE_DISC_SIZE + SIMPLE_LABEL_BAND
 
 export interface SimpleLayout {
   /** Disc centres by skill ID. */
@@ -45,10 +52,17 @@ function wideExtent(nodeCount: number): number {
   return Math.max(SIMPLE_WIDE_HEIGHT, nodeCount * SIMPLE_MIN_DISC_PITCH)
 }
 
-/** Spacing between neighbouring nodes along a layer of `nodeCount` nodes. */
+/** How many nodes fit side by side in one narrow row. */
+function narrowRowCapacity(viewportWidth: number): number {
+  return Math.max(1, Math.floor((viewportWidth - SIMPLE_NARROW_INSET * 2) / SIMPLE_MIN_NARROW_PITCH))
+}
+
+/** Spacing between neighbouring nodes along a layer of `nodeCount` nodes (its fullest row, when narrow). */
 function layerPitch(nodeCount: number, viewportWidth: number): number {
-  const extent = viewportWidth < NARROW_MAP_WIDTH ? viewportWidth - SIMPLE_NARROW_INSET * 2 : wideExtent(nodeCount)
-  return extent / Math.max(1, nodeCount)
+  if (viewportWidth < NARROW_MAP_WIDTH) {
+    return (viewportWidth - SIMPLE_NARROW_INSET * 2) / Math.max(1, Math.min(nodeCount, narrowRowCapacity(viewportWidth)))
+  }
+  return wideExtent(nodeCount) / Math.max(1, nodeCount)
 }
 
 /** A layer is dense when its nodes sit too close for every name to be legible. */
@@ -69,7 +83,8 @@ function compareInLayer(model: AtlasModel, left: AtlasNode, right: AtlasNode): n
  * The Simple view's layered flow. Wide viewports read left to right, one
  * column per layer; below the narrow-map width layers read top to bottom.
  * Layers are counted along the longest prerequisite path, and empty layers
- * left by a cut cycle take no space.
+ * left by a cut cycle take no space. A narrow layer too crowded for one row
+ * wraps onto extra rows, in reading order.
  */
 export function simpleLayout(model: AtlasModel, viewportWidth: number): SimpleLayout {
   const layerOf = longestPathLayers(model.nodes.map(node => node.skill.id), model.edges)
@@ -85,16 +100,22 @@ export function simpleLayout(model: AtlasModel, viewportWidth: number): SimpleLa
 
   const positions = new Map<string, { x: number; y: number }>()
   if (viewportWidth < NARROW_MAP_WIDTH) {
-    layers.forEach((ids, row) => {
-      const pitch = layerPitch(ids.length, viewportWidth)
+    const capacity = narrowRowCapacity(viewportWidth)
+    let rowTop = SIMPLE_NARROW_TOP
+    layers.forEach((ids, layer) => {
+      if (layer > 0) rowTop += SIMPLE_ROW_PITCH
       const staggered = ids.length > SIMPLE_STAGGER_ABOVE
-      ids.forEach((id, index) => positions.set(id, {
-        x: SIMPLE_NARROW_INSET + pitch * (index + 0.5),
-        y: SIMPLE_NARROW_TOP + row * SIMPLE_ROW_PITCH + (staggered && index % 2 === 1 ? SIMPLE_STAGGER : 0),
-      }))
+      for (let start = 0; start < ids.length; start += capacity) {
+        if (start > 0) rowTop += SIMPLE_WRAP_PITCH
+        const row = ids.slice(start, start + capacity)
+        const pitch = layerPitch(row.length, viewportWidth)
+        row.forEach((id, index) => positions.set(id, {
+          x: SIMPLE_NARROW_INSET + pitch * (index + 0.5),
+          y: rowTop + (staggered && index % 2 === 1 ? SIMPLE_STAGGER : 0),
+        }))
+      }
     })
-    const lastRow = SIMPLE_NARROW_TOP + Math.max(0, layers.length - 1) * SIMPLE_ROW_PITCH
-    return { positions, height: lastRow + SIMPLE_STAGGER + SIMPLE_DISC_SIZE / 2 + SIMPLE_LABEL_BAND, layers }
+    return { positions, height: rowTop + SIMPLE_STAGGER + SIMPLE_DISC_SIZE / 2 + SIMPLE_LABEL_BAND, layers }
   }
   const columnWidth = viewportWidth / Math.max(1, layers.length)
   // Every layer keeps its own pitch; layers shorter than the tallest are centred on it.

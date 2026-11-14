@@ -106,6 +106,30 @@ describe('Simple layout', () => {
     expect(isDenseLayer(14, WIDE)).toBe(true)
   })
 
+  it('wraps a crowded narrow layer onto extra rows so no two discs overlap down to 320px', () => {
+    // Three layers of 40, 9 and 25 skills: each follower needs one root.
+    const roots = Array.from({ length: 40 }, (_, index) => skill(`r${String(index).padStart(2, '0')}`, `Root ${index}`, index % 2 ? 'math' : 'data'))
+    const middle = Array.from({ length: 9 }, (_, index) => skill(`m${index}`, `Middle ${index}`, 'math'))
+    const leaves = Array.from({ length: 25 }, (_, index) => skill(`l${String(index).padStart(2, '0')}`, `Leaf ${index}`, 'data'))
+    const edges = [...middle.map((item, index) => edge(item.id, `r${String(index).padStart(2, '0')}`)), ...leaves.map((item, index) => edge(item.id, `m${index % 9}`))]
+    const model = atlas([...roots, ...middle, ...leaves], edges)
+    for (let width = 320; width < NARROW_MAP_WIDTH; width += 7) {
+      const layout = simpleLayout(model, width)
+      const points = [...layout.positions.values()]
+      expect(points).toHaveLength(74)
+      for (const [index, a] of points.entries()) {
+        expect(a.x - SIMPLE_DISC_SIZE / 2).toBeGreaterThanOrEqual(0)
+        expect(a.x + SIMPLE_DISC_SIZE / 2).toBeLessThanOrEqual(width)
+        for (const b of points.slice(index + 1)) expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(SIMPLE_DISC_SIZE)
+      }
+      // Layers still read top to bottom: every disc of a later layer sits below every disc of an earlier one.
+      const ys = layout.layers.map(layer => layer.map(id => layout.positions.get(id)!.y))
+      for (let layer = 1; layer < ys.length; layer++) expect(Math.min(...ys[layer]!)).toBeGreaterThan(Math.max(...ys[layer - 1]!) + SIMPLE_DISC_SIZE)
+      const lowest = Math.max(...points.map(point => point.y))
+      expect(layout.height).toBeGreaterThan(lowest + SIMPLE_DISC_SIZE / 2)
+    }
+  })
+
   it('places every skill exactly once at both widths', () => {
     const ids = SKILLS.map(item => item.id).sort()
     for (const width of [WIDE, 360]) {
