@@ -68,15 +68,21 @@ const selected = computed(() => nodesById.value.get(selectedId.value ?? ''))
 const fieldFocused = computed(() => focusedFieldId.value !== null || props.view.unassignedFocused)
 const overview = computed(() => !fieldFocused.value && props.view.camera === null)
 const viewport = ref<HTMLElement>()
+/**
+ * A zero-height strip across the viewport. Watching it rather than the
+ * viewport keeps the Simple view's width-driven height from re-notifying
+ * within one frame (WebKit reports that as a ResizeObserver loop).
+ */
+const widthProbe = ref<HTMLElement>()
 const width = ref(800)
 const height = MAP_HEIGHT
 /** How far one arrow press or pan button moves the map, in map units. */
 const PAN_STEP = 180
 let resizeObserver: ResizeObserver | undefined
 onMounted(() => {
-  if (viewport.value && typeof ResizeObserver !== 'undefined') {
+  if (widthProbe.value && typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(entries => { width.value = Math.max(280, entries[0]?.contentRect.width ?? 800) })
-    resizeObserver.observe(viewport.value)
+    resizeObserver.observe(widthProbe.value)
   }
 })
 onBeforeUnmount(() => resizeObserver?.disconnect())
@@ -590,6 +596,7 @@ function setBloom(event: Event): void {
           <button v-for="field in model.fields" :key="field.id === null ? 'unassigned' : `field:${field.id}`" type="button" :style="{ '--field': color(field.id) }" :aria-pressed="fieldFocused && field.id === view.focusedFieldId" @click="focus(field)"><i class="field-dot" aria-hidden="true" />{{ fieldName(field.id) }} <small>{{ t('skills.atlas.fieldEarned', { ...field }) }}</small></button>
         </nav>
         <div ref="viewport" class="atlas-viewport">
+          <div ref="widthProbe" class="atlas-width-probe" aria-hidden="true" />
           <div v-if="overview && !simple" class="atlas-overview">
             <p class="atlas-overview-hint">{{ t('skills.atlas.overviewHint') }}</p>
             <article v-for="region in layout.regions" :key="region.field.id === null ? 'unassigned' : `field:${region.field.id}`" class="field-card" :style="{ '--field': color(region.field.id) }">
@@ -726,6 +733,7 @@ function setBloom(event: Event): void {
 .field-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 4px 11px 4px 9px; border: 1px solid var(--app-border); border-radius: 999px; background: var(--app-card); font-size: 12px; }
 .field-dot { display: inline-block; width: 9px; height: 9px; background: var(--field); border-radius: 50%; flex-shrink: 0; }
 .atlas-viewport { border: 1px solid var(--app-border); border-radius: 18px; overflow: hidden; background: var(--app-background); }
+.atlas-width-probe { height: 0; }
 .atlas-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 20px; max-height: 680px; overflow: auto; }
 .atlas-overview-hint { grid-column: 1 / -1; color: var(--app-muted-foreground); font-size: 13px; }
 .field-card { background: var(--app-card); border: 1px solid var(--app-border); border-block-start: 3px solid var(--field); border-radius: 12px; padding: 14px; min-width: 0; }
