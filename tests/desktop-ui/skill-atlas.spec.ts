@@ -1,8 +1,8 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 for (const theme of ['light', 'dark']) {
   test(`${theme} atlas presents the whole taxonomy and restores explicit exploration`, async ({ page }, testInfo) => {
-    await page.goto(`/tests/desktop-ui/?screen=skill-atlas&theme=${theme}`)
+    await page.goto(`/tests/desktop-ui/?screen=skill-atlas&view=detailed&theme=${theme}`)
     await expect(page.getByRole('heading', { name: '35 earned · 68 Ready · 103 loaded skills' })).toBeVisible()
     const rows = page.getByRole('list', { name: 'Full-label skill list' }).getByRole('button')
     await expect(page.locator('.atlas-list summary')).toContainText('103 matching skills')
@@ -40,7 +40,7 @@ for (const theme of ['light', 'dark']) {
 test('narrow atlas supports a collapsible inspector, full long labels and reduced motion', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.goto('/tests/desktop-ui/?screen=skill-atlas&theme=dark&scenario=stress')
+  await page.goto('/tests/desktop-ui/?screen=skill-atlas&view=detailed&theme=dark&scenario=stress')
   await page.getByRole('searchbox').fill('stewardship')
   await page.getByRole('list', { name: 'Full-label skill list' }).getByRole('button').click()
   const inspector = page.getByRole('complementary', { name: 'Skill inspector' })
@@ -56,7 +56,7 @@ test('narrow atlas supports a collapsible inspector, full long labels and reduce
 
 test('Urdu RTL retains full earned meaning on narrow screens', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto('/tests/desktop-ui/?screen=skill-atlas&theme=light&scenario=stress&locale=ur')
+  await page.goto('/tests/desktop-ui/?screen=skill-atlas&view=detailed&theme=light&scenario=stress&locale=ur')
   await page.getByRole('searchbox').fill('stewardship')
   const result = page.getByRole('list').getByRole('button').filter({ hasText: 'A very long skill label' })
   await result.click()
@@ -72,7 +72,7 @@ test('Urdu RTL retains full earned meaning on narrow screens', async ({ page }, 
 
 test('new evidence has no visible-duration animation with system reduced motion', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.goto('/tests/desktop-ui/?screen=skill-atlas&theme=dark')
+  await page.goto('/tests/desktop-ui/?screen=skill-atlas&view=detailed&theme=dark')
   await page.getByRole('button', { name: 'Explore Computer Science', exact: true }).click()
   await page.getByRole('button', { name: 'Simulate evidence update', exact: true }).click()
   await expect(page.getByRole('status').filter({ hasText: 'New evidence highlighted' })).toBeVisible()
@@ -88,7 +88,7 @@ test('new evidence has no visible-duration animation with system reduced motion'
 })
 
 test('only skills whose prerequisites are all earned are emphasised as ready next', async ({ page }, testInfo) => {
-  await page.goto('/tests/desktop-ui/?screen=skill-atlas&theme=light')
+  await page.goto('/tests/desktop-ui/?screen=skill-atlas&view=detailed&theme=light')
   const list = page.getByRole('list', { name: 'Full-label skill list' })
   await page.getByRole('searchbox', { name: 'Search all skills' }).fill('Algorithms')
   // Sorting needs Arrays and Big-O, both earned; Greedy needs Sorting too; Graph needs neither of its two.
@@ -117,3 +117,89 @@ test('only skills whose prerequisites are all earned are emphasised as ready nex
   await expect(page.getByRole('complementary', { name: 'Skill inspector' }).locator('.inspector-status')).toHaveText('◎ Ready next')
   await page.screenshot({ path: testInfo.outputPath('ready-next.png'), fullPage: true })
 })
+
+/** The fixture scrolls inside its own frame, so a full-page shot first grows the viewport to the content. */
+async function shootWhole(page: Page, path: string) {
+  const viewport = page.viewportSize()!
+  const height = await page.locator('.fixture-atlas').evaluate(element => element.scrollHeight)
+  await page.setViewportSize({ width: viewport.width, height: Math.min(height + 56, 8000) })
+  await page.screenshot({ animations: 'disabled', path })
+  await page.setViewportSize(viewport)
+}
+
+/** Disc centres and diameters, in page pixels. */
+async function discs(page: Page) {
+  return page.getByRole('group', { name: 'Skill map' }).locator('.node-disc').evaluateAll(elements => elements.map(element => {
+    const box = element.getBoundingClientRect()
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2, size: box.width, left: box.left, right: box.right }
+  }))
+}
+
+/** How many pairs of discs intersect. */
+function overlaps(points: Awaited<ReturnType<typeof discs>>): number {
+  let count = 0
+  for (const [index, a] of points.entries()) {
+    for (const b of points.slice(index + 1)) if (Math.hypot(a.x - b.x, a.y - b.y) < (a.size + b.size) / 2 - 0.5) count++
+  }
+  return count
+}
+
+for (const theme of ['light', 'dark']) {
+  for (const width of [1280, 390]) {
+    test(`${theme} Simple view at ${width}px fits the width with discs apart and keeps selection across a switch`, async ({ page }, testInfo) => {
+      const errors: string[] = []
+      page.on('pageerror', error => errors.push(error.message))
+      await page.setViewportSize({ width, height: 844 })
+      await page.goto(`/tests/desktop-ui/?screen=skill-atlas&view=simple&theme=${theme}`)
+      const atlas = page.getByRole('region', { name: 'Skill atlas' })
+      await expect(atlas.getByRole('button', { name: 'Simple', exact: true })).toHaveAttribute('aria-pressed', 'true')
+      await expect(atlas.getByRole('searchbox')).toHaveCount(0)
+      await expect(atlas.getByRole('button', { name: 'Zoom in', exact: true })).toHaveCount(0)
+      const map = atlas.getByRole('group', { name: 'Skill map' })
+      await expect(map.getByRole('button')).toHaveCount(103)
+      await expect(atlas.getByText('Ringed: Ready next', { exact: true })).toBeVisible()
+      const points = await discs(page)
+      expect(points).toHaveLength(103)
+      expect(overlaps(points)).toBe(0)
+      for (const point of points) {
+        expect(point.left).toBeGreaterThanOrEqual(0)
+        expect(point.right).toBeLessThanOrEqual(width)
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
+      await shootWhole(page, testInfo.outputPath(`simple-${theme}-${width}.png`))
+
+      const sorting = map.getByRole('button', { name: 'Sorting Algorithms, not yet earned, ready next, learning-outcome Bloom level 3 Apply', exact: true })
+      await sorting.click()
+      const inspector = page.getByRole('complementary', { name: 'Skill inspector' })
+      await expect(inspector.getByRole('heading', { name: 'Sorting Algorithms' })).toBeVisible()
+      // Skills outside its one-hop neighbourhood dim.
+      expect(await map.locator('.map-node.is-dimmed').count()).toBeGreaterThan(50)
+      await shootWhole(page, testInfo.outputPath(`simple-${theme}-${width}-selected.png`))
+      await atlas.getByRole('button', { name: 'Detailed', exact: true }).click()
+      await expect(atlas.getByRole('status').filter({ hasText: 'Showing the Detailed view' })).toBeAttached()
+      await expect(atlas.getByRole('searchbox')).toBeVisible()
+      await expect(inspector.getByRole('heading', { name: 'Sorting Algorithms' })).toBeVisible()
+      await atlas.getByRole('button', { name: 'Simple', exact: true }).click()
+      await expect(atlas.getByRole('searchbox')).toHaveCount(0)
+      await expect(sorting).toHaveAttribute('aria-pressed', 'true')
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
+      expect(errors).toEqual([])
+    })
+  }
+}
+
+for (const width of [1280, 390]) {
+  test(`stress taxonomy Simple view at ${width}px keeps discs apart and long names inside the map`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 })
+    await page.goto('/tests/desktop-ui/?screen=skill-atlas&view=simple&theme=dark&scenario=stress')
+    const map = page.getByRole('group', { name: 'Skill map' })
+    await expect(map.getByRole('button')).toHaveCount(104)
+    expect(overlaps(await discs(page))).toBe(0)
+    const mapBox = (await map.boundingBox())!
+    const label = (await map.getByRole('button', { name: /A very long skill label/ }).locator('.node-label').boundingBox())!
+    expect(label.x).toBeGreaterThanOrEqual(mapBox.x - 1)
+    expect(label.x + label.width).toBeLessThanOrEqual(mapBox.x + mapBox.width + 1)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
+    await shootWhole(page, testInfo.outputPath(`simple-stress-${width}.png`))
+  })
+}
