@@ -1,6 +1,6 @@
 # Explorer: Simple and Detailed views
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: ../skill-graph-view-modes-spec.md
 Blocked by: 01-simple-layout.md
@@ -21,3 +21,7 @@ Give the atlas explorer its two views, following the parent spec's **Explorer co
 ## Tests
 
 Extend the explorer's existing mount tests: default skin, switch round trip keeps node count, accessible names, selection, neighbourhood focus, camera and query; Simple hides the listed controls while the list remains; the switch emits and follows the prop; reduced motion makes the switch synchronous; evidence feedback highlights in Simple.
+
+## Notes
+
+- 2026-11-14: Done. Implemented in 38653136, refined by c67c9827, 0d5a5dce and fccedd2f; Simple geometry lives in its own module since 0a23ce8d. The eight non-English locales carry English text for the new keys until the translation script runs with an API key.

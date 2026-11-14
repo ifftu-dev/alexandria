@@ -1,6 +1,6 @@
 # Pure Simple layout and shared layered-DAG utility
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: ../skill-graph-view-modes-spec.md
 
@@ -15,3 +15,7 @@ Build the Simple view's layout as a pure function beside the existing atlas layo
 ## Tests
 
 Vitest beside the existing layout code: layers equal longest prerequisite path; sort order within a layer; wide and narrow orientation; stagger rule; every node placed exactly once; determinism across calls; cycle protection; the instructor graph's existing tests still pass unchanged.
+
+## Notes
+
+- 2026-11-14: Done. Implemented in e80c86c0 and bcf47bef, then extended by 5de894aa, 81312204, 8b876948 and 0a23ce8d. The fixed wide height turned out to be a floor, not a rule: the final layout uses left-to-right columns only while every layer fits it, and otherwise wraps layers onto full-width rows at any width. The parent spec's Simple layout and Density decisions describe the result.

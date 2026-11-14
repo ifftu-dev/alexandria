@@ -1,8 +1,8 @@
 # Skill graph view modes: Simple and Detailed
 
-Status: active
+Status: implemented
 Updated: 2026-11-14
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 
 Follows the implemented [Personal Skill Graph atlas](skill-graph-atlas-spec.md) spec, which is frozen; this spec carries the change.
@@ -134,3 +134,7 @@ Prior art: the explorer test file's `button` finder by accessible name and `setP
 - The preview in this folder was validated at desktop and phone widths in both themes with no overflow and no console errors. Its sample data has 13 skills in 3 fields; real taxonomies are larger, which is why the density rule exists.
 - The parent spec's acceptance criteria 2, 3, 5 and 6 (always-visible meaning, Ready never Locked, accessible inspection, stillness and reduced motion) apply to Simple exactly as they do to Detailed.
 - "Ready next" in Simple is the existing readiness emphasis, not a new state: it still means every counted prerequisite is loaded and earned, nothing more.
+
+## Notes
+
+- 2026-11-14: Implemented on the integration branch through tickets 01 to 04 and one review-fix round; the Implementation Decisions above were updated to match what was built. Gates passed: Rust fmt, clippy and settings tests, strict vue-tsc, 701 Vitest tests, i18n parity and no-raw-text, the Tauri command guard and 174 desktop-ui browser checks (2 skips that predate this work). On the bundled 103-skill taxonomy the Simple page measures about 2,600px at 1280 wide, down from about 4,600px before the adaptive layout. Outstanding: machine translation of the new keys for the eight non-English locales, native-speaker review of that copy, and validation in the native WebView. Later changes start a new spec.

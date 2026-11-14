@@ -1,6 +1,6 @@
 # Surfaces: bind the remembered view, fixtures and browser checks
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: ../skill-graph-view-modes-spec.md
 Blocked by: 02-view-setting.md, 03-explorer-modes.md
@@ -18,3 +18,7 @@ Wire the explorer's view mode to the remembered preference on both personal surf
 ## Tests
 
 Extend the personal surfaces tests: the view is read from the setting on page and modal; writing it on one surface changes the other; lock then unlock another profile returns to that profile's value; Open skill and return keep the view. Run the desktop-ui suite.
+
+## Notes
+
+- 2026-11-14: Done. Implemented in 90c26a91 and e305d20c, with fixes e3de48b4 and c7564026. Page and modal share the remembered view; fixtures take `view=simple|detailed`; browser checks cover Simple at 1280 and 390 in light and dark.
