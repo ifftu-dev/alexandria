@@ -60,6 +60,27 @@ const PROVIDER_WARMUP_WINDOW: Duration = Duration::from_secs(120);
 const PROVIDER_REFRESH_INTERVAL: Duration = Duration::from_secs(180);
 const PEER_EXCHANGE_INTERVAL: Duration = Duration::from_secs(30);
 
+/// How many topics a remote peer may be recorded as subscribed to.
+///
+/// libp2p-gossipsub 0.50 caps this at 100 by default and rejects the peer's
+/// whole subscription batch past it, and it sends every subscription in one
+/// hello RPC. Peers join two topics per classroom on top of `ALL_TOPICS`, so
+/// the default would make a peer in a few dozen classrooms look subscribed to
+/// nothing: no mesh, and flood-publish skips it. The bound sits just above
+/// what one hello RPC can carry under gossipsub's 16 KiB control-message cap
+/// (about 230 classroom-length topics), so the filter is never the tighter
+/// limit while still bounding per-peer state.
+const MAX_PEER_GOSSIP_TOPICS: usize = 256;
+
+fn gossip_subscription_filter(
+) -> gossipsub::MaxCountSubscriptionFilter<gossipsub::AllowAllSubscriptionFilter> {
+    gossipsub::MaxCountSubscriptionFilter {
+        filter: gossipsub::AllowAllSubscriptionFilter {},
+        max_subscribed_topics: MAX_PEER_GOSSIP_TOPICS,
+        max_subscriptions_per_request: MAX_PEER_GOSSIP_TOPICS,
+    }
+}
+
 fn identify_agent_version() -> String {
     let version = env!("CARGO_PKG_VERSION");
     format!("alexandria-node/{version} ({})", device_label())
@@ -899,9 +920,10 @@ fn build_behaviour(
 
     diag::log("build_behaviour: creating gossipsub behaviour...");
 
-    let mut gossipsub = gossipsub::Behaviour::new(
+    let mut gossipsub = gossipsub::Behaviour::new_with_subscription_filter(
         MessageAuthenticity::Signed(keypair.clone()),
         gossipsub_config,
+        gossip_subscription_filter(),
     )
     .map_err(|e| format!("gossipsub behaviour: {e}"))?;
 
