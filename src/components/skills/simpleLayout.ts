@@ -6,8 +6,15 @@ import { NARROW_MAP_WIDTH } from './atlasLayout'
 // credentials or view state. All values are pixels; there is no camera.
 /** Diameter of a Simple-view disc. */
 export const SIMPLE_DISC_SIZE = 46
-/** Wide viewports spread each layer's nodes down this height. */
+/** Wide viewports spread each layer's nodes down at least this height. */
 export const SIMPLE_WIDE_HEIGHT = 540
+/** Room for one line of a name under a disc. */
+const SIMPLE_LABEL_LINE = 18
+/**
+ * Wide layers never pack nodes closer than a disc and a line of its name:
+ * a layer that would grows the layout past the fixed height instead.
+ */
+export const SIMPLE_MIN_DISC_PITCH = SIMPLE_DISC_SIZE + SIMPLE_LABEL_LINE
 /** Narrow viewports step down one layer per row pitch. */
 export const SIMPLE_ROW_PITCH = 156
 /** Layers with more nodes than this stagger alternate nodes on narrow viewports. */
@@ -33,9 +40,14 @@ export interface SimpleLayout {
   layers: string[][]
 }
 
+/** The length a wide layer of `nodeCount` nodes spreads along: the fixed height, or more when it is crowded. */
+function wideExtent(nodeCount: number): number {
+  return Math.max(SIMPLE_WIDE_HEIGHT, nodeCount * SIMPLE_MIN_DISC_PITCH)
+}
+
 /** Spacing between neighbouring nodes along a layer of `nodeCount` nodes. */
 function layerPitch(nodeCount: number, viewportWidth: number): number {
-  const extent = viewportWidth < NARROW_MAP_WIDTH ? viewportWidth - SIMPLE_NARROW_INSET * 2 : SIMPLE_WIDE_HEIGHT
+  const extent = viewportWidth < NARROW_MAP_WIDTH ? viewportWidth - SIMPLE_NARROW_INSET * 2 : wideExtent(nodeCount)
   return extent / Math.max(1, nodeCount)
 }
 
@@ -85,9 +97,12 @@ export function simpleLayout(model: AtlasModel, viewportWidth: number): SimpleLa
     return { positions, height: lastRow + SIMPLE_STAGGER + SIMPLE_DISC_SIZE / 2 + SIMPLE_LABEL_BAND, layers }
   }
   const columnWidth = viewportWidth / Math.max(1, layers.length)
+  // Every layer keeps its own pitch; layers shorter than the tallest are centred on it.
+  const extent = Math.max(SIMPLE_WIDE_HEIGHT, ...layers.map(ids => wideExtent(ids.length)))
   layers.forEach((ids, column) => {
     const pitch = layerPitch(ids.length, viewportWidth)
-    ids.forEach((id, index) => positions.set(id, { x: columnWidth * (column + 0.5), y: pitch * (index + 0.5) }))
+    const top = (extent - wideExtent(ids.length)) / 2
+    ids.forEach((id, index) => positions.set(id, { x: columnWidth * (column + 0.5), y: top + pitch * (index + 0.5) }))
   })
-  return { positions, height: SIMPLE_WIDE_HEIGHT + SIMPLE_LABEL_BAND, layers }
+  return { positions, height: extent + SIMPLE_LABEL_BAND, layers }
 }

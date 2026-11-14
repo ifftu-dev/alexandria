@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { buildSkillAtlas } from '@/utils/skillAtlas'
 import type { SkillGraphEdge, SkillInfo, VerifiableCredential } from '@/types'
 import { NARROW_MAP_WIDTH } from './atlasLayout'
-import { SIMPLE_DISC_SIZE, SIMPLE_LABEL_MIN_PITCH, SIMPLE_ROW_PITCH, SIMPLE_WIDE_HEIGHT, isDenseLayer, simpleLayout } from './simpleLayout'
+import { SIMPLE_DISC_SIZE, SIMPLE_LABEL_MIN_PITCH, SIMPLE_MIN_DISC_PITCH, SIMPLE_ROW_PITCH, SIMPLE_WIDE_HEIGHT, isDenseLayer, simpleLayout } from './simpleLayout'
 
 const skill = (id: string, name: string, field: string | null): SkillInfo => ({
   id, name, description: '', subject_id: 'subject', subject_name: 'Subject',
@@ -82,6 +82,28 @@ describe('Simple layout', () => {
     expect(justNarrow.get('m1')?.y).toBe(justNarrow.get('d1')?.y)
     const justWide = simpleLayout(atlas(), NARROW_MAP_WIDTH).positions
     expect(justWide.get('m1')?.x).toBe(justWide.get('d1')?.x)
+  })
+
+  it('grows a wide layout so no layer packs its discs closer than a disc and its label, centring smaller layers', () => {
+    expect(SIMPLE_MIN_DISC_PITCH).toBeGreaterThan(SIMPLE_DISC_SIZE)
+    const roots = Array.from({ length: 14 }, (_, index) => skill(`r${String(index).padStart(2, '0')}`, `Root ${index}`, 'math'))
+    const followers = [skill('f1', 'Follow 1', 'math'), skill('f2', 'Follow 2', 'math')]
+    const layout = simpleLayout(atlas([...roots, ...followers], [edge('f1', 'r00'), edge('f2', 'r01')]), WIDE)
+    const at = (id: string) => layout.positions.get(id) ?? { x: NaN, y: NaN }
+    const big = layout.layers[0]!.map(id => at(id).y)
+    const gaps = big.slice(1).map((y, index) => y - big[index]!)
+    gaps.forEach(gap => expect(gap).toBeGreaterThanOrEqual(SIMPLE_MIN_DISC_PITCH))
+    // The fixed height is the floor: the tall layer pushes the layout past it.
+    const extent = 14 * SIMPLE_MIN_DISC_PITCH
+    expect(extent).toBeGreaterThan(SIMPLE_WIDE_HEIGHT)
+    expect(big[0]! + big[big.length - 1]!).toBeCloseTo(extent)
+    expect(layout.height).toBeGreaterThan(big[big.length - 1]! + SIMPLE_DISC_SIZE / 2)
+    // The two-node layer keeps its usual spacing, centred on the taller extent.
+    const small = layout.layers[1]!.map(id => at(id).y)
+    expect(small[1]! - small[0]!).toBeCloseTo(SIMPLE_WIDE_HEIGHT / 2)
+    expect(small[0]! + small[1]!).toBeCloseTo(extent)
+    // Dense, but legible enough not to overlap.
+    expect(isDenseLayer(14, WIDE)).toBe(true)
   })
 
   it('places every skill exactly once at both widths', () => {
