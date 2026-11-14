@@ -1,7 +1,7 @@
 # DHT Username Registry
 
 Status: implemented
-Updated: 2026-10-27
+Updated: 2026-11-14
 
 **Protocols:** Kademlia records · `/alexandria/username-reg/1.0` · Cardano metadata label 1698
 
@@ -121,9 +121,10 @@ any whose digest is absent from the anchoring tx.
 
 ## Operator checklist
 
-1. `relay_data` volume per region (CI provisions it; `bom` currently
-   refuses volume creation, so Mumbai runs an ephemeral store —
-   issued receipts stay valid there, only refusal history resets).
+1. `relay_data` volume per region where the Fly config mounts one
+   (Frankfurt). The Singapore relay runs an ephemeral store: it started in
+   `bom`, which refused volume creation before Fly retired it. Issued
+   receipts stay valid there; only refusal history resets.
 2. `RELAY_SEED` set as a Fly secret — stable countersigning identity.
 3. Batcher node: `BLOCKFROST_PROJECT_ID` + funded payment address.
 4. Deploys are tag-triggered (`v*`) via the relay repo's CI, which

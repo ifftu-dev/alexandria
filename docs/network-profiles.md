@@ -1,7 +1,7 @@
 # Network Profiles
 
 Status: live
-Updated: 2026-10-27
+Updated: 2026-11-14
 
 The version-1 preprod profile is implemented in the main app. Moving the
 remaining wire protocol IDs under the namespace is still to do (see
@@ -33,7 +33,7 @@ opens the profile manager or activates a user profile.
 | `network_id` | Immutable application-network identity | `preprod` |
 | `profile_revision` | Revision of this network's configuration | `2` |
 | `cardano_network` / `cardano_network_magic` | Ledger selection | Cardano preprod / `1` |
-| `relays` | Relay PeerId, DNS name, port, fallback IPs, and registry HTTPS origin | Mumbai and Frankfurt Fly.io relays |
+| `relays` | Relay PeerId, DNS name, port, fallback IPs, and registry HTTPS origin | Singapore and Frankfurt Fly.io relays |
 | `receipt_issuer_keys` | Relay PeerIds trusted to sign username receipts | Both configured relays |
 | `stake_registry_founder_keys` | Named Ed25519 keys that verify the bootstrap registry | Three founder public keys |
 | `signed_bootstrap_registry_identity` | Expected schema and SHA-256 of the bundled signed registry | Bound to `bootstrap_registry.json` |
