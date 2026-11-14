@@ -3,15 +3,18 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId,
 import { useI18n } from 'vue-i18n'
 import { atlasLayout, MAP_HEIGHT, NODE_HEIGHT, NODE_WIDTH, REGION_HEADING_BOX, REGION_WIDTH, regionCamera } from './atlasLayout'
 import { atlasFieldColor, createAtlasPresenter } from './atlasPresentation'
+import { SIMPLE_DISC_SIZE, simpleLayout } from './simpleLayout'
+import { edgePaths as sortEdgePaths, simpleArrowHead, simpleDenseIds, simpleDimmed, simpleEdgeFaded, simpleEdgeShapes as buildSimpleEdgeShapes, simpleEmphasis as emphasisAround, simpleLabelQuiet, simpleNodeBoxes, type EdgeShape, type NodeBox } from './simpleGeometry'
 import AtlasNodeLayer from './AtlasNodeLayer.vue'
-import { motionDuration, useMotion } from '@/composables/useMotion'
+import { animateMotion, motionDuration, useMotion } from '@/composables/useMotion'
+import type { SkillGraphView } from '@/composables/useSkillGraphView'
 import { BLOOM_ORDER } from '@/utils/bloom'
 import { createAtlasViewState, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
 import { isBloomRank, type AtlasField, type AtlasModel, type AtlasNode } from '@/utils/skillAtlas'
 import type { AtlasFeedback } from '@/composables/useSkillAtlas'
 
-const props = defineProps<{ model: AtlasModel; view: AtlasViewState; feedback?: AtlasFeedback | null; reducedMotion?: boolean }>()
-const emit = defineEmits<{ 'update:view': [view: AtlasViewState]; 'open-skill': [id: string]; 'learn-skill': [id: string]; 'feedback-consumed': [revision: number] }>()
+const props = withDefaults(defineProps<{ model: AtlasModel; view: AtlasViewState; viewMode?: SkillGraphView; feedback?: AtlasFeedback | null; reducedMotion?: boolean }>(), { viewMode: 'simple' })
+const emit = defineEmits<{ 'update:view': [view: AtlasViewState]; 'update:viewMode': [mode: SkillGraphView]; 'open-skill': [id: string]; 'learn-skill': [id: string]; 'feedback-consumed': [revision: number] }>()
 const { t, locale } = useI18n()
 const present = createAtlasPresenter(t)
 const id = useId()
@@ -35,6 +38,7 @@ watch(() => props.feedback, feedback => {
   finishFeedback()
   if (!feedback) return
   seenFeedbackRevision = feedback.revision
+  viewAnnouncement.value = ''
   if (document.visibilityState === 'hidden') { emit('feedback-consumed', feedback.revision); return }
   highlightedIds.value = [...new Set([...feedback.earnedIds, ...feedback.improvedIds])]
   feedbackRevision.value = feedback.revision
@@ -65,18 +69,38 @@ const selected = computed(() => nodesById.value.get(selectedId.value ?? ''))
 const fieldFocused = computed(() => focusedFieldId.value !== null || props.view.unassignedFocused)
 const overview = computed(() => !fieldFocused.value && props.view.camera === null)
 const viewport = ref<HTMLElement>()
+/**
+ * A zero-height strip across the viewport. Watching it rather than the
+ * viewport keeps the Simple view's width-driven height from re-notifying
+ * within one frame (WebKit reports that as a ResizeObserver loop).
+ */
+const widthProbe = ref<HTMLElement>()
 const width = ref(800)
 const height = MAP_HEIGHT
 /** How far one arrow press or pan button moves the map, in map units. */
 const PAN_STEP = 180
 let resizeObserver: ResizeObserver | undefined
 onMounted(() => {
-  if (viewport.value && typeof ResizeObserver !== 'undefined') {
+  if (widthProbe.value && typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(entries => { width.value = Math.max(280, entries[0]?.contentRect.width ?? 800) })
-    resizeObserver.observe(viewport.value)
+    resizeObserver.observe(widthProbe.value)
   }
 })
 onBeforeUnmount(() => resizeObserver?.disconnect())
+// Simple: a layered flow of discs that fits the viewport, with no camera.
+// Detailed-only view fields (camera, query, Bloom emphasis, field focus) are
+// left untouched in Simple, so they are intact on the way back.
+const simple = computed(() => props.viewMode === 'simple')
+const simpleGeometry = computed(() => simpleLayout(props.model, width.value))
+/** Where each node's element sits on the canvas, in the current view. */
+const nodeBoxes = computed(() => {
+  if (simple.value) return simpleNodeBoxes(simpleGeometry.value)
+  const boxes = new Map<string, NodeBox>()
+  for (const [skillId, point] of layout.value.positions) boxes.set(skillId, { x: point.x, y: point.y, width: NODE_WIDTH, height: NODE_HEIGHT })
+  return boxes
+})
+/** Nodes in layers too dense for every name: their plain Ready names wait for hover or focus. */
+const denseIds = computed(() => simpleDenseIds(simpleGeometry.value, width.value))
 const focusedRegion = computed(() => layout.value.regions.find(region => region.field.id === focusedFieldId.value))
 const camera = computed<AtlasCamera>(() => props.view.camera ?? regionCamera(focusedRegion.value ?? { x: 0, y: 0 }, width.value))
 interface MapRect { left: number; top: number; right: number; bottom: number }
@@ -158,7 +182,7 @@ const canvasIds = shallowRef<readonly string[]>(drawnNodes.value.map(node => nod
 const canvasNodes = computed(() => canvasIds.value.flatMap(id => { const node = nodesById.value.get(id); return node ? [node] : [] }))
 // Read through a getter by the node layer, so adding a node re-renders that
 // layer and not the whole explorer.
-const nodeLayer = { get items(): readonly AtlasNode[] { return canvasNodes.value } }
+const nodeLayer = { get items(): readonly AtlasNode[] { return simple.value ? props.model.nodes : canvasNodes.value } }
 let fillScheduled = false
 /** Drops nodes that left the drawn area and adds those on screen; with `more`, also a few of the rest. */
 function fillCanvas(more: boolean): void {
@@ -188,16 +212,21 @@ watch(drawnNodes, () => fillCanvas(false))
 /** The canvas reaches past the world by the most a drawn area can, at the lowest zoom (1). */
 const canvasPad = computed(() => ({ x: width.value / 2 + DRAWN_MARGIN, y: height / 2 + DRAWN_MARGIN }))
 const canvasBox = computed(() => {
+  if (simple.value) {
+    const h = simpleGeometry.value.height
+    return { viewBox: `0 0 ${width.value} ${h}`, width: width.value, height: h }
+  }
   const pad = canvasPad.value, w = worldBounds.value.x + 2 * pad.x, h = worldBounds.value.y + 2 * pad.y
   return { viewBox: `${-pad.x} ${-pad.y} ${w} ${h}`, width: w * camera.value.zoom, height: h * camera.value.zoom }
 })
 const canvas = ref<SVGSVGElement>()
 /** Moves the canvas so the camera's view fills the screen. Set directly, so no render is involved. */
 function placeCanvas(at: AtlasCamera): void {
+  if (simple.value) { if (canvas.value) canvas.value.style.transform = ''; return }
   const screen = rectAround(at, width.value, height), pad = canvasPad.value
   if (canvas.value) canvas.value.style.transform = `translate3d(${-(screen.left + pad.x) * at.zoom}px, ${-(screen.top + pad.y) * at.zoom}px, 0)`
 }
-watch([camera, width, canvas], () => { if (!drag?.moved) placeCanvas(camera.value) }, { flush: 'post' })
+watch([camera, width, canvas, simple], () => { if (!drag?.moved) placeCanvas(camera.value) }, { flush: 'post' })
 const cameraLabel = computed(() => `${camera.value.x} ${camera.value.y} ${camera.value.zoom}`)
 const neighborhoodIds = computed(() => {
   const ids = new Set<string>()
@@ -216,6 +245,11 @@ const neighborhoodIds = computed(() => {
   }
   return ids
 })
+/** Simple emphasis: what a selection or inspector focus traces. */
+const simpleEmphasis = computed(() => emphasisAround(selected.value, neighborhoodIds.value, nodesById.value))
+function labelQuiet(node: AtlasNode): boolean {
+  return simple.value && simpleLabelQuiet(node, denseIds.value, simpleEmphasis.value)
+}
 // The map dims everything outside an active focus, so the map always says which one.
 const focusSummary = computed(() => {
   if (!selected.value || neighborhood.value === 'none') return ''
@@ -226,7 +260,8 @@ const focusSummary = computed(() => {
 })
 // A string computed only notifies when the query text changes, so other view
 // updates (selection, camera) keep the same match list and its window.
-const query = computed(() => rawQuery.value.trim().toLocaleLowerCase())
+// Simple offers no search, so its list holds every skill; the query waits for Detailed.
+const query = computed(() => simple.value ? '' : rawQuery.value.trim().toLocaleLowerCase())
 const searchText = computed(() => new Map(props.model.nodes.map(node => [node.skill.id,
   `${node.skill.name} ${node.skill.description ?? ''} ${node.skill.subject_name ?? ''} ${fieldName(node.fieldId)}`.toLocaleLowerCase()])))
 const matches = computed(() => query.value
@@ -250,7 +285,7 @@ function listScrolled(event: Event): void {
   if (target instanceof HTMLElement && target.scrollTop + target.clientHeight >= target.scrollHeight - 200) showMoreMatches(false)
 }
 const bloomMatches = computed(() => matches.value.filter(bloomMatch))
-function bloomMatch(node: AtlasNode): boolean { return bloomEmphasis.value !== null && node.earnedBloom?.rank === bloomEmphasis.value }
+function bloomMatch(node: AtlasNode): boolean { return !simple.value && bloomEmphasis.value !== null && node.earnedBloom?.rank === bloomEmphasis.value }
 const matchIds = computed(() => new Set(matches.value.map(node => node.skill.id)))
 function fieldName(fieldId: string | null): string {
   return present.fieldName(props.model.fieldById.get(fieldId) ?? { id: fieldId, name: null })
@@ -294,10 +329,23 @@ function preserveOverviewFocus(): void {
     if (document.activeElement === document.body) viewport.value?.querySelector<SVGSVGElement>('.atlas-map')?.focus({ preventScroll: true })
   })
 }
-function select(skillId: string): void {
+/** Scrolls a Simple node into view when it is off screen; Reduced and Off jump rather than glide. */
+function reveal(skillId: string): void {
+  void nextTick(() => {
+    const element = nodeElements().find(item => item.dataset.skill === skillId)?.querySelector('.map-node')
+    element?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: motionReduced.value ? 'auto' : 'smooth' })
+  })
+}
+/** Selects a skill. `fromElsewhere` marks a choice made off the map (the list, a relation), which Simple brings into view. */
+function select(skillId: string, fromElsewhere = false): void {
   const node = nodesById.value.get(skillId)
   const point = layout.value.positions.get(skillId)
   if (!node || !point) return
+  if (simple.value) {
+    update({ selectedSkillId: skillId, inspectorCollapsed: false })
+    if (fromElsewhere) reveal(skillId)
+    return
+  }
   update({ selectedSkillId: skillId, focusedFieldId: node.fieldId, unassignedFocused: node.fieldId === null,
     inspectorCollapsed: false, camera: { x: point.x + NODE_WIDTH / 2, y: point.y + NODE_HEIGHT / 2, zoom: camera.value.zoom } })
   preserveOverviewFocus()
@@ -310,6 +358,7 @@ function focus(field: AtlasField): void {
   preserveOverviewFocus()
 }
 function dimmed(node: AtlasNode): boolean {
+  if (simple.value) return simpleDimmed(simpleEmphasis.value, node.skill.id)
   if (node.skill.id === selectedId.value) return false
   return (rawQuery.value !== '' && !matchIds.value.has(node.skill.id)) ||
     (bloomEmphasis.value !== null && node.earnedBloom?.rank !== bloomEmphasis.value) ||
@@ -339,6 +388,7 @@ function stopDrag(): void {
   if (wasMoving) void nextTick(() => placeCanvas(camera.value))
 }
 function pointerDown(event: PointerEvent): void {
+  if (simple.value) return
   // Native vertical scrolling and browser pinch zoom stay available on touch.
   if (event.isPrimary === false) { stopDrag(); return }
   if (event.button !== 0) return
@@ -372,7 +422,7 @@ function mapClick(event: MouseEvent): void {
   if (suppressMapClick && event.detail !== 0) { event.stopPropagation(); event.preventDefault() }
 }
 function keyPan(event: KeyboardEvent): void {
-  if (event.target !== event.currentTarget) return
+  if (simple.value || event.target !== event.currentTarget) return
   const moves: Record<string, [number, number]> = { ArrowLeft: [-PAN_STEP, 0], ArrowRight: [PAN_STEP, 0], ArrowUp: [0, -PAN_STEP], ArrowDown: [0, PAN_STEP] }
   const move = moves[event.key]
   if (move) { event.preventDefault(); pan(...move) }
@@ -383,33 +433,109 @@ function escapeFocus(event: KeyboardEvent): void {
   update({ neighborhood: 'none' })
 }
 function reset(): void { update(createAtlasViewState()) }
+/**
+ * Set when the learner switches here, until the view arrives. A change made
+ * elsewhere (the other surface, or the remembered view loading after mount)
+ * applies at once without travel or an announcement.
+ */
+let switchRequested = false
+function chooseView(mode: SkillGraphView): void {
+  if (mode === props.viewMode) return
+  switchRequested = true
+  emit('update:viewMode', mode)
+}
+// The learner's own switch is announced. In full motion the nodes travel from
+// their old places and sizes to their new ones while the old edges fade out;
+// the new edges, hidden meanwhile, then fade back in.
+const viewAnnouncement = ref('')
+const switching = ref(false)
+let switchTimer: ReturnType<typeof setTimeout> | undefined
+/** A still copy of the edges as drawn before the switch, fading out while the nodes travel. */
+let leavingEdges: SVGSVGElement | undefined
+function finishSwitch(): void {
+  if (switchTimer !== undefined) clearTimeout(switchTimer)
+  switchTimer = undefined
+  switching.value = false
+  leavingEdges?.remove()
+  leavingEdges = undefined
+}
+onBeforeUnmount(finishSwitch)
+function nodeElements(): SVGForeignObjectElement[] {
+  return [...canvas.value?.querySelectorAll<SVGForeignObjectElement>('foreignObject[data-skill]') ?? []]
+}
+/**
+ * Copies the canvas as it stands, edges only, over the map and fades it out.
+ * The copy keeps the old view box, size and placement, so the old curves stay
+ * where they were while the canvas beneath re-renders for the new view.
+ */
+function holdLeavingEdges(): void {
+  const source = canvas.value, edges = source?.querySelector('.map-edges'), map = source?.parentElement
+  if (!source || !edges || !map) return
+  const copy = source.cloneNode(false) as SVGSVGElement
+  copy.classList.add('atlas-canvas-leaving')
+  copy.setAttribute('aria-hidden', 'true')
+  copy.appendChild(edges.cloneNode(true))
+  map.appendChild(copy)
+  leavingEdges = copy
+  animateMotion(copy, [{ opacity: 1 }, { opacity: 0 }], 'slow')
+}
+/** Moves and resizes each node that was on the canvas before the switch from its old box to its new one. */
+function travel(before: Map<string, DOMRect>): void {
+  for (const element of nodeElements()) {
+    const from = before.get(element.dataset.skill ?? ''), to = element.getBoundingClientRect()
+    if (!from || !to.width || !to.height) continue
+    // Canvas units per screen pixel differ by view (Detailed zooms).
+    const scale = to.width / (Number(element.getAttribute('width')) || to.width)
+    const dx = (from.left + from.width / 2 - to.left - to.width / 2) / scale
+    const dy = (from.top + from.height / 2 - to.top - to.height / 2) / scale
+    // Scaled about the box's centre (see .map-node-box), so the centre travels by dx, dy.
+    const sx = from.width / to.width, sy = from.height / to.height
+    if (dx || dy || sx !== 1 || sy !== 1) animateMotion(element, [{ transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` }, { transform: 'none' }], 'slow')
+  }
+}
+watch(() => props.viewMode, mode => {
+  finishSwitch()
+  const requested = switchRequested
+  switchRequested = false
+  if (!requested) return
+  viewAnnouncement.value = t(mode === 'simple' ? 'skills.atlas.viewChangedSimple' : 'skills.atlas.viewChangedDetailed')
+  if (motionReduced.value) return
+  // Read before the re-render (a pre-flush watcher), so the old places are known.
+  const before = new Map(nodeElements().map(element => [element.dataset.skill ?? '', element.getBoundingClientRect()]))
+  holdLeavingEdges()
+  switching.value = true
+  switchTimer = setTimeout(finishSwitch, motionDuration('slow'))
+  void nextTick(() => travel(before))
+})
 // Edge geometry depends only on the layout, so it is built once per model.
-const edgeShapes = computed(() => props.model.edges.flatMap(edge => {
+const edgeShapes = computed(() => props.model.edges.flatMap((edge): EdgeShape[] => {
   const from = layout.value.positions.get(edge.prerequisite_id)
   const to = layout.value.positions.get(edge.skill_id)
   if (!from || !to) return [] // Unloaded endpoints remain explicit in the inspector.
   const x1 = from.x + NODE_WIDTH, y1 = from.y + NODE_HEIGHT / 2
   const x2 = to.x, y2 = to.y + NODE_HEIGHT / 2
   const bend = Math.max(42, Math.min(160, Math.abs(x2 - x1) / 2))
-  // A cubic Bézier stays inside the box of its control points.
-  // Every curve ends heading right, so its arrowhead is a fixed triangle at its end.
-  return [{ edge, path: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`, x2, y2 }]
+  // A cubic Bezier stays inside the box of its control points.
+  return [{ edge, path: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`, x2, y2, tx: 1, ty: 0 }]
 }))
-// All edges are four paths (lines and arrowheads, plain and highlighted), drawn
-// whole and rebuilt only when the model or the focus changes. A pan or a
-// redraw of the nodes never touches them, and they add four elements, not thousands.
+const simpleEdgeShapes = computed(() => buildSimpleEdgeShapes(props.model.edges, simpleGeometry.value))
+/** Every Detailed curve ends heading right, so its arrowhead is a fixed triangle at its end. */
+function detailedArrowHead({ x2, y2 }: EdgeShape, length: number): string {
+  return `M ${x2} ${y2} l ${-length} ${-length / 2} l 0 ${length} z`
+}
+// All edges are a few paths (lines and arrowheads per emphasis), drawn whole
+// and rebuilt only when the model or the focus changes. A pan or a redraw of
+// the nodes never touches them, and they add a few elements, not thousands.
 function edgeActive(edge: AtlasModel['edges'][number]): boolean {
   return neighborhoodIds.value.size > 0
     ? neighborhoodIds.value.has(edge.prerequisite_id) && neighborhoodIds.value.has(edge.skill_id)
     : edge.prerequisite_id === selectedId.value || edge.skill_id === selectedId.value
 }
+// Simple also fades the edges that leave the emphasised neighbourhood.
 const edgePaths = computed(() => {
-  const plain: string[] = [], plainHeads: string[] = [], active: string[] = [], activeHeads: string[] = []
-  for (const { edge, path, x2, y2 } of edgeShapes.value) {
-    if (edgeActive(edge)) { active.push(path); activeHeads.push(`M ${x2} ${y2} l -14 -7 l 0 14 z`) }
-    else { plain.push(path); plainHeads.push(`M ${x2} ${y2} l -10 -5 l 0 10 z`) }
-  }
-  return { plain: plain.join(' '), plainHeads: plainHeads.join(' '), active: active.join(' '), activeHeads: activeHeads.join(' ') }
+  if (!simple.value) return sortEdgePaths(edgeShapes.value, edge => edgeActive(edge) ? 'active' : 'plain', detailedArrowHead)
+  const emphasis = simpleEmphasis.value
+  return sortEdgePaths(simpleEdgeShapes.value, edge => edgeActive(edge) ? 'active' : simpleEdgeFaded(emphasis, edge) ? 'faded' : 'plain', simpleArrowHead)
 })
 // Overview summaries are built once per model, in one pass over its edges.
 const fieldConnections = computed(() => {
@@ -444,24 +570,35 @@ function setBloom(event: Event): void {
   <section class="atlas" :class="{ 'motion-reduced': motionReduced }" :aria-label="t('skills.atlas.title')" @keydown="escapeFocus">
     <header class="atlas-heading">
       <div><p class="atlas-eyebrow">{{ t('skills.atlas.title') }}</p><h2>{{ t('skills.atlas.fieldCounts', model.counts) }}</h2></div>
-      <button type="button" @click="reset">{{ t('skills.atlas.reset') }}</button>
+      <div class="atlas-heading-actions">
+        <div class="atlas-view-switch" role="group" :aria-label="t('skills.atlas.viewGroup')">
+          <button type="button" :aria-pressed="viewMode === 'simple'" @click="chooseView('simple')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="3.5" cy="8" r="2.2" /><circle cx="12.5" cy="3.5" r="2.2" /><circle cx="12.5" cy="12.5" r="2.2" /><path d="M5.5 7l5-2.5M5.5 9l5 2.5" /></svg>{{ t('skills.atlas.viewSimple') }}</button>
+          <button type="button" :aria-pressed="viewMode === 'detailed'" @click="chooseView('detailed')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="2" width="6" height="5" rx="1.2" /><rect x="8.5" y="2" width="6" height="5" rx="1.2" /><rect x="1.5" y="9" width="6" height="5" rx="1.2" /><rect x="8.5" y="9" width="6" height="5" rx="1.2" /></svg>{{ t('skills.atlas.viewDetailed') }}</button>
+        </div>
+        <button type="button" @click="reset">{{ t('skills.atlas.reset') }}</button>
+      </div>
     </header>
-    <div class="atlas-toolbar">
+    <div v-if="!simple" class="atlas-toolbar">
       <label class="atlas-search"><span>{{ t('skills.atlas.search') }}</span><input type="search" :value="view.query" @input="update({ query: ($event.target as HTMLInputElement).value })"></label>
       <button v-if="view.query" type="button" @click="update({ query: '' })">{{ t('skills.atlas.clearSearch') }}</button>
       <label><span>{{ t('skills.atlas.bloomLegend') }}</span><select :value="view.bloomEmphasis ?? ''" @change="setBloom"><option value="">{{ t('skills.atlas.allBloom') }}</option><option v-for="option in bloomOptions" :key="option.rank" :value="option.rank">{{ option.label }}</option></select></label>
     </div>
-    <p class="atlas-legend">{{ t('skills.atlas.legend') }}</p>
-    <p role="status" class="atlas-feedback" aria-live="polite"><template v-if="highlightedIds.length">{{ t('skills.atlas.updated') }}: {{ highlightedIds.slice(0, 3).map(skillId => nodesById.get(skillId)?.skill.name).filter(Boolean).join(', ') }}{{ highlightedIds.length > 3 ? '…' : '' }}</template></p>
+    <p v-if="!simple" class="atlas-legend">{{ t('skills.atlas.legend') }}</p>
+    <p role="status" class="atlas-feedback" :class="{ 'has-feedback': highlightedIds.length }" aria-live="polite"><template v-if="highlightedIds.length">{{ t('skills.atlas.updated') }}: {{ highlightedIds.slice(0, 3).map(skillId => nodesById.get(skillId)?.skill.name).filter(Boolean).join(', ') }}{{ highlightedIds.length > 3 ? '…' : '' }}</template><span v-else-if="viewAnnouncement" class="sr-only">{{ viewAnnouncement }}</span></p>
     <div class="atlas-workspace">
       <div class="atlas-main">
-        <p v-if="view.bloomEmphasis !== null" class="bloom-summary" role="status">{{ t('skills.atlas.bloomSummary', { level: present.bloomLabel(BLOOM_ORDER[view.bloomEmphasis]), count: bloomMatches.length }) }}</p>
-        <nav class="atlas-fields" :aria-label="t('skills.atlas.overview')">
+        <p v-if="!simple && view.bloomEmphasis !== null" class="bloom-summary" role="status">{{ t('skills.atlas.bloomSummary', { level: present.bloomLabel(BLOOM_ORDER[view.bloomEmphasis]), count: bloomMatches.length }) }}</p>
+        <!-- Simple keeps the field colours named, without field focus. -->
+        <p v-if="simple" class="atlas-fields">
+          <span v-for="field in model.fields" :key="field.id === null ? 'unassigned' : `field:${field.id}`" class="field-chip" :style="{ '--field': color(field.id) }"><i class="field-dot" aria-hidden="true" />{{ fieldName(field.id) }} <small>{{ t('skills.atlas.fieldEarned', { earned: field.earned, total: field.total }) }}</small></span>
+        </p>
+        <nav v-else class="atlas-fields" :aria-label="t('skills.atlas.overview')">
           <button type="button" :aria-pressed="overview" @click="update({ focusedFieldId: null, unassignedFocused: false, camera: null, neighborhood: 'none' })">{{ t('skills.atlas.overview') }}</button>
-          <button v-for="field in model.fields" :key="field.id === null ? 'unassigned' : `field:${field.id}`" type="button" :style="{ '--field': color(field.id) }" :aria-pressed="fieldFocused && field.id === view.focusedFieldId" @click="focus(field)"><i class="field-dot" aria-hidden="true" />{{ fieldName(field.id) }}</button>
+          <button v-for="field in model.fields" :key="field.id === null ? 'unassigned' : `field:${field.id}`" type="button" :style="{ '--field': color(field.id) }" :aria-pressed="fieldFocused && field.id === view.focusedFieldId" @click="focus(field)"><i class="field-dot" aria-hidden="true" />{{ fieldName(field.id) }} <small>{{ t('skills.atlas.fieldEarned', { earned: field.earned, total: field.total }) }}</small></button>
         </nav>
         <div ref="viewport" class="atlas-viewport">
-          <div v-if="overview" class="atlas-overview">
+          <div ref="widthProbe" class="atlas-width-probe" aria-hidden="true" />
+          <div v-if="overview && !simple" class="atlas-overview">
             <p class="atlas-overview-hint">{{ t('skills.atlas.overviewHint') }}</p>
             <article v-for="region in layout.regions" :key="region.field.id === null ? 'unassigned' : `field:${region.field.id}`" class="field-card" :style="{ '--field': color(region.field.id) }">
               <button class="field-title" type="button" :aria-label="t('skills.atlas.focusField', { field: fieldName(region.field.id) })" @click="focus(region.field)"><span>{{ fieldName(region.field.id) }}</span><span aria-hidden="true">↗</span></button>
@@ -474,7 +611,7 @@ function setBloom(event: Event): void {
             <p v-if="!model.nodes.length">{{ t('skills.atlas.empty') }}</p>
           </div>
           <template v-else>
-            <div class="map-tools" :aria-label="t('skills.atlas.map')">
+            <div v-if="!simple" class="map-tools" :aria-label="t('skills.atlas.map')">
               <button type="button" :aria-label="t('skills.atlas.zoomIn')" :disabled="camera.zoom >= 1.8" @click="zoom(.2)">+</button>
               <button type="button" :aria-label="t('skills.atlas.zoomOut')" :disabled="camera.zoom <= 1" @click="zoom(-.2)">−</button>
               <span>{{ Math.round(camera.zoom * 100) }}%</span>
@@ -487,33 +624,49 @@ function setBloom(event: Event): void {
               <p role="status">{{ focusSummary }}</p>
               <button v-if="focusSummary" type="button" @click="update({ neighborhood: 'none' })">{{ t('skills.atlas.clearFocus') }}</button>
             </div>
-            <div class="atlas-map" :style="{ height: `${height}px` }" :data-camera="cameraLabel" tabindex="0" role="group" :aria-label="t('skills.atlas.map')" :aria-describedby="`${id}-map-help`" @keydown="keyPan" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerEnd" @pointercancel="pointerEnd" @lostpointercapture="pointerEnd" @click.capture="mapClick">
+            <!-- One canvas and one element per node in both views: a switch re-skins and moves them. -->
+            <div class="atlas-map" :class="{ 'is-simple': simple, 'is-switching': switching }" :style="{ height: `${simple ? simpleGeometry.height : height}px`, '--disc-size': `${SIMPLE_DISC_SIZE}px` }" :data-camera="simple ? undefined : cameraLabel" :tabindex="simple ? undefined : 0" role="group" :aria-label="t('skills.atlas.map')" :aria-describedby="simple ? undefined : `${id}-map-help`" @keydown="keyPan" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerEnd" @pointercancel="pointerEnd" @lostpointercapture="pointerEnd" @click.capture="mapClick">
               <svg ref="canvas" class="atlas-canvas" :viewBox="canvasBox.viewBox" :width="canvasBox.width" :height="canvasBox.height">
-                <g v-for="region in layout.regions" :key="region.field.id === null ? 'unassigned' : `field:${region.field.id}`" :style="{ '--field': color(region.field.id) }">
-                  <rect :x="region.x" :y="region.y" :width="region.width" :height="region.height" rx="24" class="map-region" />
-                  <foreignObject :x="region.x + REGION_HEADING_BOX.dx" :y="region.y + REGION_HEADING_BOX.dy" :width="REGION_HEADING_BOX.width" :height="REGION_HEADING_BOX.height"><div class="region-heading"><strong>{{ regionHeadings.get(region)?.name }}</strong><span>{{ regionHeadings.get(region)?.counts }}</span></div></foreignObject>
-                </g>
+                <template v-if="!simple">
+                  <g v-for="region in layout.regions" :key="region.field.id === null ? 'unassigned' : `field:${region.field.id}`" :style="{ '--field': color(region.field.id) }">
+                    <rect :x="region.x" :y="region.y" :width="region.width" :height="region.height" rx="24" class="map-region" />
+                    <foreignObject :x="region.x + REGION_HEADING_BOX.dx" :y="region.y + REGION_HEADING_BOX.dy" :width="REGION_HEADING_BOX.width" :height="REGION_HEADING_BOX.height"><div class="region-heading"><strong>{{ regionHeadings.get(region)?.name }}</strong><span>{{ regionHeadings.get(region)?.counts }}</span></div></foreignObject>
+                  </g>
+                </template>
                 <g class="map-edges" aria-hidden="true">
-                  <path class="map-edge" :d="edgePaths.plain" /><path class="map-edge-head" :d="edgePaths.plainHeads" />
-                  <path class="map-edge map-edge-active" :d="edgePaths.active" /><path class="map-edge-head map-edge-active" :d="edgePaths.activeHeads" />
+                  <template v-if="simple"><path class="map-edge map-edge-faded" :d="edgePaths.faded.path" /><path class="map-edge-head map-edge-faded" :d="edgePaths.faded.heads" /></template>
+                  <path class="map-edge" :d="edgePaths.plain.path" /><path class="map-edge-head" :d="edgePaths.plain.heads" />
+                  <path class="map-edge map-edge-active" :d="edgePaths.active.path" /><path class="map-edge-head map-edge-active" :d="edgePaths.active.heads" />
                 </g>
                 <AtlasNodeLayer v-slot="{ items }" :source="nodeLayer">
-                  <foreignObject v-for="node in items" :key="node.skill.id" v-memo="[node, layout, locale, onScreen(node), node.skill.id === view.selectedSkillId, node.readyNext, bloomMatch(node), dimmed(node), highlightedIds.includes(node.skill.id)]" :x="layout.positions.get(node.skill.id)?.x" :y="layout.positions.get(node.skill.id)?.y" :width="NODE_WIDTH" :height="NODE_HEIGHT" :style="{ '--field': color(node.fieldId) }">
-                    <button class="map-node" :class="{ 'is-selected': node.skill.id === view.selectedSkillId, 'is-ready-next': node.readyNext, 'is-bloom-match': bloomMatch(node), 'is-dimmed': dimmed(node), 'is-updated': highlightedIds.includes(node.skill.id) }" type="button" :inert="!onScreen(node) || undefined" :aria-label="nodeText(node).name" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)">
-                      <span class="skill-name" dir="auto">{{ node.skill.name }}</span><span class="node-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓</span><span v-else-if="node.readyNext" aria-hidden="true">◎</span><span v-else aria-hidden="true">○</span><span>{{ nodeText(node).evidence }}</span></span>
+                  <foreignObject v-for="node in items" :key="node.skill.id" v-memo="[node, nodeBoxes, simple, locale, onScreen(node), node.skill.id === view.selectedSkillId, node.readyNext, bloomMatch(node), dimmed(node), labelQuiet(node), highlightedIds.includes(node.skill.id)]" class="map-node-box" :data-skill="node.skill.id" :x="nodeBoxes.get(node.skill.id)?.x" :y="nodeBoxes.get(node.skill.id)?.y" :width="nodeBoxes.get(node.skill.id)?.width" :height="nodeBoxes.get(node.skill.id)?.height" :style="{ '--field': color(node.fieldId) }">
+                    <button class="map-node" :class="{ 'is-selected': node.skill.id === view.selectedSkillId, 'is-earned': node.status === 'earned', 'is-ready-next': node.readyNext, 'is-bloom-match': bloomMatch(node), 'is-dimmed': dimmed(node), 'is-updated': highlightedIds.includes(node.skill.id) }" type="button" :inert="(!simple && !onScreen(node)) || undefined" :aria-label="nodeText(node).name" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)">
+                      <template v-if="simple">
+                        <span class="node-disc" aria-hidden="true">{{ node.status === 'earned' && node.earnedBloom ? node.earnedBloom.rank + 1 : '' }}</span><span class="node-label" :class="{ 'is-label-quiet': labelQuiet(node) }" dir="auto">{{ node.skill.name }}</span>
+                      </template>
+                      <template v-else>
+                        <span class="skill-name" dir="auto">{{ node.skill.name }}</span><span class="node-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓</span><span v-else-if="node.readyNext" aria-hidden="true">◎</span><span v-else aria-hidden="true">○</span><span>{{ nodeText(node).evidence }}</span></span>
+                      </template>
                     </button>
                   </foreignObject>
                 </AtlasNodeLayer>
               </svg>
               <div ref="grabCover" class="atlas-grab-cover" hidden />
             </div>
-            <p :id="`${id}-map-help`" class="map-help">{{ t('skills.atlas.mapHelp') }}</p>
+            <p v-if="simple && !model.nodes.length" class="simple-empty">{{ t('skills.atlas.empty') }}</p>
+            <p v-if="simple" class="simple-legend">
+              <span><i class="legend-key is-earned" aria-hidden="true" />{{ t('skills.atlas.legendEarned') }}</span>
+              <span><i class="legend-key is-ready-next" aria-hidden="true" />{{ t('skills.atlas.legendReadyNext') }}</span>
+              <span><i class="legend-key" aria-hidden="true" />{{ t('skills.atlas.legendReady') }}</span>
+              <span class="legend-field">{{ t('skills.atlas.legendField') }}</span>
+            </p>
+            <p v-else :id="`${id}-map-help`" class="map-help">{{ t('skills.atlas.mapHelp') }}</p>
           </template>
         </div>
         <details class="atlas-list" open>
           <summary>{{ t('skills.atlas.list') }} <span>{{ t('skills.atlas.results', { count: matches.length }) }}</span></summary>
           <!-- Memoised: a pan or zoom re-renders the map, never these rows. -->
-          <ul ref="list" v-memo="[listedMatches, view.selectedSkillId, view.bloomEmphasis, locale, model]" :aria-label="t('skills.atlas.list')" @scroll.passive="listScrolled"><li v-for="node in listedMatches" :key="node.skill.id"><button :class="{ 'is-bloom-match': bloomMatch(node), 'is-ready-next': node.readyNext }" type="button" :style="{ '--field': color(node.fieldId) }" :aria-label="present.accessibleName(node)" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)"><i class="field-dot" aria-hidden="true" /><span><strong dir="auto">{{ node.skill.name }}</strong><small>{{ fieldName(node.fieldId) }}</small></span><span class="list-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓ </span><span v-else-if="node.readyNext" aria-hidden="true">◎ </span>{{ status(node) }}</span></button></li></ul>
+          <ul ref="list" v-memo="[listedMatches, view.selectedSkillId, view.bloomEmphasis, simple, locale, model]" :aria-label="t('skills.atlas.list')" @scroll.passive="listScrolled"><li v-for="node in listedMatches" :key="node.skill.id"><button :class="{ 'is-bloom-match': bloomMatch(node), 'is-ready-next': node.readyNext }" type="button" :style="{ '--field': color(node.fieldId) }" :aria-label="present.accessibleName(node)" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id, true)"><i class="field-dot" aria-hidden="true" /><span><strong dir="auto">{{ node.skill.name }}</strong><small>{{ fieldName(node.fieldId) }}</small></span><span class="list-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓ </span><span v-else-if="node.readyNext" aria-hidden="true">◎ </span>{{ status(node) }}</span></button></li></ul>
           <button v-if="unlisted > 0" class="list-more" type="button" @click="showMoreMatches(true)">{{ t('skills.atlas.showMoreSkills', { count: Math.min(LIST_WINDOW, unlisted) }) }}</button>
           <p v-if="!matches.length">{{ t('skills.atlas.noResults') }}</p>
         </details>
@@ -534,7 +687,7 @@ function setBloom(event: Event): void {
             <div class="neighborhood-controls"><button type="button" :aria-pressed="view.neighborhood === 'prerequisites'" @click="update({ neighborhood: view.neighborhood === 'prerequisites' ? 'none' : 'prerequisites' })">{{ t('skills.atlas.focusPrerequisites') }}</button><button type="button" :aria-pressed="view.neighborhood === 'dependents'" @click="update({ neighborhood: view.neighborhood === 'dependents' ? 'none' : 'dependents' })">{{ t('skills.atlas.focusDependents') }}</button><button v-if="view.neighborhood !== 'none'" type="button" @click="update({ neighborhood: 'none' })">{{ t('skills.atlas.allConnections') }}</button><label v-if="view.neighborhood !== 'none'"><span>{{ t('skills.atlas.depth') }}</span><select :value="view.neighborhoodDepth" @change="update({ neighborhoodDepth: Number(($event.target as HTMLSelectElement).value) === 2 ? 2 : 1 })"><option :value="1">{{ t('skills.atlas.oneStep') }}</option><option :value="2">{{ t('skills.atlas.twoSteps') }}</option></select></label></div>
             <section v-for="direction in (['prerequisites', 'dependents'] as const)" :key="direction" class="inspector-relations">
               <h3>{{ t(`skills.atlas.${direction}`) }} <span>{{ selected[direction].length }}</span></h3>
-              <ul><li v-for="relation in selected[direction]" :key="relation.skillId"><button v-if="relation.loaded" type="button" :aria-label="relationLabel(relation)" @click="select(relation.skillId)"><strong dir="auto">{{ relation.name }}</strong><small>{{ fieldName(nodesById.get(relation.skillId)?.fieldId ?? null) }} · {{ present.state(relationNode(relation)) }}</small></button><p v-else>{{ relation.name }} · {{ t('skills.atlas.notLoaded') }}</p></li></ul>
+              <ul><li v-for="relation in selected[direction]" :key="relation.skillId"><button v-if="relation.loaded" type="button" :aria-label="relationLabel(relation)" @click="select(relation.skillId, true)"><strong dir="auto">{{ relation.name }}</strong><small>{{ fieldName(nodesById.get(relation.skillId)?.fieldId ?? null) }} · {{ present.state(relationNode(relation)) }}</small></button><p v-else>{{ relation.name }} · {{ t('skills.atlas.notLoaded') }}</p></li></ul>
               <p v-if="!selected[direction].length" class="atlas-muted">{{ t('skills.atlas.noRelations') }}</p>
             </section>
           </template>
@@ -553,12 +706,19 @@ function setBloom(event: Event): void {
 .atlas button:focus-visible, .atlas input:focus-visible, .atlas select:focus-visible, .atlas summary:focus-visible, .atlas-map:focus-visible { outline: 3px solid var(--app-ring); outline-offset: 2px; }
 .atlas button:disabled { opacity: .45; cursor: default; }
 .atlas button[aria-pressed=true] { border-color: var(--app-primary); box-shadow: inset 0 0 0 1px var(--app-primary); }
-.atlas-feedback:not(:empty) { padding: 10px 14px; margin-block-end: 12px; border-inline-start: 3px solid var(--app-primary); background: var(--app-muted); border-radius: 8px; }
+.atlas-feedback.has-feedback { padding: 10px 14px; margin-block-end: 12px; border-inline-start: 3px solid var(--app-primary); background: var(--app-muted); border-radius: 8px; }
 .atlas .map-node.is-updated { outline: 2px solid var(--app-primary); outline-offset: -2px; }
 .atlas:not(.motion-reduced) .map-node.is-updated { animation: atlas-evidence var(--duration-reveal) ease-out 1; }
 @keyframes atlas-evidence { from { box-shadow: inset 0 0 0 5px var(--app-primary); } to { box-shadow: inset 0 0 0 0 transparent; } }
-@media (prefers-reduced-motion: reduce) { .atlas .map-node.is-updated { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .atlas .map-node.is-updated, .atlas .map-node.is-updated .node-disc { animation: none !important; } }
 .atlas-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-block-end: 20px; }
+.atlas-heading-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+/* The view switch: a segmented control whose pressed half is the active view. */
+.atlas-view-switch { display: flex; gap: 3px; padding: 3px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-card); }
+.atlas .atlas-view-switch button { display: flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 9px; background: transparent; color: var(--app-muted-foreground); font-size: 13px; font-weight: 550; padding: 8px 13px; transition: background-color var(--transition-fast), color var(--transition-fast); }
+.atlas .atlas-view-switch button:not([aria-pressed=true]):hover { background: var(--app-muted); color: var(--app-foreground); }
+.atlas .atlas-view-switch button[aria-pressed=true] { background: var(--app-primary); color: var(--app-primary-foreground); box-shadow: none; }
+.atlas-view-switch svg { width: 16px; height: 16px; flex-shrink: 0; }
 .atlas-eyebrow { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--app-muted-foreground); margin-block-end: 4px; }
 .atlas-heading h2 { font-size: 22px; font-weight: 650; letter-spacing: -.025em; }
 .atlas-toolbar { display: flex; flex-wrap: wrap; gap: 14px; }
@@ -570,8 +730,11 @@ function setBloom(event: Event): void {
 .atlas-main { min-width: 0; }
 .atlas-fields { display: flex; flex-wrap: wrap; gap: 6px; margin-block-end: 12px; }
 .atlas-fields button { font-size: 12px; display: flex; align-items: center; gap: 7px; }
+.atlas-fields small { font-size: 11px; color: var(--app-muted-foreground); }
+.field-chip { display: inline-flex; align-items: center; gap: 7px; min-height: 32px; padding: 4px 11px 4px 9px; border: 1px solid var(--app-border); border-radius: 999px; background: var(--app-card); font-size: 12px; }
 .field-dot { display: inline-block; width: 9px; height: 9px; background: var(--field); border-radius: 50%; flex-shrink: 0; }
 .atlas-viewport { border: 1px solid var(--app-border); border-radius: 18px; overflow: hidden; background: var(--app-background); }
+.atlas-width-probe { height: 0; }
 .atlas-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; padding: 20px; max-height: 680px; overflow: auto; }
 .atlas-overview-hint { grid-column: 1 / -1; color: var(--app-muted-foreground); font-size: 13px; }
 .field-card { background: var(--app-card); border: 1px solid var(--app-border); border-block-start: 3px solid var(--field); border-radius: 12px; padding: 14px; min-width: 0; }
@@ -612,6 +775,40 @@ function setBloom(event: Event): void {
 .atlas-grab-cover { position: absolute; inset: 0; cursor: grabbing; }
 .atlas-grab-cover[hidden] { display: none; }
 .map-help { padding: 10px 14px; color: var(--app-muted-foreground); font-size: 12px; border-block-start: 1px solid var(--app-border); }
+/* Simple: the same node elements wear a disc skin on a still canvas. */
+.atlas-map.is-simple { cursor: default; touch-action: auto; user-select: auto; background-size: 22px 22px; }
+/* In both views the edges are hidden at once while nodes travel (their old curves fade out on a copy), then fade back in at their new places. */
+.atlas-map .map-edges { transition: opacity var(--transition-base); }
+.atlas-map.is-switching .map-edges { opacity: 0; transition: none; }
+.atlas-canvas-leaving { pointer-events: none; }
+/* A travelling node resizes about its centre. */
+.map-node-box { transform-box: fill-box; transform-origin: center; }
+.map-edge.map-edge-faded, .map-edge-head.map-edge-faded { opacity: .07; }
+.atlas-map.is-simple .map-node-box { pointer-events: none; overflow: visible; }
+.atlas .atlas-map.is-simple .map-node { pointer-events: auto; box-sizing: border-box; margin: 0 auto; width: auto; max-width: 100%; height: auto; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 6px; padding: 8px 4px 2px; border: 0; border-radius: 10px; background: transparent; box-shadow: none; text-align: center; transition: opacity var(--transition-base); }
+.atlas .atlas-map.is-simple .map-node.is-updated { outline: none; animation: none; }
+.atlas .atlas-map.is-simple .map-node:focus-visible { outline: 3px solid var(--app-ring); outline-offset: 2px; }
+.atlas-map.is-simple .map-node.is-dimmed { opacity: .32; }
+.node-disc { position: relative; box-sizing: border-box; display: grid; place-items: center; flex-shrink: 0; width: var(--disc-size); height: var(--disc-size); border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--app-muted-foreground) 55%, transparent); background: var(--app-card); color: var(--app-muted-foreground); font-size: 15px; font-weight: 650; transition: transform var(--transition-fast), box-shadow var(--transition-fast); }
+.map-node.is-earned .node-disc { background: var(--field); border-color: var(--field); color: var(--app-card); }
+.map-node.is-ready-next .node-disc { border: 2px solid var(--field); color: var(--field); }
+.map-node.is-ready-next .node-disc::after { content: ""; position: absolute; inset: -6px; border-radius: 50%; border: 1.5px dashed color-mix(in srgb, var(--field) 70%, transparent); }
+.map-node:hover .node-disc { transform: scale(1.06); }
+.map-node.is-selected .node-disc { box-shadow: 0 0 0 3px var(--app-background), 0 0 0 5.5px var(--app-primary); }
+.map-node.is-updated .node-disc { outline: 2px solid var(--app-primary); outline-offset: 3px; }
+.atlas:not(.motion-reduced) .map-node.is-updated .node-disc { animation: atlas-evidence var(--duration-reveal) ease-out 1; }
+.node-label { max-width: 100%; padding: 1px 4px; border-radius: 4px; background: color-mix(in srgb, var(--app-background) 88%, transparent); font-size: 12px; font-weight: 550; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.map-node.is-selected .node-label { color: var(--app-primary); font-weight: 650; }
+/* Dense layers: plain Ready names wait for hover or focus (the list and accessible name always carry them). */
+.node-label.is-label-quiet { opacity: 0; }
+.map-node:hover .node-label, .map-node:focus-visible .node-label { opacity: 1; }
+.simple-empty { padding: 14px; color: var(--app-muted-foreground); }
+.simple-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 10px 14px; border-block-start: 1px solid var(--app-border); color: var(--app-muted-foreground); font-size: 12px; }
+.simple-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend-key { display: inline-block; box-sizing: border-box; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--app-muted-foreground); }
+.legend-key.is-earned { background: var(--app-muted-foreground); }
+.legend-key.is-ready-next { border-style: dashed; }
+.simple-legend .legend-field { margin-inline-start: auto; }
 .atlas-list { margin-block-start: 16px; border: 1px solid var(--app-border); border-radius: 12px; background: var(--app-card); }
 .atlas-list summary { cursor: pointer; padding: 14px; font-weight: 600; }
 .atlas-list summary span { display: inline-block; margin-inline-start: 10px; font-size: 12px; font-weight: 400; color: var(--app-muted-foreground); }
@@ -657,7 +854,12 @@ function setBloom(event: Event): void {
   .atlas-main, .atlas-inspector { width: 100%; }
   .atlas-heading { align-items: start; }
   .atlas-heading h2 { font-size: 18px; }
-  .atlas-heading > button { font-size: 12px; }
+  .atlas-heading { flex-direction: column; align-items: stretch; }
+  .atlas-heading-actions { justify-content: stretch; }
+  .atlas-heading-actions > button { font-size: 12px; }
+  /* Full width, with thumb-sized halves. */
+  .atlas-view-switch { width: 100%; }
+  .atlas .atlas-view-switch button { flex: 1; }
   .atlas-toolbar > label { width: 100%; }
   .atlas-fields { flex-wrap: nowrap; overflow-x: auto; padding-block-end: 4px; }
   .atlas-fields button { flex-shrink: 0; max-width: 230px; }

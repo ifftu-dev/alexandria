@@ -79,27 +79,19 @@ impl SettingsStore {
     /// only protection against a stale frontend smuggling arbitrary
     /// rows into `app_settings`.
     pub fn set_raw(conn: &Connection, key: &str, value: &str) -> Result<(), SettingsError> {
-        let (scope, kind) =
-            registry::lookup_meta(key).ok_or_else(|| SettingsError::UnknownKey(key.to_string()))?;
+        let meta =
+            registry::lookup(key).ok_or_else(|| SettingsError::UnknownKey(key.to_string()))?;
 
         // Best-effort type validation so the frontend learns of bad
-        // values now rather than after the next get(). The actual
-        // parse round-trips through SettingValue impls.
-        let ok = match kind {
-            "bool" => bool::from_setting_string(value).is_some(),
-            "int" => i64::from_setting_string(value).is_some(),
-            "float" => f64::from_setting_string(value).is_some(),
-            "string" => true,
-            "json" => super::registry::JsonSetting::from_setting_string(value).is_some(),
-            _ => true,
-        };
-        if !ok {
+        // values now rather than after the next get().
+        if !accepts(meta, value) {
             return Err(SettingsError::InvalidValue {
                 key: key.to_string(),
-                kind,
+                kind: meta.kind,
                 value: value.to_string(),
             });
         }
+        let scope = meta.scope;
 
         conn.execute(
             "INSERT INTO app_settings (key, value, scope, updated_at)
@@ -154,18 +146,24 @@ impl SettingsStore {
     }
 
     /// Apply an incoming syncable row using last-write-wins on
-    /// `updated_at`. Used by the sync receiver.
+    /// `updated_at`. Used by the sync receiver. Rows a local write
+    /// would refuse (a wrong type, or a value outside the key's closed
+    /// set) are ignored, so the local value stands.
     pub fn apply_sync_row(
         conn: &Connection,
         key: &str,
         value: &str,
         remote_updated_at: &str,
     ) -> Result<bool, SettingsError> {
-        let (scope, _) = match registry::lookup_meta(key) {
+        let meta = match registry::lookup(key) {
             Some(m) => m,
             None => return Ok(false), // forward-compat: ignore unknown keys
         };
-        if scope != Scope::Sync {
+        if meta.scope != Scope::Sync {
+            return Ok(false);
+        }
+        if !accepts(meta, value) {
+            log::warn!("settings: ignoring synced {key} with invalid value `{value}`");
             return Ok(false);
         }
 
@@ -193,6 +191,22 @@ impl SettingsStore {
             params![key, value, remote_updated_at],
         )?;
         Ok(true)
+    }
+}
+
+/// Whether `value` is valid for the key: it parses as the key's
+/// kind, and a key with a closed value set holds it. The actual parse
+/// round-trips through SettingValue impls.
+fn accepts(meta: registry::KeyMeta, value: &str) -> bool {
+    match meta.kind {
+        "bool" => bool::from_setting_string(value).is_some(),
+        "int" => i64::from_setting_string(value).is_some(),
+        "float" => f64::from_setting_string(value).is_some(),
+        "string" => meta
+            .allowed_values
+            .is_none_or(|allowed| allowed.contains(&value)),
+        "json" => registry::JsonSetting::from_setting_string(value).is_some(),
+        _ => true,
     }
 }
 
@@ -254,6 +268,23 @@ mod tests {
         let err =
             SettingsStore::set_raw(db.conn(), "sentinel.ai_scoring_enabled", "maybe").unwrap_err();
         assert!(matches!(err, SettingsError::InvalidValue { .. }));
+    }
+
+    #[test]
+    fn set_raw_holds_skill_graph_view_to_simple_or_detailed() {
+        let db = db();
+        let err = SettingsStore::set_raw(db.conn(), "ui.skill_graph_view", "fancy").unwrap_err();
+        assert!(matches!(err, SettingsError::InvalidValue { .. }));
+        assert_eq!(
+            SettingsStore::get(db.conn(), keys::UI_SKILL_GRAPH_VIEW),
+            "simple"
+        );
+
+        SettingsStore::set_raw(db.conn(), "ui.skill_graph_view", "detailed").unwrap();
+        assert_eq!(
+            SettingsStore::get(db.conn(), keys::UI_SKILL_GRAPH_VIEW),
+            "detailed"
+        );
     }
 
     #[test]
@@ -325,6 +356,39 @@ mod tests {
         )
         .unwrap();
         assert!(!applied);
+    }
+
+    /// A paired device cannot push a value outside a key's closed set:
+    /// the row is refused and the local value stands.
+    #[test]
+    fn apply_sync_row_refuses_a_value_outside_the_closed_set() {
+        let db = db();
+        SettingsStore::set_raw(db.conn(), "ui.skill_graph_view", "detailed").unwrap();
+        let applied = SettingsStore::apply_sync_row(
+            db.conn(),
+            "ui.skill_graph_view",
+            "fancy",
+            "2999-01-01T00:00:00",
+        )
+        .unwrap();
+        assert!(!applied);
+        assert_eq!(
+            SettingsStore::get(db.conn(), keys::UI_SKILL_GRAPH_VIEW),
+            "detailed"
+        );
+
+        let applied = SettingsStore::apply_sync_row(
+            db.conn(),
+            "ui.skill_graph_view",
+            "simple",
+            "2999-01-01T00:00:00",
+        )
+        .unwrap();
+        assert!(applied);
+        assert_eq!(
+            SettingsStore::get(db.conn(), keys::UI_SKILL_GRAPH_VIEW),
+            "simple"
+        );
     }
 
     #[test]

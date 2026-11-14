@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import SkillAtlasExplorer from '@/components/skills/SkillAtlasExplorer.vue'
 import { buildSkillAtlas } from '@/utils/skillAtlas'
 import type { AtlasFeedback, AtlasViewState } from '@/composables/useSkillAtlas'
+import { isSkillGraphView, type SkillGraphView } from '@/composables/useSkillGraphView'
 import type { SkillGraphEdge, SkillInfo, VerifiableCredential } from '@/types'
 import taxonomy from '../../bootstrap/public_taxonomy.json'
 
@@ -47,6 +48,9 @@ const model = computed(() => buildSkillAtlas({ skills, edges, subjectDid: 'did:f
 const view = ref<AtlasViewState>({ selectedSkillId: null, focusedFieldId: null, unassignedFocused: false,
   query: '', bloomEmphasis: null, neighborhood: 'none', neighborhoodDepth: 1, camera: null, inspectorCollapsed: false })
 const feedback = ref<AtlasFeedback | null>(null)
+// `view` opens the explorer in either view; like a profile that never chose, it defaults to Simple.
+const requestedView = params.get('view')
+const viewMode = ref<SkillGraphView>(isSkillGraphView(requestedView) ? requestedView : 'simple')
 const instance = ref(0)
 const lastAction = ref('')
 function improve(): void {
@@ -63,7 +67,7 @@ function improve(): void {
       <button type="button" @click="improve">Simulate evidence update</button>
       <output>{{ lastAction }}</output>
     </div>
-    <SkillAtlasExplorer :key="instance" :model="model" :view="view" :feedback="feedback" :reduced-motion="params.get('motion') === 'reduced'"
+    <SkillAtlasExplorer :key="instance" v-model:view-mode="viewMode" :model="model" :view="view" :feedback="feedback" :reduced-motion="params.get('motion') === 'reduced'"
       @update:view="view = $event" @open-skill="lastAction = `open-skill: ${$event}`" @learn-skill="lastAction = `learn-skill: ${$event}`"
       @feedback-consumed="feedback?.revision === $event && (feedback = null)" />
   </main>

@@ -197,6 +197,16 @@
     "nameReadyNextNoLevel": "{name}，尚未获得，下一步就绪",
     "focusShowingPrerequisites": "正在显示 {skill} 的先修技能 · {depth}",
     "focusShowingDependents": "正在显示 {skill} 的后续技能 · {depth}",
-    "clearFocus": "取消聚焦"
+    "clearFocus": "取消聚焦",
+    "viewGroup": "Graph view",
+    "viewSimple": "Simple",
+    "viewDetailed": "Detailed",
+    "viewChangedSimple": "Showing the Simple view",
+    "viewChangedDetailed": "Showing the Detailed view",
+    "fieldEarned": "{earned}/{total} earned",
+    "legendEarned": "Filled: earned, the number is your Bloom level",
+    "legendReadyNext": "Ringed: Ready next",
+    "legendReady": "Hollow: Ready",
+    "legendField": "Color means field"
   }
 }

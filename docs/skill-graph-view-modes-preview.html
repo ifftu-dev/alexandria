@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skill graph modes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* App tokens (alexandria/src/assets/css/main.css) */
+:root{
+  --app-background:rgb(247,246,243);--app-foreground:rgb(23,25,35);--app-muted:rgb(233,231,226);--app-muted-foreground:rgb(75,85,99);
+  --app-card:rgb(255,255,255);--app-border:rgb(209,211,216);--app-ring:rgb(99,102,241);--app-primary:rgb(79,70,229);--app-primary-foreground:#fff;
+  --atlas-field-0:#5561be;--atlas-field-1:#ad5b23;--atlas-field-2:#26776d;
+  --font-sans:'Inter',system-ui,sans-serif;--radius:.5rem;--ease:cubic-bezier(.2,.7,.2,1);--morph:460ms;
+  --edge:rgb(23,25,35);
+}
+.dark{
+  --app-background:rgb(17,24,39);--app-foreground:rgb(249,250,251);--app-muted:rgb(31,41,55);--app-muted-foreground:rgb(156,163,175);
+  --app-card:rgb(31,41,55);--app-border:rgb(55,65,81);--app-ring:rgb(129,140,248);--app-primary:rgb(129,140,248);--app-primary-foreground:rgb(17,24,39);
+  --atlas-field-0:#a7b0ff;--atlas-field-1:#edac78;--atlas-field-2:#7dc7b7;--edge:rgb(249,250,251);
+}
+@media (prefers-reduced-motion:reduce){:root{--morph:0ms}}
+*{box-sizing:border-box}
+html{background:var(--app-background)}
+body{margin:0;padding:20px 16px 40px;font:14px/1.5 var(--font-sans);color:var(--app-foreground);background:var(--app-background);-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;touch-action:manipulation}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--app-ring);outline-offset:3px}
+[hidden]{display:none!important}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+/* mock chrome */
+.chrome{display:flex;gap:10px;align-items:center;flex-wrap:wrap;max-width:1120px;margin:0 auto 14px;font-size:12px;color:var(--app-muted-foreground)}
+.chrome strong{color:var(--app-foreground);font-weight:600}
+.chrome .spacer{flex:1}
+.chip{border:1px solid var(--app-border);background:var(--app-card);border-radius:999px;padding:5px 11px;font-size:12px}
+.chip[aria-pressed=true]{border-color:var(--app-primary);box-shadow:inset 0 0 0 1px var(--app-primary)}
+
+/* product frame */
+.product{max-width:1120px;margin:0 auto;border:1px solid var(--app-border);border-radius:14px;background:var(--app-background);padding:16px 18px 14px}
+.brandbar{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--app-muted-foreground);padding-bottom:14px;border-bottom:1px solid var(--app-border)}
+.brandmark{color:var(--app-foreground);font-weight:650;font-size:15px;letter-spacing:-.3px}
+.sample{margin-left:auto;font-size:11px;border:1px solid var(--app-border);border-radius:4px;padding:2px 6px}
+.heading{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin:20px 0 14px;flex-wrap:wrap}
+h1{font-size:24px;line-height:1.15;letter-spacing:-.6px;font-weight:650;margin:0}
+.subtitle{margin:6px 0 0;color:var(--app-muted-foreground);font-size:12.5px}
+.subtitle b{font-weight:600;color:var(--app-foreground)}
+
+/* mode switch */
+.mode-switch{display:flex;gap:3px;padding:3px;border:1px solid var(--app-border);border-radius:10px;background:var(--app-card)}
+.mode-switch button{border:0;background:none;border-radius:7px;padding:8px 13px;font-size:12.5px;font-weight:500;display:flex;gap:8px;align-items:center;color:var(--app-muted-foreground);transition:background .2s,color .2s}
+.mode-switch button svg{width:16px;height:16px;flex-shrink:0}
+.mode-switch button[aria-pressed=true]{background:var(--app-primary);color:var(--app-primary-foreground)}
+.mode-switch button:not([aria-pressed=true]):hover{background:var(--app-muted);color:var(--app-foreground)}
+
+/* field strip + detailed tools */
+.strip{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 12px;min-height:34px}
+.field-chip{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--app-border);background:var(--app-card);border-radius:999px;padding:5px 11px 5px 8px;font-size:12px}
+.field-chip .dot{width:9px;height:9px;border-radius:50%;background:var(--field)}
+.field-chip small{color:var(--app-muted-foreground)}
+.tools{display:flex;gap:8px;align-items:center;margin-left:auto}
+.tools label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--app-muted-foreground)}
+.tools input,.tools select{border:1px solid var(--app-border);border-radius:7px;background:var(--app-card);padding:6px 9px;font-size:12.5px;min-height:32px}
+.tools input{width:170px}
+
+/* workspace */
+.workspace{display:grid;grid-template-columns:minmax(0,1fr);border:1px solid var(--app-border);border-radius:12px;overflow:hidden;background:var(--app-card)}
+@media(min-width:920px){.workspace{grid-template-columns:minmax(0,1fr) 272px}.canvas{grid-column:1;grid-row:1}.legend{grid-column:1;grid-row:2}.inspector{grid-column:2;grid-row:1/3;border-top:0!important;border-left:1px solid var(--app-border)}}
+.canvas{position:relative;background:var(--app-background);isolation:isolate;overflow:hidden;transition:height var(--morph) var(--ease)}
+.canvas[data-mode=simple]{background-image:radial-gradient(color-mix(in srgb,var(--app-border) 70%,transparent) .8px,transparent .8px);background-size:22px 22px}
+.canvas svg.edges{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible;transition:opacity 160ms}
+.canvas.is-morphing svg.edges{opacity:0}
+.edges path{fill:none;stroke:var(--edge);stroke-width:1.3;opacity:.16;transition:opacity .2s,stroke-width .2s}
+.edges path.active{stroke:var(--app-primary);stroke-width:2.2;opacity:1}
+.canvas[data-mode=simple] .edges path.faded{opacity:.05}
+.regions{position:absolute;inset:0;pointer-events:none;z-index:0}
+.region{position:absolute;border-radius:18px;background:color-mix(in srgb,var(--field) 6%,var(--app-background));border:1px solid color-mix(in srgb,var(--field) 26%,var(--app-border));opacity:0;transition:opacity var(--morph) var(--ease),left var(--morph) var(--ease),top var(--morph) var(--ease),width var(--morph) var(--ease),height var(--morph) var(--ease)}
+.canvas[data-mode=detailed] .region{opacity:1}
+.region-head{position:absolute;left:16px;right:16px;top:12px}
+.region-head strong{display:block;font-size:12.5px;font-weight:650;letter-spacing:.01em}
+.region-head span{display:block;font-size:11px;color:var(--app-muted-foreground);margin-top:1px}
+.region-bar{height:3px;border-radius:2px;background:color-mix(in srgb,var(--field) 20%,var(--app-border));margin-top:7px;overflow:hidden}
+.region-bar i{display:block;height:100%;background:var(--field);border-radius:2px}
+
+/* nodes: one element, two skins */
+.node{position:absolute;z-index:2;border:0;background:none;padding:0;color:var(--app-foreground);text-align:center;display:flex;flex-direction:column;align-items:center;gap:7px;
+  transition:left var(--morph) var(--ease),top var(--morph) var(--ease),width var(--morph) var(--ease),height var(--morph) var(--ease),opacity .25s}
+.node.dim{opacity:.32}
+.orb{width:46px;height:46px;border-radius:50%;position:relative;display:grid;place-items:center;font-size:14px;font-weight:650;flex-shrink:0;
+  background:var(--app-card);border:1.5px solid color-mix(in srgb,var(--app-muted-foreground) 55%,transparent);color:var(--app-muted-foreground);transition:transform .2s var(--ease),box-shadow .2s}
+.earned .orb{background:var(--field);border-color:var(--field);color:#fff;box-shadow:0 6px 16px -6px color-mix(in srgb,var(--field) 60%,transparent)}
+.dark .earned .orb{color:rgb(17,24,39)}
+.ready-next .orb{border:2px solid var(--field);color:var(--field)}
+.ready-next .orb::after{content:"";position:absolute;inset:-6px;border-radius:50%;border:1.5px dashed color-mix(in srgb,var(--field) 70%,transparent)}
+.node:hover .orb{transform:scale(1.06)}
+.node[aria-pressed=true] .orb{box-shadow:0 0 0 3px var(--app-background),0 0 0 5.5px var(--app-primary)}
+.label{font-size:11.5px;line-height:1.3;font-weight:550;max-width:130px;padding:1px 4px;border-radius:4px;background:color-mix(in srgb,var(--app-background) 88%,transparent)}
+.node[aria-pressed=true] .label{font-weight:650;color:var(--app-primary)}
+.card{display:none;width:100%;height:100%;text-align:left;padding:10px 12px 9px;border:1px solid var(--app-border);border-left:3px solid var(--field);border-radius:10px;background:var(--app-card);flex-direction:column;justify-content:space-between;transition:box-shadow .2s,border-color .2s}
+.card .name{font-size:12.5px;font-weight:600;line-height:1.3}
+.card .evidence{font-size:11.5px;color:var(--field);font-weight:550;display:flex;gap:5px;align-items:center}
+.card .evidence .ico{font-size:12px}
+.ready:not(.ready-next) .card .evidence{color:var(--app-muted-foreground);font-weight:500}
+.card .outcome{font-size:10.5px;color:var(--app-muted-foreground);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node:hover .card{box-shadow:0 4px 14px -6px rgb(0 0 0/.3)}
+.node[aria-pressed=true] .card{border-color:var(--app-primary);box-shadow:inset 0 0 0 1px var(--app-primary),0 6px 20px -8px color-mix(in srgb,var(--app-primary) 50%,transparent)}
+.canvas[data-mode=detailed] .node{gap:0}
+.canvas[data-mode=detailed] .orb,.canvas[data-mode=detailed] .label{display:none}
+.canvas[data-mode=detailed] .card{display:flex}
+.canvas[data-mode=detailed] .node.search-miss{opacity:.25}
+
+.map-tools{position:absolute;right:12px;bottom:12px;z-index:3;display:flex;gap:2px;padding:3px;border:1px solid var(--app-border);border-radius:8px;background:var(--app-card);font-size:12px;align-items:center}
+.map-tools button{border:0;background:none;width:28px;height:26px;border-radius:5px;color:var(--app-muted-foreground)}
+.map-tools button:hover{background:var(--app-muted);color:var(--app-foreground)}
+.map-tools span{padding:0 6px;color:var(--app-muted-foreground);font-variant-numeric:tabular-nums}
+.hint{position:absolute;left:14px;bottom:12px;font-size:11px;color:var(--app-muted-foreground);pointer-events:none;z-index:3}
+
+.legend{padding:9px 14px;display:flex;gap:16px;flex-wrap:wrap;border-top:1px solid var(--app-border);font-size:11px;color:var(--app-muted-foreground);background:var(--app-card);align-items:center}
+.legend span{display:flex;gap:6px;align-items:center}
+.k{width:12px;height:12px;border-radius:50%;border:1.5px solid var(--app-muted-foreground);display:inline-block}
+.k.filled{background:var(--app-muted-foreground);border-color:var(--app-muted-foreground)}
+.k.next{border:1.5px dashed var(--app-muted-foreground)}
+.legend .push{margin-left:auto}
+
+/* inspector */
+.inspector{border-top:1px solid var(--app-border);padding:18px 18px 16px;background:var(--app-card);display:flex;flex-direction:column;gap:14px}
+.eyebrow{display:flex;align-items:center;gap:7px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--app-muted-foreground);margin:0}
+.eyebrow .dot{width:8px;height:8px;border-radius:50%;background:var(--field)}
+h2{font-size:18px;font-weight:650;letter-spacing:-.3px;line-height:1.25;margin:4px 0 0}
+.status{font-size:12.5px;margin-top:5px;font-weight:550;color:var(--field)}
+.status.muted{color:var(--app-muted-foreground);font-weight:500}
+.desc{font-size:12.5px;color:var(--app-muted-foreground);margin:0}
+dl{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:0;font-size:12px}
+dt{color:var(--app-muted-foreground);font-size:10.5px;letter-spacing:.03em;text-transform:uppercase}
+dd{margin:2px 0 0;font-weight:550}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.actions button{border:1px solid var(--app-border);border-radius:8px;padding:8px 12px;background:var(--app-card);font-size:12.5px;font-weight:500;min-height:36px}
+.actions .primary{background:var(--app-primary);color:var(--app-primary-foreground);border-color:var(--app-primary)}
+.rel h3{font-size:10.5px;letter-spacing:.03em;text-transform:uppercase;color:var(--app-muted-foreground);margin:0 0 6px;font-weight:600}
+.rel h3 b{font-weight:600;color:var(--app-foreground);margin-left:4px}
+.rel ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px}
+.rel button{width:100%;text-align:left;border:1px solid var(--app-border);border-radius:8px;padding:7px 10px;background:var(--app-background);display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:12px}
+.rel button:hover{background:var(--app-muted)}
+.rel button small{color:var(--field);font-weight:550;white-space:nowrap}
+.rel .none{font-size:12px;color:var(--app-muted-foreground);margin:0}
+.foot{display:flex;justify-content:space-between;gap:12px;padding-top:12px;font-size:11px;color:var(--app-muted-foreground);flex-wrap:wrap}
+
+@media(max-width:640px){
+  .product{padding:12px}
+  h1{font-size:22px}
+  .mode-switch{width:100%}.mode-switch button{flex:1;justify-content:center;min-height:40px}
+  .tools{margin-left:0;width:100%}.tools input{flex:1;width:auto}
+  .label{max-width:96px;font-size:10.5px}
+  .foot{flex-direction:column;gap:3px}
+  .hint{max-width:52%}
+  dl{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="chrome">
+  <strong>Skill graph · mode mock v2</strong><span>Same 13 sample skills, two lenses. Selection and field colours carry across.</span>
+  <span class="spacer"></span>
+  <button class="chip" id="theme" type="button" aria-pressed="false">Dark</button>
+</div>
+
+<section class="product" aria-label="Alexandria skill graph mock">
+  <div class="brandbar"><span class="brandmark">alexandria</span><span>/</span><span>My learning</span><span>/</span><span>Skills</span><span class="sample">Sample profile</span></div>
+  <header class="heading">
+    <div><h1>Your skill graph</h1><p class="subtitle"><b>8</b> earned · <b>4</b> ready next · <b>1</b> ready · 3 fields</p></div>
+    <div class="mode-switch" role="group" aria-label="Graph view">
+      <button type="button" data-mode="simple" aria-pressed="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="3.5" cy="8" r="2.2"/><circle cx="12.5" cy="3.5" r="2.2"/><circle cx="12.5" cy="12.5" r="2.2"/><path d="M5.5 7l5-2.5M5.5 9l5 2.5"/></svg>Simple</button>
+      <button type="button" data-mode="detailed" aria-pressed="false"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1.5" y="2" width="6" height="5" rx="1.2"/><rect x="8.5" y="2" width="6" height="5" rx="1.2"/><rect x="1.5" y="9" width="6" height="5" rx="1.2"/><rect x="8.5" y="9" width="6" height="5" rx="1.2"/></svg>Detailed</button>
+    </div>
+  </header>
+
+  <div class="strip" id="strip">
+    <span class="field-chip" style="--field:var(--atlas-field-0)"><i class="dot"></i>Mathematics <small>5/6</small></span>
+    <span class="field-chip" style="--field:var(--atlas-field-1)"><i class="dot"></i>Data Science <small>2/5</small></span>
+    <span class="field-chip" style="--field:var(--atlas-field-2)"><i class="dot"></i>Computer Science <small>1/2</small></span>
+    <div class="tools" id="tools" hidden>
+      <label><span class="sr">Search skills</span><input id="q" type="search" placeholder="Search skills…"></label>
+      <label><select aria-label="Highlight Bloom level"><option>All Bloom levels</option><option>1 Remember</option><option>2 Understand</option><option>3 Apply</option><option>4 Analyze</option><option>5 Evaluate</option><option>6 Create</option></select></label>
+    </div>
+  </div>
+
+  <div class="workspace">
+    <div class="canvas" data-mode="simple" aria-label="Skills and prerequisite connections">
+      <div class="regions"></div>
+      <svg class="edges" aria-hidden="true"><defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="4.5" markerHeight="4.5" orient="auto-start-reverse"><path d="M0 0L10 5 0 10Z" fill="context-stroke"/></marker></defs><g></g></svg>
+      <div class="nodes"></div>
+      <span class="hint" id="hint">Tap a skill to trace what it builds on and unlocks</span>
+      <div class="map-tools" id="maptools" hidden aria-label="Map tools"><button type="button" aria-label="Zoom out">−</button><span>100%</span><button type="button" aria-label="Zoom in">+</button></div>
+    </div>
+    <div class="legend" id="legend"></div>
+    <aside class="inspector" aria-label="Selected skill" id="inspector"></aside>
+  </div>
+  <div class="foot"><span id="ctx" aria-live="polite"></span><span id="remember"></span></div>
+</section>
+
+<script>
+(()=>{
+const FIELDS={math:{name:'Mathematics',slot:0},data:{name:'Data Science',slot:1},cs:{name:'Computer Science',slot:2}};
+const BLOOM=['Remember','Understand','Apply','Analyze','Evaluate','Create'];
+const S=[
+ ['vectors','Vectors & Spaces','math',2,2,'Vector arithmetic, span and basis.'],
+ ['matrices','Matrix Operations','math',3,2,'Multiplication, inverses and decompositions.'],
+ ['probability','Probability Fundamentals','math',2,2,'Sample spaces, events and conditional probability.'],
+ ['distributions','Probability Distributions','math',2,2,'Common discrete and continuous distributions.'],
+ ['inference','Statistical Inference','math',null,3,'Estimation, confidence intervals and tests.'],
+ ['regression','Regression Analysis','math',2,2,'Fitting and interpreting linear models.'],
+ ['sql','SQL','data',2,2,'Querying and shaping relational data.'],
+ ['etl','ETL Pipelines','data',null,2,'Extract, transform and load workflows.'],
+ ['supervised','Supervised Learning','data',2,2,'Training predictors from labelled data.'],
+ ['unsupervised','Unsupervised Learning','data',null,2,'Clustering and dimensionality reduction.'],
+ ['evaluation','Model Evaluation','data',null,4,'Metrics, validation and error analysis.'],
+ ['python','Python','cs',3,2,'Core language, data structures and tooling.'],
+ ['functional','Functional Programming','cs',null,1,'Pure functions, immutability and composition.'],
+].map(([id,name,field,earned,outcome,desc])=>({id,name,field,earned,outcome,desc}));
+const E=[['vectors','matrices'],['probability','distributions'],['distributions','inference'],['distributions','regression'],['matrices','supervised'],['regression','supervised'],['matrices','unsupervised'],['probability','unsupervised'],['inference','evaluation'],['supervised','evaluation'],['sql','etl'],['python','functional']];
+const byId=new Map(S.map(s=>[s.id,s]));
+const prereqs=id=>E.filter(e=>e[1]===id).map(e=>e[0]);
+const leads=id=>E.filter(e=>e[0]===id).map(e=>e[1]);
+for(const s of S){s.readyNext=!s.earned&&prereqs(s.id).length>0&&prereqs(s.id).every(p=>byId.get(p).earned);}
+const layerOf=new Map();const layer=id=>{if(layerOf.has(id))return layerOf.get(id);const l=prereqs(id).length?Math.max(...prereqs(id).map(layer))+1:0;layerOf.set(id,l);return l;};S.forEach(s=>layer(s.id));
+
+const canvas=document.querySelector('.canvas'),nodesEl=document.querySelector('.nodes'),regionsEl=document.querySelector('.regions'),edgesG=document.querySelector('.edges g');
+let mode='simple',selected='supervised',query='';
+try{const m=localStorage.getItem('skill-graph-mode');if(m==='detailed'||m==='simple')mode=m;}catch{}
+
+const fieldVar=f=>`var(--atlas-field-${FIELDS[f].slot})`;
+const stateText=s=>s.earned?`✓ ${s.earned} ${BLOOM[s.earned-1]}`:s.readyNext?'◎ Ready next':'○ Ready';
+const stateWord=s=>s.earned?`Earned · ${s.earned} ${BLOOM[s.earned-1]}`:s.readyNext?'Ready next · every prerequisite earned':'Ready';
+
+for(const s of S){
+  const b=document.createElement('button');b.type='button';b.dataset.skill=s.id;
+  b.className='node '+(s.earned?'earned':'ready'+(s.readyNext?' ready-next':''));
+  b.style.setProperty('--field',fieldVar(s.field));
+  b.setAttribute('aria-label',`${s.name}, ${FIELDS[s.field].name}, ${stateWord(s)}`);
+  b.innerHTML=`<span class="orb" aria-hidden="true">${s.earned??''}</span><span class="label" aria-hidden="true">${s.name}</span>
+  <span class="card" aria-hidden="true"><span class="name">${s.name}</span><span><span class="evidence"><span class="ico">${s.earned?'✓':s.readyNext?'◎':'○'}</span>${s.earned?`${s.earned} ${BLOOM[s.earned-1]}`:s.readyNext?'Ready next':'Ready'}</span><span class="outcome">${s.earned?'':`Outcome · ${s.outcome} ${BLOOM[s.outcome-1]}`}</span></span></span>`;
+  b.onclick=()=>{selected=s.id;render();};
+  nodesEl.append(b);
+}
+
+function simpleLayout(w,narrow){
+  const cols=new Map();for(const s of S){const l=layerOf.get(s.id);if(!cols.has(l))cols.set(l,[]);cols.get(l).push(s);}
+  const n=cols.size;const pos=new Map();
+  for(const [l,list] of cols){
+    list.sort((a,b)=>FIELDS[a.field].slot-FIELDS[b.field].slot||a.name.localeCompare(b.name));
+    list.forEach((s,i)=>{
+      if(narrow){const pitch=w/list.length,stag=list.length>3?(i%2)*34:0;pos.set(s.id,{x:Math.min(w-56,Math.max(56,pitch*(i+.5))),y:70+l*156+stag,w:104,h:76});}
+      else{const H=540,pitch=H/list.length;pos.set(s.id,{x:(w/(n))*(l+.5),y:pitch*(i+.5)-2,w:130,h:76});}
+    });
+  }
+  return {pos,height:narrow?70+(n-1)*156+34+100:584,regions:[]};
+}
+function detailedLayout(w,narrow){
+  const GX=20,GY=18,INSET=18,HEAD=62,colsPer=2,CH=92;const CW=narrow?Math.min(176,(w-32-INSET*2-GX)/2):Math.min(184,(w-22-INSET*4-GX*2-32)/4);
+  const groups={math:[],data:[],cs:[]};for(const s of S)groups[s.field].push(s);
+  const regionH=list=>HEAD+Math.ceil(list.length/colsPer)*(CH+GY)-GY+INSET;
+  const regionW=INSET*2+colsPer*CW+GX;
+  const pos=new Map(),regions=[];
+  const place=(f,x,y)=>{const list=groups[f];regions.push({f,x,y,w:regionW,h:regionH(list)});list.forEach((s,i)=>pos.set(s.id,{x:x+INSET+(i%colsPer)*(CW+GX)+CW/2,y:y+HEAD+Math.floor(i/colsPer)*(CH+GY)+CH/2,w:CW,h:CH}));};
+  let height;
+  if(narrow){let y=16;for(const f of ['math','data','cs']){place(f,(w-regionW)/2,y);y+=regionH(groups[f])+16;}height=y+40;}
+  else{const gap=22,left=Math.max(16,(w-(regionW*2+gap))/2);place('math',left,16);place('data',left+regionW+gap,16);const y2=16+Math.max(regionH(groups.math),regionH(groups.data))+16;place('cs',left,y2);height=y2+regionH(groups.cs)+44;}
+  return {pos,height,regions};
+}
+function draw(){
+  const w=canvas.clientWidth,narrow=w<640;
+  const L=mode==='simple'?simpleLayout(w,narrow):detailedLayout(w,narrow);
+  canvas.style.height=L.height+'px';
+  const near=new Set([selected,...prereqs(selected),...leads(selected)]);
+  for(const b of nodesEl.children){const p=L.pos.get(b.dataset.skill);b.style.left=(p.x-p.w/2)+'px';b.style.top=(p.y-(mode==='simple'?23:p.h/2))+'px';b.style.width=p.w+'px';b.style.height=p.h+'px';
+    b.setAttribute('aria-pressed',String(b.dataset.skill===selected));
+    b.classList.toggle('dim',mode==='simple'&&!near.has(b.dataset.skill));
+    b.classList.toggle('search-miss',!!query&&!byId.get(b.dataset.skill).name.toLowerCase().includes(query));}
+  regionsEl.replaceChildren();
+  for(const r of L.regions){const list=S.filter(s=>s.field===r.f),earned=list.filter(s=>s.earned).length;const d=document.createElement('div');d.className='region';d.style.cssText=`--field:${fieldVar(r.f)};left:${r.x}px;top:${r.y}px;width:${r.w}px;height:${r.h}px`;d.innerHTML=`<div class="region-head"><strong>${FIELDS[r.f].name}</strong><span>${earned} of ${list.length} earned</span><div class="region-bar"><i style="width:${earned/list.length*100}%"></i></div></div>`;regionsEl.append(d);}
+  edgesG.replaceChildren();
+  for(const [a,b] of E){const p=L.pos.get(a),q=L.pos.get(b);let x1,y1,x2,y2,d;
+    if(mode==='simple'){const r=24;const dx=q.x-p.x,dy=q.y-p.y,len=Math.hypot(dx,dy);x1=p.x+dx/len*r;y1=p.y+dy/len*r;x2=q.x-dx/len*(r+2);y2=q.y-dy/len*(r+2);
+      d=narrow?`M${x1},${y1} C${x1},${y1+dy*.5} ${x2},${y2-dy*.5} ${x2},${y2}`:`M${x1},${y1} C${x1+dx*.5},${y1} ${x2-dx*.5},${y2} ${x2},${y2}`;}
+    else{const dx=q.x-p.x,dy=q.y-p.y;const horiz=Math.abs(dx)>p.w*.75;
+      if(horiz){const s=Math.sign(dx);x1=p.x+s*p.w/2;y1=p.y;x2=q.x-s*(q.w/2+2);y2=q.y;d=`M${x1},${y1} C${x1+dx*.4},${y1} ${x2-dx*.4},${y2} ${x2},${y2}`;}
+      else{const s=Math.sign(dy)||1;x1=p.x;y1=p.y+s*p.h/2;x2=q.x;y2=q.y-s*(q.h/2+2);d=`M${x1},${y1} C${x1},${y1+dy*.45} ${x2},${y2-dy*.45} ${x2},${y2}`;}}
+    const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',d);path.setAttribute('marker-end','url(#arrow)');
+    if(a===selected||b===selected)path.classList.add('active');else if(mode==='simple')path.classList.add('faded');edgesG.append(path);}
+}
+function relList(title,ids){return `<div class="rel"><h3>${title}<b>${ids.length}</b></h3>${ids.length?`<ul>${ids.map(id=>{const s=byId.get(id);return `<li><button type="button" data-go="${id}" style="--field:${fieldVar(s.field)}"><span>${s.name}</span><small>${stateText(s)}</small></button></li>`;}).join('')}</ul>`:`<p class="none">None</p>`}</div>`;}
+function render(){
+  canvas.dataset.mode=mode;
+  document.querySelectorAll('.mode-switch button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.mode===mode)));
+  document.getElementById('tools').hidden=mode!=='detailed';
+  document.getElementById('maptools').hidden=mode!=='detailed';
+  document.getElementById('hint').textContent=mode==='simple'?'Tap a skill to trace what it builds on and unlocks':'Drag to pan · scroll to zoom · search above';
+  document.getElementById('legend').innerHTML=mode==='simple'
+    ?`<span><i class="k filled"></i>Earned · number = Bloom level</span><span><i class="k next"></i>Ready next</span><span><i class="k"></i>Ready</span><span class="push">Colour = field</span>`
+    :`<span>✓ Earned Bloom level</span><span>◎ Ready next</span><span>○ Ready</span><span>→ prerequisite</span><span class="push">Bar = field progress</span>`;
+  const s=byId.get(selected);
+  document.getElementById('inspector').innerHTML=`<div style="--field:${fieldVar(s.field)}"><p class="eyebrow"><i class="dot"></i>${FIELDS[s.field].name}</p><h2>${s.name}</h2><p class="status ${s.earned||s.readyNext?'':'muted'}">${stateText(s)}${s.readyNext?' · all prerequisites earned':''}</p></div>
+    <p class="desc">${s.desc}</p>
+    <dl>${s.earned?`<div><dt>Current level</dt><dd>${s.earned} ${BLOOM[s.earned-1]}</dd></div>`:''}<div><dt>Learning outcome</dt><dd>${s.outcome} ${BLOOM[s.outcome-1]}</dd></div></dl>
+    <div class="actions"><button type="button" class="primary">Open skill ↗</button><button type="button">${s.earned?'Go deeper':'Start learning'}</button></div>
+    ${relList('Builds on',prereqs(s.id))}${relList('Unlocks',leads(s.id))}`;
+  document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{selected=b.dataset.go;render();});
+  document.getElementById('ctx').textContent=`${mode==='simple'?'Simple':'Detailed'} view · ${s.name} selected`;
+  document.getElementById('remember').textContent=`Last view remembered per profile · default is Simple`;
+  draw();
+}
+document.querySelectorAll('.mode-switch button').forEach(b=>b.onclick=()=>{if(b.dataset.mode===mode)return;mode=b.dataset.mode;try{localStorage.setItem('skill-graph-mode',mode);}catch{}
+  canvas.classList.add('is-morphing');render();const ms=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--morph'))||0;setTimeout(()=>{draw();canvas.classList.remove('is-morphing');},ms+20);});
+document.getElementById('q').oninput=e=>{query=e.target.value.trim().toLowerCase();draw();};
+document.getElementById('theme').onclick=e=>{const on=document.documentElement.classList.toggle('dark');e.currentTarget.setAttribute('aria-pressed',String(on));e.currentTarget.textContent=on?'Light':'Dark';};
+render();new ResizeObserver(()=>draw()).observe(canvas);
+})();
+</script>
+</body>
+</html>
