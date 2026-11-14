@@ -440,9 +440,19 @@ function escapeFocus(event: KeyboardEvent): void {
   update({ neighborhood: 'none' })
 }
 function reset(): void { update(createAtlasViewState()) }
-function chooseView(mode: SkillGraphView): void { if (mode !== props.viewMode) emit('update:viewMode', mode) }
-// A switch is announced. In full motion the nodes travel from their old
-// places to their new ones while the edges, hidden, wait and then fade back in.
+/**
+ * Set when the learner switches here, until the view arrives. A change made
+ * elsewhere (the other surface, or the remembered view loading after mount)
+ * applies at once without travel or an announcement.
+ */
+let switchRequested = false
+function chooseView(mode: SkillGraphView): void {
+  if (mode === props.viewMode) return
+  switchRequested = true
+  emit('update:viewMode', mode)
+}
+// The learner's own switch is announced. In full motion the nodes travel from
+// their old places to their new ones while the edges, hidden, wait and then fade back in.
 const viewAnnouncement = ref('')
 const switching = ref(false)
 let switchTimer: ReturnType<typeof setTimeout> | undefined
@@ -468,8 +478,11 @@ function travel(before: Map<string, DOMRect>): void {
   }
 }
 watch(() => props.viewMode, mode => {
-  viewAnnouncement.value = t('skills.atlas.viewChanged', { view: t(mode === 'simple' ? 'skills.atlas.viewSimple' : 'skills.atlas.viewDetailed') })
   finishSwitch()
+  const requested = switchRequested
+  switchRequested = false
+  if (!requested) return
+  viewAnnouncement.value = t('skills.atlas.viewChanged', { view: t(mode === 'simple' ? 'skills.atlas.viewSimple' : 'skills.atlas.viewDetailed') })
   if (motionReduced.value) return
   // Read before the re-render (a pre-flush watcher), so the old places are known.
   const before = new Map(nodeElements().map(element => [element.dataset.skill ?? '', element.getBoundingClientRect()]))

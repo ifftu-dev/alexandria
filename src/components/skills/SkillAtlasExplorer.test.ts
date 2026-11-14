@@ -176,6 +176,18 @@ describe('Simple and Detailed views', () => {
     expect(quiet()).toEqual([])
   })
 
+  it('takes a view change made elsewhere at once and in silence, saving travel and the announcement for its own switch', async () => {
+    vi.useFakeTimers()
+    // Another surface switched, or the remembered view arrived after mounting.
+    const wrapper = simple({ ...initialView(), focusedFieldId: 'Engineering', camera: { x: 400, y: 300, zoom: 1 } }, false)
+    await wrapper.setProps({ viewMode: 'detailed' })
+    expect(wrapper.get('.atlas-map').classes()).not.toContain('is-switching')
+    expect(wrapper.get('.atlas-feedback[role="status"]').text()).toBe('')
+    await button(wrapper, 'Simple').trigger('click')
+    expect(wrapper.get('.atlas-map').classes()).toContain('is-switching')
+    expect(wrapper.get('.atlas-feedback[role="status"]').text()).toBe('Showing the Simple view')
+  })
+
   it('hides the edges while nodes travel on a switch, and switches synchronously under reduced motion', async () => {
     vi.useFakeTimers()
     const focused = { ...initialView(), focusedFieldId: 'Engineering', camera: { x: 400, y: 300, zoom: 1 } }
