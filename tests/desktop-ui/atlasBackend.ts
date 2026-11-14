@@ -1,6 +1,7 @@
 import taxonomy from '../../bootstrap/public_taxonomy.json'
 import type { Chapter, Course, Element, Identity, SkillInfo, SkillGraphEdge, VerifiableCredential } from '@/types'
 import type { SettingEntry } from '@/composables/useSettings'
+import type { SkillGraphView } from '@/composables/useSkillGraphView'
 
 /**
  * `stress` adds one long-label unassigned skill. `scale` grows the bootstrap
@@ -36,8 +37,16 @@ export function scaleTaxonomy() {
   return { skills, edges }
 }
 
-/** Strict external IPC fixture shared by mounted surfaces and browser journeys. */
-export function atlasBackend(scenario: AtlasScenario | null = null) {
+export interface AtlasBackendOptions {
+  /** Remembered skill graph view per profile; a profile left out has never chosen. */
+  views?: Partial<Record<string, SkillGraphView>>
+}
+
+/**
+ * Strict external IPC fixture shared by mounted surfaces and browser journeys.
+ * Each profile keeps its own settings; `settings` is the first profile's.
+ */
+export function atlasBackend(scenario: AtlasScenario | null = null, options: AtlasBackendOptions = {}) {
   const stress = scenario === 'stress'
   const graph = scenario === 'scale' ? scaleTaxonomy() : { skills: taxonomy.skills, edges: taxonomy.skill_prerequisites }
   const skillsPerSubject = new Map<string, number>()
@@ -87,8 +96,29 @@ export function atlasBackend(scenario: AtlasScenario | null = null) {
     content_cid: null, position: 0, duration_seconds: null }]
   const identity: Identity = { stake_address: 'stake-fixture', payment_address: 'payment-fixture', username: null,
     display_name: 'Atlas learner', bio: null, avatar_cid: null, visibility: null, profile_hash: null, created_at: '', updated_at: '' }
-  const settings: SettingEntry[] = ['learner.targets', 'instructor.graph_prefs'].map(key => ({ key, scope: 'sync', category: '', label: key,
-    description: '', kind: 'json', default_value: key === 'learner.targets' ? '[]' : '{}', current_value: key === 'learner.targets' ? '[]' : '{}', is_default: true }))
+  const settingDefaults: Array<Pick<SettingEntry, 'key' | 'kind' | 'default_value'>> = [
+    { key: 'learner.targets', kind: 'json', default_value: '[]' },
+    { key: 'instructor.graph_prefs', kind: 'json', default_value: '{}' },
+    { key: 'ui.skill_graph_view', kind: 'string', default_value: 'simple' },
+  ]
+  const settingsByProfile = new Map<string, SettingEntry[]>()
+  function settingsOf(profile: string): SettingEntry[] {
+    let entries = settingsByProfile.get(profile)
+    if (!entries) {
+      const view = options.views?.[profile]
+      entries = settingDefaults.map(({ key, kind, default_value }) => {
+        const current_value = key === 'ui.skill_graph_view' && view ? view : default_value
+        return { key, scope: 'sync', category: '', label: key, description: '', kind, default_value, current_value, is_default: current_value === default_value }
+      })
+      settingsByProfile.set(profile, entries)
+    }
+    return entries
+  }
+  const settings = settingsOf('profile-a')
+  function activeSettings(): SettingEntry[] {
+    if (!state.profile) throw new Error('Settings need an unlocked profile')
+    return settingsOf(state.profile)
+  }
   const state = { profile: 'profile-a' as string | null, level: 1, earned: true, reads: 0, unexpected: [] as string[] }
   function credential(skillId: string, level: unknown): VerifiableCredential {
     return { '@context': [], id: `vc-${skillId}`, type: ['VerifiableCredential'], issuer: 'did:fixture:issuer', validFrom: '2026-10-27T00:00:00Z',
@@ -132,11 +162,11 @@ export function atlasBackend(scenario: AtlasScenario | null = null) {
       case 'get_my_skill_graph': return { subject_did: `did:fixture:${state.profile}`, nodes: state.earned ? [{
         id: 'skill_big_o', name: 'Big-O Analysis', bloom_level: 'analyze', subject_name: 'Computer Science', public: true, teaching: false,
       }] : [], edges: [] }
-      case 'list_settings': return structuredClone(settings)
+      case 'list_settings': return structuredClone(activeSettings())
       case 'set_setting': {
-        const entry = settings.find(item => item.key === args?.key)
+        const entry = activeSettings().find(item => item.key === args?.key)
         if (!entry) throw new Error(`Unknown fixture setting ${args?.key}`)
-        entry.current_value = String(args?.value); return null
+        entry.current_value = String(args?.value); entry.is_default = entry.current_value === entry.default_value; return null
       }
       case 'plugin:event|listen': return 1
       case 'plugin:event|unlisten': return null
@@ -153,5 +183,5 @@ export function atlasBackend(scenario: AtlasScenario | null = null) {
       default: state.unexpected.push(command); throw new Error(`Unexpected atlas fixture IPC: ${command}`)
     }
   }
-  return { state, invoke, skills, settings }
+  return { state, invoke, skills, settings, settingsOf }
 }

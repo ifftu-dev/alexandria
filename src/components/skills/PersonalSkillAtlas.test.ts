@@ -4,12 +4,12 @@ import { defineComponent, h } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
 import en from '@/locales/en'
-import { atlasBackend } from '../../../tests/desktop-ui/atlasBackend'
+import { atlasBackend, type AtlasBackendOptions } from '../../../tests/desktop-ui/atlasBackend'
 
 const ipc = vi.hoisted(() => vi.fn())
 vi.mock('@tauri-apps/api/core', () => ({ invoke: ipc, transformCallback: () => 1 }))
 let wrapper: VueWrapper | undefined
-beforeEach(() => { vi.resetModules(); ipc.mockReset(); Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke: ipc, transformCallback: () => 1, unregisterCallback: () => {} } }) })
+beforeEach(() => { vi.resetModules(); ipc.mockReset(); Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke: ipc, transformCallback: () => 1, unregisterCallback: () => {} } }); Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { configurable: true, value: { unregisterListener: () => {} } }) })
 afterEach(() => { wrapper?.unmount(); document.body.innerHTML = ''; sessionStorage.clear() })
 function button(name: string, root: ParentNode = document) {
   const target = [...root.querySelectorAll('button')].find(el => (el.getAttribute('aria-label') ?? el.textContent?.trim()) === name)
@@ -17,8 +17,16 @@ function button(name: string, root: ParentNode = document) {
   return target
 }
 async function click(name: string, root: ParentNode = document) { button(name, root).click(); await flushPromises() }
-async function setup() {
-  const backend = atlasBackend('stress')
+/** Whether the view switch inside `root` shows this view as active. */
+function showing(view: 'Simple' | 'Detailed', root: ParentNode = document) {
+  return button(view, root).getAttribute('aria-pressed') === 'true'
+}
+/** The skills page (the modal is teleported outside it). */
+const page = () => wrapper!.element as HTMLElement
+const map = (root: ParentNode) => root.querySelector('[aria-label="Skill map"]') ?? (() => { throw new Error('Missing skill map') })()
+const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]') ?? (() => { throw new Error('Missing modal') })()
+async function setup(options: AtlasBackendOptions = {}) {
+  const backend = atlasBackend('stress', options)
   ipc.mockImplementation(backend.invoke)
   const { useProfiles } = await import('@/composables/useProfiles')
   const { useSkillAtlas } = await import('@/composables/useSkillAtlas')
@@ -39,12 +47,78 @@ async function setup() {
   await flushPromises()
   return { backend, router, atlas, profiles: useProfiles() }
 }
+it('opens both surfaces in the remembered view', async () => {
+  const { atlas } = await setup({ views: { 'profile-a': 'detailed' } })
+  await click('My Graph')
+  expect(showing('Detailed', page())).toBe(true)
+  expect(page().querySelector('input[type="search"]')).not.toBeNull()
+  atlas.setModalOpen(true)
+  await flushPromises()
+  expect(showing('Detailed', dialog())).toBe(true)
+  expect(dialog().querySelector('input[type="search"]')).not.toBeNull()
+})
+
+it('opens in Simple for a profile that never chose, and a switch on one surface moves the other', async () => {
+  const { atlas, backend } = await setup()
+  await click('My Graph')
+  expect(showing('Simple', page())).toBe(true)
+  expect(page().querySelector('input[type="search"]')).toBeNull()
+  await click('Detailed', page())
+  expect(backend.settingsOf('profile-a').find(entry => entry.key === 'ui.skill_graph_view')?.current_value).toBe('detailed')
+  atlas.setModalOpen(true)
+  await flushPromises()
+  expect(showing('Detailed', dialog())).toBe(true)
+  await click('Simple', dialog())
+  expect(showing('Simple', page())).toBe(true)
+  expect(backend.settingsOf('profile-a').find(entry => entry.key === 'ui.skill_graph_view')?.current_value).toBe('simple')
+})
+
+it('returns the next profile to its own remembered view after a lock', async () => {
+  const { profiles, router, backend } = await setup({ views: { 'profile-b': 'detailed' } })
+  const { clearSettingsCache } = await import('@/composables/useSettings')
+  await click('My Graph')
+  expect(showing('Simple', page())).toBe(true)
+  // The app clears the settings cache when a profile locks.
+  await profiles.lockProfile()
+  clearSettingsCache()
+  await profiles.unlockProfile('profile-b', 'fixture-only')
+  await router.push('/skills')
+  await flushPromises()
+  await click('My Graph')
+  expect(showing('Detailed', page())).toBe(true)
+  await click('Simple', page())
+  expect(backend.settingsOf('profile-b').find(entry => entry.key === 'ui.skill_graph_view')?.current_value).toBe('simple')
+  expect(backend.settingsOf('profile-a').find(entry => entry.key === 'ui.skill_graph_view')?.is_default).toBe(true)
+})
+
+it('keeps the Simple view through Open skill and return on the page and in the modal', async () => {
+  const { atlas, router } = await setup({ views: { 'profile-a': 'detailed' } })
+  await click('My Graph')
+  await click('Simple', page())
+  await click('Big-O Analysis, earned, Bloom level 2 Understand', map(page()))
+  await click('Open skill', page())
+  expect(router.currentRoute.value.path).toBe('/skills/skill_big_o')
+  await click('Back to all skills')
+  expect(showing('Simple', page())).toBe(true)
+  expect(page().querySelector('[aria-label="Skill inspector"]')?.textContent).toContain('Big-O Analysis')
+  await router.push('/other')
+  await flushPromises()
+  atlas.setModalOpen(true)
+  await flushPromises()
+  await click('Big-O Analysis, earned, Bloom level 2 Understand', map(dialog()))
+  await click('Open skill', dialog())
+  await click('Back to all skills')
+  expect(showing('Simple', dialog())).toBe(true)
+})
+
 it('keeps browse filters separate and restores graph selection, camera and controls after opening a real skill detail', async () => {
   const { atlas, router, backend } = await setup()
   await click('Browse Skills')
   await wrapper!.get('input').setValue('impossible browse query')
   await click('My Graph')
   expect(wrapper!.text()).toContain('Visibility & teaching')
+  // Search and the map tools belong to the Detailed view.
+  await click('Detailed')
   // The list shows every loaded skill in its count and renders its first window.
   expect(wrapper!.find('.atlas-list summary').text()).toContain('104 matching skills')
   expect(wrapper!.findAll('[aria-label="Full-label skill list"] button')).toHaveLength(50)
@@ -60,6 +134,7 @@ it('keeps browse filters separate and restores graph selection, camera and contr
   expect(wrapper!.text()).toContain('Big-O Analysis')
   await click('Back to all skills')
   expect(atlas.pageView.value).toEqual(saved)
+  expect(showing('Detailed')).toBe(true)
   expect(wrapper!.get<HTMLInputElement>('input[type="search"]').element.value).toBe('Big-O')
   expect(wrapper!.get('[aria-label="Skill inspector"]').text()).toContain('2 Understand')
   expect(backend.state.unexpected).toEqual([])
@@ -73,6 +148,7 @@ it('returns to the expanded context once, releases scroll locks and does not reo
   await flushPromises()
   const dialog = document.querySelector('[role="dialog"]')!
   expect(dialog).not.toBeNull()
+  await click('Detailed', dialog)
   const input = dialog.querySelector('input[type="search"]') as HTMLInputElement
   input.value = 'Big-O'
   input.dispatchEvent(new Event('input', { bubbles: true }))
@@ -88,6 +164,7 @@ it('returns to the expanded context once, releases scroll locks and does not reo
   await click('Back to all skills')
   expect(document.querySelector('[role="dialog"]')).not.toBeNull()
   expect(atlas.modalView.value).toEqual(saved)
+  expect(showing('Detailed', document.querySelector('[role="dialog"]')!)).toBe(true)
   await click('Close', document.querySelector('[role="dialog"]')!)
   expect(document.body.style.overflow).toBe('')
   await router.push('/skills/skill_big_o')
@@ -122,6 +199,7 @@ it('offers a course and enrollment for an already earned skill from the modal', 
 it('keeps Ready learning accessible, updates the skill filter on route reuse and explains an empty result', async () => {
   const { router, backend } = await setup()
   await click('My Graph')
+  await click('Detailed')
   await wrapper!.get('input[type="search"]').setValue('Sorting Algorithms')
   await click('Sorting Algorithms, not yet earned, Ready, learning-outcome Bloom level 3 Apply')
   await click('Find learning opportunities')

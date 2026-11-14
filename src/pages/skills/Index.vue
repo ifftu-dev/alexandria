@@ -9,6 +9,7 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { useProfiles } from '@/composables/useProfiles'
 import { isAtlasTab, useSkillAtlas } from '@/composables/useSkillAtlas'
 import { useSkillAtlasActions } from '@/composables/useSkillAtlasActions'
+import { useSkillGraphView } from '@/composables/useSkillGraphView'
 import { AppBadge, AppTabs } from '@/components/ui'
 import SkillAtlasExplorer from '@/components/skills/SkillAtlasExplorer.vue'
 import { createAtlasPresenter } from '@/components/skills/atlasPresentation'
@@ -24,6 +25,7 @@ const { t } = useI18n()
 const router = useRouter()
 const { learnSkill, openSkill, actionError } = useSkillAtlasActions('page')
 const atlas = useSkillAtlas()
+const graphView = useSkillGraphView()
 const { addGoal } = useGoals()
 const pendingGoal = ref<string | null>(null)
 const goalError = ref<string | null>(null)
@@ -338,8 +340,7 @@ async function goalSkill(skill: SkillInfo) {
 
       <!-- ============ GRAPH TAB ============ -->
       <div v-if="activeTab === 'graph'" class="space-y-6">
-        <!-- Detailed until the remembered view is bound here. -->
-        <SkillAtlasExplorer v-if="model" :model="model" :view="pageView" view-mode="detailed" :feedback="atlas.feedbackFor('page')"
+        <SkillAtlasExplorer v-if="model" v-model:view-mode="graphView" :model="model" :view="pageView" :feedback="atlas.feedbackFor('page')"
           @update:view="atlas.updateView('page', $event)" @open-skill="openSkill" @learn-skill="learnSkill"
           @feedback-consumed="atlas.acknowledgeFeedback" />
         <GraphVisibilityEditor />

@@ -2,6 +2,8 @@
 import { watch } from 'vue'
 import { useSkillAtlas } from '@/composables/useSkillAtlas'
 import { useSkillAtlasActions } from '@/composables/useSkillAtlasActions'
+import { useSkillGraphView } from '@/composables/useSkillGraphView'
+import { useSettings } from '@/composables/useSettings'
 import { AppModal } from '@/components/ui'
 import SkillAtlasExplorer from '@/components/skills/SkillAtlasExplorer.vue'
 
@@ -10,9 +12,12 @@ const emit = defineEmits<{ close: [] }>()
 const atlas = useSkillAtlas()
 const { model, modalView, error } = atlas
 const { learnSkill, openSkill, actionError } = useSkillAtlasActions('modal')
+const viewMode = useSkillGraphView()
 watch(() => props.visible, (visible, _old, onCleanup) => {
   if (!visible) return
   void atlas.ensureLoaded()
+  // The remembered view is a profile setting; the modal can open before any page has loaded settings.
+  void useSettings().initialize().catch(() => {})
   onCleanup(atlas.activateSurface('modal'))
 }, { immediate: true })
 </script>
@@ -21,8 +26,7 @@ watch(() => props.visible, (visible, _old, onCleanup) => {
   <AppModal :open="visible" :title="$t('skills.graph.modalTitle')" max-width="90rem" @close="emit('close')">
     <p v-if="actionError" role="alert">{{ actionError }}</p>
     <div v-if="error" role="alert"><p>{{ error }}</p><button type="button" @click="atlas.refresh('retry')">{{ $t('common.actions.retry') }}</button></div>
-    <!-- Detailed until the remembered view is bound here. -->
-    <SkillAtlasExplorer v-if="visible && model" :model="model" :view="modalView" view-mode="detailed" :feedback="atlas.feedbackFor('modal')"
+    <SkillAtlasExplorer v-if="visible && model" v-model:view-mode="viewMode" :model="model" :view="modalView" :feedback="atlas.feedbackFor('modal')"
       @update:view="atlas.updateView('modal', $event)" @open-skill="openSkill"
       @learn-skill="learnSkill" @feedback-consumed="atlas.acknowledgeFeedback" />
   </AppModal>
