@@ -498,7 +498,7 @@ watch(() => props.viewMode, mode => {
   const requested = switchRequested
   switchRequested = false
   if (!requested) return
-  viewAnnouncement.value = t('skills.atlas.viewChanged', { view: t(mode === 'simple' ? 'skills.atlas.viewSimple' : 'skills.atlas.viewDetailed') })
+  viewAnnouncement.value = t(mode === 'simple' ? 'skills.atlas.viewChangedSimple' : 'skills.atlas.viewChangedDetailed')
   if (motionReduced.value) return
   // Read before the re-render (a pre-flush watcher), so the old places are known.
   const before = new Map(nodeElements().map(element => [element.dataset.skill ?? '', element.getBoundingClientRect()]))
@@ -590,11 +590,11 @@ function setBloom(event: Event): void {
         <p v-if="!simple && view.bloomEmphasis !== null" class="bloom-summary" role="status">{{ t('skills.atlas.bloomSummary', { level: present.bloomLabel(BLOOM_ORDER[view.bloomEmphasis]), count: bloomMatches.length }) }}</p>
         <!-- Simple keeps the field colours named, without field focus. -->
         <p v-if="simple" class="atlas-fields">
-          <span v-for="field in model.fields" :key="field.id === null ? 'unassigned' : `field:${field.id}`" class="field-chip" :style="{ '--field': color(field.id) }"><i class="field-dot" aria-hidden="true" />{{ fieldName(field.id) }} <small>{{ t('skills.atlas.fieldEarned', { ...field }) }}</small></span>
+          <span v-for="field in model.fields" :key="field.id === null ? 'unassigned' : `field:${field.id}`" class="field-chip" :style="{ '--field': color(field.id) }"><i class="field-dot" aria-hidden="true" />{{ fieldName(field.id) }} <small>{{ t('skills.atlas.fieldEarned', { earned: field.earned, total: field.total }) }}</small></span>
         </p>
         <nav v-else class="atlas-fields" :aria-label="t('skills.atlas.overview')">
           <button type="button" :aria-pressed="overview" @click="update({ focusedFieldId: null, unassignedFocused: false, camera: null, neighborhood: 'none' })">{{ t('skills.atlas.overview') }}</button>
-          <button v-for="field in model.fields" :key="field.id === null ? 'unassigned' : `field:${field.id}`" type="button" :style="{ '--field': color(field.id) }" :aria-pressed="fieldFocused && field.id === view.focusedFieldId" @click="focus(field)"><i class="field-dot" aria-hidden="true" />{{ fieldName(field.id) }} <small>{{ t('skills.atlas.fieldEarned', { ...field }) }}</small></button>
+          <button v-for="field in model.fields" :key="field.id === null ? 'unassigned' : `field:${field.id}`" type="button" :style="{ '--field': color(field.id) }" :aria-pressed="fieldFocused && field.id === view.focusedFieldId" @click="focus(field)"><i class="field-dot" aria-hidden="true" />{{ fieldName(field.id) }} <small>{{ t('skills.atlas.fieldEarned', { earned: field.earned, total: field.total }) }}</small></button>
         </nav>
         <div ref="viewport" class="atlas-viewport">
           <div ref="widthProbe" class="atlas-width-probe" aria-hidden="true" />
