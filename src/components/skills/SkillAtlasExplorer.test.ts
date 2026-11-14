@@ -6,6 +6,7 @@ import en from '@/locales/en'
 import { buildSkillAtlas } from '@/utils/skillAtlas'
 import type { SkillInfo, VerifiableCredential } from '@/types'
 import type { AtlasViewState } from '@/composables/useSkillAtlas'
+import type { SkillGraphView } from '@/composables/useSkillGraphView'
 import SkillAtlasExplorer from './SkillAtlasExplorer.vue'
 
 const skill = (id: string, name: string, field: string | null, overrides: Partial<SkillInfo> = {}): SkillInfo => ({
@@ -31,10 +32,13 @@ const BRIDGES = 'Bridges, not yet earned, Ready, learning-outcome Bloom level 6 
 const ALGEBRA = 'Algebra, earned, Bloom level 4 Analyze'
 const CRAFT = 'Craft, earned, earned level unavailable'
 const mounted: VueWrapper[] = []
-function setup(view = initialView(), reducedMotion = false, feedback: { revision: number; earnedIds: string[]; improvedIds: string[] } | null = null, attachTo?: HTMLElement) {
+// Detailed unless a test asks otherwise: most tests exercise the Detailed map. `null` leaves the prop unset.
+function setup(view = initialView(), reducedMotion = false, feedback: { revision: number; earnedIds: string[]; improvedIds: string[] } | null = null, attachTo?: HTMLElement, viewMode: SkillGraphView | null = 'detailed') {
   const wrapper = mount(SkillAtlasExplorer, {
     attachTo,
-    props: { model, view, reducedMotion, feedback, 'onUpdate:view': (next: AtlasViewState) => { void wrapper.setProps({ view: next }) } },
+    props: { model, view, reducedMotion, feedback, ...(viewMode === null ? {} : { viewMode }),
+      'onUpdate:view': (next: AtlasViewState) => { void wrapper.setProps({ view: next }) },
+      'onUpdate:viewMode': (next: SkillGraphView) => { void wrapper.setProps({ viewMode: next }) } },
     global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: { en } })] },
   })
   mounted.push(wrapper)
@@ -46,6 +50,163 @@ function button(wrapper: VueWrapper, name: string) {
   return found
 }
 afterEach(() => { mounted.splice(0).forEach(w => w.unmount()); vi.useRealTimers() })
+const simple = (view = initialView(), reducedMotion = true) => setup(view, reducedMotion, null, undefined, 'simple')
+const mapNames = (wrapper: VueWrapper) => wrapper.findAll('.map-node').map(item => item.attributes('aria-label'))
+const pressed = (wrapper: VueWrapper, name: string) => button(wrapper, name).attributes('aria-pressed')
+
+describe('Simple and Detailed views', () => {
+  it('opens in the Simple view by default: every skill a disc button named as in Detailed, earned discs carrying their Bloom number', () => {
+    const wrapper = setup(initialView(), true, null, undefined, null)
+    expect(pressed(wrapper, 'Simple')).toBe('true')
+    expect(pressed(wrapper, 'Detailed')).toBe('false')
+    expect(wrapper.get('[role="group"][aria-label="Graph view"]').findAll('button')).toHaveLength(2)
+    expect([...mapNames(wrapper)].sort()).toEqual([ALGEBRA, BRIDGES, CRAFT].sort())
+    const disc = (name: string) => button(wrapper, name).get('.node-disc')
+    expect(disc(ALGEBRA).text()).toBe('4')
+    // An unavailable earned level shows no number, never a fabricated Remember.
+    expect(disc(CRAFT).text()).toBe('')
+    expect(disc(BRIDGES).text()).toBe('')
+    expect(button(wrapper, ALGEBRA).text()).toContain('Algebra')
+    expect(button(wrapper, ALGEBRA).text()).not.toContain('Analyze')
+  })
+
+  it('emits the view from the switch, follows the prop, and keeps node count and names across a round trip', async () => {
+    const focused = { ...initialView(), focusedFieldId: 'Engineering', camera: { x: 400, y: 300, zoom: 1.2 } }
+    const wrapper = simple(focused)
+    const before = [...mapNames(wrapper)].sort()
+    await button(wrapper, 'Simple').trigger('click')
+    expect(wrapper.emitted('update:viewMode')).toBeUndefined()
+    await button(wrapper, 'Detailed').trigger('click')
+    expect(wrapper.emitted('update:viewMode')).toEqual([['detailed']])
+    expect(pressed(wrapper, 'Detailed')).toBe('true')
+    expect(wrapper.find('.node-disc').exists()).toBe(false)
+    await wrapper.setProps({ viewMode: 'simple' })
+    expect(pressed(wrapper, 'Simple')).toBe('true')
+    expect([...mapNames(wrapper)].sort()).toEqual(before)
+    expect(before).toHaveLength(3)
+    expect(wrapper.props('view')).toEqual(focused)
+  })
+
+  it('hides search, Bloom emphasis, field focus, cards and map tools in Simple, keeping their state, the full list, reset and the inspector', async () => {
+    const explored = { ...initialView(), query: 'bridg', bloomEmphasis: 3 as const }
+    const wrapper = simple(explored)
+    expect(wrapper.find('input[type="search"]').exists()).toBe(false)
+    expect(wrapper.find('select').exists()).toBe(false)
+    expect(wrapper.findAll('button').map(item => item.text())).not.toContain('Field overview')
+    expect(wrapper.find('.atlas-overview').exists()).toBe(false)
+    expect(wrapper.find('.region-heading').exists()).toBe(false)
+    expect(() => button(wrapper, 'Zoom in')).toThrow()
+    expect(() => button(wrapper, 'Move map left')).toThrow()
+    expect(wrapper.text()).not.toContain('Emphasizing')
+    // The list holds every skill: the hidden query does not filter it.
+    expect(wrapper.findAll('.atlas-list li button').map(item => item.attributes('aria-label'))).toEqual([ALGEBRA, BRIDGES, CRAFT])
+    expect(wrapper.findAll('.is-bloom-match')).toHaveLength(0)
+    expect(wrapper.find('[aria-label="Skill inspector"]').exists()).toBe(true)
+    expect(button(wrapper, 'Reset exploration').exists()).toBe(true)
+    await button(wrapper, 'Detailed').trigger('click')
+    expect((wrapper.get('input[type="search"]').element as HTMLInputElement).value).toBe('bridg')
+    expect(wrapper.get('select').element.value).toBe('3')
+    expect(wrapper.props('view')).toEqual(explored)
+  })
+
+  it('traces a selection in Simple: its edges active, everything past one hop dimmed, cleared by reset; inspector focus still applies', async () => {
+    const id = (name: string) => `s-${name}`
+    const chain = ['one', 'two', 'three', 'four'].map(name => skill(id(name), name, 'Line'))
+    const link = (from: string, to: string) => ({ skill_id: id(to), skill_name: to, skill_bloom: 'create', prerequisite_id: id(from), prerequisite_name: from, prerequisite_bloom: 'create' })
+    const wrapper = simple()
+    await wrapper.setProps({ model: buildSkillAtlas({ skills: chain, edges: [link('one', 'two'), link('two', 'three'), link('three', 'four')], activeCredentials: [], subjectDid: 'did:me' }) })
+    const curves = (selector: string) => wrapper.find(selector).attributes('d')?.match(/M /g)?.length ?? 0
+    const dimmedNames = () => wrapper.findAll('.map-node.is-dimmed').map(item => item.text())
+    expect(curves('.map-edge:not(.map-edge-active):not(.map-edge-faded)')).toBe(3)
+    expect(dimmedNames()).toEqual([])
+    await wrapper.findAll('.map-node').find(item => item.text() === 'two')!.trigger('click')
+    expect(wrapper.get('[aria-label="Skill inspector"]').text()).toContain('two')
+    expect(curves('.map-edge.map-edge-active')).toBe(2)
+    expect(curves('.map-edge.map-edge-faded')).toBe(1)
+    expect(dimmedNames()).toEqual(['four'])
+    // Selecting in Simple leaves the Detailed camera and field focus alone.
+    expect(wrapper.props('view')).toMatchObject({ selectedSkillId: id('two'), camera: null, focusedFieldId: null })
+    await button(wrapper, 'Focus dependents').trigger('click')
+    await wrapper.setProps({ view: { ...wrapper.props('view'), neighborhoodDepth: 2 } })
+    expect(wrapper.text()).toContain('Showing dependents of two · 2 steps')
+    expect(dimmedNames()).toEqual(['one'])
+    // Selection and focus survive the switch both ways.
+    await button(wrapper, 'Detailed').trigger('click')
+    await button(wrapper, 'Simple').trigger('click')
+    expect(wrapper.props('view')).toMatchObject({ selectedSkillId: id('two'), neighborhood: 'dependents', neighborhoodDepth: 2 })
+    expect(dimmedNames()).toEqual(['one'])
+    await button(wrapper, 'Reset exploration').trigger('click')
+    expect(dimmedNames()).toEqual([])
+    expect(curves('.map-edge.map-edge-active')).toBe(0)
+    expect(curves('.map-edge.map-edge-faded')).toBe(0)
+  })
+
+  it('always names earned, ready-next, selected and neighbouring nodes, and holds back plain Ready names only in dense layers', async () => {
+    const pad = (index: number) => String(index).padStart(2, '0')
+    const roots = Array.from({ length: 12 }, (_, index) => skill(`r${pad(index)}`, `Root ${pad(index)}`, 'Wide'))
+    const next = Array.from({ length: 10 }, (_, index) => skill(`d${pad(index)}`, `Next ${pad(index)}`, 'Wide', { prerequisite_count: 1 }))
+    const edges = next.map((item, index) => ({ skill_id: item.id, skill_name: item.name, skill_bloom: 'create',
+      prerequisite_id: index < 5 ? 'r00' : 'r01', prerequisite_name: '', prerequisite_bloom: 'create' }))
+    const wrapper = simple()
+    await wrapper.setProps({ model: buildSkillAtlas({ skills: [...roots, ...next], edges, activeCredentials: [credential('r00', 2)], subjectDid: 'did:me' }) })
+    const quiet = () => wrapper.findAll('.map-node').filter(item => item.find('.node-label.is-label-quiet').exists()).map(item => item.text())
+    expect(quiet()).not.toContain('Root 00')
+    expect(quiet()).not.toContain('Next 00')
+    expect(quiet()).toEqual(expect.arrayContaining(['Root 02', 'Next 05']))
+    // A held-back name stays in the accessible name.
+    expect(wrapper.findAll('.map-node').every(item => item.attributes('aria-label')?.startsWith(item.get('.node-label').text()))).toBe(true)
+    await wrapper.findAll('.map-node').find(item => item.text() === 'Next 05')!.trigger('click')
+    expect(quiet()).not.toContain('Next 05')
+    expect(quiet()).not.toContain('Root 01')
+    expect(quiet()).toContain('Root 02')
+    // A sparse graph names everything.
+    await wrapper.setProps({ model, view: initialView() })
+    expect(quiet()).toEqual([])
+  })
+
+  it('hides the edges while nodes travel on a switch, and switches synchronously under reduced motion', async () => {
+    vi.useFakeTimers()
+    const focused = { ...initialView(), focusedFieldId: 'Engineering', camera: { x: 400, y: 300, zoom: 1 } }
+    const full = simple(focused, false)
+    await button(full, 'Detailed').trigger('click')
+    expect(full.get('.atlas-map').classes()).toContain('is-switching')
+    await vi.advanceTimersByTimeAsync(250)
+    expect(full.get('.atlas-map').classes()).not.toContain('is-switching')
+    full.unmount()
+    const reduced = simple(focused, true)
+    // jsdom queues a toggle event for the open list; the switch must add nothing.
+    const pending = vi.getTimerCount()
+    await button(reduced, 'Detailed').trigger('click')
+    expect(reduced.get('.atlas-map').classes()).not.toContain('is-switching')
+    expect(reduced.findAll('.map-node .node-evidence').length).toBeGreaterThan(0)
+    expect(vi.getTimerCount()).toBe(pending)
+  })
+
+  it('highlights new evidence on Simple discs and announces a switch in the status region', async () => {
+    const wrapper = simple()
+    await wrapper.setProps({ feedback: { revision: 2, earnedIds: ['b'], improvedIds: [] } })
+    expect(button(wrapper, BRIDGES).classes()).toContain('is-updated')
+    expect(wrapper.get('[role="status"]').text()).toContain('New evidence highlighted: Bridges')
+    await wrapper.setProps({ feedback: null })
+    const status = () => wrapper.get('.atlas-feedback[role="status"]').text()
+    await button(wrapper, 'Detailed').trigger('click')
+    expect(status()).toBe('Showing the Detailed view')
+    await button(wrapper, 'Simple').trigger('click')
+    expect(status()).toBe('Showing the Simple view')
+  })
+
+  it('names the Simple encoding and field colours with earned counts, and keeps the Detailed legend for Detailed', async () => {
+    const wrapper = simple()
+    const text = () => wrapper.text()
+    for (const item of ['Filled: earned, the number is your Bloom level', 'Ringed: Ready next', 'Hollow: Ready', 'Color means field']) expect(text()).toContain(item)
+    expect(text()).not.toContain('Field color identifies membership')
+    expect(wrapper.findAll('.field-chip').map(item => item.text()).sort()).toEqual(['Engineering 0/1 earned', 'Mathematics 1/1 earned', 'Unassigned 1/1 earned'])
+    await button(wrapper, 'Detailed').trigger('click')
+    expect(text()).toContain('Field color identifies membership')
+    expect(text()).not.toContain('Ringed: Ready next')
+    expect(button(wrapper, 'Engineering 0/1 earned').exists()).toBe(true)
+  })
+})
 
 describe('personal atlas explorer public interactions', () => {
   it('selects a Ready skill despite unmet prerequisites and only opens or learns on explicit action', async () => {
@@ -81,7 +242,8 @@ describe('personal atlas explorer public interactions', () => {
     expect(names('.atlas-list li button')).toEqual([ALGEBRA, BRIDGES, CRAFT])
     await button(wrapper, 'Explore Engineering').trigger('click')
     expect(names('.map-node')).toContain(BRIDGES)
-    await button(wrapper, 'Mathematics').trigger('click')
+    // Field focus buttons carry the field's earned count.
+    await button(wrapper, 'Mathematics 1/1 earned').trigger('click')
     expect(names('.map-node')).toContain(ALGEBRA)
     const checks = wrapper.findAll('span').filter(item => item.element.childNodes.length === 1 && item.text().startsWith('✓'))
     expect(checks.length).toBeGreaterThan(0)

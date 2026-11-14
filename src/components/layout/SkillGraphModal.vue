@@ -21,7 +21,8 @@ watch(() => props.visible, (visible, _old, onCleanup) => {
   <AppModal :open="visible" :title="$t('skills.graph.modalTitle')" max-width="90rem" @close="emit('close')">
     <p v-if="actionError" role="alert">{{ actionError }}</p>
     <div v-if="error" role="alert"><p>{{ error }}</p><button type="button" @click="atlas.refresh('retry')">{{ $t('common.actions.retry') }}</button></div>
-    <SkillAtlasExplorer v-if="visible && model" :model="model" :view="modalView" :feedback="atlas.feedbackFor('modal')"
+    <!-- Detailed until the remembered view is bound here. -->
+    <SkillAtlasExplorer v-if="visible && model" :model="model" :view="modalView" view-mode="detailed" :feedback="atlas.feedbackFor('modal')"
       @update:view="atlas.updateView('modal', $event)" @open-skill="openSkill"
       @learn-skill="learnSkill" @feedback-consumed="atlas.acknowledgeFeedback" />
   </AppModal>

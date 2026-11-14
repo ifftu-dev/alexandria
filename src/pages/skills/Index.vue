@@ -338,7 +338,8 @@ async function goalSkill(skill: SkillInfo) {
 
       <!-- ============ GRAPH TAB ============ -->
       <div v-if="activeTab === 'graph'" class="space-y-6">
-        <SkillAtlasExplorer v-if="model" :model="model" :view="pageView" :feedback="atlas.feedbackFor('page')"
+        <!-- Detailed until the remembered view is bound here. -->
+        <SkillAtlasExplorer v-if="model" :model="model" :view="pageView" view-mode="detailed" :feedback="atlas.feedbackFor('page')"
           @update:view="atlas.updateView('page', $event)" @open-skill="openSkill" @learn-skill="learnSkill"
           @feedback-consumed="atlas.acknowledgeFeedback" />
         <GraphVisibilityEditor />

@@ -197,6 +197,15 @@
     "nameReadyNextNoLevel": "{name}، ابھی حاصل نہیں ہوئی، شروع کرنے کے لیے تیار",
     "focusShowingPrerequisites": "{skill} کی پیشگی مہارتیں دکھائی جا رہی ہیں · {depth}",
     "focusShowingDependents": "{skill} پر منحصر مہارتیں دکھائی جا رہی ہیں · {depth}",
-    "clearFocus": "توجہ ہٹائیں"
+    "clearFocus": "توجہ ہٹائیں",
+    "viewGroup": "Graph view",
+    "viewSimple": "Simple",
+    "viewDetailed": "Detailed",
+    "viewChanged": "Showing the {view} view",
+    "fieldEarned": "{earned}/{total} earned",
+    "legendEarned": "Filled: earned, the number is your Bloom level",
+    "legendReadyNext": "Ringed: Ready next",
+    "legendReady": "Hollow: Ready",
+    "legendField": "Color means field"
   }
 }

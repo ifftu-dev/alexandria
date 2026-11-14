@@ -197,6 +197,15 @@
     "nameReadyNextNoLevel": "{name}, ఇంకా సంపాదించలేదు, ప్రారంభించడానికి సిద్ధం",
     "focusShowingPrerequisites": "{skill} ముందస్తు నైపుణ్యాలు చూపబడుతున్నాయి · {depth}",
     "focusShowingDependents": "{skill} పై ఆధారిత నైపుణ్యాలు చూపబడుతున్నాయి · {depth}",
-    "clearFocus": "దృష్టిని తీసివేయండి"
+    "clearFocus": "దృష్టిని తీసివేయండి",
+    "viewGroup": "Graph view",
+    "viewSimple": "Simple",
+    "viewDetailed": "Detailed",
+    "viewChanged": "Showing the {view} view",
+    "fieldEarned": "{earned}/{total} earned",
+    "legendEarned": "Filled: earned, the number is your Bloom level",
+    "legendReadyNext": "Ringed: Ready next",
+    "legendReady": "Hollow: Ready",
+    "legendField": "Color means field"
   }
 }

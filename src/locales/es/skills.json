@@ -197,6 +197,15 @@
     "nameReadyNextNoLevel": "{name}, aún no adquirida, lista para empezar",
     "focusShowingPrerequisites": "Mostrando los requisitos previos de {skill} · {depth}",
     "focusShowingDependents": "Mostrando las dependientes de {skill} · {depth}",
-    "clearFocus": "Quitar el enfoque"
+    "clearFocus": "Quitar el enfoque",
+    "viewGroup": "Graph view",
+    "viewSimple": "Simple",
+    "viewDetailed": "Detailed",
+    "viewChanged": "Showing the {view} view",
+    "fieldEarned": "{earned}/{total} earned",
+    "legendEarned": "Filled: earned, the number is your Bloom level",
+    "legendReadyNext": "Ringed: Ready next",
+    "legendReady": "Hollow: Ready",
+    "legendField": "Color means field"
   }
 }
