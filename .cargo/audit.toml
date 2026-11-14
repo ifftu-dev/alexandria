@@ -78,21 +78,6 @@ ignore = [
     "RUSTSEC-2026-0195",
     "RUSTSEC-2026-0194",
 
-    # hickory-proto 0.25.x — CPU exhaustion in message encoding
-    # (RUSTSEC-2026-0119) and an unbounded NSEC3 validation loop
-    # (RUSTSEC-2026-0118, no fix at any version).
-    #
-    # The 0.25 package remains in Cargo.lock beneath `libp2p-mdns`, but the
-    # workspace's explicit libp2p feature set does not enable mDNS and the
-    # resolved all-target tree for hickory-proto 0.25.2 is empty. The active
-    # DNS stack uses hickory-proto 0.26.1.
-    #
-    # Remove these accepts when the stale lock record disappears. Re-evaluate
-    # immediately if libp2p mDNS is enabled or any other 0.25 consumer enters
-    # the resolved graph.
-    "RUSTSEC-2026-0119",
-    "RUSTSEC-2026-0118",
-
     # ringbuf 0.4.8 — `Consumer::skip` and `Consumer::clear` are not
     # panic-safe: if an element's `Drop` panics mid-loop the read index is not
     # advanced, and the ring buffer's own destructor drops those elements again
@@ -163,52 +148,4 @@ ignore = [
     # (ECDSA signing, ECDH), or when p256/k256 release on elliptic-curve
     # with crypto-bigint >= 0.7.6.
     "RUSTSEC-2026-0387",
-
-    # hickory-proto 0.25.2 — panics in zone-file and SVCB/HTTPS text parsing
-    # (RUSTSEC-2026-0487, -0489, -0490) and memory amplification from DNS
-    # header record counts (RUSTSEC-2026-0491). The fix is >= 0.26.2; the
-    # 0.26 copy used by iroh and our resolver is on 0.26.3.
-    #
-    # hickory-proto / hickory-resolver 0.25.2 — DNSSEC validation flaws:
-    # inverted and unscoped NSEC3 checks (RUSTSEC-2026-0504, -0505), NXDOMAIN
-    # accepted for an empty non-terminal (RUSTSEC-2026-0511), an unrelated
-    # signed RRset accepted as the answer (RUSTSEC-2026-0512), and lookups
-    # returning records that failed validation (RUSTSEC-2026-0514), and NSEC
-    # or NSEC3 records from the wrong side of a zone cut accepted as proof of
-    # nonexistence (RUSTSEC-2026-0530, -0531, -0532). 0.26.x is unaffected.
-    #
-    # 0.25.2 is only a lockfile entry: libp2p 0.56 pins it for its optional
-    # `dns` and `mdns` features, which no workspace crate enables, so it is
-    # never compiled (`cargo tree --all-features --target all -i
-    # hickory-proto@0.25.2` prints nothing). These ignores name the advisory
-    # IDs, so they also cover 0.26.x; the 0.26 copy must stay >= 0.26.2.
-    #
-    # Remove when libp2p moves to hickory 0.26, and immediately if anything
-    # enables libp2p's `dns` or `mdns` features.
-    "RUSTSEC-2026-0487",
-    "RUSTSEC-2026-0489",
-    "RUSTSEC-2026-0490",
-    "RUSTSEC-2026-0491",
-    "RUSTSEC-2026-0504",
-    "RUSTSEC-2026-0505",
-    "RUSTSEC-2026-0511",
-    "RUSTSEC-2026-0512",
-    "RUSTSEC-2026-0514",
-    "RUSTSEC-2026-0530",
-    "RUSTSEC-2026-0531",
-    "RUSTSEC-2026-0532",
-
-    # libp2p-gossipsub 0.49.5 — a PRUNE naming topics the node never joined
-    # still records a backoff for each, kept up to an hour after the peer
-    # disconnects, so a stream of PRUNEs can exhaust memory
-    # (RUSTSEC-2026-0534). Fixed in 0.50.1, which needs libp2p 0.57; the fix
-    # is backported upstream but no 0.49.x release carries it yet. 0.49.5
-    # already fixes the GRAFT variant (RUSTSEC-2026-0536).
-    #
-    # Accepted for now: the cost is memory on one node, bounded by the
-    # backoff expiry, and nothing launched depends on gossipsub uptime.
-    #
-    # Remove when a 0.49.x release carries the backport or the workspace
-    # moves to libp2p 0.57.
-    "RUSTSEC-2026-0534",
 ]
