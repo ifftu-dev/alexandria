@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { atlasLayout, MAP_HEIGHT, NARROW_MAP_WIDTH, NODE_HEIGHT, NODE_WIDTH, REGION_HEADING_BOX, REGION_WIDTH, regionCamera } from './atlasLayout'
+import { atlasLayout, MAP_HEIGHT, NODE_HEIGHT, NODE_WIDTH, REGION_HEADING_BOX, REGION_WIDTH, regionCamera } from './atlasLayout'
 import { atlasFieldColor, createAtlasPresenter } from './atlasPresentation'
-import { isDenseLayer, SIMPLE_DISC_SIZE, SIMPLE_LABEL_MAX_WIDTH, simpleLayout } from './simpleLayout'
+import { SIMPLE_DISC_SIZE, simpleLayout } from './simpleLayout'
+import { edgePaths as sortEdgePaths, simpleArrowHead, simpleDenseIds, simpleDimmed, simpleEdgeFaded, simpleEdgeShapes as buildSimpleEdgeShapes, simpleEmphasis as emphasisAround, simpleLabelQuiet, simpleNodeBoxes, type EdgeShape, type NodeBox } from './simpleGeometry'
 import AtlasNodeLayer from './AtlasNodeLayer.vue'
 import { animateMotion, motionDuration, useMotion } from '@/composables/useMotion'
 import type { SkillGraphView } from '@/composables/useSkillGraphView'
@@ -91,25 +92,15 @@ onBeforeUnmount(() => resizeObserver?.disconnect())
 // left untouched in Simple, so they are intact on the way back.
 const simple = computed(() => props.viewMode === 'simple')
 const simpleGeometry = computed(() => simpleLayout(props.model, width.value))
-/** A Simple node's box: its disc with room above for the ready-next halo, and its name below, as wide as the layout lets the name grow. */
-const SIMPLE_RING_ROOM = 8
-const SIMPLE_NODE_HEIGHT = SIMPLE_RING_ROOM + SIMPLE_DISC_SIZE + 44
-interface NodeBox { x: number; y: number; width: number; height: number }
 /** Where each node's element sits on the canvas, in the current view. */
 const nodeBoxes = computed(() => {
+  if (simple.value) return simpleNodeBoxes(simpleGeometry.value)
   const boxes = new Map<string, NodeBox>()
-  if (simple.value) {
-    for (const [skillId, point] of simpleGeometry.value.positions) {
-      const nodeWidth = simpleGeometry.value.labelWidths.get(skillId) ?? SIMPLE_LABEL_MAX_WIDTH
-      boxes.set(skillId, { x: point.x - nodeWidth / 2, y: point.y - SIMPLE_DISC_SIZE / 2 - SIMPLE_RING_ROOM, width: nodeWidth, height: SIMPLE_NODE_HEIGHT })
-    }
-  } else {
-    for (const [skillId, point] of layout.value.positions) boxes.set(skillId, { x: point.x, y: point.y, width: NODE_WIDTH, height: NODE_HEIGHT })
-  }
+  for (const [skillId, point] of layout.value.positions) boxes.set(skillId, { x: point.x, y: point.y, width: NODE_WIDTH, height: NODE_HEIGHT })
   return boxes
 })
 /** Nodes in layers too dense for every name: their plain Ready names wait for hover or focus. */
-const denseIds = computed(() => new Set(simpleGeometry.value.layers.filter(ids => isDenseLayer(ids.length, width.value)).flat()))
+const denseIds = computed(() => simpleDenseIds(simpleGeometry.value, width.value))
 const focusedRegion = computed(() => layout.value.regions.find(region => region.field.id === focusedFieldId.value))
 const camera = computed<AtlasCamera>(() => props.view.camera ?? regionCamera(focusedRegion.value ?? { x: 0, y: 0 }, width.value))
 interface MapRect { left: number; top: number; right: number; bottom: number }
@@ -254,20 +245,10 @@ const neighborhoodIds = computed(() => {
   }
   return ids
 })
-/**
- * Simple emphasis: an inspector focus when one is active, otherwise the
- * selection and its loaded one-hop prerequisites and dependents.
- */
-const simpleEmphasis = computed(() => {
-  if (neighborhoodIds.value.size > 0) return neighborhoodIds.value
-  const ids = new Set<string>()
-  if (!selected.value) return ids
-  ids.add(selected.value.skill.id)
-  for (const relation of [...selected.value.prerequisites, ...selected.value.dependents]) if (nodesById.value.has(relation.skillId)) ids.add(relation.skillId)
-  return ids
-})
+/** Simple emphasis: what a selection or inspector focus traces. */
+const simpleEmphasis = computed(() => emphasisAround(selected.value, neighborhoodIds.value, nodesById.value))
 function labelQuiet(node: AtlasNode): boolean {
-  return simple.value && denseIds.value.has(node.skill.id) && node.status === 'ready' && !node.readyNext && !simpleEmphasis.value.has(node.skill.id)
+  return simple.value && simpleLabelQuiet(node, denseIds.value, simpleEmphasis.value)
 }
 // The map dims everything outside an active focus, so the map always says which one.
 const focusSummary = computed(() => {
@@ -348,11 +329,23 @@ function preserveOverviewFocus(): void {
     if (document.activeElement === document.body) viewport.value?.querySelector<SVGSVGElement>('.atlas-map')?.focus({ preventScroll: true })
   })
 }
-function select(skillId: string): void {
+/** Scrolls a Simple node into view when it is off screen; Reduced and Off jump rather than glide. */
+function reveal(skillId: string): void {
+  void nextTick(() => {
+    const element = nodeElements().find(item => item.dataset.skill === skillId)?.querySelector('.map-node')
+    element?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: motionReduced.value ? 'auto' : 'smooth' })
+  })
+}
+/** Selects a skill. `fromElsewhere` marks a choice made off the map (the list, a relation), which Simple brings into view. */
+function select(skillId: string, fromElsewhere = false): void {
   const node = nodesById.value.get(skillId)
   const point = layout.value.positions.get(skillId)
   if (!node || !point) return
-  if (simple.value) { update({ selectedSkillId: skillId, inspectorCollapsed: false }); return }
+  if (simple.value) {
+    update({ selectedSkillId: skillId, inspectorCollapsed: false })
+    if (fromElsewhere) reveal(skillId)
+    return
+  }
   update({ selectedSkillId: skillId, focusedFieldId: node.fieldId, unassignedFocused: node.fieldId === null,
     inspectorCollapsed: false, camera: { x: point.x + NODE_WIDTH / 2, y: point.y + NODE_HEIGHT / 2, zoom: camera.value.zoom } })
   preserveOverviewFocus()
@@ -365,7 +358,7 @@ function focus(field: AtlasField): void {
   preserveOverviewFocus()
 }
 function dimmed(node: AtlasNode): boolean {
-  if (simple.value) return simpleEmphasis.value.size > 0 && !simpleEmphasis.value.has(node.skill.id)
+  if (simple.value) return simpleDimmed(simpleEmphasis.value, node.skill.id)
   if (node.skill.id === selectedId.value) return false
   return (rawQuery.value !== '' && !matchIds.value.has(node.skill.id)) ||
     (bloomEmphasis.value !== null && node.earnedBloom?.rank !== bloomEmphasis.value) ||
@@ -491,47 +484,24 @@ watch(() => props.viewMode, mode => {
   void nextTick(() => travel(before))
 })
 // Edge geometry depends only on the layout, so it is built once per model.
-const edgeShapes = computed(() => props.model.edges.flatMap(edge => {
+const edgeShapes = computed(() => props.model.edges.flatMap((edge): EdgeShape[] => {
   const from = layout.value.positions.get(edge.prerequisite_id)
   const to = layout.value.positions.get(edge.skill_id)
   if (!from || !to) return [] // Unloaded endpoints remain explicit in the inspector.
   const x1 = from.x + NODE_WIDTH, y1 = from.y + NODE_HEIGHT / 2
   const x2 = to.x, y2 = to.y + NODE_HEIGHT / 2
   const bend = Math.max(42, Math.min(160, Math.abs(x2 - x1) / 2))
-  // A cubic Bézier stays inside the box of its control points.
-  // Every curve ends heading right, so its arrowhead is a fixed triangle at its end.
+  // A cubic Bezier stays inside the box of its control points.
   return [{ edge, path: `M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`, x2, y2, tx: 1, ty: 0 }]
 }))
-const round = (value: number) => Math.round(value * 10) / 10
-// Simple edges run disc rim to disc rim, leaving along the reading direction
-// (rightward when wide, downward when narrow), with a head along their end.
-const simpleEdgeShapes = computed(() => {
-  const positions = simpleGeometry.value.positions, narrow = width.value < NARROW_MAP_WIDTH, radius = SIMPLE_DISC_SIZE / 2
-  return props.model.edges.flatMap(edge => {
-    const from = positions.get(edge.prerequisite_id), to = positions.get(edge.skill_id)
-    if (!from || !to) return []
-    const length = Math.hypot(to.x - from.x, to.y - from.y)
-    if (length === 0) return []
-    const ux = (to.x - from.x) / length, uy = (to.y - from.y) / length
-    const x1 = round(from.x + ux * radius), y1 = round(from.y + uy * radius)
-    const x2 = round(to.x - ux * (radius + 4)), y2 = round(to.y - uy * (radius + 4))
-    const c1x = narrow ? x1 : round((x1 + x2) / 2), c1y = narrow ? round((y1 + y2) / 2) : y1
-    const c2x = narrow ? x2 : c1x, c2y = narrow ? c1y : y2
-    const end = Math.hypot(x2 - c2x, y2 - c2y)
-    const tx = end ? (x2 - c2x) / end : ux, ty = end ? (y2 - c2y) / end : uy
-    return [{ edge, path: `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`, x2, y2, tx, ty }]
-  })
-})
-/** An arrowhead with its tip at the end of an edge, pointing along its end direction. */
-function arrowHead(shape: { x2: number; y2: number; tx: number; ty: number }, length: number): string {
-  const { x2, y2, tx, ty } = shape
-  if (!simple.value) return `M ${x2} ${y2} l ${-length} ${-length / 2} l 0 ${length} z`
-  const bx = x2 - tx * length, by = y2 - ty * length, half = length / 2
-  return `M ${x2} ${y2} L ${round(bx - ty * half)} ${round(by + tx * half)} L ${round(bx + ty * half)} ${round(by - tx * half)} z`
+const simpleEdgeShapes = computed(() => buildSimpleEdgeShapes(props.model.edges, simpleGeometry.value))
+/** Every Detailed curve ends heading right, so its arrowhead is a fixed triangle at its end. */
+function detailedArrowHead({ x2, y2 }: EdgeShape, length: number): string {
+  return `M ${x2} ${y2} l ${-length} ${-length / 2} l 0 ${length} z`
 }
-// All edges are four paths (lines and arrowheads, plain and highlighted), drawn
-// whole and rebuilt only when the model or the focus changes. A pan or a
-// redraw of the nodes never touches them, and they add four elements, not thousands.
+// All edges are a few paths (lines and arrowheads per emphasis), drawn whole
+// and rebuilt only when the model or the focus changes. A pan or a redraw of
+// the nodes never touches them, and they add a few elements, not thousands.
 function edgeActive(edge: AtlasModel['edges'][number]): boolean {
   return neighborhoodIds.value.size > 0
     ? neighborhoodIds.value.has(edge.prerequisite_id) && neighborhoodIds.value.has(edge.skill_id)
@@ -539,15 +509,9 @@ function edgeActive(edge: AtlasModel['edges'][number]): boolean {
 }
 // Simple also fades the edges that leave the emphasised neighbourhood.
 const edgePaths = computed(() => {
-  const plain: string[] = [], plainHeads: string[] = [], active: string[] = [], activeHeads: string[] = [], faded: string[] = [], fadedHeads: string[] = []
-  const emphasis = simple.value ? simpleEmphasis.value : new Set<string>()
-  for (const shape of simple.value ? simpleEdgeShapes.value : edgeShapes.value) {
-    const { edge, path } = shape
-    if (edgeActive(edge)) { active.push(path); activeHeads.push(arrowHead(shape, 14)) }
-    else if (emphasis.size > 0 && !(emphasis.has(edge.prerequisite_id) && emphasis.has(edge.skill_id))) { faded.push(path); fadedHeads.push(arrowHead(shape, 10)) }
-    else { plain.push(path); plainHeads.push(arrowHead(shape, 10)) }
-  }
-  return { plain: plain.join(' '), plainHeads: plainHeads.join(' '), active: active.join(' '), activeHeads: activeHeads.join(' '), faded: faded.join(' '), fadedHeads: fadedHeads.join(' ') }
+  if (!simple.value) return sortEdgePaths(edgeShapes.value, edge => edgeActive(edge) ? 'active' : 'plain', detailedArrowHead)
+  const emphasis = simpleEmphasis.value
+  return sortEdgePaths(simpleEdgeShapes.value, edge => edgeActive(edge) ? 'active' : simpleEdgeFaded(emphasis, edge) ? 'faded' : 'plain', simpleArrowHead)
 })
 // Overview summaries are built once per model, in one pass over its edges.
 const fieldConnections = computed(() => {
@@ -646,9 +610,9 @@ function setBloom(event: Event): void {
                   </g>
                 </template>
                 <g class="map-edges" aria-hidden="true">
-                  <template v-if="simple"><path class="map-edge map-edge-faded" :d="edgePaths.faded" /><path class="map-edge-head map-edge-faded" :d="edgePaths.fadedHeads" /></template>
-                  <path class="map-edge" :d="edgePaths.plain" /><path class="map-edge-head" :d="edgePaths.plainHeads" />
-                  <path class="map-edge map-edge-active" :d="edgePaths.active" /><path class="map-edge-head map-edge-active" :d="edgePaths.activeHeads" />
+                  <template v-if="simple"><path class="map-edge map-edge-faded" :d="edgePaths.faded.path" /><path class="map-edge-head map-edge-faded" :d="edgePaths.faded.heads" /></template>
+                  <path class="map-edge" :d="edgePaths.plain.path" /><path class="map-edge-head" :d="edgePaths.plain.heads" />
+                  <path class="map-edge map-edge-active" :d="edgePaths.active.path" /><path class="map-edge-head map-edge-active" :d="edgePaths.active.heads" />
                 </g>
                 <AtlasNodeLayer v-slot="{ items }" :source="nodeLayer">
                   <foreignObject v-for="node in items" :key="node.skill.id" v-memo="[node, nodeBoxes, simple, locale, onScreen(node), node.skill.id === view.selectedSkillId, node.readyNext, bloomMatch(node), dimmed(node), labelQuiet(node), highlightedIds.includes(node.skill.id)]" class="map-node-box" :data-skill="node.skill.id" :x="nodeBoxes.get(node.skill.id)?.x" :y="nodeBoxes.get(node.skill.id)?.y" :width="nodeBoxes.get(node.skill.id)?.width" :height="nodeBoxes.get(node.skill.id)?.height" :style="{ '--field': color(node.fieldId) }">
@@ -678,7 +642,7 @@ function setBloom(event: Event): void {
         <details class="atlas-list" open>
           <summary>{{ t('skills.atlas.list') }} <span>{{ t('skills.atlas.results', { count: matches.length }) }}</span></summary>
           <!-- Memoised: a pan or zoom re-renders the map, never these rows. -->
-          <ul ref="list" v-memo="[listedMatches, view.selectedSkillId, view.bloomEmphasis, simple, locale, model]" :aria-label="t('skills.atlas.list')" @scroll.passive="listScrolled"><li v-for="node in listedMatches" :key="node.skill.id"><button :class="{ 'is-bloom-match': bloomMatch(node), 'is-ready-next': node.readyNext }" type="button" :style="{ '--field': color(node.fieldId) }" :aria-label="present.accessibleName(node)" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)"><i class="field-dot" aria-hidden="true" /><span><strong dir="auto">{{ node.skill.name }}</strong><small>{{ fieldName(node.fieldId) }}</small></span><span class="list-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓ </span><span v-else-if="node.readyNext" aria-hidden="true">◎ </span>{{ status(node) }}</span></button></li></ul>
+          <ul ref="list" v-memo="[listedMatches, view.selectedSkillId, view.bloomEmphasis, simple, locale, model]" :aria-label="t('skills.atlas.list')" @scroll.passive="listScrolled"><li v-for="node in listedMatches" :key="node.skill.id"><button :class="{ 'is-bloom-match': bloomMatch(node), 'is-ready-next': node.readyNext }" type="button" :style="{ '--field': color(node.fieldId) }" :aria-label="present.accessibleName(node)" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id, true)"><i class="field-dot" aria-hidden="true" /><span><strong dir="auto">{{ node.skill.name }}</strong><small>{{ fieldName(node.fieldId) }}</small></span><span class="list-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓ </span><span v-else-if="node.readyNext" aria-hidden="true">◎ </span>{{ status(node) }}</span></button></li></ul>
           <button v-if="unlisted > 0" class="list-more" type="button" @click="showMoreMatches(true)">{{ t('skills.atlas.showMoreSkills', { count: Math.min(LIST_WINDOW, unlisted) }) }}</button>
           <p v-if="!matches.length">{{ t('skills.atlas.noResults') }}</p>
         </details>
@@ -699,7 +663,7 @@ function setBloom(event: Event): void {
             <div class="neighborhood-controls"><button type="button" :aria-pressed="view.neighborhood === 'prerequisites'" @click="update({ neighborhood: view.neighborhood === 'prerequisites' ? 'none' : 'prerequisites' })">{{ t('skills.atlas.focusPrerequisites') }}</button><button type="button" :aria-pressed="view.neighborhood === 'dependents'" @click="update({ neighborhood: view.neighborhood === 'dependents' ? 'none' : 'dependents' })">{{ t('skills.atlas.focusDependents') }}</button><button v-if="view.neighborhood !== 'none'" type="button" @click="update({ neighborhood: 'none' })">{{ t('skills.atlas.allConnections') }}</button><label v-if="view.neighborhood !== 'none'"><span>{{ t('skills.atlas.depth') }}</span><select :value="view.neighborhoodDepth" @change="update({ neighborhoodDepth: Number(($event.target as HTMLSelectElement).value) === 2 ? 2 : 1 })"><option :value="1">{{ t('skills.atlas.oneStep') }}</option><option :value="2">{{ t('skills.atlas.twoSteps') }}</option></select></label></div>
             <section v-for="direction in (['prerequisites', 'dependents'] as const)" :key="direction" class="inspector-relations">
               <h3>{{ t(`skills.atlas.${direction}`) }} <span>{{ selected[direction].length }}</span></h3>
-              <ul><li v-for="relation in selected[direction]" :key="relation.skillId"><button v-if="relation.loaded" type="button" :aria-label="relationLabel(relation)" @click="select(relation.skillId)"><strong dir="auto">{{ relation.name }}</strong><small>{{ fieldName(nodesById.get(relation.skillId)?.fieldId ?? null) }} · {{ present.state(relationNode(relation)) }}</small></button><p v-else>{{ relation.name }} · {{ t('skills.atlas.notLoaded') }}</p></li></ul>
+              <ul><li v-for="relation in selected[direction]" :key="relation.skillId"><button v-if="relation.loaded" type="button" :aria-label="relationLabel(relation)" @click="select(relation.skillId, true)"><strong dir="auto">{{ relation.name }}</strong><small>{{ fieldName(nodesById.get(relation.skillId)?.fieldId ?? null) }} · {{ present.state(relationNode(relation)) }}</small></button><p v-else>{{ relation.name }} · {{ t('skills.atlas.notLoaded') }}</p></li></ul>
               <p v-if="!selected[direction].length" class="atlas-muted">{{ t('skills.atlas.noRelations') }}</p>
             </section>
           </template>

@@ -100,26 +100,58 @@ describe('Simple layout', () => {
     expect(justWide.get('m1')?.x).toBe(justWide.get('d1')?.x)
   })
 
-  it('grows a wide layout so no layer packs its discs closer than a disc and its label, centring smaller layers', () => {
-    expect(SIMPLE_MIN_DISC_PITCH).toBeGreaterThan(SIMPLE_DISC_SIZE)
-    const roots = Array.from({ length: 14 }, (_, index) => skill(`r${String(index).padStart(2, '0')}`, `Root ${index}`, 'math'))
-    const followers = [skill('f1', 'Follow 1', 'math'), skill('f2', 'Follow 2', 'math')]
-    const layout = simpleLayout(atlas([...roots, ...followers], [edge('f1', 'r00'), edge('f2', 'r01')]), WIDE)
-    const at = (id: string) => layout.positions.get(id) ?? { x: NaN, y: NaN }
-    const big = layout.layers[0]!.map(id => at(id).y)
-    const gaps = big.slice(1).map((y, index) => y - big[index]!)
-    gaps.forEach(gap => expect(gap).toBeGreaterThanOrEqual(SIMPLE_MIN_DISC_PITCH))
-    // The fixed height is the floor: the tall layer pushes the layout past it.
-    const extent = 14 * SIMPLE_MIN_DISC_PITCH
-    expect(extent).toBeGreaterThan(SIMPLE_WIDE_HEIGHT)
-    expect(big[0]! + big[big.length - 1]!).toBeCloseTo(extent)
-    expect(layout.height).toBeGreaterThan(big[big.length - 1]! + SIMPLE_DISC_SIZE / 2)
-    // The two-node layer keeps its usual spacing, centred on the taller extent.
-    const small = layout.layers[1]!.map(id => at(id).y)
-    expect(small[1]! - small[0]!).toBeCloseTo(SIMPLE_WIDE_HEIGHT / 2)
-    expect(small[0]! + small[1]!).toBeCloseTo(extent)
-    // A crowded wide layer grows rather than holding names back.
-    expect(isDenseLayer(14, WIDE)).toBe(false)
+  it('keeps left-to-right layers only while the most crowded layer fits the fixed height at the minimum pitch', () => {
+    // Five discs fit 540px at a 96px pitch; six do not.
+    expect(SIMPLE_MIN_DISC_PITCH).toBe(96)
+    expect(SIMPLE_WIDE_HEIGHT).toBe(540)
+    const roots = (count: number) => Array.from({ length: count }, (_, index) => skill(`r${String(index).padStart(2, '0')}`, `Root ${index}`, 'math'))
+    const fits = simpleLayout(atlas([...roots(5), skill('f1', 'Follow 1', 'math')], [edge('f1', 'r00')]), WIDE)
+    expect(fits.flow).toBe('columns')
+    expect(new Set(fits.layers[0]!.map(id => fits.positions.get(id)!.x)).size).toBe(1)
+    const crowdedColumn = simpleLayout(atlas([...roots(6), skill('f1', 'Follow 1', 'math')], [edge('f1', 'r00')]), WIDE)
+    expect(crowdedColumn.flow).toBe('rows')
+    // The roots now share a row, and the follower sits below it.
+    expect(new Set(crowdedColumn.layers[0]!.map(id => crowdedColumn.positions.get(id)!.y)).size).toBe(1)
+    expect(crowdedColumn.positions.get('f1')!.y).toBeGreaterThan(crowdedColumn.positions.get('r00')!.y + SIMPLE_DISC_SIZE)
+    expect(crowdedColumn.height).toBeLessThan(fits.height)
+    // Phones always read top to bottom.
+    expect(simpleLayout(atlas(), 360).flow).toBe('rows')
+    expect(simpleLayout(atlas(), WIDE).flow).toBe('columns')
+  })
+
+  it('wraps each crowded wide layer onto rows that use the full width, layers reading top to bottom', () => {
+    const layout = simpleLayout(crowded(), WIDE)
+    expect(layout.flow).toBe('rows')
+    const at = (id: string) => layout.positions.get(id)!
+    // Forty roots at 1200px take three rows of up to fourteen, spread edge to edge.
+    const rootRows = new Map<number, number[]>()
+    for (const id of layout.layers[0]!) {
+      const { x, y } = at(id)
+      const row = rootRows.get(y) ?? []
+      row.push(x)
+      rootRows.set(y, row)
+    }
+    // Staggering drops alternate discs, so a row shows as two y values.
+    expect(rootRows.size).toBe(6)
+    const xs = layout.layers[0]!.slice(0, 14).map(id => at(id).x)
+    expect(Math.min(...xs)).toBeLessThan(60)
+    expect(Math.max(...xs)).toBeGreaterThan(WIDE - 60)
+    const ys = layout.layers.map(layer => layer.map(id => at(id).y))
+    for (let layer = 1; layer < ys.length; layer++) expect(Math.min(...ys[layer]!)).toBeGreaterThan(Math.max(...ys[layer - 1]!) + SIMPLE_DISC_SIZE)
+    const points = [...layout.positions.values()]
+    for (const [index, a] of points.entries()) for (const b of points.slice(index + 1)) expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(SIMPLE_DISC_SIZE)
+  })
+
+  it('keeps a hundred skills in three layers under 2,000px tall at 1,280px wide', () => {
+    const pad = (index: number) => String(index).padStart(3, '0')
+    const roots = Array.from({ length: 40 }, (_, index) => skill(`r${pad(index)}`, `Root ${index}`, index % 3 ? 'math' : 'data'))
+    const middle = Array.from({ length: 35 }, (_, index) => skill(`m${pad(index)}`, `Middle ${index}`, 'math'))
+    const leaves = Array.from({ length: 25 }, (_, index) => skill(`l${pad(index)}`, `Leaf ${index}`, 'data'))
+    const edges = [...middle.map((item, index) => edge(item.id, `r${pad(index)}`)), ...leaves.map((item, index) => edge(item.id, `m${pad(index)}`))]
+    const layout = simpleLayout(atlas([...roots, ...middle, ...leaves], edges), 1280)
+    expect(layout.layers.map(layer => layer.length)).toEqual([40, 35, 25])
+    expect(layout.positions.size).toBe(100)
+    expect(layout.height).toBeLessThan(2000)
   })
 
   it('wraps a crowded narrow layer onto extra rows so no two discs overlap down to 320px', () => {
@@ -203,17 +235,19 @@ describe('Simple layout', () => {
   it('calls a layer dense exactly when its nodes sit closer than the label legibility threshold', () => {
     for (const width of [WIDE, 360]) {
       const verdicts = new Set<boolean>()
-      for (let count = 1; count <= 12; count++) {
+      for (let count = 1; count <= 20; count++) {
         const roots = Array.from({ length: count }, (_, index) => skill(`r${String(index).padStart(2, '0')}`, `Root ${index}`, 'math'))
         const layout = simpleLayout(atlas(roots, []), width)
         const [first, second] = (layout.layers[0] ?? []).map(id => layout.positions.get(id) ?? { x: NaN, y: NaN })
-        // Pitch runs along the layer: down a wide column, across a narrow row (ignoring stagger).
-        const pitch = first && second ? (width < NARROW_MAP_WIDTH ? second.x - first.x : second.y - first.y) : Infinity
-        expect(isDenseLayer(count, width)).toBe(pitch < SIMPLE_LABEL_MIN_PITCH)
-        verdicts.add(isDenseLayer(count, width))
+        // Pitch runs along the layer: down a column, across a row (ignoring stagger).
+        const pitch = first && second ? (layout.flow === 'rows' ? second.x - first.x : second.y - first.y) : Infinity
+        expect(isDenseLayer(count, width, layout.flow)).toBe(pitch < SIMPLE_LABEL_MIN_PITCH)
+        verdicts.add(isDenseLayer(count, width, layout.flow))
+        // Columns only hold layers that fit at a legible pitch.
+        if (layout.flow === 'columns') expect(isDenseLayer(count, width, layout.flow)).toBe(false)
       }
-      // Wide layers grow past crowding instead, so only narrow rows ever thin their names.
-      expect([...verdicts].sort()).toEqual(width < NARROW_MAP_WIDTH ? [false, true] : [false])
+      // Rows full to capacity thin their names at either width.
+      expect([...verdicts].sort()).toEqual([false, true])
     }
   })
 

@@ -119,6 +119,47 @@ describe('Simple and Detailed views', () => {
     expect(wrapper.props('view')).toEqual(explored)
   })
 
+  it('brings a skill chosen from the list or an inspector relation into view on the Simple map, instantly under reduced motion', async () => {
+    const scrolls: { skill: string | undefined; options: unknown }[] = []
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (this: Element, options?: unknown) {
+      scrolls.push({ skill: this.closest('[data-skill]')?.getAttribute('data-skill') ?? undefined, options })
+    }
+    try {
+      const listRow = (wrapper: VueWrapper, name: string) => wrapper.get('.atlas-list').findAll('button').find(item => item.attributes('aria-label') === name)!
+      const full = simple(initialView(), false)
+      // A press on the map itself is already in view.
+      await button(full, BRIDGES).trigger('click')
+      await nextTick()
+      expect(scrolls).toEqual([])
+      await listRow(full, CRAFT).trigger('click')
+      await nextTick()
+      // Nearest: a node already on screen does not move.
+      expect(scrolls).toEqual([{ skill: 'c', options: { block: 'nearest', inline: 'nearest', behavior: 'smooth' } }])
+      await listRow(full, BRIDGES).trigger('click')
+      await full.get('.inspector-relations').findAll('button')[0]!.trigger('click')
+      await nextTick()
+      expect(scrolls.map(item => item.skill)).toEqual(['c', 'b', 'a'])
+      full.unmount()
+
+      scrolls.length = 0
+      const reduced = simple(initialView(), true)
+      await listRow(reduced, CRAFT).trigger('click')
+      await nextTick()
+      expect(scrolls).toEqual([{ skill: 'c', options: { block: 'nearest', inline: 'nearest', behavior: 'auto' } }])
+      reduced.unmount()
+
+      // Detailed moves its camera instead.
+      scrolls.length = 0
+      const detailed = setup()
+      await listRow(detailed, CRAFT).trigger('click')
+      await nextTick()
+      expect(scrolls).toEqual([])
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
+  })
+
   it('traces a selection in Simple: its edges active, everything past one hop dimmed, cleared by reset; inspector focus still applies', async () => {
     const id = (name: string) => `s-${name}`
     const chain = ['one', 'two', 'three', 'four'].map(name => skill(id(name), name, 'Line'))
@@ -157,7 +198,7 @@ describe('Simple and Detailed views', () => {
     const next = Array.from({ length: 10 }, (_, index) => skill(`d${pad(index)}`, `Next ${pad(index)}`, 'Wide', { prerequisite_count: 1 }))
     const edges = next.map((item, index) => ({ skill_id: item.id, skill_name: item.name, skill_bloom: 'create',
       prerequisite_id: index < 5 ? 'r00' : 'r01', prerequisite_name: '', prerequisite_bloom: 'create' }))
-    // Wide layers grow past crowding; a phone's rows are where names get held back.
+    // Rows full to capacity are where names get held back.
     mapWidth(360)
     const wrapper = simple()
     await wrapper.setProps({ model: buildSkillAtlas({ skills: [...roots, ...next], edges, activeCredentials: [credential('r00', 2)], subjectDid: 'did:me' }) })
