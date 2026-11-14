@@ -13,6 +13,7 @@
 import { ref, computed } from 'vue'
 import type { SkillInfo, SkillGraphEdge } from '@/types'
 import { BLOOM_FILLS, bloomFill, bloomRank } from '@/utils/bloom'
+import { longestPathLayers } from '@/utils/skillLayers'
 
 const props = defineProps<{
   skills: SkillInfo[]
@@ -58,40 +59,8 @@ function nodeWidth(bloom: string): number {
 const layout = computed(() => {
   const skillMap = new Map(props.skills.map(s => [s.id, s]))
 
-  // Build adjacency: prerequisite -> [dependents]
-  const dependents = new Map<string, string[]>()
-  const prerequisites = new Map<string, string[]>()
-  const nodeIds = new Set(props.skills.map(s => s.id))
-
-  for (const e of props.edges) {
-    if (!nodeIds.has(e.skill_id) || !nodeIds.has(e.prerequisite_id)) continue
-    if (!dependents.has(e.prerequisite_id)) dependents.set(e.prerequisite_id, [])
-    dependents.get(e.prerequisite_id)!.push(e.skill_id)
-    if (!prerequisites.has(e.skill_id)) prerequisites.set(e.skill_id, [])
-    prerequisites.get(e.skill_id)!.push(e.prerequisite_id)
-  }
-
   // Compute layers via longest path from roots
-  const layers = new Map<string, number>()
-
-  function computeLayer(id: string, visited: Set<string>): number {
-    if (layers.has(id)) return layers.get(id)!
-    if (visited.has(id)) return 0 // cycle protection
-    visited.add(id)
-
-    const prereqs = prerequisites.get(id) ?? []
-    const maxPrereqLayer = prereqs.length > 0
-      ? Math.max(...prereqs.map(p => computeLayer(p, visited)))
-      : -1
-
-    const layer = maxPrereqLayer + 1
-    layers.set(id, layer)
-    return layer
-  }
-
-  for (const id of nodeIds) {
-    computeLayer(id, new Set())
-  }
+  const layers = longestPathLayers(props.skills.map(s => s.id), props.edges)
 
   // Group by layer
   const layerGroups = new Map<number, string[]>()
