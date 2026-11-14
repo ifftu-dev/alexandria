@@ -198,6 +198,18 @@ pub mod keys {
         default: || false,
     };
 
+    pub const UI_SKILL_GRAPH_VIEW: SettingKey<String> = SettingKey {
+        key: "ui.skill_graph_view",
+        scope: Scope::Sync,
+        category: "Appearance",
+        label: "Skill graph view",
+        description: "Simple or detailed. Every skill graph opens in the last view you chose.",
+        default: || "simple".to_string(),
+    };
+
+    /// The only values [`UI_SKILL_GRAPH_VIEW`] accepts.
+    pub const UI_SKILL_GRAPH_VIEW_VALUES: &[&str] = &["simple", "detailed"];
+
     pub const UI_ACTIVE_MODE: SettingKey<String> = SettingKey {
         key: "ui.active_mode",
         scope: Scope::Device,
@@ -609,6 +621,7 @@ pub fn all_entries(
         entry!(UI_ACTIVE_MODE),
         entry!(UI_SIDEBAR_COLLAPSED),
         entry!(UI_SIDEBAR_SECTIONS),
+        entry!(UI_SKILL_GRAPH_VIEW),
         entry!(UI_KEYBOARD_SHORTCUTS),
         entry!(UI_OMNI_RECENTS),
         entry!(SENTINEL_AI_SCORING),
@@ -660,6 +673,7 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
     check!(UI_ACTIVE_MODE);
     check!(UI_SIDEBAR_COLLAPSED);
     check!(UI_SIDEBAR_SECTIONS);
+    check!(UI_SKILL_GRAPH_VIEW);
     check!(UI_KEYBOARD_SHORTCUTS);
     check!(UI_OMNI_RECENTS);
     check!(SENTINEL_AI_SCORING);
@@ -691,6 +705,16 @@ pub fn lookup_meta(key: &str) -> Option<(Scope, &'static str)> {
     check!(LEARNER_TARGETS);
     check!(CHAT_REVIEW_BEFORE_SEND);
     check!(IDENTITY_LOCAL_DID);
+    None
+}
+
+/// The closed set of values a string setting accepts, for keys that
+/// declare one. `SettingsStore::set_raw` refuses anything outside it.
+pub fn allowed_values(key: &str) -> Option<&'static [&'static str]> {
+    use keys::*;
+    if key == UI_SKILL_GRAPH_VIEW.key {
+        return Some(UI_SKILL_GRAPH_VIEW_VALUES);
+    }
     None
 }
 
@@ -782,6 +806,25 @@ mod tests {
         assert_eq!(motion.current_value, "system");
         assert_eq!(motion.scope, Scope::Device);
         assert_eq!(lookup_meta("ui.motion"), Some((Scope::Device, "string")));
+    }
+
+    /// The Simple/Detailed skill graph view is one profile preference
+    /// that follows the learner across devices and starts on Simple.
+    #[test]
+    fn skill_graph_view_is_a_synced_preference_defaulting_to_simple() {
+        let overrides = std::collections::HashMap::new();
+        let entries = all_entries(&overrides);
+        let view = entries
+            .iter()
+            .find(|e| e.key == "ui.skill_graph_view")
+            .expect("ui.skill_graph_view is registered");
+        assert_eq!(view.default_value, "simple");
+        assert_eq!(view.current_value, "simple");
+        assert_eq!(view.scope, Scope::Sync);
+        assert_eq!(
+            lookup_meta("ui.skill_graph_view"),
+            Some((Scope::Sync, "string"))
+        );
     }
 
     #[test]

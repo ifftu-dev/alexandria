@@ -84,12 +84,15 @@ impl SettingsStore {
 
         // Best-effort type validation so the frontend learns of bad
         // values now rather than after the next get(). The actual
-        // parse round-trips through SettingValue impls.
+        // parse round-trips through SettingValue impls; string keys
+        // that declare a closed value set are held to it.
         let ok = match kind {
             "bool" => bool::from_setting_string(value).is_some(),
             "int" => i64::from_setting_string(value).is_some(),
             "float" => f64::from_setting_string(value).is_some(),
-            "string" => true,
+            "string" => {
+                registry::allowed_values(key).is_none_or(|allowed| allowed.contains(&value))
+            }
             "json" => super::registry::JsonSetting::from_setting_string(value).is_some(),
             _ => true,
         };
@@ -254,6 +257,23 @@ mod tests {
         let err =
             SettingsStore::set_raw(db.conn(), "sentinel.ai_scoring_enabled", "maybe").unwrap_err();
         assert!(matches!(err, SettingsError::InvalidValue { .. }));
+    }
+
+    #[test]
+    fn set_raw_holds_skill_graph_view_to_simple_or_detailed() {
+        let db = db();
+        let err = SettingsStore::set_raw(db.conn(), "ui.skill_graph_view", "fancy").unwrap_err();
+        assert!(matches!(err, SettingsError::InvalidValue { .. }));
+        assert_eq!(
+            SettingsStore::get(db.conn(), keys::UI_SKILL_GRAPH_VIEW),
+            "simple"
+        );
+
+        SettingsStore::set_raw(db.conn(), "ui.skill_graph_view", "detailed").unwrap();
+        assert_eq!(
+            SettingsStore::get(db.conn(), keys::UI_SKILL_GRAPH_VIEW),
+            "detailed"
+        );
     }
 
     #[test]
