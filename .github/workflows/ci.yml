@@ -274,10 +274,11 @@ jobs:
         # the README alone, imports nothing but Node's standard library, and
         # checks the same credential, limit and endorsement vectors the Rust
         # verifier does. `crates/` is a backend prefix, so editing a vector or
-        # the verifier itself triggers it.
+        # the verifier itself triggers it. Run from the repository root so a
+        # verifier that reads its vectors from the working directory fails.
         if: needs.changes.outputs.backend == 'true'
-        working-directory: alexandria/crates/alexandria-verify/tests/vectors
-        run: node independent-verifier.mjs
+        working-directory: alexandria
+        run: node crates/alexandria-verify/tests/vectors/independent-verifier.mjs
 
       - name: Schema document matches the baseline
         # docs/database-schema.md is generated from schema.rs. The previous
