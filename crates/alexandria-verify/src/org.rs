@@ -18,6 +18,11 @@
 //! relayed. Nobody between the two has to be trusted, including the service
 //! that carried the request.
 //!
+//! The same record backs the credentials an organisation issues. Such a
+//! credential's issuer is an object naming the signing key's DID with the
+//! organisation's `name` and `domain`, and [`organisation_backing`] reports
+//! whether that domain's descriptor lists the key.
+//!
 //! The crate performs no I/O: callers resolve the TXT records and hand them
 //! to [`descriptor_from_txt`].
 
@@ -33,8 +38,9 @@ pub const TXT_LABEL: &str = "_alexandria";
 /// The record's `v=` value.
 pub const TXT_VERSION: &str = "alexandria-org1";
 
-/// The most signing keys a descriptor may list: enough to rotate, few enough
-/// that a descriptor is not a key dump.
+/// The most signing keys a descriptor may list: enough for an old key and its
+/// successor to be listed together, few enough that a descriptor is not a key
+/// dump.
 pub const MAX_KEYS: usize = 8;
 
 /// The longest organisation name accepted.

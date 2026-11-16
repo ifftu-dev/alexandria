@@ -42,7 +42,8 @@ pub enum TrustProfile {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProfileSignal {
-    /// A platform attestation that verifies (`device_attested`).
+    /// A platform attestation of the session (App Attest or Play Integrity)
+    /// whose evidence verifies, credential- or session-bound.
     DeviceAttestation,
     /// Face presence, liveness and gaze from the camera.
     Camera,

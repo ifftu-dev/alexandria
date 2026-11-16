@@ -80,8 +80,8 @@ pub struct IssuancePolicy {
     /// Maximum tolerated warning flags.
     #[serde(default)]
     pub max_warning: Option<i64>,
-    /// If true, the session status must be `completed` (clean): `flagged`
-    /// and `suspended` are refused.
+    /// If true, the session status must be `completed` (clean): `review`,
+    /// `flagged`, `suspended` and any other value are refused.
     #[serde(default)]
     pub require_clean: bool,
     /// Minimum verified assurance level: `local` (met by any credential) or

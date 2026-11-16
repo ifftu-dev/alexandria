@@ -15,9 +15,9 @@
 //! §4.1 (Subject identified by DID), §5.1 (MUST support at least one
 //! DID method — we ship `did:key`).
 //!
-//! A `did:key` is its key: it resolves to the key in its identifier, always.
-//! There is no rotation overlay. An identity that needs a new key is a new
-//! `did:key`.
+//! A `did:key` is its key: it resolves to the key in its identifier, always,
+//! and no registry state can change it. An identity that needs a new key is a
+//! new `did:key`.
 
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
