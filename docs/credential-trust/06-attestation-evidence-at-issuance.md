@@ -47,3 +47,5 @@ A credential issued against an attested integrity session carries attestation ev
 - Wiring: `assessment_grade` uses `PairedAttester`; adaptive finalize uses the native source (a paired phone's adaptive session issues session-bound) and reports the binding too. Other `issue()` callers get native evidence.
 - Size: evidence at generous platform sizes (12 KiB attestation object, 8 KiB tokens) is under a quarter of the 256 KiB credential limit and the 64 KiB string limit. No limit changed; limit vectors untouched.
 - Per-session keys unchanged: each session generates its own App Attest key.
+
+2026-11-16 (review fix): evidence is no longer obtained inside the grading write transaction. Grading and adaptive finalize rehearse in a transaction that is rolled back (`credentials::RecordingAttester`), ask the attester with no database job running, then commit with the answer (`credentials::PreparedEvidence`); a credential whose binding digest changed in between is session-bound with that reason. The 15 s phone wait no longer holds the database thread.

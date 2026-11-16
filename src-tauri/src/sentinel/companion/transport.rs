@@ -594,8 +594,9 @@ async fn signed(
 
 /// Issuance's evidence port on a desktop: a paired phone's session asks the
 /// phone over the companion link ([`CompanionHub::request_binding`]); any
-/// other session uses this device's own platform. Called from the database
-/// thread, which it blocks until the phone answers or the wait times out.
+/// other session uses this device's own platform. Blocks its caller until
+/// the phone answers or the wait times out, so grading calls it between its
+/// database jobs, never inside one ([`crate::credentials::PreparedEvidence`]).
 pub struct PairedAttester {
     pub hub: CompanionHub,
     pub runtime: tokio::runtime::Handle,

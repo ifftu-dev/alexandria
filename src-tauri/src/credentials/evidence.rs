@@ -130,6 +130,87 @@ pub(crate) fn attach(
     Ok(EvidenceBinding::Session { reason })
 }
 
+/// What an issuance pass asked its attester for: evidence over `digest`
+/// from `session_id`'s attested key.
+#[derive(Debug, Clone)]
+pub struct BindRequest {
+    pub session_id: String,
+    pub record: DeviceAttestation,
+    pub digest: [u8; 32],
+}
+
+/// An attester that answers nothing and remembers what it was asked, for a
+/// rehearsal pass rolled back before any platform call is made.
+#[derive(Default)]
+pub struct RecordingAttester(std::sync::Mutex<Option<BindRequest>>);
+
+impl RecordingAttester {
+    /// The request the rehearsal made, if it reached the attester.
+    pub fn take(self) -> Option<BindRequest> {
+        self.0.into_inner().ok().flatten()
+    }
+}
+
+impl BindingAttester for RecordingAttester {
+    fn bind(
+        &self,
+        session_id: &str,
+        record: &DeviceAttestation,
+        digest: &[u8; 32],
+    ) -> Result<String, String> {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = Some(BindRequest {
+                session_id: session_id.to_string(),
+                record: record.clone(),
+                digest: *digest,
+            });
+        }
+        Err("evidence is obtained after the rehearsal".into())
+    }
+}
+
+/// Evidence obtained before the issuing transaction opened, answered to the
+/// one digest it was obtained for.
+///
+/// Issuance that waits on a platform (a paired phone answers in seconds)
+/// runs in two passes: a rehearsal in a transaction that is rolled back,
+/// with a [`RecordingAttester`], learns the binding digest; the platform is
+/// asked with no transaction open; the committed pass then answers from this.
+/// A committed pass whose digest differs (the credential changed in between)
+/// falls back to session-bound evidence with that reason.
+#[derive(Debug, Clone)]
+pub struct PreparedEvidence {
+    obtained: Option<([u8; 32], Result<String, String>)>,
+}
+
+impl PreparedEvidence {
+    /// Ask `attester` for what `request` names, if anything. Call with no
+    /// transaction open: this is the wait.
+    pub fn obtain(request: Option<BindRequest>, attester: &dyn BindingAttester) -> Self {
+        Self {
+            obtained: request.map(|request| {
+                let answer = attester.bind(&request.session_id, &request.record, &request.digest);
+                (request.digest, answer)
+            }),
+        }
+    }
+}
+
+impl BindingAttester for PreparedEvidence {
+    fn bind(
+        &self,
+        _session_id: &str,
+        _record: &DeviceAttestation,
+        digest: &[u8; 32],
+    ) -> Result<String, String> {
+        match &self.obtained {
+            Some((asked, answer)) if asked == digest => answer.clone(),
+            Some(_) => Err("the credential changed while its evidence was obtained".into()),
+            None => Err("no evidence was obtained before issuance".into()),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

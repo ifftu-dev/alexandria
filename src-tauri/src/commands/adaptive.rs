@@ -396,23 +396,101 @@ pub async fn assessment_finalize_adaptive(
         .await
         .map_err(|e| e.to_string())?;
     let now = now_rfc3339();
+    let trust = crate::sentinel::attestation::TrustConfig::from_profile();
+    // As in grading: a rehearsal learns what the credential will ask the
+    // platform for, the platform is asked with no database job running, and
+    // the committed pass uses the answer.
+    let request = {
+        let (issuer, attempt_id, now, trust) = (
+            issuer.clone(),
+            attempt_id.clone(),
+            now.clone(),
+            trust.clone(),
+        );
+        state
+            .db_executor
+            .execute(
+                DatabaseWorkload::Learner,
+                state.profile_lease(),
+                "assessment.finalize_adaptive.rehearse",
+                move |db| adaptive_evidence_request(db, &issuer, &attempt_id, &now, &trust),
+            )
+            .await?
+    };
+    let prepared = tokio::task::spawn_blocking(move || {
+        crate::credentials::PreparedEvidence::obtain(
+            request,
+            &crate::sentinel::attestation::NativeAttester,
+        )
+    })
+    .await
+    .map_err(|e| format!("evidence worker failed: {e}"))?;
     state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "assessment.finalize_adaptive",
-            move |db| finalize_adaptive_impl(db, &issuer, &attempt_id, &now),
+            move |db| {
+                let evidence = crate::credentials::EvidenceSource {
+                    trust,
+                    attester: &prepared,
+                };
+                finalize_adaptive_pass(db, &issuer, &attempt_id, &now, &evidence, true)
+            },
         )
         .await
 }
 
-/// Core of `assessment_finalize_adaptive`, separated from Tauri state.
+/// Core of `assessment_finalize_adaptive`, separated from Tauri state, with
+/// this device's own platform as the evidence source.
 pub fn finalize_adaptive_impl(
     db: &crate::db::Database,
     issuer: &Issuer,
     attempt_id: &str,
     now: &str,
+) -> Result<GradeResult, String> {
+    let source = crate::credentials::EvidenceSource::native();
+    let request = adaptive_evidence_request(db, issuer, attempt_id, now, &source.trust)?;
+    let prepared = crate::credentials::PreparedEvidence::obtain(request, source.attester);
+    let evidence = crate::credentials::EvidenceSource {
+        trust: source.trust,
+        attester: &prepared,
+    };
+    finalize_adaptive_pass(db, issuer, attempt_id, now, &evidence, true)
+}
+
+/// The evidence a passing adaptive attempt's credential will ask for,
+/// learned from a finalize pass that is rolled back; `None` without a
+/// stored session attestation (no rehearsal is run).
+fn adaptive_evidence_request(
+    db: &crate::db::Database,
+    issuer: &Issuer,
+    attempt_id: &str,
+    now: &str,
+    trust: &crate::sentinel::attestation::TrustConfig,
+) -> Result<Option<crate::credentials::BindRequest>, String> {
+    if !crate::commands::assessment::attempt_session_attested(db.conn(), attempt_id)? {
+        return Ok(None);
+    }
+    let recorder = crate::credentials::RecordingAttester::default();
+    let rehearsal = crate::credentials::EvidenceSource {
+        trust: trust.clone(),
+        attester: &recorder,
+    };
+    finalize_adaptive_pass(db, issuer, attempt_id, now, &rehearsal, false)?;
+    Ok(recorder.take())
+}
+
+/// One finalize pass in a write transaction, committed only when `commit`
+/// is set; a rehearsal's writes are rolled back.
+fn finalize_adaptive_pass(
+    db: &crate::db::Database,
+    issuer: &Issuer,
+    attempt_id: &str,
+    now: &str,
+    evidence: &crate::credentials::EvidenceSource<'_>,
+    commit: bool,
 ) -> Result<GradeResult, String> {
     let issuer_did = issuer.did();
     let conn = db.conn();
@@ -556,14 +634,8 @@ pub fn finalize_adaptive_impl(
             integrity_session_id: integrity_session_id.clone(),
             integrity_policy: None,
         };
-        let issued = crate::credentials::issue_with(
-            conn,
-            issuer,
-            &req,
-            now,
-            &crate::credentials::EvidenceSource::native(),
-        )
-        .map_err(|e| e.to_string())?;
+        let issued = crate::credentials::issue_with(conn, issuer, &req, now, evidence)
+            .map_err(|e| e.to_string())?;
         credential_id = Some(
             issued
                 .credential
@@ -580,6 +652,16 @@ pub fn finalize_adaptive_impl(
     )
     .map_err(|e| e.to_string())?;
 
+    if !commit {
+        // A rehearsal: everything above is rolled back with the transaction.
+        drop(tx);
+        return Ok(GradeResult {
+            score,
+            passed,
+            credential_id,
+            attestation_evidence,
+        });
+    }
     if passed {
         crate::aggregation::store::recompute_all_impl(conn, now).map_err(|e| e.to_string())?;
     }

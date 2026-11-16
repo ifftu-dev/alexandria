@@ -1109,6 +1109,55 @@ pub async fn assessment_grade(
         hub: state.content_node.companion(),
         runtime: tokio::runtime::Handle::current(),
     };
+    let manifest = crate::sentinel::scoring::active_manifest();
+    let trust = crate::sentinel::attestation::TrustConfig::from_profile();
+    // Grading runs in two database jobs with the evidence wait between them,
+    // so no write transaction (and no database thread) is held while the
+    // phone answers: a rehearsal learns what the credential will ask for,
+    // then the committed pass uses the answer.
+    let request = {
+        #[cfg(desktop)]
+        let grader_runtime = grader_runtime.clone();
+        let (signer, attempt_id, answers, now) = (
+            signer.clone(),
+            attempt_id.clone(),
+            answers.clone(),
+            now.clone(),
+        );
+        let (manifest, trust) = (manifest.clone(), trust.clone());
+        state
+            .db_executor
+            .execute(
+                DatabaseWorkload::Learner,
+                state.profile_lease(),
+                "assessment.grade.rehearse",
+                move |db| {
+                    #[cfg(desktop)]
+                    let engine = GradeEngine {
+                        runtime: &grader_runtime,
+                        budgets: Default::default(),
+                    };
+                    #[cfg(not(desktop))]
+                    let engine = GradeEngine::default();
+                    grading_evidence_request(
+                        db,
+                        &engine,
+                        &signer,
+                        &attempt_id,
+                        &answers,
+                        &now,
+                        &manifest,
+                        &trust,
+                    )
+                },
+            )
+            .await?
+    };
+    let prepared = tokio::task::spawn_blocking(move || {
+        crate::credentials::PreparedEvidence::obtain(request, &attester)
+    })
+    .await
+    .map_err(|e| format!("evidence worker failed: {e}"))?;
     let graded = state
         .db_executor
         .execute(
@@ -1123,14 +1172,17 @@ pub async fn assessment_grade(
                 };
                 #[cfg(not(desktop))]
                 let engine = GradeEngine::default();
-                let issuance = GradeIssuance {
-                    manifest: crate::sentinel::scoring::active_manifest(),
-                    evidence: crate::credentials::EvidenceSource {
-                        trust: crate::sentinel::attestation::TrustConfig::from_profile(),
-                        attester: &attester,
-                    },
-                };
-                grade_attempt_with(db, &engine, &signer, &attempt_id, &answers, &now, &issuance)
+                grade_with_prepared(
+                    db,
+                    &engine,
+                    &signer,
+                    &attempt_id,
+                    &answers,
+                    &now,
+                    &manifest,
+                    &trust,
+                    &prepared,
+                )
             },
         )
         .await?;
@@ -1171,6 +1223,11 @@ pub fn grade_attempt_impl(
 /// the attempt's longitudinal consistency before a credential is issued,
 /// and an explicit source of attestation evidence. A failure to obtain
 /// evidence never fails grading.
+///
+/// Evidence is obtained with no transaction open
+/// ([`crate::credentials::PreparedEvidence`]): a rehearsal learns what the
+/// credential will ask for, the attester answers, and the committed pass
+/// uses the answer.
 pub(crate) fn grade_attempt_with(
     db: &crate::db::Database,
     engine: &GradeEngine<'_>,
@@ -1179,6 +1236,120 @@ pub(crate) fn grade_attempt_with(
     answers: &[SubmittedAnswer],
     now: &str,
     issuance: &GradeIssuance<'_>,
+) -> Result<GradeResult, String> {
+    let request = grading_evidence_request(
+        db,
+        engine,
+        issuer,
+        attempt_id,
+        answers,
+        now,
+        &issuance.manifest,
+        &issuance.evidence.trust,
+    )?;
+    let prepared =
+        crate::credentials::PreparedEvidence::obtain(request, issuance.evidence.attester);
+    grade_with_prepared(
+        db,
+        engine,
+        issuer,
+        attempt_id,
+        answers,
+        now,
+        &issuance.manifest,
+        &issuance.evidence.trust,
+        &prepared,
+    )
+}
+
+/// The evidence a passing grade's credential will ask its attester for,
+/// learned from a grading pass that is rolled back. `None` when the
+/// attempt's session carries no stored attestation (no rehearsal is run) or
+/// the rehearsal asked for nothing. Errors are the ones grading would give.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn grading_evidence_request(
+    db: &crate::db::Database,
+    engine: &GradeEngine<'_>,
+    issuer: &Issuer,
+    attempt_id: &str,
+    answers: &[SubmittedAnswer],
+    now: &str,
+    manifest: &crate::sentinel::scoring::RatioManifest,
+    trust: &crate::sentinel::attestation::TrustConfig,
+) -> Result<Option<crate::credentials::BindRequest>, String> {
+    if !attempt_session_attested(db.conn(), attempt_id)? {
+        return Ok(None);
+    }
+    let recorder = crate::credentials::RecordingAttester::default();
+    let rehearsal = GradeIssuance {
+        manifest: manifest.clone(),
+        evidence: crate::credentials::EvidenceSource {
+            trust: trust.clone(),
+            attester: &recorder,
+        },
+    };
+    grade_pass(
+        db, engine, issuer, attempt_id, answers, now, &rehearsal, false,
+    )?;
+    Ok(recorder.take())
+}
+
+/// Grade and commit, answering the credential's evidence request from
+/// `prepared`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn grade_with_prepared(
+    db: &crate::db::Database,
+    engine: &GradeEngine<'_>,
+    issuer: &Issuer,
+    attempt_id: &str,
+    answers: &[SubmittedAnswer],
+    now: &str,
+    manifest: &crate::sentinel::scoring::RatioManifest,
+    trust: &crate::sentinel::attestation::TrustConfig,
+    prepared: &crate::credentials::PreparedEvidence,
+) -> Result<GradeResult, String> {
+    let issuance = GradeIssuance {
+        manifest: manifest.clone(),
+        evidence: crate::credentials::EvidenceSource {
+            trust: trust.clone(),
+            attester: prepared,
+        },
+    };
+    grade_pass(
+        db, engine, issuer, attempt_id, answers, now, &issuance, true,
+    )
+}
+
+/// Whether the attempt's integrity session carries a stored attestation,
+/// the only case in which issuance asks an attester for anything.
+pub(crate) fn attempt_session_attested(
+    conn: &rusqlite::Connection,
+    attempt_id: &str,
+) -> Result<bool, String> {
+    Ok(conn
+        .query_row(
+            "SELECT s.attestation_json IS NOT NULL FROM assessment_attempts a \
+             JOIN integrity_sessions s ON s.id = a.integrity_session_id WHERE a.id = ?1",
+            params![attempt_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .unwrap_or(false))
+}
+
+/// One grading pass in a write transaction, committed only when `commit`
+/// is set; a rehearsal's writes are rolled back.
+#[allow(clippy::too_many_arguments)]
+fn grade_pass(
+    db: &crate::db::Database,
+    engine: &GradeEngine<'_>,
+    issuer: &Issuer,
+    attempt_id: &str,
+    answers: &[SubmittedAnswer],
+    now: &str,
+    issuance: &GradeIssuance<'_>,
+    commit: bool,
 ) -> Result<GradeResult, String> {
     let manifest = &issuance.manifest;
     let issuer_did = issuer.did();
@@ -1428,6 +1599,16 @@ pub(crate) fn grade_attempt_with(
     )
     .map_err(|e| e.to_string())?;
 
+    if !commit {
+        // A rehearsal: everything above is rolled back with the transaction.
+        drop(tx);
+        return Ok(GradeResult {
+            score,
+            passed,
+            credential_id,
+            attestation_evidence,
+        });
+    }
     if passed {
         crate::aggregation::store::recompute_all_impl(conn, now).map_err(|e| e.to_string())?;
     }
@@ -1780,6 +1961,117 @@ mod tests {
         assert_eq!(
             verify_evidence(&stored, &trust.inputs()),
             AttestationOutcome::VerifiedSessionBound {
+                platform: Platform::Ios
+            }
+        );
+    }
+
+    /// Evidence over the credential is obtained with no write transaction
+    /// open: a paired phone can take seconds to answer, and a grade's write
+    /// transaction would hold the profile's only database thread meanwhile.
+    /// The proof obtained outside still binds the committed credential.
+    #[test]
+    fn evidence_over_the_credential_is_obtained_outside_the_write_transaction() {
+        use crate::credentials::{EvidenceBinding, EvidenceSource};
+        use crate::sentinel::attestation::{
+            apple_app_id, session_nonce, AttestationPayload, BindingAttester, DeviceAttestation,
+            Platform, TrustConfig,
+        };
+        use alexandria_verify::attestation::test_support::{
+            b64, build_assertion, build_world, World, AAGUID_PROD,
+        };
+        use alexandria_verify::attestation::{verify_evidence, AttestationOutcome};
+
+        /// Signs what issuance asks for, noting whether a transaction was
+        /// open on the profile's connection when it was asked.
+        struct Watcher<'a> {
+            world: &'a World,
+            conn: &'a rusqlite::Connection,
+            in_transaction: std::cell::RefCell<Vec<bool>>,
+        }
+        impl BindingAttester for Watcher<'_> {
+            fn bind(
+                &self,
+                _: &str,
+                _: &DeviceAttestation,
+                digest: &[u8; 32],
+            ) -> Result<String, String> {
+                self.in_transaction
+                    .borrow_mut()
+                    .push(!self.conn.is_autocommit());
+                Ok(b64(&build_assertion(self.world, digest, 2)))
+            }
+        }
+
+        let ctx = setup();
+        let started = "2026-07-21T23:00:00Z";
+        let w = build_world(
+            &apple_app_id(),
+            session_nonce("test-session", started),
+            AAGUID_PROD,
+            0,
+        );
+        let record = DeviceAttestation {
+            platform: Platform::Ios,
+            nonce_hex: hex::encode(session_nonce("test-session", started)),
+            app_id: apple_app_id(),
+            payload: AttestationPayload::AppAttest {
+                key_id_b64: w.key_id_b64(),
+                attestation_b64: w.attestation_b64(),
+                assertion_b64: None,
+                asserted_root: None,
+            },
+            captured_at: started.into(),
+            companion: None,
+        };
+        ctx.db
+            .conn()
+            .execute(
+                "UPDATE integrity_sessions SET started_at = ?1, attestation_json = ?2,
+                        assurance_level = 'device_attested' WHERE id = 'test-session'",
+                params![started, serde_json::to_string(&record).unwrap()],
+            )
+            .unwrap();
+        let answers = [answer("q1", &[0]), answer("q2", &[1])];
+        prepare(&ctx, &answers);
+        let trust = TrustConfig {
+            apple_root_pem: w.root_pem.clone(),
+            ..TrustConfig::default()
+        };
+        let watcher = Watcher {
+            world: &w,
+            conn: ctx.db.conn(),
+            in_transaction: Default::default(),
+        };
+        let result = grade_attempt_with(
+            &ctx.db,
+            &ctx.engine(),
+            &ctx.issuer,
+            "att_1",
+            &answers,
+            NOW,
+            &GradeIssuance {
+                manifest: crate::sentinel::scoring::active_manifest(),
+                evidence: EvidenceSource {
+                    trust: trust.clone(),
+                    attester: &watcher,
+                },
+            },
+        )
+        .expect("grading commits");
+
+        assert_eq!(*watcher.in_transaction.borrow(), vec![false]);
+        assert_eq!(
+            result.attestation_evidence,
+            Some(EvidenceBinding::Credential)
+        );
+        let stored =
+            crate::credentials::store::get(ctx.db.conn(), result.credential_id.as_deref().unwrap())
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            verify_evidence(&stored, &trust.inputs()),
+            AttestationOutcome::VerifiedCredentialBound {
                 platform: Platform::Ios
             }
         );

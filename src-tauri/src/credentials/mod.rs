@@ -34,7 +34,9 @@ pub mod store;
 pub mod trust;
 
 pub use error::{CredentialError, PolicyRefusal, StatusChange, SupersessionRequires};
-pub use evidence::{EvidenceBinding, EvidenceSource};
+pub use evidence::{
+    BindRequest, EvidenceBinding, EvidenceSource, PreparedEvidence, RecordingAttester,
+};
 pub use issue::{issue, issue_with, IssuancePolicy, IssueCredentialRequest, Issued};
 pub use issuer::Issuer;
 
