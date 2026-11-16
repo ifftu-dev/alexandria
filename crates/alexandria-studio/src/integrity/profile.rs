@@ -1,5 +1,5 @@
-//! Trust profiles: the fixed signal sets a session can run, how the backend
-//! chooses one at session start, and how a policy floor is judged against it.
+//! Trust profiles: the fixed signal sets a session can run and how the
+//! backend chooses one at session start.
 //!
 //! Four profiles, ordered `core < attested < camera < full`. Every profile
 //! runs the core signals (input, focus, clipboard, display, environment
@@ -14,96 +14,16 @@
 //! highest permitted one that meets the floor, or the highest permitted one
 //! when none does (the floor result then says so).
 //!
-//! A floor is met when the session's profile includes every signal the floor
-//! profile adds. That is a signal-set test, not the order: `camera` does not
-//! meet an `attested` floor.
+//! The profile and signal types and the floor judgement ([`evaluate_floor`])
+//! live in the verifier library ([`alexandria_verify::integrity`]), so a
+//! verifier judges an issuance policy the same way; this module re-exports
+//! them and adds selection.
 
 use serde::{Deserialize, Serialize};
 
-/// Camera coverage the `camera` and `full` profiles need for the camera to
-/// count (see [`TrustProfile::min_camera_coverage`]).
-pub const MIN_CAMERA_COVERAGE: f64 = 0.9;
-
-/// A fixed set of signals a session runs, locked at session start.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TrustProfile {
-    Core,
-    Attested,
-    Camera,
-    Full,
-}
-
-/// A signal a profile adds to the core set.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProfileSignal {
-    /// A platform attestation that verifies (`device_attested`).
-    DeviceAttestation,
-    /// Face presence, liveness and gaze from the camera.
-    Camera,
-}
-
-impl TrustProfile {
-    /// Weakest first.
-    pub const ALL: [TrustProfile; 4] = [
-        TrustProfile::Core,
-        TrustProfile::Attested,
-        TrustProfile::Camera,
-        TrustProfile::Full,
-    ];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            TrustProfile::Core => "core",
-            TrustProfile::Attested => "attested",
-            TrustProfile::Camera => "camera",
-            TrustProfile::Full => "full",
-        }
-    }
-
-    pub fn parse(profile: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|p| p.as_str() == profile)
-    }
-
-    /// The signals this profile adds to the core set.
-    pub fn signals(self) -> &'static [ProfileSignal] {
-        match self {
-            TrustProfile::Core => &[],
-            TrustProfile::Attested => &[ProfileSignal::DeviceAttestation],
-            TrustProfile::Camera => &[ProfileSignal::Camera],
-            TrustProfile::Full => &[ProfileSignal::DeviceAttestation, ProfileSignal::Camera],
-        }
-    }
-
-    /// The fraction of committed windows that must carry camera checks for
-    /// the camera to count towards a policy floor. A property of the camera
-    /// profiles, not a sponsor knob; an operating constant until measured.
-    pub fn min_camera_coverage(self) -> Option<f64> {
-        self.includes(ProfileSignal::Camera)
-            .then_some(MIN_CAMERA_COVERAGE)
-    }
-
-    pub fn includes(self, signal: ProfileSignal) -> bool {
-        self.signals().contains(&signal)
-    }
-
-    /// Whether a session under this profile runs every signal `floor` adds.
-    pub fn meets(self, floor: TrustProfile) -> bool {
-        floor.signals().iter().all(|s| self.includes(*s))
-    }
-}
-
-impl ProfileSignal {
-    pub const ALL: [ProfileSignal; 2] = [ProfileSignal::DeviceAttestation, ProfileSignal::Camera];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            ProfileSignal::DeviceAttestation => "device_attestation",
-            ProfileSignal::Camera => "camera",
-        }
-    }
-}
+pub use alexandria_verify::integrity::{
+    evaluate_floor, PolicyFloor, ProfileSignal, TrustProfile, MIN_CAMERA_COVERAGE,
+};
 
 /// One flag per capability. Used for both what the device reports it has
 /// and what the learner consented to for this session.
@@ -225,52 +145,5 @@ pub fn select_profile(inputs: &SelectionInputs) -> ProfileSelection {
             .into_iter()
             .filter(|s| !profile.includes(*s))
             .collect(),
-    }
-}
-
-/// A policy floor judged against a session.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PolicyFloor {
-    /// The minimum profile the policy asks for; `None` asks for nothing.
-    pub required: Option<TrustProfile>,
-    /// The session's locked profile; `None` when none was selected.
-    pub profile: Option<TrustProfile>,
-    pub satisfied: bool,
-    /// Signals the floor needs that the session does not run or that are no
-    /// longer credited (an attestation that stopped verifying).
-    pub missing: Vec<ProfileSignal>,
-}
-
-/// Judge `floor` against a session locked to `profile`. `uncredited` lists
-/// the signals the profile runs that do not count at the time of the
-/// evaluation: an attestation that no longer verifies, or a camera whose
-/// coverage fell below the profile's minimum. A profile cannot carry a floor
-/// on a signal it has lost.
-pub fn evaluate_floor(
-    profile: Option<TrustProfile>,
-    floor: Option<TrustProfile>,
-    uncredited: &[ProfileSignal],
-) -> PolicyFloor {
-    let missing: Vec<ProfileSignal> = floor
-        .map(|f| f.signals())
-        .unwrap_or_default()
-        .iter()
-        .copied()
-        .filter(|s| {
-            let runs = profile.is_some_and(|p| p.includes(*s));
-            !runs || uncredited.contains(s)
-        })
-        .collect();
-    // With a floor, a session that never selected a profile cannot meet it,
-    // even a `core` floor: capability absence is never clean.
-    let satisfied = match floor {
-        None => true,
-        Some(_) => profile.is_some() && missing.is_empty(),
-    };
-    PolicyFloor {
-        required: floor,
-        profile,
-        satisfied,
-        missing,
     }
 }
