@@ -20,7 +20,7 @@ Spec sections: *Verifier library housekeeping*, stories 15–16, 50.
 
 - [x] `cargo doc` for the crate builds without warnings; grep finds no "JWS" or rotation language in its public docs.
 - [x] Vectors regenerate byte-identically on a second run.
-- [ ] Cloud `scripts/check-vendor.py --source <app>/crates` passes.
+- [x] Cloud `scripts/check-vendor.py --source <app>/crates` passes.
 
 ## Pointers
 
@@ -36,3 +36,5 @@ Spec sections: *Verifier library housekeeping*, stories 15–16, 50.
 - Vectors regenerate byte-identically on two runs (main, limits, endorsements, issuance policy, attestation). Since 0.6.0 the existing credentials' bytes are unchanged; vectors 01–12 changed only in `store` (no `suspended`) and `expect` (`attestation`, `verifiedAssuranceLevel`), and 08 was replaced.
 - The independent verifier resolves its vectors from its own location, so it runs from any directory; CI now runs it from the repository root.
 - The Cloud vendor sync and its `check-vendor.py` criterion are left to the coordinator after the last merge. Nothing is published to crates.io.
+
+2026-11-16: the Cloud vendor sync landed (Cloud `09b3710`, `build(vendor): sync alexandria-verify 0.7.0 from the app`); `check-vendor.py --source <app>/crates` passes.
