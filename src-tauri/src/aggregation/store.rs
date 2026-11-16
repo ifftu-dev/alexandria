@@ -212,7 +212,8 @@ fn recompute_all_in_transaction(conn: &Connection, now: &str) -> Result<u32, Agg
 /// traceability) are derived from the claim's provenance tier via
 /// `config.quality_triple`; a claim with no provenance resolves to
 /// `(1.0, 1.0, 1.0)`. Inputs the session-status rule rules out are left out
-/// (see [`super::weights::session_status_counts`]).
+/// here, the one place derived states apply it (see
+/// [`super::weights::session_status_counts`]).
 fn load_evidence_for(
     conn: &Connection,
     subject: &Did,

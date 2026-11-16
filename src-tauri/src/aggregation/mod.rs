@@ -69,7 +69,9 @@ pub struct AggregationInput {
     #[serde(default)]
     pub attestation: AttestationOutcome,
     /// The session status the credential's integrity assertion states, if
-    /// it carries one.
+    /// it carries one. Carried for explanation only: the session-status rule
+    /// is applied once, before inputs are built (`store::load_evidence_for`),
+    /// so every input that reaches [`aggregate_skill_state`] counts.
     #[serde(default)]
     pub session_status: Option<String>,
 }
@@ -84,16 +86,10 @@ pub fn aggregate_skill_state(
     config: &AggregationConfig,
 ) -> DerivedSkillState {
     use weights::{
-        counts, freshness_weight, independence_weight, issuer_weight, provenance_weight,
-        quality_weight,
+        freshness_weight, independence_weight, issuer_weight, provenance_weight, quality_weight,
     };
 
     let computed_at = verification_time.to_string();
-
-    // An input its session status rules out contributes nothing: it is
-    // dropped before weights, issuer clusters and counts are taken.
-    let counted: Vec<AggregationInput> = evidence.iter().filter(|e| counts(e)).cloned().collect();
-    let evidence = counted.as_slice();
 
     if evidence.is_empty() {
         return DerivedSkillState {

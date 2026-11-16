@@ -39,11 +39,10 @@ pub fn type_weight(credential_type: CredentialType, config: &AggregationConfig) 
 /// `attested_weight` when its attestation evidence verified credential-bound;
 /// an issuer-signed credential takes its declared type's weight.
 ///
-/// An input whose session status rules it out ([`counts`]) weighs 0.
+/// Inputs the session-status rule rules out never reach here: they are left
+/// out where verified inputs become aggregation inputs
+/// ([`session_status_counts`]).
 pub fn provenance_weight(evidence: &AggregationInput, config: &AggregationConfig) -> f64 {
-    if !counts(evidence) {
-        return 0.0;
-    }
     if !evidence.self_issued {
         return type_weight(evidence.credential_type, config);
     }
@@ -59,17 +58,6 @@ fn credential_bound(attestation: &AttestationOutcome) -> bool {
     matches!(
         attestation,
         AttestationOutcome::VerifiedCredentialBound { .. }
-    )
-}
-
-/// Whether a scoring input counts at all under its session status. An input
-/// that does not count contributes nothing: no weight, no issuer cluster, no
-/// active evidence.
-pub fn counts(evidence: &AggregationInput) -> bool {
-    session_status_counts(
-        evidence.self_issued,
-        &evidence.attestation,
-        evidence.session_status.as_deref(),
     )
 }
 
