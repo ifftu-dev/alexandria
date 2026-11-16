@@ -50,8 +50,36 @@ hex = "0.4"
 bs58 = "0.5"
 # Pure-Rust GZIP for Bitstring Status List encodedList; no I/O.
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# Device attestation checking (`attestation` feature): App Attest is a CBOR
+# attestation object, an X.509 chain to Apple's root (signature checks by
+# x509-parser's `verify`, over ring) and ECDSA P-256 assertions; Play
+# Integrity is a JWE (A256KW + A256GCM) around an ES256 JWS. All pure crypto.
+minicbor = { version = "0.25", default-features = false, optional = true }
+x509-parser = { version = "0.17", features = ["verify"], optional = true }
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"], optional = true }
+aes = { version = "0.8", optional = true }
+aes-gcm = { version = "0.10", optional = true }
+# Synthetic attestation fixtures (`test-support` only).
+rcgen = { version = "0.13", optional = true }
+
+[features]
+default = []
+# Verify the device attestation evidence a credential carries. Without it,
+# evidence entries still parse and verify as `unverifiable`, so a minimal
+# verifier carries no certificate-chain code.
+attestation = ["dep:minicbor", "dep:x509-parser", "dep:p256", "dep:aes", "dep:aes-gcm"]
+# Deterministic synthetic App Attest chains and Play Integrity tokens for the
+# tests of crates that verify attestation. Never enable in a shipped build.
+test-support = ["attestation", "dep:rcgen"]
 
 [dev-dependencies]
 # `hazmat` signs with a non-default nonce, producing a second valid signature
 # over identical genesis bytes for the DAO-id regression test.
 ed25519-dalek = { version = "2", features = ["hazmat"] }
+# The attestation fixtures (`src/attestation/test_support.rs`), which the
+# attestation vectors include directly so they build with or without the
+# feature.
+rcgen = "0.13"
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+aes = "0.8"
+aes-gcm = "0.10"

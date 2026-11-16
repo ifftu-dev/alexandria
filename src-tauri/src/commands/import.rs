@@ -524,6 +524,7 @@ mod tests {
             terms_of_use: None,
             witness: None,
             integrity: None,
+            evidence: Vec::new(),
             proof: Proof::unsigned("2026-01-01T00:00:00Z"),
         };
         sign_credential(UnsignedCredential { credential: vc }, issuer_key, &issuer).unwrap()

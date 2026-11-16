@@ -558,11 +558,12 @@ async fn read_message<T: DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sentinel::attestation::app_attest::{self, tests::build_assertion};
+    use crate::sentinel::attestation::app_attest;
     use crate::sentinel::attestation::{apple_app_id, ASSURANCE_DEVICE_ATTESTED};
     use crate::sentinel::companion::tests::{
         did_of, learner, phone_capture, trust, SESSION, STARTED,
     };
+    use alexandria_verify::attestation::test_support::{build_assertion, World};
     use base64::Engine as _;
     use iroh::address_lookup::MemoryLookup;
     use iroh::protocol::Router;
@@ -610,7 +611,7 @@ mod tests {
         phone_ep: Endpoint,
         offer: CompanionOffer,
         nonce: [u8; 32],
-        world: Arc<app_attest::tests::World>,
+        world: Arc<World>,
         _router: Router,
     }
 

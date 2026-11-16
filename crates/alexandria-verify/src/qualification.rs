@@ -322,7 +322,7 @@ impl QualificationPolicySet {
         let accepted = |did: &Did| policy.accepted_issuers.iter().any(|issuer| issuer == did);
         let permits = |route| policy.routes.contains(&route);
         let (route, qualifying_issuers) = match trust {
-            CredentialTrust::VerifiedIssuerSigned { issuer }
+            CredentialTrust::VerifiedIssuerSigned { issuer, .. }
                 if permits(QualificationRoute::AcceptedIssuer) && accepted(&issuer) =>
             {
                 (QualificationRoute::AcceptedIssuer, vec![issuer])
@@ -523,6 +523,7 @@ mod tests {
             terms_of_use: None,
             witness: None,
             integrity: None,
+            evidence: Vec::new(),
             proof: Proof::unsigned("2026-01-01T00:00:00Z"),
         };
         sign_credential(

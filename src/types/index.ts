@@ -2141,8 +2141,42 @@ export interface VerificationResult {
   superseded: boolean
   verificationTime: string
   pendingReasons: VerificationPendingReason[]
+  /** What the credential's device attestation evidence proved. */
+  attestation: AttestationOutcome
+  /** `device_attested` only for verified credential-bound evidence. */
+  verifiedAssuranceLevel: VerifiedAssuranceLevel
   acceptanceDecision: AcceptanceDecision
 }
+
+/** Mirrors `alexandria_verify::attestation::Platform`. */
+export type AttestationPlatform = 'ios' | 'android'
+
+/** Mirrors `alexandria_verify::attestation::InvalidReason`. */
+export type AttestationInvalidReason =
+  | 'malformed_evidence'
+  | 'duplicate_evidence'
+  | 'missing_integrity_assertion'
+  | 'untrusted_chain'
+  | 'wrong_nonce'
+  | 'wrong_app_id'
+  | 'key_mismatch'
+  | 'counter'
+  | 'environment_not_accepted'
+  | 'invalid_signature'
+  | 'device_integrity'
+  | 'binding_mismatch'
+  | 'companion_mismatch'
+
+/** Mirrors `alexandria_verify::attestation::AttestationOutcome`. */
+export type AttestationOutcome =
+  | { outcome: 'not_supplied' }
+  | { outcome: 'verified_credential_bound'; platform: AttestationPlatform }
+  | { outcome: 'verified_session_bound'; platform: AttestationPlatform }
+  | { outcome: 'unverifiable'; platform: AttestationPlatform }
+  | { outcome: 'invalid'; reason: AttestationInvalidReason }
+
+/** Mirrors `alexandria_verify::attestation::VerifiedAssuranceLevel`. */
+export type VerifiedAssuranceLevel = 'local' | 'device_attested'
 
 /** Mirrors `alexandria_verify::trust::TrustInvalidReason`. */
 export type TrustInvalidReason =
@@ -2157,6 +2191,7 @@ export type TrustInvalidReason =
   | 'superseded'
   | 'integrity_anchor_missing'
   | 'type_not_allowed'
+  | 'invalid_attestation'
 
 /** Mirrors `alexandria_verify::trust::EndorsementMismatch`. */
 export type EndorsementMismatch =
@@ -2188,14 +2223,15 @@ export interface StatusPublishReport {
 export type CredentialTrust =
   | { state: 'invalid'; reasons: TrustInvalidReason[] }
   | { state: 'pending'; reasons: VerificationPendingReason[] }
-  | { state: 'verified_self_claim'; endorsement: EndorsementOutcome }
-  | { state: 'verified_issuer_signed'; issuer: string }
+  | { state: 'verified_self_claim'; endorsement: EndorsementOutcome; attestation: AttestationOutcome }
+  | { state: 'verified_issuer_signed'; issuer: string; attestation: AttestationOutcome }
   | {
     state: 'verified_course_endorsement'
     course_id: string
     course_document_cid: string
     course_document_version: number
     attestors: string[]
+    attestation: AttestationOutcome
   }
 
 // --- Survivability bundle (§20.4) ----------------------------------------

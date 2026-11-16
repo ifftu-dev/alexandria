@@ -41,21 +41,17 @@ pub mod session;
 pub mod transport;
 
 use base64::Engine as _;
-use ed25519_dalek::{Signer as _, SigningKey, Verifier as _};
+use ed25519_dalek::{Signer as _, SigningKey};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::sentinel::attestation::{
-    self as att, native::Captured, AttestationPayload, DeviceAttestation, TrustConfig, Unverified,
+    self as att, native::Captured, DeviceAttestation, TrustConfig, Unverified,
 };
 
 /// ALPN of the companion protocol on the shared iroh endpoint.
 pub const ALPN: &[u8] = b"alexandria/sentinel-companion/1";
 /// How long an offer stays valid (seconds).
 pub const OFFER_TTL_SECS: i64 = 300;
-
-const NONCE_TAG: &[u8] = b"alexandria-companion-attest-v1\0";
-const STATEMENT_TAG: &str = "alexandria-companion-statement-v1";
 
 /// What the desktop shows for the phone to join. Encoded as a code
 /// ([`CompanionOffer::encode`]); it carries a secret, so it is shown, not
@@ -128,34 +124,10 @@ impl CompanionOffer {
     }
 }
 
-/// The nonce the phone's platform attests: the desktop session's nonce
-/// bound to the learner and to the phone's transport identity.
-pub fn companion_nonce(
-    session_nonce: &[u8; 32],
-    learner_did: &str,
-    phone_endpoint: &str,
-) -> [u8; 32] {
-    let mut h = Sha256::new();
-    h.update(NONCE_TAG);
-    h.update(session_nonce);
-    h.update(learner_did.as_bytes());
-    h.update(b"\0");
-    h.update(phone_endpoint.as_bytes());
-    h.finalize().into()
-}
-
-/// Stored with a companion's attestation: who it vouches for and which
-/// phone delivered it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CompanionBinding {
-    pub learner_did: String,
-    /// The phone's iroh endpoint id (hex), as authenticated by the
-    /// connection that delivered the hello.
-    pub phone_endpoint: String,
-    /// Ed25519 signature by the learner DID key over [`statement`].
-    pub did_signature_b64: String,
-}
+/// The nonce the phone's platform attests and the binding stored with a
+/// companion's attestation are defined by the verifier library, which checks
+/// them in credential evidence too.
+pub use alexandria_verify::attestation::{companion_nonce, CompanionBinding};
 
 /// The phone's first message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -192,26 +164,6 @@ pub fn answer_offer(
     ))
 }
 
-/// The bytes the learner DID signs: the binding's subject and phone, the
-/// attested nonce, and a digest of the start-of-session attestation
-/// material (the end assertion is added later and is not covered).
-fn statement(record: &DeviceAttestation, learner_did: &str, phone_endpoint: &str) -> Vec<u8> {
-    let start_material = match &record.payload {
-        AttestationPayload::AppAttest {
-            key_id_b64,
-            attestation_b64,
-            ..
-        } => format!("app_attest|{key_id_b64}|{attestation_b64}"),
-        AttestationPayload::PlayIntegrity { token } => format!("play_integrity|{token}"),
-    };
-    let digest = hex::encode(Sha256::digest(start_material.as_bytes()));
-    format!(
-        "{STATEMENT_TAG}\n{learner_did}\n{phone_endpoint}\n{}\n{}\n{digest}",
-        record.app_id, record.nonce_hex
-    )
-    .into_bytes()
-}
-
 /// Phone side: wrap the platform's output into the hello.
 pub fn build_hello(
     offer: &CompanionOffer,
@@ -230,7 +182,11 @@ pub fn build_hello(
         captured_at: captured_at.into(),
         companion: None,
     };
-    let signature = learner_key.sign(&statement(&record, &offer.learner_did, phone_endpoint));
+    let signature = learner_key.sign(&alexandria_verify::attestation::companion_statement(
+        &record,
+        &offer.learner_did,
+        phone_endpoint,
+    ));
     record.companion = Some(CompanionBinding {
         learner_did: offer.learner_did.clone(),
         phone_endpoint: phone_endpoint.into(),
@@ -251,28 +207,7 @@ pub fn bound_nonce(
     binding: &CompanionBinding,
     session_nonce: &[u8; 32],
 ) -> Result<[u8; 32], Unverified> {
-    let failed = |reason: &str| Unverified::Failed {
-        reason: format!("companion: {reason}"),
-    };
-    let did = alexandria_verify::did::parse_did_key(&binding.learner_did)
-        .map_err(|_| failed("binding names no did:key learner"))?;
-    let key = alexandria_verify::did::resolve_did_key(&did)
-        .map_err(|_| failed("binding names no did:key learner"))?;
-    let signature = base64::engine::general_purpose::STANDARD
-        .decode(binding.did_signature_b64.trim())
-        .ok()
-        .and_then(|b| ed25519_dalek::Signature::from_slice(&b).ok())
-        .ok_or_else(|| failed("learner signature is malformed"))?;
-    key.verify(
-        &statement(record, &binding.learner_did, &binding.phone_endpoint),
-        &signature,
-    )
-    .map_err(|_| failed("learner signature does not verify"))?;
-    Ok(companion_nonce(
-        session_nonce,
-        &binding.learner_did,
-        &binding.phone_endpoint,
-    ))
+    alexandria_verify::attestation::companion_bound_nonce(record, binding, session_nonce)
 }
 
 /// What the desktop keeps from an accepted hello.
@@ -346,17 +281,18 @@ pub fn accept_hello(
 fn reason(why: Unverified) -> String {
     match why {
         Unverified::NoTrustMaterial => "no trust material for the phone's platform".into(),
-        Unverified::Failed { reason } => reason,
+        Unverified::Failed { reason, .. } => reason,
     }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::sentinel::attestation::app_attest::tests::{build_assertion, build_world, World};
+    use crate::sentinel::attestation::AttestationPayload;
     use crate::sentinel::attestation::{
         apple_app_id, effective_assurance, Platform, SessionAttestationFacts,
     };
+    use alexandria_verify::attestation::test_support::{build_assertion, build_world, World};
 
     pub(crate) const SESSION: &str = "isess_desktop";
     pub(crate) const STARTED: &str = "2026-11-12T10:00:00Z";

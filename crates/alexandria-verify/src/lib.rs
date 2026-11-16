@@ -15,6 +15,7 @@
 //! not an application.
 
 pub mod access;
+pub mod attestation;
 pub mod course;
 pub mod did;
 pub mod exchange;

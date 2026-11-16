@@ -182,6 +182,7 @@ fn issue_new_observation(
         terms_of_use: None,
         witness: Some(witness),
         integrity: None,
+        evidence: Vec::new(),
         proof: Proof::unsigned(now.clone()),
     };
     let signed = sign_credential(

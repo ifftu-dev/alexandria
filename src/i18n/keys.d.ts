@@ -797,6 +797,7 @@ export type MessageKey =
   | 'credentials.detail.trustReason.anchorMissing'
   | 'credentials.detail.trustReason.expired'
   | 'credentials.detail.trustReason.inconsistent'
+  | 'credentials.detail.trustReason.invalidAttestation'
   | 'credentials.detail.trustReason.invalidSignature'
   | 'credentials.detail.trustReason.invalidStatusReference'
   | 'credentials.detail.trustReason.issuerUnresolved'

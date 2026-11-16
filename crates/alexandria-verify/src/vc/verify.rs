@@ -11,7 +11,9 @@
 //! 5. Check expiration against `verification_time`.
 //! 6. Resolve referenced status and local lifecycle state.
 //! 7. Check a caller-observed integrity anchor against the recomputed hash.
-//! 8. Emit an accepted, pending, or rejected `VerificationResult`.
+//! 8. Check device attestation evidence against the caller's trust inputs
+//!    (`crate::attestation`); invalid evidence rejects.
+//! 9. Emit an accepted, pending, or rejected `VerificationResult`.
 //!
 //! Missing or unavailable issuer/status evidence produces a typed pending
 //! result. A malformed reference or a failed cryptographic/policy check is a
@@ -24,15 +26,40 @@ use super::{
     AcceptanceDecision, VerifiableCredential, VerificationPendingReason, VerificationPolicy,
     VerificationResult,
 };
+use crate::attestation::{AttestationOutcome, AttestationTrust, VerifiedAssuranceLevel};
 use crate::did::{parse_did_key, resolve_did_key, Did, DidError};
 use crate::{StoreLookup, VerificationStore};
 
-/// Verification algorithm per spec §13.2, steps 1–10.
+/// Verification algorithm per spec §13.2, steps 1–10, with no attestation
+/// trust inputs: attestation evidence the credential carries is reported as
+/// `unverifiable` (or `invalid` when it fails a check that needs no trust
+/// input). Use [`verify_credential_with_attestation`] to check it.
 pub fn verify_credential(
     db: &dyn VerificationStore,
     credential: &VerifiableCredential,
     verification_time: &str,
     policy: &VerificationPolicy,
+) -> VerificationResult {
+    verify_credential_with_attestation(
+        db,
+        credential,
+        verification_time,
+        policy,
+        &AttestationTrust::default(),
+    )
+}
+
+/// [`verify_credential`], checking the credential's device attestation
+/// evidence against `trust`. The result's `attestation` and
+/// `verifiedAssuranceLevel` report what the evidence proved; invalid
+/// evidence rejects. A credential without evidence verifies exactly as it
+/// would without trust inputs.
+pub fn verify_credential_with_attestation(
+    db: &dyn VerificationStore,
+    credential: &VerifiableCredential,
+    verification_time: &str,
+    policy: &VerificationPolicy,
+    trust: &AttestationTrust,
 ) -> VerificationResult {
     // Default: all flags negative; promote to true as checks pass.
     // VC envelope `id` is optional in W3C VC v2 §4.3 — fall back to
@@ -51,8 +78,16 @@ pub fn verify_credential(
         superseded: false,
         verification_time: verification_time.to_string(),
         pending_reasons: Vec::new(),
+        attestation: AttestationOutcome::NotSupplied,
+        verified_assurance_level: VerifiedAssuranceLevel::Local,
         acceptance_decision: AcceptanceDecision::Reject,
     };
+
+    // -- device attestation evidence ----------------------------------------
+    // Judged on the credential's own content and the caller's trust inputs.
+    // Only invalid evidence affects the decision (in `finalize`).
+    result.attestation = crate::attestation::verify_evidence(credential, trust);
+    result.verified_assurance_level = result.attestation.verified_assurance_level();
 
     // -- subject binding ----------------------------------------------------
     // Subject MUST have a DID identifier. §10: semantic non-transferability.
@@ -324,6 +359,7 @@ fn finalize(
         && result.subject_bound
         && type_allowed(credential, policy)
         && !result.revoked
+        && !result.attestation.rejects()
         && (!policy.require_integrity_anchor || result.integrity_anchored || anchor_pending)
         && !(policy.reject_expired && result.expired)
         && !(policy.reject_suspended && result.suspended)
@@ -382,6 +418,7 @@ mod tests {
             terms_of_use: None,
             witness: None,
             integrity: None,
+            evidence: Vec::new(),
             proof: Proof::unsigned("2026-01-01T00:00:00Z"),
         }
     }
