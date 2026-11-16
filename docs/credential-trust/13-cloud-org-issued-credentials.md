@@ -1,6 +1,6 @@
 # 13 Cloud organisation-issued credentials
 
-Triage: ready-for-agent
+Triage: done
 Type: task
 Repos: alexandria-cloud
 Part of: alexandria/docs/credential-trust-spec.md
@@ -22,10 +22,10 @@ The hosted service signs a candidate's accepted result as the organisation.
 
 ## Acceptance criteria
 
-- [ ] HTTP tests: policy satisfied → credential issued; the vendored verifier accepts it with organisation backing `verified` for the org's descriptor; policy unmet → refusal recorded, nothing issued; self-issue refused; unverified domain refused.
-- [ ] Revoke, suspend and reinstate change what the hosted lists serve; each writes an audit row.
-- [ ] The candidate's signed fetch returns only their own credentials.
-- [ ] Migrations, fmt, clippy, console checks pass.
+- [x] HTTP tests: policy satisfied → credential issued; the vendored verifier accepts it with organisation backing `verified` for the org's descriptor; policy unmet → refusal recorded, nothing issued; self-issue refused; unverified domain refused.
+- [x] Revoke, suspend and reinstate change what the hosted lists serve; each writes an audit row.
+- [x] The candidate's signed fetch returns only their own credentials.
+- [x] Migrations, fmt, clippy, console checks pass.
 
 ## Pointers
 
@@ -33,3 +33,16 @@ The hosted service signs a candidate's accepted result as the organisation.
 - Status list hosting: `src/status_lists.rs`, `src/http/status_lists.rs`.
 - Signed `/for/{did}` endpoints: `src/http/api.rs`, `docs/organisations.md` *What gets signed*.
 - Commits need `--signoff` (DCO).
+
+## Notes
+
+2026-11-16: built on `alexandria-cloud` `ct/13-cloud-org-issued-credentials` (merged into the Cloud integration branch by the coordinator's merger).
+
+- Roles carry an issuance policy (`PUT /api/roles/{id}/issuance-policy`, administrators); an assessment request may name a `role_id`. The run snapshots the policy at invitation, so later role edits do not change what an invited candidate is judged against.
+- On an accepted share the service issues a role credential signed with the organisation's hosted key: issuer object with the key's `did:key` and the organisation's verified name and domain, the candidate's integrity assertion unchanged, and the coverage `relatedResource` copied only when it matches the assertion's digest.
+- Deviation (coordinator decision): the candidate's attestation evidence is not copied, because its binding digest covers the candidate credential and would verify as `binding_mismatch`. The role credential instead carries an `AssessedCredentialEvidence` entry naming the candidate credential by id and integrity hash, with the attestation outcome and verified assurance level the service established; the organisation's signature vouches for them. That entry type is defined in Cloud only for now.
+- Refusal order, first failure recorded on the run and shown in the console: `share_not_accepted` (pending shares record but do not issue), `subject_is_organisation_key`, `no_integrity_assertion`, the shared rule's codes, `organisation_not_verified`.
+- Status: revocation list 1 and suspension list 2 per organisation key; revoke, suspend (optionally until a time) and reinstate are admin-only, re-sign and republish the lists and are audited; a loop lifts timed suspensions each minute. After a key rotation, credentials signed with the old key can no longer change status (409).
+- `GET /api/credentials/for/{did}` returns `[{credential}]` with the same signed-GET rule as the other `/for/{did}` endpoints. Migration `0055`.
+- Not done: story 28 (telling the candidate the policy before they start). `CredentialRequest` carries no policy; adding it changes the verifier library's exchange contract.
+
