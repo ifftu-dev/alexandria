@@ -72,7 +72,10 @@ impl Default for AggregationConfig {
         provenance_quality.insert(ProvenanceTier::IssuerSigned, (1.00, 1.00, 1.00));
 
         Self {
-            version: "1.2".into(),
+            // 1.3: class weight follows verified provenance — a self-issued
+            // credential takes the `SelfAssertion` weight whatever type it
+            // declares (`weights::provenance_weight`).
+            version: "1.3".into(),
             type_weights,
             provenance_quality,
             skill_decay: HashMap::new(),
