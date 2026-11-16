@@ -148,6 +148,11 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // bound to an identifier that is not self-resolving, with no validity
     // window or rotated-by link, and refuses a row without a key.
     (41, "key_registry_lookup_only", include_str!("key_registry_lookup_only.sql")),
+    // A status list fetched from where a credential names it is ordered by
+    // its own signed `validFrom` (unix seconds), never by `version`, which
+    // is the issuer's counter for lists it holds or gossips. NULL for a list
+    // that did not arrive by fetch.
+    (42, "status_list_valid_from", "ALTER TABLE credential_status_lists ADD COLUMN valid_from INTEGER;"),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

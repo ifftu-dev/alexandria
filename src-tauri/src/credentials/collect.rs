@@ -225,8 +225,8 @@ async fn fetch_list(client: &reqwest::Client, url: &str) -> Result<VerifiableCre
 /// Verify what [`fetch`] brought back and keep what verifies.
 ///
 /// Status lists come first, each applied only when the credential's issuer
-/// signed it for the URL it was fetched from and it is not older than the
-/// copy already held. Then each credential, for `holder` only, goes through
+/// signed it for the URL it was fetched from, it is not one `holder` issues,
+/// and it is newer than the copy already held. Then each credential, for `holder` only, goes through
 /// [`receive::receive`]: accepted ones are stored once, pending ones wait in
 /// the pending-verification queue until a later pull can decide them, and
 /// refused ones are dropped (and leave the queue). Organisation backing is
@@ -240,7 +240,7 @@ pub fn store(
     resolve: &DescriptorResolver<'_>,
 ) -> Vec<Collected> {
     for list in &fetched.status_lists {
-        if let Err(error) = apply_list(conn, list, now) {
+        if let Err(error) = apply_list(conn, holder, list, now) {
             log::debug!("collect: status list {} not applied: {error}", list.url);
         }
     }
@@ -324,10 +324,22 @@ fn collect_one(
 ///
 /// The list must name its issuer in its URL, be the list it was fetched as,
 /// be signed by that issuer and carry the purpose the credential used it for
-/// ([`status::verify_fetched_list`]). Its `validFrom` orders versions: an
-/// older copy than the one held is ignored, so a replayed list cannot undo a
+/// ([`status::verify_fetched_list`]). A list `holder` issues is never written
+/// from a fetch: this profile's own bits are the source of truth for it, and
+/// a genuine older copy it once pushed to its host could otherwise be
+/// replayed over a later revocation. Fetched copies are ordered by their own
+/// signed `validFrom` against the `valid_from` of the copy held, never
+/// against the `version` counter, so a replayed older list cannot undo a
 /// revocation. A row held under another issuer is never overwritten.
-fn apply_list(conn: &Connection, list: &FetchedList, now: &str) -> Result<(), String> {
+fn apply_list(
+    conn: &Connection,
+    holder: &Did,
+    list: &FetchedList,
+    now: &str,
+) -> Result<(), String> {
+    if &list.issuer == holder {
+        return Err("the list is one this profile issues".into());
+    }
     if !names_own_list(&list.url, &list.issuer) {
         return Err("the list URL does not name the credential's issuer".into());
     }
@@ -341,29 +353,30 @@ fn apply_list(conn: &Connection, list: &FetchedList, now: &str) -> Result<(), St
     if bits.len() > crate::p2p::vc_status::MAX_BITS_BYTES {
         return Err("status list bitmap is over the cap".into());
     }
-    let version = chrono::DateTime::parse_from_rfc3339(&list.document.valid_from)
+    let valid_from = chrono::DateTime::parse_from_rfc3339(&list.document.valid_from)
         .map_err(|e| format!("status list validFrom: {e}"))?
         .timestamp();
     conn.execute(
         "INSERT INTO credential_status_lists \
-         (list_id, issuer_did, version, status_purpose, bits, bit_length, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+         (list_id, issuer_did, version, status_purpose, bits, bit_length, updated_at, valid_from) \
+         VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, ?7) \
          ON CONFLICT(list_id) DO UPDATE SET \
-            version = excluded.version, \
             status_purpose = excluded.status_purpose, \
             bits = excluded.bits, \
             bit_length = excluded.bit_length, \
-            updated_at = excluded.updated_at \
+            updated_at = excluded.updated_at, \
+            valid_from = excluded.valid_from \
          WHERE credential_status_lists.issuer_did = excluded.issuer_did \
-           AND excluded.version >= credential_status_lists.version",
+           AND (credential_status_lists.valid_from IS NULL \
+                OR excluded.valid_from > credential_status_lists.valid_from)",
         rusqlite::params![
             list.url,
             list.issuer.as_str(),
-            version,
             list.status_purpose,
             bits,
             (bits.len() as i64) * 8,
             now,
+            valid_from,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -780,6 +793,173 @@ mod tests {
         assert_eq!(later[0].outcome, Outcome::Stored);
         assert_eq!(listed(&db).len(), 1);
         assert_eq!(pending_rows(&db), 0);
+    }
+
+    /// `signer`'s list `number` at `origin`, signed as of `valid_from`.
+    fn fetched_list(
+        origin: &str,
+        signer: &SigningKey,
+        number: u32,
+        bits: &[u8],
+        valid_from: &str,
+    ) -> FetchedList {
+        let issuer = derive_did_key(signer);
+        let url = status::list_url(origin, &issuer, number);
+        let document = status::status_list_credential(
+            &url,
+            &issuer,
+            STATUS_PURPOSE_REVOCATION,
+            bits,
+            valid_from,
+            signer,
+        )
+        .unwrap();
+        FetchedList {
+            url,
+            issuer,
+            status_purpose: STATUS_PURPOSE_REVOCATION.into(),
+            document,
+        }
+    }
+
+    /// The first 16 bytes of the bits held for `list_id` (a signed list
+    /// pads its bitmap to the minimum length).
+    fn list_bits(db: &Database, list_id: &str) -> Vec<u8> {
+        let mut bits: Vec<u8> = db
+            .conn()
+            .query_row(
+                "SELECT bits FROM credential_status_lists WHERE list_id = ?1",
+                [list_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        bits.truncate(16);
+        bits
+    }
+
+    fn store_lists(db: &Database, lists: Vec<FetchedList>) {
+        let holder = derive_did_key(&learner_key());
+        let fetched = Fetched {
+            credentials: Vec::new(),
+            status_lists: lists,
+        };
+        store(db.conn(), &holder, &fetched, NOW, &resolve_example);
+    }
+
+    /// A list this profile issues is never written from a fetch, however
+    /// genuinely signed: an older copy the device itself once pushed to its
+    /// host, replayed, must not undo a revocation made since.
+    #[test]
+    fn a_fetched_copy_of_a_locally_issued_list_never_replaces_local_bits() {
+        let db = open_db();
+        let origin = "https://cloud.example.org";
+        let learner = learner_key();
+        let holder = derive_did_key(&learner);
+        let list_id = status::list_url(origin, &holder, 1);
+        let mut revoked = vec![0u8; 16];
+        revoked[0] = 0x80;
+        db.conn()
+            .execute(
+                "INSERT INTO credential_status_lists \
+                 (list_id, issuer_did, version, status_purpose, bits, bit_length) \
+                 VALUES (?1, ?2, 2, 'revocation', ?3, 128)",
+                rusqlite::params![list_id, holder.as_str(), revoked],
+            )
+            .unwrap();
+
+        store_lists(
+            &db,
+            vec![fetched_list(origin, &learner, 1, &[0u8; 16], ISSUED)],
+        );
+
+        assert_eq!(list_bits(&db, &list_id), revoked);
+    }
+
+    /// Fetched copies of another issuer's list are ordered by their own
+    /// `validFrom`: an older copy served after a newer one changes nothing.
+    #[test]
+    fn an_older_fetched_copy_does_not_replace_a_newer_one() {
+        let db = open_db();
+        let origin = "https://cloud.example.org";
+        let org = org_key();
+        let list_id = status::list_url(origin, &derive_did_key(&org), 1);
+        let mut revoked = vec![0u8; 16];
+        revoked[0] = 0x80;
+
+        store_lists(
+            &db,
+            vec![fetched_list(
+                origin,
+                &org,
+                1,
+                &revoked,
+                "2026-11-16T11:00:00Z",
+            )],
+        );
+        store_lists(
+            &db,
+            vec![fetched_list(
+                origin,
+                &org,
+                1,
+                &[0u8; 16],
+                "2026-11-16T09:00:00Z",
+            )],
+        );
+        assert_eq!(list_bits(&db, &list_id), revoked);
+
+        let mut both = revoked.clone();
+        both[0] |= 0x40;
+        store_lists(
+            &db,
+            vec![fetched_list(origin, &org, 1, &both, "2026-11-16T11:30:00Z")],
+        );
+        assert_eq!(list_bits(&db, &list_id), both);
+    }
+
+    /// A row a gossiped list wrote carries the issuer's own counter in
+    /// `version`, which says nothing about a fetched copy's age: a fetched
+    /// copy is ordered against the stored `validFrom` alone, so a large
+    /// counter cannot pin the list against the issuer's later copies.
+    #[test]
+    fn a_fetched_copy_is_not_ordered_against_a_gossip_version_counter() {
+        let db = open_db();
+        let origin = "https://cloud.example.org";
+        let org = org_key();
+        let list_id = status::list_url(origin, &derive_did_key(&org), 1);
+        let gossiped = crate::p2p::vc_status::build_signed_status_document(
+            &org,
+            Some(&list_id),
+            STATUS_PURPOSE_REVOCATION,
+            4_000_000_000,
+            &[0u8; 16],
+        )
+        .unwrap();
+        let envelope = crate::p2p::types::SignedGossipMessage {
+            topic: "/alexandria/vc-status/1.0".into(),
+            payload: gossiped,
+            signature: vec![0u8; 64],
+            public_key: vec![0u8; 32],
+            stake_address: String::new(),
+            timestamp: 0,
+            encrypted: false,
+            key_id: None,
+        };
+        crate::p2p::vc_status::handle_status_message(&db, &envelope).unwrap();
+
+        let mut revoked = vec![0u8; 16];
+        revoked[0] = 0x80;
+        store_lists(
+            &db,
+            vec![fetched_list(
+                origin,
+                &org,
+                1,
+                &revoked,
+                "2026-11-16T11:00:00Z",
+            )],
+        );
+        assert_eq!(list_bits(&db, &list_id), revoked);
     }
 
     /// A credential cannot name another issuer's list and have its own

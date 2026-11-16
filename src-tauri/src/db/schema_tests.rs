@@ -554,7 +554,7 @@ fn with_provisional_notifications(db: Database) -> Database {
 #[test]
 fn provisional_notifications_upgrade_preserves_data_and_backfills_call_kinds() {
     let db = provisional_notification_database();
-    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 23);
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 24);
     assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
     let saved: (
         String,
@@ -680,7 +680,8 @@ fn provisional_notifications_upgrade_preserves_data_and_backfills_call_kinds() {
             (38, "llm_probes".into()),
             (39, "integrity_observed_items".into()),
             (40, "integrity_pending_flags".into()),
-            (41, "key_registry_lookup_only".into())
+            (41, "key_registry_lookup_only".into()),
+            (42, "status_list_valid_from".into())
         ]
     );
     let applied_at: String = db
@@ -728,7 +729,7 @@ fn notifications_migrate_fresh_and_current_main_without_changing_existing_calls(
         }
         assert_eq!(
             super::run_migrations_on_connection(db.conn()).unwrap(),
-            41 - prior_version
+            42 - prior_version
         );
         assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
         db.conn().execute_batch(
@@ -814,7 +815,7 @@ fn provisional_notifications_failed_upgrade_reopens_and_retries_atomically() {
     db.conn()
         .execute_batch("DROP TRIGGER fail_upgrade")
         .unwrap();
-    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 23);
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 24);
     assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
 }
 
