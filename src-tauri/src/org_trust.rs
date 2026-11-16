@@ -98,6 +98,58 @@ fn store(conn: &Connection, descriptor: &OrgDescriptor, now: i64) -> Result<(), 
     Ok(())
 }
 
+/// The cached descriptor for `domain` if it was fetched less than
+/// [`DESCRIPTOR_TTL_SECS`] before `now`. A stale or missing copy is `None`:
+/// backing judged from an old copy could outlive a key the domain removed.
+pub(crate) fn fresh_descriptor(
+    conn: &Connection,
+    domain: &str,
+    now: i64,
+) -> Result<Option<OrgDescriptor>, String> {
+    let Ok(domain) = org::normalise_domain(domain) else {
+        return Ok(None);
+    };
+    Ok(cached(conn, &domain)?
+        .filter(|(_, fetched_at)| now - fetched_at < DESCRIPTOR_TTL_SECS)
+        .map(|(descriptor, _)| descriptor))
+}
+
+/// Make sure the cache holds a fresh descriptor for `domain`, asking DNS only
+/// when the cached copy is missing or stale. Afterwards [`fresh_descriptor`]
+/// reads it.
+pub(crate) async fn refresh_descriptor(
+    state: &State<'_, AppState>,
+    domain: &str,
+) -> Result<OrgDescriptor, String> {
+    let domain = org::normalise_domain(domain).map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().timestamp();
+    let lookup = domain.clone();
+    let cached = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "org.descriptor.read",
+            move |db| fresh_descriptor(db.conn(), &lookup, now),
+        )
+        .await?;
+    if let Some(descriptor) = cached {
+        return Ok(descriptor);
+    }
+    let descriptor = fetch_descriptor(&domain).await?;
+    let stored = descriptor.clone();
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "org.descriptor.store",
+            move |db| store(db.conn(), &stored, now),
+        )
+        .await?;
+    Ok(descriptor)
+}
+
 /// Look up and check `domain`'s descriptor in DNS.
 pub(crate) async fn fetch_descriptor(domain: &str) -> Result<OrgDescriptor, String> {
     let name = org::txt_name(domain).map_err(|e| e.to_string())?;
@@ -266,6 +318,20 @@ mod tests {
         store(db.conn(), &renamed, 20).unwrap();
         let (found, at) = cached(db.conn(), "alexandria.ifftu.dev").unwrap().unwrap();
         assert_eq!((found.name.as_str(), at), ("IFFTU Labs", 20));
+    }
+
+    #[test]
+    fn only_a_fresh_cached_descriptor_resolves() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        store(db.conn(), &descriptor(), 100).unwrap();
+        let fresh = |now| fresh_descriptor(db.conn(), "Alexandria.IFFTU.dev", now).unwrap();
+        assert_eq!(fresh(100), Some(descriptor()));
+        assert_eq!(fresh(100 + DESCRIPTOR_TTL_SECS), None);
+        assert_eq!(
+            fresh_descriptor(db.conn(), "not a domain", 100).unwrap(),
+            None
+        );
     }
 
     /// Needs the network. `cargo test --lib org_trust -- --ignored`
