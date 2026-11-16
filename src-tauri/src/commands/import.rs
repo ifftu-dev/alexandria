@@ -516,7 +516,7 @@ mod tests {
             context: vec!["https://www.w3.org/ns/credentials/v2".into()],
             id: Some(id.to_string()),
             type_: vec!["VerifiableCredential".into(), class.as_str().to_string()],
-            issuer: issuer.clone(),
+            issuer: issuer.clone().into(),
             valid_from: "2026-01-01T00:00:00Z".into(),
             valid_until: valid_until.map(str::to_string),
             credential_subject: CredentialSubject {

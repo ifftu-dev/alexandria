@@ -13,6 +13,7 @@ import {
 import VideoPlayer from '@/components/course/VideoPlayer.vue'
 import {
   extractSkillClaim,
+  issuerDid,
   type OpinionRow,
   type SubjectFieldInfo,
   type VerifiableCredential,
@@ -171,7 +172,7 @@ onMounted(async () => {
         <div v-else class="space-y-3">
           <div
             v-for="vc in linkedCredentials"
-            :key="vc.id ?? vc.issuer + vc.validFrom"
+            :key="vc.id ?? issuerDid(vc.issuer) + vc.validFrom"
             class="rounded-lg bg-muted/30 p-3"
           >
             <div class="flex items-center justify-between gap-3">

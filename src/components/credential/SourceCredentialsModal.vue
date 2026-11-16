@@ -6,6 +6,7 @@ import { useDisplayNames } from '@/composables/useDisplayNames'
 import {
   extractSkillClaim,
   extractRoleClaim,
+  issuerDid,
   type CredentialAnchorState,
   type VerifiableCredential,
 } from '@/types'
@@ -43,7 +44,7 @@ watch(
   (list) => {
     const dids: string[] = []
     for (const c of list) {
-      if (typeof c.issuer === 'string') dids.push(c.issuer)
+      dids.push(issuerDid(c.issuer))
       if (c.credentialSubject?.id) dids.push(c.credentialSubject.id)
     }
     void ensureNames(dids.filter(Boolean))
@@ -70,7 +71,7 @@ watch(
 )
 
 function issuerOf(c: VerifiableCredential): string {
-  return typeof c.issuer === 'string' ? c.issuer : ''
+  return issuerDid(c.issuer)
 }
 
 function scoreOf(c: VerifiableCredential): number | null {
@@ -187,7 +188,7 @@ function pickCredential(c: VerifiableCredential) {
       <ul v-if="filtered.length" class="divide-y divide-border rounded-lg border border-border">
         <li
           v-for="c in filtered"
-          :key="c.id ?? c.issuer + c.validFrom"
+          :key="c.id ?? issuerDid(c.issuer) + c.validFrom"
           class="flex items-center gap-3 p-3 transition-colors hover:bg-muted/40 cursor-pointer"
           @click="pickCredential(c)"
         >

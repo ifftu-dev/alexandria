@@ -1124,7 +1124,8 @@ mod tests {
         .unwrap();
         assert_eq!(vc.issuer, owner, "issued under the org's DID");
         assert_ne!(
-            vc.issuer.0, subject.0,
+            vc.issuer.as_str(),
+            subject.0,
             "issuer is independent of the subject"
         );
     }

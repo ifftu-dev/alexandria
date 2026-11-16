@@ -494,7 +494,9 @@ pub struct VerifiableCredential {
     pub id: Option<String>,
     #[serde(rename = "type")]
     pub type_: Vec<String>,
-    pub issuer: Did,
+    /// The issuer: a DID string, or an object whose `id` is the DID (VC Data
+    /// Model 2.0 §4.7). The proof is checked against [`CredentialIssuer::id`].
+    pub issuer: CredentialIssuer,
     pub valid_from: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub valid_until: Option<String>,
@@ -528,6 +530,89 @@ pub struct VerifiableCredential {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub related_resource: Vec<RelatedResource>,
     pub proof: Proof,
+}
+
+/// A credential's `issuer` (VC Data Model 2.0 §4.7): the issuer's DID as a
+/// string, or an object whose `id` is that DID.
+///
+/// Credentials issued by learners use the string form. An organisation's
+/// hosted service uses the object form to state its `name` and `domain`
+/// beside the signing key's DID. Those two are the issuer's own words: only
+/// [`crate::org::organisation_backing`], given the domain's descriptor, says
+/// whether the domain stands behind the key. The object is kept as received,
+/// so the proof covers every property the issuer signed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CredentialIssuer {
+    Did(Did),
+    Object(IssuerObject),
+}
+
+/// The object form of [`CredentialIssuer`]: an `id` and whatever other
+/// properties the issuer stated.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IssuerObject {
+    pub id: Did,
+    #[serde(flatten)]
+    pub properties: serde_json::Map<String, serde_json::Value>,
+}
+
+impl CredentialIssuer {
+    /// An issuer object naming an organisation by `name` and `domain`.
+    pub fn organisation(id: Did, name: &str, domain: &str) -> Self {
+        let mut properties = serde_json::Map::new();
+        properties.insert("name".into(), name.into());
+        properties.insert("domain".into(), domain.into());
+        Self::Object(IssuerObject { id, properties })
+    }
+
+    /// The issuer's DID, whichever form the credential uses.
+    pub fn id(&self) -> &Did {
+        match self {
+            Self::Did(did) => did,
+            Self::Object(object) => &object.id,
+        }
+    }
+
+    /// The issuer's DID as a string.
+    pub fn as_str(&self) -> &str {
+        self.id().as_str()
+    }
+
+    /// The `name` an issuer object states, when it is a string.
+    pub fn name(&self) -> Option<&str> {
+        self.property("name")
+    }
+
+    /// The `domain` an issuer object states, when it is a string.
+    pub fn domain(&self) -> Option<&str> {
+        self.property("domain")
+    }
+
+    fn property(&self, key: &str) -> Option<&str> {
+        match self {
+            Self::Did(_) => None,
+            Self::Object(object) => object.properties.get(key)?.as_str(),
+        }
+    }
+}
+
+impl From<Did> for CredentialIssuer {
+    fn from(did: Did) -> Self {
+        Self::Did(did)
+    }
+}
+
+impl PartialEq<Did> for CredentialIssuer {
+    fn eq(&self, other: &Did) -> bool {
+        self.id() == other
+    }
+}
+
+impl PartialEq<CredentialIssuer> for Did {
+    fn eq(&self, other: &CredentialIssuer) -> bool {
+        self == other.id()
+    }
 }
 
 /// One entry of a credential's `evidence` (VC Data Model 2.0 §5.6), kept as

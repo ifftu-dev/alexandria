@@ -241,7 +241,7 @@ fn load_evidence_for(
             let (rubric, proctoring, traceability) = config.quality_triple(input.claim.provenance);
             AggregationInput {
                 credential_id: input.credential_id,
-                issuer: input.credential.issuer,
+                issuer: input.credential.issuer.id().clone(),
                 credential_type,
                 raw_score: input.claim.score.clamp(0.0, 1.0),
                 issuance_time: input.credential.valid_from,
@@ -752,7 +752,7 @@ mod tests {
                 "VerifiableCredential".into(),
                 "AttestationCredential".into(),
             ],
-            issuer: Did("did:key:zI".into()),
+            issuer: Did("did:key:zI".into()).into(),
             valid_from: NOW.into(),
             valid_until: None,
             credential_subject: claim.into_subject(Did("did:key:zS".into())),

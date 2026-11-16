@@ -77,6 +77,12 @@ export function didKeyToPublicKey(did) {
   return decoded.slice(2)
 }
 
+/** The issuer's DID: `issuer` itself, or the `id` of an issuer object (VC 2.0). */
+export function issuerId(vc) {
+  const issuer = vc?.issuer
+  return issuer && typeof issuer === 'object' ? issuer.id ?? null : issuer ?? null
+}
+
 function b64urlDecode(s) {
   return new Uint8Array(Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64'))
 }
@@ -96,9 +102,10 @@ function ed25519Verify(publicKey, message, signature) {
  */
 export function verifyCredential(vc, context = {}) {
   const now = context.now ?? new Date()
+  const issuer = issuerId(vc)
   const result = {
     id: vc.id ?? null,
-    issuer: vc.issuer ?? null,
+    issuer,
     subject: vc.credentialSubject?.id ?? null,
     claim: vc.credentialSubject ? {
       skillId: vc.credentialSubject.skillId ?? null,
@@ -114,10 +121,10 @@ export function verifyCredential(vc, context = {}) {
   // 1. Issuer key: a did:key is its key, whatever the registry says; any
   // other DID method is looked up in the registry.
   let publicKey = null
-  const registered = (context.keyRegistry ?? []).find((k) => k.did === vc.issuer)
-  if (registered && !String(vc.issuer).startsWith('did:key:')) publicKey = Buffer.from(registered.public_key_hex, 'hex')
+  const registered = (context.keyRegistry ?? []).find((k) => k.did === issuer)
+  if (registered && !String(issuer).startsWith('did:key:')) publicKey = Buffer.from(registered.public_key_hex, 'hex')
   else {
-    try { publicKey = didKeyToPublicKey(vc.issuer) } catch (e) {
+    try { publicKey = didKeyToPublicKey(issuer) } catch (e) {
       // Not self-resolving and no registry entry: the signature cannot be
       // judged either way. That is pending, not a forgery.
       result.signature = 'unverified: issuer key not available'
@@ -132,7 +139,7 @@ export function verifyCredential(vc, context = {}) {
   else if (proof.type !== 'DataIntegrityProof' || proof.cryptosuite !== 'eddsa-jcs-2022') {
     result.reasons.push(`unsupported proof: ${proof.type} / ${proof.cryptosuite ?? 'no cryptosuite'}`)
   } else if (proof.proofPurpose !== 'assertionMethod') result.reasons.push('proofPurpose is not assertionMethod')
-  else if (typeof proof.verificationMethod !== 'string' || proof.verificationMethod.split('#')[0] !== vc.issuer || !proof.verificationMethod.split('#')[1]) {
+  else if (typeof proof.verificationMethod !== 'string' || proof.verificationMethod.split('#')[0] !== issuer || !proof.verificationMethod.split('#')[1]) {
     result.reasons.push('verificationMethod is not controlled by the issuer')
   } else if (publicKey) {
     try {
@@ -259,7 +266,7 @@ export async function resolveStatusLists(credentials, statusLists, options = {})
   for (const vc of credentials) {
     for (const reference of statusEntries(vc)) {
       if (isListUrl(reference.statusListCredential)) {
-        wanted.set(reference.statusListCredential, { issuer: vc.issuer, purpose: reference.statusPurpose })
+        wanted.set(reference.statusListCredential, { issuer: issuerId(vc), purpose: reference.statusPurpose })
       }
     }
   }
@@ -271,7 +278,7 @@ export async function resolveStatusLists(credentials, statusLists, options = {})
       if (text.length > 1 << 20) throw new Error('response larger than 1 MiB')
       const listVc = JSON.parse(text)
       if (listVc.id !== url) throw new Error(`document id ${listVc.id} is not the URL fetched`)
-      if (listVc.issuer !== issuer) throw new Error('list is not issued by the credential issuer')
+      if (issuerId(listVc) !== issuer) throw new Error('list is not issued by the credential issuer')
       if (!(listVc.type ?? []).includes('BitstringStatusListCredential')) throw new Error('not a BitstringStatusListCredential')
       const subject = listVc.credentialSubject ?? {}
       if (subject.type !== 'BitstringStatusList') throw new Error('subject is not a BitstringStatusList')

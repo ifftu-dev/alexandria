@@ -17,6 +17,7 @@ use crate::course::{
     CourseCompletionPolicy,
 };
 use crate::did::Did;
+use crate::org::{organisation_backing, OrgDescriptor, OrganisationBacking};
 use crate::vc::verify::type_allowed;
 use crate::vc::{
     AcceptanceDecision, SkillClaim, VerifiableCredential, VerificationPendingReason,
@@ -27,7 +28,8 @@ use crate::vc::{
 /// this value so a rule change cannot leave a stale classification in place.
 ///
 /// 2: verified states carry the credential's attestation outcome.
-pub const TRUST_CALCULATION_VERSION: u32 = 2;
+/// 3: issuer-signed states carry organisation backing.
+pub const TRUST_CALCULATION_VERSION: u32 = 3;
 
 const COURSE_DOCUMENT_EVIDENCE_PREFIX: &str = "course-document:blake3:";
 const COMPLETION_ROOT_EVIDENCE_PREFIX: &str = "completion-root:";
@@ -69,6 +71,12 @@ pub enum CredentialTrust {
         /// What the credential's device attestation evidence proved.
         #[serde(default)]
         attestation: AttestationOutcome,
+        /// Which organisation's domain lists the issuer key
+        /// ([`organisation_backing`]). Present when a descriptor was supplied
+        /// or the issuer names a domain; absent for a plain issuer nobody
+        /// asked about.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        organisation: Option<OrganisationBacking>,
     },
     /// An authentic self-claim for an exact course document whose signed
     /// completion policy threshold is met by distinct authorized attestors.
@@ -137,11 +145,61 @@ pub struct CourseEndorsementEvidence<'a> {
     pub endorsements: &'a [CourseCompletionEndorsement],
 }
 
+/// [`classify_credential`], also judging which organisation stands behind the
+/// issuer key of an issuer-signed credential.
+///
+/// `organisation` is the descriptor the caller resolved for the domain the
+/// issuer names ([`crate::org::organisation_backing`]). An issuer-signed state
+/// carries the outcome when a descriptor is supplied or the issuer names a
+/// domain, so an issuer object whose domain went unresolved reads
+/// `descriptor_not_supplied`. Self-claims carry none: an organisation backs
+/// keys that sign for others.
+pub fn classify_credential_with_organisation(
+    credential: &VerifiableCredential,
+    verification: &VerificationResult,
+    policy: &VerificationPolicy,
+    expected_network_id: &str,
+    endorsement: Option<CourseEndorsementEvidence<'_>>,
+    organisation: Option<&OrgDescriptor>,
+) -> CredentialTrust {
+    let mut trust = classify_credential(
+        credential,
+        verification,
+        policy,
+        expected_network_id,
+        endorsement,
+    );
+    if let CredentialTrust::VerifiedIssuerSigned {
+        organisation: backing,
+        ..
+    } = &mut trust
+    {
+        if organisation.is_some() || credential.issuer.domain().is_some() {
+            *backing = Some(organisation_backing(credential, organisation));
+        }
+    }
+    trust
+}
+
+impl CredentialTrust {
+    /// Whether the verified credential's issuer is its subject: `Some(true)`
+    /// for a self-claim (endorsed or not), `Some(false)` for an issuer-signed
+    /// credential, `None` while invalid or pending.
+    pub fn self_issued(&self) -> Option<bool> {
+        match self {
+            Self::VerifiedSelfClaim { .. } | Self::VerifiedCourseEndorsement { .. } => Some(true),
+            Self::VerifiedIssuerSigned { .. } => Some(false),
+            Self::Invalid { .. } | Self::Pending { .. } => None,
+        }
+    }
+}
+
 /// Classify a credential from its verifier result.
 ///
 /// The verifier result is rechecked against the credential and policy rather
 /// than trusted: a result for another credential, or an `accept` that
-/// contradicts its own flags, is invalid.
+/// contradicts its own flags, is invalid. Organisation backing is not judged
+/// here; see [`classify_credential_with_organisation`].
 pub fn classify_credential(
     credential: &VerifiableCredential,
     verification: &VerificationResult,
@@ -272,8 +330,9 @@ fn classify_accepted(
 ) -> CredentialTrust {
     if credential.issuer != credential.credential_subject.id {
         return CredentialTrust::VerifiedIssuerSigned {
-            issuer: credential.issuer.clone(),
+            issuer: credential.issuer.id().clone(),
             attestation,
+            organisation: None,
         };
     }
     let Some(evidence) = endorsement else {
@@ -382,7 +441,7 @@ mod tests {
             context: vec!["https://www.w3.org/ns/credentials/v2".into()],
             id: Some("urn:uuid:trust-test".into()),
             type_: vec!["VerifiableCredential".into(), "SelfAssertion".into()],
-            issuer: issuer_did.clone(),
+            issuer: issuer_did.clone().into(),
             valid_from: "2026-01-01T00:00:00Z".into(),
             valid_until: None,
             credential_subject: claim.into_subject(subject.clone()),
@@ -627,7 +686,85 @@ mod tests {
             CredentialTrust::VerifiedIssuerSigned {
                 issuer: derive_did_key(&issuer),
                 attestation: AttestationOutcome::NotSupplied,
+                organisation: None,
             }
+        );
+    }
+
+    #[test]
+    fn issuer_signed_credential_carries_organisation_backing_and_says_it_is_not_self_issued() {
+        use crate::org::{OrgDescriptor, OrganisationBacking, DESCRIPTOR_FORMAT};
+        use crate::vc::CredentialIssuer;
+
+        let org_key = key(4);
+        let org_did = derive_did_key(&org_key);
+        let learner = derive_did_key(&key(1));
+        let mut unsigned = credential(&org_key, &learner, Vec::new());
+        unsigned.issuer = CredentialIssuer::organisation(org_did.clone(), "Org", "org.example");
+        let vc = sign_credential(
+            UnsignedCredential {
+                credential: unsigned,
+            },
+            &org_key,
+            &org_did,
+        )
+        .unwrap();
+        let descriptor = OrgDescriptor {
+            format: DESCRIPTOR_FORMAT.into(),
+            domain: "org.example".into(),
+            name: "Org Ltd".into(),
+            keys: vec![org_did.as_str().into()],
+        };
+        let policy = VerificationPolicy::default();
+        let result = verify_credential(&NullStore, &vc, NOW, &policy);
+        let classify_with = |descriptor: Option<&OrgDescriptor>| {
+            classify_credential_with_organisation(&vc, &result, &policy, NETWORK, None, descriptor)
+        };
+
+        let backed = classify_with(Some(&descriptor));
+        assert_eq!(
+            backed,
+            CredentialTrust::VerifiedIssuerSigned {
+                issuer: org_did.clone(),
+                attestation: AttestationOutcome::NotSupplied,
+                organisation: Some(OrganisationBacking::Verified {
+                    name: "Org Ltd".into(),
+                    domain: "org.example".into(),
+                }),
+            }
+        );
+        assert_eq!(backed.self_issued(), Some(false));
+
+        // The issuer names a domain, so an unanswered lookup is reported.
+        match classify_with(None) {
+            CredentialTrust::VerifiedIssuerSigned { organisation, .. } => {
+                assert_eq!(
+                    organisation,
+                    Some(OrganisationBacking::DescriptorNotSupplied)
+                )
+            }
+            other => panic!("expected issuer-signed, got {other:?}"),
+        }
+
+        // A self-claim says so, and carries no organisation backing.
+        let own = credential(&key(1), &learner, Vec::new());
+        let own_result = verify_credential(&NullStore, &own, NOW, &policy);
+        let trust = classify_credential_with_organisation(
+            &own,
+            &own_result,
+            &policy,
+            NETWORK,
+            None,
+            Some(&descriptor),
+        );
+        assert_eq!(trust.self_issued(), Some(true));
+        assert!(matches!(trust, CredentialTrust::VerifiedSelfClaim { .. }));
+        assert_eq!(
+            CredentialTrust::Pending {
+                reasons: Vec::new()
+            }
+            .self_issued(),
+            None
         );
     }
 

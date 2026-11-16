@@ -515,7 +515,7 @@ mod tests {
             context: vec!["https://www.w3.org/ns/credentials/v2".into()],
             id: Some("urn:uuid:qualification-test".into()),
             type_: vec!["VerifiableCredential".into(), class.into()],
-            issuer: issuer_did.clone(),
+            issuer: issuer_did.clone().into(),
             valid_from: "2026-01-01T00:00:00Z".into(),
             valid_until: None,
             credential_subject: claim.into_subject(subject.clone()),

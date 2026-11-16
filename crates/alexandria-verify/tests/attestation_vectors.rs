@@ -144,7 +144,7 @@ fn credential(
         context: vec!["https://www.w3.org/ns/credentials/v2".into()],
         id: Some("urn:uuid:attestation-vector".into()),
         type_: vec!["VerifiableCredential".into(), "AssessmentCredential".into()],
-        issuer: learner.clone(),
+        issuer: learner.clone().into(),
         valid_from: GENERATED.into(),
         valid_until: None,
         credential_subject: subject(learner, score),

@@ -9,7 +9,8 @@ use crate::profile::scope::ProfileState as State;
 use rusqlite::Connection;
 
 use alexandria_verify::course::sign_completion_endorsement;
-use alexandria_verify::trust::{classify_credential, CredentialTrust};
+use alexandria_verify::org::OrgDescriptor;
+use alexandria_verify::trust::{classify_credential_with_organisation, CredentialTrust};
 
 use crate::content_store::course as content_course;
 use crate::credentials::store;
@@ -26,8 +27,15 @@ use crate::evidence::completion::{
 use crate::network_profile::embedded_preprod;
 use crate::AppState;
 
+/// Resolves the descriptor an organisation publishes on a domain, or `None`
+/// when none is available. The app's resolver reads the descriptors
+/// [`crate::org_trust`] has freshly fetched; tests stub it.
+pub type DescriptorResolver<'a> = dyn Fn(&str) -> Result<Option<OrgDescriptor>, String> + 'a;
+
 /// Classify a stored credential from its signed bytes and, for a completion
-/// self-claim, the exact endorsement evidence of the claim that lists it.
+/// self-claim, the exact endorsement evidence of the claim that lists it. When
+/// the issuer names a domain, `resolve` supplies that domain's descriptor and
+/// an issuer-signed state reports the organisation backing.
 ///
 /// Lookup failures and corrupt or ambiguous stored completion evidence are
 /// errors: they must not collapse into a settled-looking lower trust state.
@@ -36,6 +44,7 @@ pub fn credential_trust_impl(
     credential_id: &str,
     verification_time: &str,
     network_id: &str,
+    resolve: &DescriptorResolver<'_>,
 ) -> Result<Option<CredentialTrust>, String> {
     let Some(credential) = store::get(conn, credential_id).map_err(|e| e.to_string())? else {
         return Ok(None);
@@ -43,13 +52,25 @@ pub fn credential_trust_impl(
     let policy = VerificationPolicy::default();
     let verification = verify_credential_db(conn, &credential, verification_time, &policy);
     let evidence = stored_completion_evidence(conn, credential_id)?;
-    Ok(Some(classify_credential(
+    let descriptor = match credential.issuer.domain() {
+        Some(domain) => resolve(domain)?,
+        None => None,
+    };
+    Ok(Some(classify_credential_with_organisation(
         &credential,
         &verification,
         &policy,
         network_id,
         evidence.as_ref().map(StoredCompletionEvidence::as_evidence),
+        descriptor.as_ref(),
     )))
+}
+
+/// The domain a stored credential's issuer names, if any.
+fn stored_issuer_domain(conn: &Connection, credential_id: &str) -> Result<Option<String>, String> {
+    Ok(store::get(conn, credential_id)
+        .map_err(|e| e.to_string())?
+        .and_then(|credential| credential.issuer.domain().map(str::to_string)))
 }
 
 #[tauri::command]
@@ -62,6 +83,21 @@ pub async fn get_credential_trust(
         .network_id
         .clone();
     let verification_time = crate::clock::now_rfc3339();
+    let lookup = credential_id.clone();
+    let domain = state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "credentials.trust.issuer_domain",
+            move |db| stored_issuer_domain(db.conn(), &lookup),
+        )
+        .await?;
+    // A domain that cannot be resolved now reads as descriptor_not_supplied.
+    if let Some(domain) = &domain {
+        let _ = crate::org_trust::refresh_descriptor(&state, domain).await;
+    }
+    let now = chrono::Utc::now().timestamp();
     state
         .db_executor
         .execute(
@@ -69,7 +105,14 @@ pub async fn get_credential_trust(
             state.profile_lease(),
             "credentials.trust",
             move |db| {
-                credential_trust_impl(db.conn(), &credential_id, &verification_time, &network_id)
+                let conn = db.conn();
+                credential_trust_impl(
+                    conn,
+                    &credential_id,
+                    &verification_time,
+                    &network_id,
+                    &|domain| crate::org_trust::fresh_descriptor(conn, domain, now),
+                )
             },
         )
         .await
@@ -217,6 +260,11 @@ mod tests {
     }
 
     const CREDENTIAL_ID: &str = "urn:uuid:completion-self-claim";
+
+    /// A resolver for credentials whose issuer names no domain.
+    fn no_organisation(_: &str) -> Result<Option<OrgDescriptor>, String> {
+        Ok(None)
+    }
     const NOW: &str = "2026-09-15T00:00:00Z";
 
     fn store_self_claim(db: &crate::db::Database, binding: &CourseCompletionBinding) {
@@ -248,7 +296,7 @@ mod tests {
             context: vec!["https://www.w3.org/ns/credentials/v2".into()],
             id: Some(CREDENTIAL_ID.into()),
             type_: vec!["VerifiableCredential".into(), "SelfAssertion".into()],
-            issuer: subject_did.clone(),
+            issuer: subject_did.clone().into(),
             valid_from: "2026-01-01T00:00:00Z".into(),
             valid_until: None,
             credential_subject: claim.into_subject(subject_did.clone()),
@@ -299,7 +347,7 @@ mod tests {
         let (db, policy, binding, first, second) = fixture();
         store_self_claim(&db, &binding);
         let trust = |network: &str| {
-            credential_trust_impl(db.conn(), CREDENTIAL_ID, NOW, network)
+            credential_trust_impl(db.conn(), CREDENTIAL_ID, NOW, network, &no_organisation)
                 .unwrap()
                 .expect("stored credential")
         };
@@ -358,10 +406,124 @@ mod tests {
                 reason: EndorsementMismatch::WrongNetwork,
             })
         );
-        assert!(
-            credential_trust_impl(db.conn(), "urn:uuid:missing", NOW, "preprod")
+        assert!(credential_trust_impl(
+            db.conn(),
+            "urn:uuid:missing",
+            NOW,
+            "preprod",
+            &no_organisation
+        )
+        .unwrap()
+        .is_none());
+    }
+
+    const ORG_CREDENTIAL_ID: &str = "urn:uuid:org-issued-role";
+
+    /// A role credential the organisation at `org.example` issued to a
+    /// learner, with the issuer object naming the organisation.
+    fn store_org_issued(db: &crate::db::Database) -> alexandria_verify::did::Did {
+        use alexandria_verify::vc::sign::{sign_credential, UnsignedCredential};
+        use alexandria_verify::vc::{
+            Claim, CredentialIssuer, Proof, RoleClaim, VerifiableCredential,
+        };
+
+        let org = SigningKey::from_bytes(&[4; 32]);
+        let org_did = did_from_verifying_key(&org.verifying_key());
+        let learner = did_from_verifying_key(&SigningKey::from_bytes(&[9; 32]).verifying_key());
+        let unsigned = VerifiableCredential {
+            context: vec!["https://www.w3.org/ns/credentials/v2".into()],
+            id: Some(ORG_CREDENTIAL_ID.into()),
+            type_: vec!["VerifiableCredential".into(), "RoleCredential".into()],
+            issuer: CredentialIssuer::organisation(org_did.clone(), "Org", "org.example"),
+            valid_from: "2026-01-01T00:00:00Z".into(),
+            valid_until: None,
+            credential_subject: Claim::Role(RoleClaim {
+                role: "role".into(),
+                scope: None,
+            })
+            .into_subject(learner.clone()),
+            credential_status: None,
+            terms_of_use: None,
+            witness: None,
+            integrity: None,
+            evidence: Vec::new(),
+            related_resource: Vec::new(),
+            proof: Proof::unsigned("2026-01-01T00:00:00Z"),
+        };
+        let credential = sign_credential(
+            UnsignedCredential {
+                credential: unsigned,
+            },
+            &org,
+            &org_did,
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO credentials (id, issuer_did, subject_did, credential_type, \
+                 claim_kind, issuance_date, signed_vc_json, integrity_hash, revoked) \
+                 VALUES (?1, ?2, ?3, 'RoleCredential', 'role', \
+                         '2026-01-01T00:00:00Z', ?4, ?1, 0)",
+                params![
+                    ORG_CREDENTIAL_ID,
+                    org_did.as_str(),
+                    learner.as_str(),
+                    serde_json::to_string(&credential).unwrap()
+                ],
+            )
+            .unwrap();
+        org_did
+    }
+
+    #[test]
+    fn an_organisation_issued_credential_reports_the_backing_its_domain_gives() {
+        use alexandria_verify::org::{OrgDescriptor, OrganisationBacking, DESCRIPTOR_FORMAT};
+
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let org_did = store_org_issued(&db);
+        let listing = |keys: Vec<String>| OrgDescriptor {
+            format: DESCRIPTOR_FORMAT.into(),
+            domain: "org.example".into(),
+            name: "Org Ltd".into(),
+            keys,
+        };
+        let backing_with = |descriptor: Option<OrgDescriptor>| {
+            let resolve = |domain: &str| {
+                assert_eq!(domain, "org.example", "the issuer's domain is resolved");
+                Ok(descriptor.clone())
+            };
+            match credential_trust_impl(db.conn(), ORG_CREDENTIAL_ID, NOW, "preprod", &resolve)
                 .unwrap()
-                .is_none()
+                .expect("stored credential")
+            {
+                CredentialTrust::VerifiedIssuerSigned {
+                    issuer,
+                    organisation,
+                    ..
+                } => {
+                    assert_eq!(issuer, org_did);
+                    organisation
+                }
+                other => panic!("expected an issuer-signed credential, got {other:?}"),
+            }
+        };
+
+        assert_eq!(
+            backing_with(Some(listing(vec![org_did.as_str().into()]))),
+            Some(OrganisationBacking::Verified {
+                name: "Org Ltd".into(),
+                domain: "org.example".into(),
+            })
+        );
+        let successor = did_from_verifying_key(&SigningKey::from_bytes(&[5; 32]).verifying_key());
+        assert_eq!(
+            backing_with(Some(listing(vec![successor.as_str().into()]))),
+            Some(OrganisationBacking::KeyNotListed)
+        );
+        assert_eq!(
+            backing_with(None),
+            Some(OrganisationBacking::DescriptorNotSupplied)
         );
     }
 
@@ -379,7 +541,10 @@ mod tests {
                 params![binding.subject_did.as_str(), "33".repeat(32), CREDENTIAL_ID],
             )
             .unwrap();
-        assert!(credential_trust_impl(db.conn(), CREDENTIAL_ID, NOW, "preprod").is_err());
+        assert!(
+            credential_trust_impl(db.conn(), CREDENTIAL_ID, NOW, "preprod", &no_organisation)
+                .is_err()
+        );
 
         db.conn()
             .execute("DELETE FROM completion_claims WHERE id = 'other-claim'", [])
@@ -390,6 +555,9 @@ mod tests {
                 [],
             )
             .unwrap();
-        assert!(credential_trust_impl(db.conn(), CREDENTIAL_ID, NOW, "preprod").is_err());
+        assert!(
+            credential_trust_impl(db.conn(), CREDENTIAL_ID, NOW, "preprod", &no_organisation)
+                .is_err()
+        );
     }
 }
