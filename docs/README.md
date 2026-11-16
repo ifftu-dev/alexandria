@@ -59,6 +59,7 @@ Open work, tracked as described in [agents/issue-tracker.md](agents/issue-tracke
 | Doc | What it covers |
 |---|---|
 | [ai-chat-spec.md](ai-chat-spec.md) | AI chat and tutoring |
+| [credential-trust-spec.md](credential-trust-spec.md) | Checkable attestation evidence, provenance-based scoring and organisation-issued credentials |
 | [personhood-trust-proposal.md](personhood-trust-proposal.md) | Personhood issuer trust and account binding |
 | [sentinel-federation.md](sentinel-federation.md) | Federated Sentinel threat model and privacy budget |
 | [sentinel-trust-profiles-spec.md](sentinel-trust-profiles-spec.md) | Sentinel trust profiles, verification rungs and measured signals, with [tickets](sentinel-trust-profiles/) |
