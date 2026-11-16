@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 // the rest of the codebase had moved to v2.
 use alexandria_verify::vc::context::W3C_VC_V2;
 
-use super::{status_list, CredentialError, Issuer, PolicyViolation, SupersessionRequires};
+use super::{status_list, CredentialError, Issuer, SupersessionRequires};
 use crate::crypto::did::Did;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
@@ -18,149 +18,46 @@ use crate::domain::vc::{
 };
 
 /// Issuance-time integrity gate (§ Integrity→VC bridge). When an
-/// `IssueCredentialRequest` carries both an `integrity_session_id` and
-/// an `IssuancePolicy`, the session's terminal state must satisfy every
-/// set bound or issuance is refused — so a "trusted" credential is only
-/// minted when the assessment that backed it passed the sponsor's
-/// integrity rules. All fields are optional/opt-in; an absent policy
-/// means "embed the attestation but gate on nothing".
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct IssuancePolicy {
-    /// Minimum final integrity score in `[0,1]`.
-    #[serde(default)]
-    pub min_integrity: Option<f64>,
-    /// Maximum tolerated critical flags.
-    #[serde(default)]
-    pub max_critical: Option<i64>,
-    /// Maximum tolerated warning flags.
-    #[serde(default)]
-    pub max_warning: Option<i64>,
-    /// If true, the session status must be `completed` (clean) —
-    /// `flagged` / `suspended` are rejected.
-    #[serde(default)]
-    pub require_clean: bool,
-    /// If set, the assertion's `assurance_level` must equal this. Only
-    /// `"local"` is currently achievable.
-    #[serde(default)]
-    pub required_assurance_level: Option<String>,
-    /// Probe policy for attempts made for this role. Overrides the
-    /// assessment's own policy when set to anything but `none`, and chooses
-    /// which probes run after submission. At issuance, anything but `none`
-    /// requires that the probe step ran under it and that no probe failed;
-    /// a skipped probe never counts against the learner (require a satisfied
-    /// one with `min_verification_rung: probed`).
-    #[serde(default)]
-    pub probe_policy: Option<crate::assessment::probes::ProbePolicy>,
-    /// The model connection that writes generated probes under the `llm`
-    /// policy: a saved model connection on the device that runs the attempt.
-    /// Without one a generated probe is skipped. Ignored by every other
-    /// policy and not judged at issuance.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub probe_connection_id: Option<String>,
-    /// Minimum trust profile (the policy floor). Judged at attempt start and
-    /// again here; issuance is refused unless the session meets it and the
-    /// two judgements agree.
-    #[serde(default)]
-    pub min_trust_profile: Option<crate::sentinel::scoring::TrustProfile>,
-    /// Minimum verification rung, judged at issuance from the session.
-    #[serde(default)]
-    pub min_verification_rung: Option<crate::sentinel::scoring::VerificationRung>,
-}
+/// `IssueCredentialRequest` carries both an `integrity_session_id` and an
+/// `IssuancePolicy`, the credential must satisfy every set bound or issuance
+/// is refused, so a "trusted" credential is only minted when the assessment
+/// that backed it passed the sponsor's integrity rules. The policy is judged
+/// by the verifier library's shared rule ([`alexandria_verify::policy`]),
+/// the one the hosted service applies, over the credential's assertion and
+/// its attestation outcome; this module adds only the checks that need the
+/// session ([`SessionFacts::floor_agrees`]).
+pub use alexandria_verify::policy::IssuancePolicy;
 
-impl IssuancePolicy {
-    /// The first bound the assertion violates, if any.
-    fn evaluate(
-        &self,
-        a: &IntegrityAssertion,
-        facts: &SessionFacts,
-    ) -> Result<(), PolicyViolation> {
-        if self.require_clean && a.status != "completed" {
-            return Err(PolicyViolation::NotClean {
-                status: a.status.clone(),
+/// Judge `policy` for a credential about to be signed: the shared rule over
+/// its integrity assertion and the outcome of its attestation evidence, then
+/// the agreement of the floor judged at attempt start with the one judged
+/// from the session now.
+fn gate(
+    policy: &IssuancePolicy,
+    vc: &VerifiableCredential,
+    facts: &SessionFacts,
+) -> Result<(), CredentialError> {
+    let Some(assertion) = &vc.integrity else {
+        return Err(CredentialError::PolicyWithoutSession);
+    };
+    let attestation = alexandria_verify::attestation::verify_evidence(
+        vc,
+        crate::sentinel::attestation::profile_trust_inputs(),
+    );
+    alexandria_verify::policy::evaluate(policy, assertion, &attestation)?;
+    if let Some(floor) = policy.min_trust_profile {
+        if !facts.floor_agrees(floor) {
+            return Err(CredentialError::PolicyFloorDisagrees {
+                required: floor.as_str().to_string(),
             });
         }
-        if let Some(min) = self.min_integrity {
-            match a.integrity_score {
-                Some(score) if score >= min => {}
-                Some(score) => return Err(PolicyViolation::IntegrityBelowMinimum { score, min }),
-                None => return Err(PolicyViolation::NoIntegrityScore),
-            }
-        }
-        if let Some(max) = self.max_critical {
-            if a.critical_count > max {
-                return Err(PolicyViolation::TooManyCritical {
-                    count: a.critical_count,
-                    max,
-                });
-            }
-        }
-        if let Some(max) = self.max_warning {
-            if a.warning_count > max {
-                return Err(PolicyViolation::TooManyWarnings {
-                    count: a.warning_count,
-                    max,
-                });
-            }
-        }
-        if let Some(req) = &self.required_assurance_level {
-            if &a.assurance_level != req {
-                return Err(PolicyViolation::AssuranceBelowRequired {
-                    level: a.assurance_level.clone(),
-                    required: req.clone(),
-                });
-            }
-        }
-        if let Some(floor) = self.min_trust_profile {
-            use crate::sentinel::scoring::evaluate_floor;
-            // Judged again from the session as it stands: the attestation
-            // counts only if it verifies now, the camera only if its
-            // coverage meets the profile's minimum.
-            let now = evaluate_floor(facts.trust_profile, Some(floor), &facts.uncredited);
-            if !now.satisfied {
-                return Err(PolicyViolation::TrustProfileBelowFloor {
-                    profile: facts
-                        .trust_profile
-                        .map_or("none", |p| p.as_str())
-                        .to_string(),
-                    required: floor.as_str().to_string(),
-                });
-            }
-            // The learner was told the attempt-start judgement; issuance must
-            // agree with it or refuse.
-            if facts.recorded_floor.as_ref() != Some(&now) {
-                return Err(PolicyViolation::PolicyFloorDisagrees {
-                    required: floor.as_str().to_string(),
-                });
-            }
-        }
-        if let Some(required) = self.min_verification_rung {
-            if facts.rung < required {
-                return Err(PolicyViolation::RungBelowMinimum {
-                    rung: facts.rung.as_str().to_string(),
-                    required: required.as_str().to_string(),
-                });
-            }
-        }
-        if let Some(policy) = self
-            .probe_policy
-            .filter(|p| *p != crate::assessment::probes::ProbePolicy::None)
-        {
-            let name = policy.as_str().to_string();
-            match &facts.probe {
-                Some(p) if p.policies.contains(&name) => {
-                    if p.failed > 0 {
-                        return Err(PolicyViolation::ProbeFailed { policy: name });
-                    }
-                }
-                _ => return Err(PolicyViolation::ProbePolicyNotRun { policy: name }),
-            }
-        }
-        Ok(())
     }
+    Ok(())
 }
 
-/// Facts about the bound session that the assertion does not carry but a
-/// policy may gate on. Derived from the session at issuance.
+/// Facts about the bound session that the assertion does not carry, for the
+/// checks only the issuing device can make. Derived from the session at
+/// issuance.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SessionFacts {
     /// The session's locked trust profile, if one was chosen.
@@ -170,10 +67,6 @@ pub struct SessionFacts {
     /// The policy floor as judged at attempt start or interview-check
     /// acceptance.
     pub recorded_floor: Option<crate::sentinel::scoring::PolicyFloor>,
-    /// The verification rung the session reached.
-    pub rung: crate::sentinel::scoring::VerificationRung,
-    /// The probe step's results, when it ran.
-    pub probe: Option<crate::sentinel::surface::ProbeOutcome>,
 }
 
 impl SessionFacts {
@@ -190,11 +83,22 @@ impl SessionFacts {
         Ok(Self {
             trust_profile: surface.trust_profile,
             uncredited: surface.uncredited.clone(),
-            rung: surface.rung,
-            probe: surface.probe.clone(),
             // An unreadable judgement is no judgement: issuance then refuses.
             recorded_floor: floor.and_then(|j| serde_json::from_str(&j).ok()),
         })
+    }
+
+    /// Whether `floor`, judged again from the session as it stands (the
+    /// attestation counts only if it verifies now, the camera only if its
+    /// coverage meets the profile's minimum), agrees with the judgement the
+    /// learner was told at attempt start. A session never judged disagrees.
+    fn floor_agrees(&self, floor: crate::sentinel::scoring::TrustProfile) -> bool {
+        let now = crate::sentinel::scoring::evaluate_floor(
+            self.trust_profile,
+            Some(floor),
+            &self.uncredited,
+        );
+        self.recorded_floor.as_ref() == Some(&now)
     }
 }
 
@@ -400,11 +304,11 @@ pub fn issue(
     )
     .map_err(CredentialError::Envelope)?;
 
-    // § Integrity→VC bridge: summarise the bound session, enforce the
-    // optional issuance gate, and embed the attestation in the envelope.
-    // A policy without a session is a caller error; a session without a
-    // policy embeds the attestation but gates on nothing.
-    let integrity = match &req.integrity_session_id {
+    // § Integrity→VC bridge: summarise the bound session and embed the
+    // assertion in the envelope; the optional issuance gate is judged on the
+    // envelope before signing. A policy without a session is a caller error;
+    // a session without a policy embeds the assertion but gates on nothing.
+    let (integrity, session_facts) = match &req.integrity_session_id {
         Some(session_id) => {
             let (assertion, facts) = build_integrity_assertion(
                 conn,
@@ -412,16 +316,13 @@ pub fn issue(
                 now,
                 &crate::sentinel::attestation::TrustConfig::from_profile(),
             )?;
-            if let Some(policy) = &req.integrity_policy {
-                policy.evaluate(&assertion, &facts)?;
-            }
-            Some(assertion)
+            (Some(assertion), Some(facts))
         }
         None => {
             if req.integrity_policy.is_some() {
                 return Err(CredentialError::PolicyWithoutSession);
             }
-            None
+            (None, None)
         }
     };
 
@@ -441,6 +342,9 @@ pub fn issue(
         evidence: Vec::new(),
         proof: Proof::unsigned(now.to_string()),
     };
+    if let (Some(policy), Some(facts)) = (&req.integrity_policy, &session_facts) {
+        gate(policy, &vc, facts)?;
+    }
     let signed = sign_credential(
         UnsignedCredential { credential: vc },
         issuer_key,
@@ -529,7 +433,7 @@ pub fn issue(
 mod tests {
     use super::*;
     use crate::credentials::fixtures::{sample_request, setup, test_key, NOW};
-    use crate::credentials::{CredentialError, PolicyViolation, SupersessionRequires};
+    use crate::credentials::{CredentialError, PolicyRefusal, SupersessionRequires};
 
     /// Insert a terminal integrity session row for bridge tests.
     fn seed_session(
@@ -959,7 +863,7 @@ mod tests {
         assert!(
             matches!(
                 &err,
-                CredentialError::Policy(PolicyViolation::RungBelowMinimum { rung, required })
+                CredentialError::Policy(PolicyRefusal::RungBelowMinimum { rung, required })
                     if rung == "process" && required == "probed"
             ),
             "{err:?}"
@@ -992,7 +896,7 @@ mod tests {
         assessed(db.conn(), "skipped_step", false, 2, 2);
         assert!(matches!(
             refusal(&req, "skipped_step").unwrap_err(),
-            CredentialError::Policy(PolicyViolation::ProbePolicyNotRun { .. })
+            CredentialError::Policy(PolicyRefusal::ProbePolicyNotRun { .. })
         ));
 
         // Probes ran, but under another policy.
@@ -1000,7 +904,7 @@ mod tests {
         verified(db.conn(), "other", "probe", "authored", "satisfied");
         assert!(matches!(
             refusal(&req, "other").unwrap_err(),
-            CredentialError::Policy(PolicyViolation::ProbePolicyNotRun { .. })
+            CredentialError::Policy(PolicyRefusal::ProbePolicyNotRun { .. })
         ));
 
         // A probe that failed is a failed verification.
@@ -1010,7 +914,7 @@ mod tests {
         assert!(
             matches!(
                 err,
-                CredentialError::Policy(PolicyViolation::ProbeFailed { .. })
+                CredentialError::Policy(PolicyRefusal::ProbeFailed { .. })
             ),
             "{err:?}"
         );
@@ -1055,7 +959,7 @@ mod tests {
         req.integrity_session_id = Some("unjudged".into());
         assert!(matches!(
             issue(db.conn(), &key, &req, NOW).unwrap_err(),
-            CredentialError::Policy(PolicyViolation::PolicyFloorDisagrees { .. })
+            CredentialError::PolicyFloorDisagrees { .. }
         ));
 
         // A session whose profile does not run the camera does not meet it.
@@ -1063,24 +967,39 @@ mod tests {
         req.integrity_session_id = Some("core".into());
         assert!(matches!(
             issue(db.conn(), &key, &req, NOW).unwrap_err(),
-            CredentialError::Policy(PolicyViolation::TrustProfileBelowFloor { .. })
+            CredentialError::Policy(PolicyRefusal::TrustProfileBelowFloor { .. })
         ));
     }
 
     #[test]
-    fn a_camera_lost_for_too_much_of_the_session_no_longer_carries_a_camera_floor() {
+    fn a_degraded_camera_no_longer_carries_a_camera_floor() {
         use crate::sentinel::scoring::TrustProfile;
         let (db, key, _, subject) = setup();
         let mut req = sample_request(subject.clone());
         req.integrity_policy = Some(floor_policy(TrustProfile::Camera));
 
-        // One window in ten without camera checks: degraded, and said so,
-        // but within the profile's coverage minimum.
+        // Every window carried camera checks: the floor is met.
+        session_on_profile(db.conn(), "whole", false, true, Some(TrustProfile::Camera));
+        camera_windows(db.conn(), "whole", 10, 0);
+        req.integrity_session_id = Some("whole".into());
+        let a = issue(db.conn(), &key, &req, NOW)
+            .unwrap()
+            .integrity
+            .unwrap();
+        assert!(a.signals_degraded.is_empty());
+
+        // One window in ten without camera checks: degraded, and said so.
+        // The shared rule judges the floor from the assertion, where a
+        // verifier cannot see how much of the session the camera covered, so
+        // a degraded camera does not carry the floor.
         session_on_profile(db.conn(), "brief", false, true, Some(TrustProfile::Camera));
         camera_windows(db.conn(), "brief", 10, 1);
         req.integrity_session_id = Some("brief".into());
-        let vc = issue(db.conn(), &key, &req, NOW).unwrap();
-        let a = vc.integrity.unwrap();
+        assert!(matches!(
+            issue(db.conn(), &key, &req, NOW).unwrap_err(),
+            CredentialError::Policy(PolicyRefusal::TrustProfileBelowFloor { .. })
+        ));
+        let a = assertion_for(db.conn(), &key, &subject, "brief");
         assert_eq!(a.trust_profile.as_deref(), Some("camera"));
         assert_eq!(a.signals_run, vec!["core", "camera"]);
         assert_eq!(a.signals_degraded, vec!["camera"]);
@@ -1098,7 +1017,7 @@ mod tests {
         req.integrity_session_id = Some("covered".into());
         assert!(matches!(
             issue(db.conn(), &key, &req, NOW).unwrap_err(),
-            CredentialError::Policy(PolicyViolation::TrustProfileBelowFloor { .. })
+            CredentialError::Policy(PolicyRefusal::TrustProfileBelowFloor { .. })
         ));
 
         // A camera session with no committed windows has no coverage at all.
@@ -1106,7 +1025,7 @@ mod tests {
         req.integrity_session_id = Some("empty".into());
         assert!(matches!(
             issue(db.conn(), &key, &req, NOW).unwrap_err(),
-            CredentialError::Policy(PolicyViolation::TrustProfileBelowFloor { .. })
+            CredentialError::Policy(PolicyRefusal::TrustProfileBelowFloor { .. })
         ));
         // Without a floor it still issues, and the assertion says it degraded.
         let a = assertion_for(db.conn(), &key, &subject, "empty");
@@ -1126,7 +1045,7 @@ mod tests {
         req.integrity_policy = Some(floor_policy(TrustProfile::Attested));
         assert!(matches!(
             issue(db.conn(), &key, &req, NOW).unwrap_err(),
-            CredentialError::Policy(PolicyViolation::TrustProfileBelowFloor { .. })
+            CredentialError::Policy(PolicyRefusal::TrustProfileBelowFloor { .. })
         ));
         // Without the floor the credential issues and names the loss.
         req.integrity_policy = None;
@@ -1172,7 +1091,9 @@ mod tests {
         let mut req = sample_request(subject);
         req.integrity_session_id = Some("sess_claimed".into());
 
-        for required in ["anchored", "high_assurance"] {
+        // `device_attested` is met only by verified credential-bound
+        // evidence, which this credential does not carry.
+        for required in ["device_attested", "anchored", "high_assurance"] {
             req.integrity_policy = Some(IssuancePolicy {
                 required_assurance_level: Some(required.into()),
                 ..Default::default()
@@ -1181,12 +1102,19 @@ mod tests {
             assert!(
                 matches!(
                     &error,
-                    CredentialError::Policy(PolicyViolation::AssuranceBelowRequired { level, required: wanted })
+                    CredentialError::Policy(PolicyRefusal::AssuranceBelowRequired { level, required: wanted })
                         if level == "local" && wanted == required
                 ),
                 "{error:?}"
             );
         }
+
+        // A required level is a minimum: `local` is met by every credential.
+        req.integrity_policy = Some(IssuancePolicy {
+            required_assurance_level: Some("local".into()),
+            ..Default::default()
+        });
+        assert!(issue(db.conn(), &key, &req, NOW).is_ok());
 
         req.integrity_policy = None;
         let vc = issue(db.conn(), &key, &req, NOW).unwrap();
@@ -1210,7 +1138,7 @@ mod tests {
         assert!(
             matches!(
                 &err,
-                CredentialError::Policy(PolicyViolation::NotClean { status }) if status == "suspended"
+                CredentialError::Policy(PolicyRefusal::NotClean { status }) if status == "suspended"
             ),
             "{err:?}"
         );
@@ -1225,7 +1153,7 @@ mod tests {
         });
         assert!(matches!(
             issue(db.conn(), &key, &req, NOW).unwrap_err(),
-            CredentialError::Policy(PolicyViolation::IntegrityBelowMinimum { .. })
+            CredentialError::Policy(PolicyRefusal::IntegrityBelowMinimum { .. })
         ));
         req.integrity_policy = Some(IssuancePolicy {
             max_critical: Some(1),
@@ -1233,7 +1161,7 @@ mod tests {
         });
         assert!(matches!(
             issue(db.conn(), &key, &req, NOW).unwrap_err(),
-            CredentialError::Policy(PolicyViolation::TooManyCritical { count: 2, max: 1 })
+            CredentialError::Policy(PolicyRefusal::TooManyCritical { count: 2, max: 1 })
         ));
         req.integrity_policy = Some(IssuancePolicy {
             max_warning: Some(0),
@@ -1241,7 +1169,7 @@ mod tests {
         });
         assert!(matches!(
             issue(db.conn(), &key, &req, NOW).unwrap_err(),
-            CredentialError::Policy(PolicyViolation::TooManyWarnings { count: 1, max: 0 })
+            CredentialError::Policy(PolicyRefusal::TooManyWarnings { count: 1, max: 0 })
         ));
     }
 
