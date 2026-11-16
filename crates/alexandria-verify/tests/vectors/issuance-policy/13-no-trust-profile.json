@@ -1,0 +1,42 @@
+{
+  "description": "Any floor, even core, and a session that never chose a profile.",
+  "policy": {
+    "min_integrity": null,
+    "max_critical": null,
+    "max_warning": null,
+    "require_clean": false,
+    "required_assurance_level": null,
+    "probe_policy": null,
+    "min_trust_profile": "core",
+    "min_verification_rung": null
+  },
+  "integrity": {
+    "sessionId": "isess_policy_vector",
+    "status": "completed",
+    "integrityScore": 0.91,
+    "criticalCount": 0,
+    "warningCount": 1,
+    "assuranceLevel": "local",
+    "generatedAt": "2026-06-01T00:00:00Z",
+    "verificationRung": "probed",
+    "probe": {
+      "outcome": "satisfied",
+      "policies": [
+        "reseed"
+      ],
+      "satisfied": 2,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "attestation": {
+    "outcome": "not_supplied"
+  },
+  "expect": {
+    "refusal": {
+      "code": "trust_profile_below_floor",
+      "profile": "none",
+      "required": "core"
+    }
+  }
+}

@@ -43,35 +43,9 @@ impl fmt::Display for SupersessionRequires {
     }
 }
 
-/// The first bound of an [`IssuancePolicy`](super::IssuancePolicy) the bound
-/// integrity session broke.
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum PolicyViolation {
-    #[error("issuance policy: session status is '{status}', requires 'completed'")]
-    NotClean { status: String },
-    #[error("issuance policy: integrity score {score:.3} below minimum {min:.3}")]
-    IntegrityBelowMinimum { score: f64, min: f64 },
-    #[error("issuance policy: minimum integrity required but session has no score")]
-    NoIntegrityScore,
-    #[error("issuance policy: {count} critical flags exceed maximum {max}")]
-    TooManyCritical { count: i64, max: i64 },
-    #[error("issuance policy: {count} warning flags exceed maximum {max}")]
-    TooManyWarnings { count: i64, max: i64 },
-    #[error("issuance policy: assurance level '{level}' does not meet required '{required}'")]
-    AssuranceBelowRequired { level: String, required: String },
-    #[error("issuance policy: trust profile '{profile}' does not meet the '{required}' floor")]
-    TrustProfileBelowFloor { profile: String, required: String },
-    #[error(
-        "issuance policy: the '{required}' floor judged before the first item does not match issuance"
-    )]
-    PolicyFloorDisagrees { required: String },
-    #[error("issuance policy: verification rung '{rung}' does not meet the '{required}' minimum")]
-    RungBelowMinimum { rung: String, required: String },
-    #[error("issuance policy: the '{policy}' probe step did not run in the session")]
-    ProbePolicyNotRun { policy: String },
-    #[error("issuance policy: a '{policy}' probe failed")]
-    ProbeFailed { policy: String },
-}
+/// The first requirement of an [`IssuancePolicy`](super::IssuancePolicy) a
+/// credential does not meet, judged by the verifier library's shared rule.
+pub use alexandria_verify::policy::PolicyRefusal;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CredentialError {
@@ -90,7 +64,14 @@ pub enum CredentialError {
     #[error("integrity session {0} not found")]
     SessionNotFound(String),
     #[error(transparent)]
-    Policy(#[from] PolicyViolation),
+    Policy(#[from] PolicyRefusal),
+    /// The policy floor judged at attempt start does not match the one
+    /// judged from the session at issuance. Needs the session, so the shared
+    /// rule cannot judge it.
+    #[error(
+        "issuance policy: the '{required}' floor judged before the first item does not match issuance"
+    )]
+    PolicyFloorDisagrees { required: String },
     #[error("supersedes target {0} not found locally")]
     SupersededNotFound(String),
     #[error("§11.4: supersession requires {0} as the prior credential")]

@@ -1,0 +1,40 @@
+{
+  "description": "Several bounds unmet: the refusal is the first in the rule's order (status, score, flags, assurance, floor, rung, probes).",
+  "policy": {
+    "min_integrity": 0.8,
+    "max_critical": 0,
+    "max_warning": 1,
+    "require_clean": true,
+    "required_assurance_level": "local",
+    "probe_policy": "reseed",
+    "min_trust_profile": "camera",
+    "min_verification_rung": "probed"
+  },
+  "integrity": {
+    "sessionId": "isess_policy_vector",
+    "status": "suspended",
+    "integrityScore": 0.2,
+    "criticalCount": 3,
+    "warningCount": 1,
+    "assuranceLevel": "local",
+    "generatedAt": "2026-06-01T00:00:00Z",
+    "trustProfile": "camera",
+    "verificationRung": "probed",
+    "signalsRun": [
+      "core",
+      "camera"
+    ],
+    "signalsNotRun": [
+      "device_attestation"
+    ]
+  },
+  "attestation": {
+    "outcome": "not_supplied"
+  },
+  "expect": {
+    "refusal": {
+      "code": "not_clean",
+      "status": "suspended"
+    }
+  }
+}

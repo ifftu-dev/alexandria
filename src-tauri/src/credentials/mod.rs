@@ -24,7 +24,7 @@ pub mod lifecycle;
 pub mod status_list;
 pub mod store;
 
-pub use error::{CredentialError, PolicyViolation, StatusChange, SupersessionRequires};
+pub use error::{CredentialError, PolicyRefusal, StatusChange, SupersessionRequires};
 pub use issue::{issue, IssuancePolicy, IssueCredentialRequest};
 pub use issuer::Issuer;
 
