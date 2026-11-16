@@ -68,6 +68,8 @@ async fn a_registry_row_cannot_change_how_a_did_key_issuer_verifies() {
             terms_of_use: None,
             witness: None,
             integrity: None,
+            evidence: Vec::new(),
+            related_resource: Vec::new(),
             proof: Proof::unsigned(TEST_NOW),
         },
     };
