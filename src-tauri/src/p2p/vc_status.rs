@@ -34,6 +34,9 @@ pub enum StatusIngest {
     IgnoredUnknownIssuer,
     /// Parsed and attributed, but the issuer signature is absent or wrong.
     IgnoredBadSignature,
+    /// The list id does not name the signing issuer, or the row under that
+    /// id belongs to another issuer. A signer speaks only for its own lists.
+    IgnoredForeignList,
 }
 
 #[derive(serde::Deserialize)]
@@ -72,6 +75,28 @@ fn default_list_id(issuer: &str, status_purpose: &str) -> String {
         REVOCATION_LIST_NUMBER
     };
     format!("urn:alexandria:status-list:{issuer}:{number}")
+}
+
+/// Whether `list_id` names `issuer`'s own list: the hosted URL form
+/// `{host}/status-lists/{issuer}/{n}` or the URN form
+/// `urn:alexandria:status-list:{issuer}:{n}`.
+///
+/// A signature only proves who wrote a document; this is what stops a peer
+/// signing for its own DID from writing its bits over someone else's list.
+pub(crate) fn list_names_issuer(list_id: &str, issuer: &str) -> bool {
+    if let Some(location) = alexandria_verify::vc::status::parse_list_url(list_id) {
+        return location.issuer.as_str() == issuer;
+    }
+    list_id
+        .strip_prefix("urn:alexandria:status-list:")
+        .and_then(|rest| rest.rsplit_once(':'))
+        .is_some_and(|(named, number)| {
+            named == issuer
+                && !number.is_empty()
+                && !number.starts_with('0')
+                && number.len() <= 9
+                && number.chars().all(|c| c.is_ascii_digit())
+        })
 }
 
 /// The bytes an issuer signs to authorise a status list.
@@ -203,18 +228,25 @@ pub fn handle_status_message(
         .list_id
         .clone()
         .unwrap_or_else(|| default_list_id(&parsed.issuer, &parsed.status_purpose));
+    if !list_names_issuer(&list_id, &parsed.issuer) {
+        return Ok(StatusIngest::IgnoredForeignList);
+    }
 
-    // Refuse older versions to prevent rollback (§11.2). Checked before the
-    // signature so a replayed old document costs nothing.
-    let existing: Option<i64> = db
+    // Refuse older versions to prevent rollback (§11.2), and never touch a
+    // row held under another issuer. Checked before the signature so a
+    // replayed old document costs nothing.
+    let existing: Option<(String, i64)> = db
         .conn()
         .query_row(
-            "SELECT version FROM credential_status_lists WHERE list_id = ?1",
+            "SELECT issuer_did, version FROM credential_status_lists WHERE list_id = ?1",
             rusqlite::params![&list_id],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .ok();
-    if let Some(prev) = existing {
+    if let Some((holder, prev)) = existing {
+        if holder != parsed.issuer {
+            return Ok(StatusIngest::IgnoredForeignList);
+        }
         if parsed.version <= prev {
             return Ok(StatusIngest::IgnoredNewer);
         }
@@ -267,7 +299,9 @@ pub fn handle_status_message(
                 status_purpose = excluded.status_purpose, \
                 bits = excluded.bits, \
                 bit_length = excluded.bit_length, \
-                updated_at = excluded.updated_at",
+                updated_at = excluded.updated_at \
+             WHERE credential_status_lists.issuer_did = excluded.issuer_did \
+               AND excluded.version > credential_status_lists.version",
             rusqlite::params![
                 &list_id,
                 &parsed.issuer,
@@ -505,6 +539,120 @@ mod tests {
             .unwrap();
         assert_eq!(purpose, "suspension");
         assert_eq!(bits, vec![0x80]);
+    }
+
+    /// Hold `bits` as `issuer_did`'s list `list_id`, as local issuance or an
+    /// earlier pull would.
+    fn hold_list(db: &Database, list_id: &str, issuer_did: &str, version: i64, bits: &[u8]) {
+        db.conn()
+            .execute(
+                "INSERT INTO credential_status_lists \
+                 (list_id, issuer_did, version, status_purpose, bits, bit_length) \
+                 VALUES (?1, ?2, ?3, 'revocation', ?4, ?5)",
+                rusqlite::params![list_id, issuer_did, version, bits, bits.len() as i64 * 8],
+            )
+            .unwrap();
+    }
+
+    fn held(db: &Database, list_id: &str) -> (String, Vec<u8>) {
+        db.conn()
+            .query_row(
+                "SELECT issuer_did, bits FROM credential_status_lists WHERE list_id = ?1",
+                rusqlite::params![list_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+    }
+
+    /// A peer signing honestly for its own DID still cannot name another
+    /// issuer's list: the list id must name the signer, in either form.
+    #[test]
+    fn a_peer_cannot_replace_another_issuers_list() {
+        let victim = alexandria_verify::did::derive_did_key(&issuer_key());
+        let attacker = SigningKey::from_bytes(&[9u8; 32]);
+        for list_id in [
+            format!("urn:alexandria:status-list:{}:1", victim.as_str()),
+            format!(
+                "https://status.example.org/status-lists/{}/1",
+                victim.as_str()
+            ),
+        ] {
+            let db = Database::open_in_memory().unwrap();
+            db.run_migrations().unwrap();
+            hold_list(&db, &list_id, victim.as_str(), 3, &[0x80]);
+
+            let doc =
+                build_signed_status_document(&attacker, Some(&list_id), "revocation", 99, &[0x00])
+                    .unwrap();
+            assert_eq!(
+                handle_status_message(&db, &stub_msg(&doc)).unwrap(),
+                StatusIngest::IgnoredForeignList,
+                "{list_id}"
+            );
+            assert_eq!(
+                held(&db, &list_id),
+                (victim.as_str().to_string(), vec![0x80])
+            );
+        }
+    }
+
+    /// The local issuer's own list is no different: a peer cannot zero the
+    /// bits of credentials this profile revoked.
+    #[test]
+    fn a_peer_cannot_replace_the_local_issuers_list() {
+        let local = SigningKey::from_bytes(&[5u8; 32]);
+        let local_did = alexandria_verify::did::derive_did_key(&local);
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let list_id = format!("urn:alexandria:status-list:{}:1", local_did.as_str());
+        hold_list(&db, &list_id, local_did.as_str(), 1, &[0xff]);
+
+        let attacker = SigningKey::from_bytes(&[9u8; 32]);
+        let doc =
+            build_signed_status_document(&attacker, Some(&list_id), "revocation", 2, &[0]).unwrap();
+        assert_eq!(
+            handle_status_message(&db, &stub_msg(&doc)).unwrap(),
+            StatusIngest::IgnoredForeignList
+        );
+        assert_eq!(held(&db, &list_id).1, vec![0xff]);
+    }
+
+    /// A row already held under another issuer is never relabelled, even
+    /// when its id is one the signer's own list could carry (a row written
+    /// before the name check existed, or under an id the check accepts).
+    #[test]
+    fn a_row_held_under_another_issuer_is_never_relabelled() {
+        let signer = issuer_key();
+        let signer_did = alexandria_verify::did::derive_did_key(&signer);
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let list_id = format!("urn:alexandria:status-list:{}:1", signer_did.as_str());
+        let other = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+        hold_list(&db, &list_id, other, 1, &[0x80]);
+
+        let doc =
+            build_signed_status_document(&signer, Some(&list_id), "revocation", 2, &[0]).unwrap();
+        assert_eq!(
+            handle_status_message(&db, &stub_msg(&doc)).unwrap(),
+            StatusIngest::IgnoredForeignList
+        );
+        assert_eq!(held(&db, &list_id), (other.to_string(), vec![0x80]));
+    }
+
+    /// The issuer's own list under its hosted URL is still accepted.
+    #[test]
+    fn an_issuer_may_publish_its_own_hosted_list() {
+        let sk = issuer_key();
+        let did = alexandria_verify::did::derive_did_key(&sk);
+        let db = db_with_issuer(&sk);
+        let list_id = format!("https://status.example.org/status-lists/{}/2", did.as_str());
+        let doc =
+            build_signed_status_document(&sk, Some(&list_id), "suspension", 1, &[0x40]).unwrap();
+        assert_eq!(
+            handle_status_message(&db, &stub_msg(&doc)).unwrap(),
+            StatusIngest::Applied
+        );
+        assert_eq!(held(&db, &list_id), (did.as_str().to_string(), vec![0x40]));
     }
 
     #[test]
