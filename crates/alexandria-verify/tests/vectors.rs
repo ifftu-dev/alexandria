@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 
 use alexandria_verify::coverage::{self, CoverageStatement};
 use alexandria_verify::did::{derive_did_key, Did, KeyRegistryEntry};
+use alexandria_verify::org::{organisation_backing, OrgDescriptor, OrganisationBacking};
 use alexandria_verify::vc::sign::{sign_credential, UnsignedCredential};
 use alexandria_verify::vc::verify::verify_credential;
 use alexandria_verify::vc::{
@@ -59,6 +60,14 @@ struct Vector {
     #[serde(default)]
     store: VectorStore,
     expect: VerificationResult,
+    /// The organisation descriptor the caller resolved for the issuer's
+    /// domain (`org::descriptor_from_txt`), when one was supplied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    organisation_descriptor: Option<OrgDescriptor>,
+    /// The organisation backing `org::organisation_backing` must report for
+    /// this credential and descriptor. Absent for vectors that do not test it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    expect_organisation_backing: Option<OrganisationBacking>,
 }
 
 /// The lookups verification performs, as data. Suspension has no lookup of
@@ -133,6 +142,9 @@ const V2_CONTEXT: &str = "https://www.w3.org/ns/credentials/v2";
 const NOW: &str = "2026-06-01T00:00:00Z";
 const ORG_NAME: &str = "Vector Organisation";
 const ORG_DOMAIN: &str = "org.example";
+/// The name the domain's descriptor publishes; differs from the issuer
+/// object's own `name` so a vector can show which one is reported.
+const ORG_PUBLISHED_NAME: &str = "Vector Organisation Ltd";
 
 fn skeleton(issuer: Did, subject: Did, valid_until: Option<&str>) -> VerifiableCredential {
     VerifiableCredential {
@@ -202,6 +214,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store: VectorStore::default(),
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -231,6 +245,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store: VectorStore::default(),
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -252,6 +268,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store: VectorStore::default(),
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -281,6 +299,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store: VectorStore::default(),
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -305,6 +325,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store: VectorStore::default(),
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -327,6 +349,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store: VectorStore::default(),
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -355,6 +379,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store: VectorStore::default(),
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -376,6 +402,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store: VectorStore::default(),
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -420,6 +448,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store,
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -479,6 +509,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store,
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -498,6 +530,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store,
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -517,6 +551,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store,
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -554,6 +590,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store,
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -573,16 +611,84 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 description: "The issuer is an object carrying the signing key's DID as `id` \
                               with the organisation's `name` and `domain`, as VC 2.0 allows. \
                               The key is resolved from `id` and the proof's verification \
-                              method sits under `id`; the credential is accepted."
+                              method sits under `id`; the credential is accepted. No descriptor \
+                              for the domain is supplied, so organisation backing is \
+                              descriptor_not_supplied."
                     .into(),
                 verification_time: NOW.into(),
                 policy: default_policy.clone(),
+                expect_organisation_backing: Some(organisation_backing(&vc, None)),
                 credential: vc,
                 store: VectorStore::default(),
                 expect,
+                organisation_descriptor: None,
             },
         ));
     }
+    // The same object-issuer credential, judged against descriptors the
+    // caller resolved. Backing never changes the verification result.
+    let org_vector = |description: &str, descriptor: OrgDescriptor| {
+        let mut vc = skeleton(issuer.clone(), subject.clone(), None);
+        vc.issuer = CredentialIssuer::organisation(issuer.clone(), ORG_NAME, ORG_DOMAIN);
+        let vc = signed(vc, &issuer_key, &issuer);
+        let expect = verify_credential(&VectorStore::default(), &vc, NOW, &default_policy);
+        Vector {
+            description: description.into(),
+            verification_time: NOW.into(),
+            policy: default_policy.clone(),
+            expect_organisation_backing: Some(organisation_backing(&vc, Some(&descriptor))),
+            credential: vc,
+            store: VectorStore::default(),
+            expect,
+            organisation_descriptor: Some(descriptor),
+        }
+    };
+    let successor = derive_did_key(&key("vector-org-successor"));
+    let descriptor = |domain: &str, name: &str, keys: &[&Did]| OrgDescriptor {
+        format: alexandria_verify::org::DESCRIPTOR_FORMAT.into(),
+        domain: domain.into(),
+        name: name.into(),
+        keys: keys.iter().map(|k| k.as_str().to_string()).collect(),
+    };
+    out.push((
+        "20-organisation-backing-verified",
+        org_vector(
+            "The descriptor for the issuer's domain lists the issuer key among its keys. \
+             Organisation backing is verified, with the name and domain the descriptor \
+             publishes: the issuer object's own name is not the one reported.",
+            descriptor(ORG_DOMAIN, ORG_PUBLISHED_NAME, &[&successor, &issuer]),
+        ),
+    ));
+    out.push((
+        "21-organisation-key-not-listed",
+        org_vector(
+            "The organisation removed the issuer key from its domain's descriptor, which \
+             now lists only a successor key. Organisation backing is key_not_listed, while \
+             the signature still verifies and the credential is accepted as a plain key's.",
+            descriptor(ORG_DOMAIN, ORG_PUBLISHED_NAME, &[&successor]),
+        ),
+    ));
+    out.push((
+        "22-organisation-wrong-domain",
+        org_vector(
+            "The caller supplied the descriptor of a domain other than the one the issuer \
+             object names. It lists the issuer key, but backs nothing for this credential: \
+             organisation backing is wrong_domain.",
+            descriptor("other.example", "Other Organisation", &[&issuer]),
+        ),
+    ));
+    out.push((
+        "23-organisation-invalid-descriptor",
+        org_vector(
+            "The supplied descriptor for the issuer's domain lists a key that is not a \
+             did:key, so it fails the descriptor checks and backs nothing: organisation \
+             backing is invalid_descriptor, even though it also lists the issuer key.",
+            OrgDescriptor {
+                keys: vec![issuer.as_str().into(), "did:web:org.example".into()],
+                ..descriptor(ORG_DOMAIN, ORG_PUBLISHED_NAME, &[])
+            },
+        ),
+    ));
 
     // --- policy -----------------------------------------------------------
     {
@@ -612,6 +718,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store: VectorStore::default(),
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -637,6 +745,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store: VectorStore::default(),
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -663,6 +773,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store: VectorStore::default(),
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -689,6 +801,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store: VectorStore::default(),
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -714,6 +828,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 credential: vc,
                 store: VectorStore::default(),
                 expect,
+                organisation_descriptor: None,
+                expect_organisation_backing: None,
             },
         ));
     }
@@ -827,6 +943,14 @@ fn vectors_match_this_implementation() {
             "{}: coverageStatementMismatch",
             path.display()
         );
+        if let Some(expected) = &v.expect_organisation_backing {
+            assert_eq!(
+                &organisation_backing(&v.credential, v.organisation_descriptor.as_ref()),
+                expected,
+                "{}: organisationBacking",
+                path.display()
+            );
+        }
         // A coverage statement the credential names consistently resolves
         // from the registry, whatever its version.
         if let Some(digest) = v
@@ -951,6 +1075,60 @@ fn an_object_issuer_verifies_against_its_id() {
     );
     let got = verify_credential(&VectorStore::default(), &tampered, NOW, &v.policy);
     assert!(!got.valid_signature);
+}
+
+/// The organisation backing vectors state what the spec promises: backing
+/// verified with the published name and domain, withdrawn when the key leaves
+/// the descriptor, refused for another domain's or a malformed descriptor,
+/// and never a change to the verification result itself.
+#[test]
+fn organisation_backing_vectors_report_what_the_descriptor_says() {
+    let all = build_all();
+    let get = |name: &str| &all.iter().find(|(n, _)| *n == name).expect(name).1;
+    let backing = |name: &str| {
+        serde_json::to_value(get(name).expect_organisation_backing.as_ref().expect(name))
+            .expect("serialize backing")
+    };
+
+    assert_eq!(
+        backing("19-object-issuer"),
+        serde_json::json!({"outcome": "descriptor_not_supplied"})
+    );
+    assert_eq!(
+        backing("20-organisation-backing-verified"),
+        serde_json::json!({
+            "outcome": "verified",
+            "name": "Vector Organisation Ltd",
+            "domain": "org.example",
+        })
+    );
+    assert_eq!(
+        backing("21-organisation-key-not-listed"),
+        serde_json::json!({"outcome": "key_not_listed"})
+    );
+    assert_eq!(
+        backing("22-organisation-wrong-domain"),
+        serde_json::json!({"outcome": "wrong_domain"})
+    );
+    assert_eq!(
+        backing("23-organisation-invalid-descriptor"),
+        serde_json::json!({"outcome": "invalid_descriptor"})
+    );
+    for name in [
+        "19-object-issuer",
+        "20-organisation-backing-verified",
+        "21-organisation-key-not-listed",
+        "22-organisation-wrong-domain",
+        "23-organisation-invalid-descriptor",
+    ] {
+        let v = get(name);
+        assert!(v.expect.valid_signature, "{name}: signature still verifies");
+        assert_eq!(
+            v.expect.acceptance_decision,
+            AcceptanceDecision::Accept,
+            "{name}: backing never changes the decision"
+        );
+    }
 }
 
 /// The suspension vectors state facts an implementer can check by hand:

@@ -1,5 +1,5 @@
 {
-  "description": "The issuer is an object carrying the signing key's DID as `id` with the organisation's `name` and `domain`, as VC 2.0 allows. The key is resolved from `id` and the proof's verification method sits under `id`; the credential is accepted.",
+  "description": "The issuer is an object carrying the signing key's DID as `id` with the organisation's `name` and `domain`, as VC 2.0 allows. The key is resolved from `id` and the proof's verification method sits under `id`; the credential is accepted. No descriptor for the domain is supplied, so organisation backing is descriptor_not_supplied.",
   "verificationTime": "2026-06-01T00:00:00Z",
   "policy": {
     "reject_expired": true,
@@ -69,5 +69,8 @@
     },
     "verifiedAssuranceLevel": "local",
     "acceptanceDecision": "accept"
+  },
+  "expectOrganisationBacking": {
+    "outcome": "descriptor_not_supplied"
   }
 }
