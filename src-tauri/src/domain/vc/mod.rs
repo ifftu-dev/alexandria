@@ -28,6 +28,9 @@ impl VerificationStore for SqliteVerificationStore<'_> {
         }
     }
 
+    /// Any list held locally: this node's own, or one received by gossip
+    /// or in a bundle. Suspension is read from here too; the issuer's
+    /// `credentials.suspended` bookkeeping is never consulted.
     fn status_list_bits(&self, list_id: &str) -> StoreLookup<Vec<u8>> {
         match self
             .0
@@ -39,22 +42,6 @@ impl VerificationStore for SqliteVerificationStore<'_> {
             .optional()
         {
             Ok(Some(bits)) => StoreLookup::Found(bits),
-            Ok(None) => StoreLookup::Missing,
-            Err(_) => StoreLookup::Unavailable,
-        }
-    }
-
-    fn suspension(&self, credential_id: &str) -> StoreLookup<(bool, Option<String>)> {
-        match self
-            .0
-            .query_row(
-                "SELECT suspended, suspended_until FROM credentials WHERE id = ?1",
-                rusqlite::params![credential_id],
-                |r| Ok((r.get::<_, i64>(0)? != 0, r.get::<_, Option<String>>(1)?)),
-            )
-            .optional()
-        {
-            Ok(Some(state)) => StoreLookup::Found(state),
             Ok(None) => StoreLookup::Missing,
             Err(_) => StoreLookup::Unavailable,
         }
@@ -121,7 +108,6 @@ mod tests {
             unavailable.status_list_bits("missing"),
             StoreLookup::Unavailable
         );
-        assert_eq!(unavailable.suspension("missing"), StoreLookup::Unavailable);
         assert_eq!(
             unavailable.is_superseded("missing"),
             StoreLookup::Unavailable
@@ -135,7 +121,6 @@ mod tests {
             StoreLookup::Missing
         ));
         assert_eq!(available.status_list_bits("missing"), StoreLookup::Missing);
-        assert_eq!(available.suspension("missing"), StoreLookup::Missing);
         assert_eq!(
             available.is_superseded("missing"),
             StoreLookup::Found(false)

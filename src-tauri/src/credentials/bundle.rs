@@ -4,7 +4,7 @@
 //! The export bundle is a single JSON document carrying everything a
 //! third-party verifier needs to re-check the credentials without any
 //! Alexandria infrastructure: the signed VCs themselves, the historical
-//! key registry, and the revocation status lists.
+//! key registry, and the revocation and suspension status lists.
 //!
 //! Determinism comes from JCS canonicalization — same inputs ⇒
 //! byte-identical bundle, which is what the survivability tests assert
@@ -270,8 +270,9 @@ pub fn rejection_reasons(result: &VerificationResult) -> Vec<&'static str> {
                 VerificationPendingReason::StatusListUnavailable => {
                     "status list lookup is unavailable"
                 }
-                VerificationPendingReason::SuspensionStateUnavailable => {
-                    "suspension lookup is unavailable"
+                VerificationPendingReason::SuspensionListMissing => "suspension list is missing",
+                VerificationPendingReason::SuspensionListUnavailable => {
+                    "suspension list lookup is unavailable"
                 }
                 VerificationPendingReason::SupersessionStateUnavailable => {
                     "supersession lookup is unavailable"
@@ -412,9 +413,10 @@ pub fn verify_bundle_offline(
 /// A [`VerificationStore`] over a credential bundle's own contents.
 ///
 /// A bundle is self-contained: it carries the key registry entries and status
-/// lists needed to check the credentials inside it, and nothing else. So the
-/// answer to "is this suspended?" or "is this superseded?" is always no — those
-/// are facts about a local collection, and a bundle is not one.
+/// lists needed to check the credentials inside it — revocation and
+/// suspension lists alike — and nothing else. So the answer to "is this
+/// superseded?" is always "not known": that is a fact about a local
+/// collection, and a bundle is not one.
 ///
 /// This used to be done by opening an in-memory SQLite database, running the
 /// entire application migration suite against it, and INSERTing the bundle's
@@ -504,13 +506,6 @@ impl crate::domain::vc::VerificationStore for BundleStore {
             .unwrap_or(crate::domain::vc::StoreLookup::Missing)
     }
 
-    fn suspension(
-        &self,
-        _credential_id: &str,
-    ) -> crate::domain::vc::StoreLookup<(bool, Option<String>)> {
-        crate::domain::vc::StoreLookup::Missing
-    }
-
     /// A bundle can carry a credential's receipt but not the ledger's word
     /// on the transaction it names, so an anchor with a receipt is
     /// unavailable here rather than confirmed.
@@ -566,7 +561,10 @@ mod tests {
         );
         assert_eq!(
             report.results[0].pending_reasons,
-            vec![VerificationPendingReason::StatusListMissing]
+            vec![
+                VerificationPendingReason::StatusListMissing,
+                VerificationPendingReason::SuspensionListMissing
+            ]
         );
         // A bare credential carries no status list, so this must not read as
         // a clean bill of health.
@@ -805,14 +803,27 @@ mod tests {
             alexandria_verify::vc::status::get_bit(&bits, 1),
             Some(false)
         );
+        let suspension = &on_disk.status_list_credentials[1];
+        let suspension_id = suspension.id.clone().unwrap();
+        assert_eq!(
+            suspension_id,
+            alexandria_verify::vc::status::list_url("https://cloud.example", &issuer, 2)
+        );
+        alexandria_verify::vc::status::verify_fetched_list(
+            suspension,
+            &suspension_id,
+            &issuer,
+            "suspension",
+        )
+        .unwrap();
         for credential in &on_disk.credentials {
-            assert_eq!(
+            let named = |purpose| {
                 credential
-                    .credential_status
-                    .as_ref()
-                    .map(|s| s.status_list_credential.as_str()),
-                Some(list_id.as_str())
-            );
+                    .status_entry(purpose)
+                    .map(|s| s.status_list_credential.as_str())
+            };
+            assert_eq!(named("revocation"), Some(list_id.as_str()));
+            assert_eq!(named("suspension"), Some(suspension_id.as_str()));
         }
     }
 
@@ -827,12 +838,12 @@ mod tests {
             credentials::issue(db.conn(), &key, &sample_request(subject.clone()), NOW).unwrap();
         let json = export_signed(db.conn(), Some(&key)).unwrap();
         let bundle: CredentialBundle = serde_json::from_str(&json).unwrap();
-        assert_eq!(bundle.status_list_credentials.len(), 1);
+        // Both of the issuer's lists: revocation and suspension.
+        assert_eq!(bundle.status_list_credentials.len(), 2);
         let list = &bundle.status_list_credentials[0];
         assert_eq!(
             list.id.as_deref(),
-            vc.credential_status
-                .as_ref()
+            vc.status_entry("revocation")
                 .map(|s| s.status_list_credential.as_str())
         );
         assert!(list
@@ -864,6 +875,52 @@ mod tests {
             "a revoked credential must not verify from the signed list"
         );
         assert_eq!(total, 1);
+    }
+
+    #[test]
+    fn a_suspension_travels_in_the_signed_export_and_reads_from_the_list_alone() {
+        // A receiver of the bundle has no issuer database: the suspension
+        // reaches them as a bit in the signed suspension list.
+        let (db, key, issuer, subject) = setup();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
+        lifecycle::suspend(
+            db.conn(),
+            &issuer,
+            vc.id.as_deref().unwrap(),
+            None,
+            None,
+            NOW,
+        )
+        .unwrap();
+        let mut bundle: CredentialBundle =
+            serde_json::from_str(&export_signed(db.conn(), Some(&key)).unwrap()).unwrap();
+        bundle.status_lists.clear();
+        let json = serde_json_canonicalizer::to_string(&bundle).unwrap();
+        let report = verify_offline(&json, NOW).unwrap();
+        assert!(report.results[0].suspended);
+        assert!(!report.results[0].revoked);
+        assert_eq!(report.accepted, 0);
+
+        // Without the suspension list the receiver cannot say "not
+        // suspended": the decision waits.
+        let suspension_list = vc
+            .status_entry("suspension")
+            .unwrap()
+            .status_list_credential
+            .clone();
+        bundle
+            .status_list_credentials
+            .retain(|list| list.id.as_deref() != Some(suspension_list.as_str()));
+        let json = serde_json_canonicalizer::to_string(&bundle).unwrap();
+        let report = verify_offline(&json, NOW).unwrap();
+        assert_eq!(
+            report.results[0].pending_reasons,
+            vec![VerificationPendingReason::SuspensionListMissing]
+        );
+        assert_eq!(
+            rejection_reasons(&report.results[0]),
+            vec!["suspension list is missing"]
+        );
     }
 
     #[test]
@@ -961,8 +1018,17 @@ mod tests {
         assert_eq!(bundle.format_version, BUNDLE_FORMAT_VERSION);
         assert_eq!(bundle.credentials.len(), 1);
         assert_eq!(bundle.credentials[0].id, vc.id);
-        assert_eq!(bundle.status_lists.len(), 1);
-        assert_eq!(bundle.status_lists[0].issuer_did, issuer.as_str());
+        assert_eq!(bundle.status_lists.len(), 2, "revocation and suspension");
+        assert!(bundle
+            .status_lists
+            .iter()
+            .all(|list| list.issuer_did == issuer.as_str()));
+        let purposes: Vec<_> = bundle
+            .status_lists
+            .iter()
+            .map(|list| list.status_purpose.as_str())
+            .collect();
+        assert_eq!(purposes, ["revocation", "suspension"]);
         // No integrity assertion, no coverage statement.
         assert!(bundle.coverage_statements.is_empty());
         assert!(!json.contains("coverage_statements"));

@@ -13,8 +13,8 @@ use super::{status_list, CredentialError, Issuer, PolicyViolation, SupersessionR
 use crate::crypto::did::Did;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
-    integrity_hash_of, Claim, CredentialStatus, CredentialType, IntegrityAssertion, ProbeSummary,
-    Proof, VerifiableCredential,
+    integrity_hash_of, Claim, CredentialType, IntegrityAssertion, ProbeSummary, Proof,
+    VerifiableCredential,
 };
 
 /// Issuance-time integrity gate (§ Integrity→VC bridge). When an
@@ -342,7 +342,9 @@ pub fn issue(
         return Err(CredentialError::SubjectNotDid);
     }
 
-    let list_id = status_list::ensure(conn, issuer_did)?;
+    // The revocation list's slot is the credential's slot in both lists.
+    let lists = status_list::ensure(conn, issuer_did)?;
+    let list_id = lists.revocation.clone();
     let index = status_list::allocate(conn, &list_id)?;
 
     let type_name = req.credential_type.as_str();
@@ -409,13 +411,7 @@ pub fn issue(
         valid_from: now.to_string(),
         valid_until: req.expiration_date.clone(),
         credential_subject: claim.into_subject(req.subject.clone()),
-        credential_status: Some(CredentialStatus {
-            id: format!("{list_id}#{index}"),
-            type_: status_list::ENTRY_TYPE.into(),
-            status_purpose: "revocation".into(),
-            status_list_index: index.to_string(),
-            status_list_credential: list_id.clone(),
-        }),
+        credential_status: Some(lists.entries(index)),
         terms_of_use: None,
         witness: None,
         integrity,
@@ -1172,11 +1168,23 @@ mod tests {
         let vc = issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
         assert!(!vc.proof.proof_value.is_empty());
         assert!(vc.id.as_deref().unwrap().starts_with("urn:alexandria:vc:"));
-        let status = vc.credential_status.expect("status attached");
-        assert_eq!(status.status_list_index, "0");
-        assert!(status
-            .status_list_credential
-            .starts_with("urn:alexandria:status-list:"));
+        // Two entries: revocation and suspension, each a Bitstring Status
+        // List entry into its own list, at the same index.
+        let json = serde_json::to_value(&vc).unwrap();
+        let entries = json["credentialStatus"]
+            .as_array()
+            .expect("a list of entries");
+        let purposes: Vec<_> = entries.iter().map(|e| e["statusPurpose"].clone()).collect();
+        assert_eq!(purposes, ["revocation", "suspension"]);
+        let issuer = vc.issuer.as_str();
+        for (entry, number) in entries.iter().zip([1, 2]) {
+            assert_eq!(entry["type"], "BitstringStatusListEntry");
+            assert_eq!(entry["statusListIndex"], "0");
+            assert_eq!(
+                entry["statusListCredential"],
+                format!("urn:alexandria:status-list:{issuer}:{number}")
+            );
+        }
     }
 
     #[test]
@@ -1186,8 +1194,12 @@ mod tests {
         let (db, key, _, subject) = setup();
         let a = issue(db.conn(), &key, &sample_request(subject.clone()), NOW).unwrap();
         let b = issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
-        assert_eq!(a.credential_status.unwrap().status_list_index, "0");
-        assert_eq!(b.credential_status.unwrap().status_list_index, "1");
+        for (vc, index) in [(a, "0"), (b, "1")] {
+            assert!(vc
+                .status_entries()
+                .iter()
+                .all(|e| e.status_list_index == index));
+        }
     }
 
     #[test]

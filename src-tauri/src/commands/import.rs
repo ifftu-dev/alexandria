@@ -169,7 +169,10 @@ pub fn import_credential_impl(
         .find(|t| t.as_str() != "VerifiableCredential")
         .cloned()
         .ok_or_else(|| "credential names no class beyond VerifiableCredential".to_string())?;
-    let (list_id, list_index) = match &vc.credential_status {
+    // The denormalised slot is the revocation entry's; every entry stays in
+    // the signed JSON, which is what verification reads.
+    let (list_id, list_index) = match vc.status_entry(crate::domain::vc::STATUS_PURPOSE_REVOCATION)
+    {
         Some(s) => (
             Some(s.status_list_credential.clone()),
             Some(s.status_list_index.clone()),
@@ -618,13 +621,16 @@ mod tests {
             entitlement_props(),
             None,
         );
-        vc.credential_status = Some(CredentialStatus {
-            id: "urn:test:missing-status#0".into(),
-            type_: "BitstringStatusListEntry".into(),
-            status_purpose: "revocation".into(),
-            status_list_index: "0".into(),
-            status_list_credential: "urn:test:missing-status".into(),
-        });
+        vc.credential_status = Some(
+            CredentialStatus {
+                id: "urn:test:missing-status#0".into(),
+                type_: "BitstringStatusListEntry".into(),
+                status_purpose: "revocation".into(),
+                status_list_index: "0".into(),
+                status_list_credential: "urn:test:missing-status".into(),
+            }
+            .into(),
+        );
         let vc = sign_credential(UnsignedCredential { credential: vc }, &issuer_key, &issuer)
             .expect("re-sign status-bearing credential");
 

@@ -301,12 +301,15 @@ async fn the_whole_demo_path_works_against_a_live_cloud() {
     );
     let first = credential(&db, &first_id);
     let list_url = status::list_url(&base, &did, 1);
-    let reference = first.credential_status.clone().expect("status reference");
+    let reference = first
+        .status_entry("revocation")
+        .cloned()
+        .expect("status reference");
     assert_eq!(reference.status_list_credential, list_url);
     assert_eq!(
         status_list::pending(db.conn(), &did).unwrap().len(),
-        1,
-        "a new list is pending"
+        2,
+        "a new pair of lists, revocation and suspension, is pending"
     );
     publish_lists(&db, &issuer).await;
     let (code, served) = cloud.open("GET", &list_url[base.len()..], None).await;
@@ -974,7 +977,10 @@ mod ipc {
         )
         .unwrap();
         let list_url = status::list_url(&base, &did, 1);
-        let reference = first.credential_status.clone().expect("status reference");
+        let reference = first
+            .status_entry("revocation")
+            .cloned()
+            .expect("status reference");
         assert_eq!(reference.status_list_credential, list_url);
         let (code, served) = cloud.open("GET", &list_url[base.len()..], None).await;
         assert_eq!(code, 200, "grading published the list: {served}");

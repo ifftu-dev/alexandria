@@ -318,7 +318,8 @@ fn run_reinstate(ctx: &ProjectContext, password_file: Option<&Path>, id: &str) -
     output::kv("ID", id);
 
     let signer = vault::unlock(ctx, password_file)?;
-    app_lib::credentials::lifecycle::reinstate(&signer.conn, signer.issuer.did(), id)
+    let now = vault::now_rfc3339();
+    app_lib::credentials::lifecycle::reinstate(&signer.conn, signer.issuer.did(), id, &now)
         .map_err(|e| anyhow::anyhow!(e))
         .context("credentials::lifecycle::reinstate failed")?;
 

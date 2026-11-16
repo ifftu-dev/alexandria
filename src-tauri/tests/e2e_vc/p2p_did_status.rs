@@ -95,6 +95,7 @@ async fn status_list_revocation_propagates() {
         key.sign(&app_lib::p2p::vc_status::canonical_status_bytes(
             &list_id,
             issuer.as_str(),
+            "revocation",
             1,
             &bits,
         ))

@@ -160,25 +160,43 @@ export function verifyCredential(vc, context = {}) {
   const subjectBound = typeof result.subject === 'string' && result.subject.startsWith('did:')
   if (!subjectBound) result.reasons.push('credentialSubject.id is not a DID, so the credential is not bound to a holder')
 
-  // Bitstring Status List, if the bundle carries it. Bit n = byte n/8, bit n%8 from the most significant bit.
-  const status = vc.credentialStatus
-  if (!status) result.status = 'no status list named'
+  // Bitstring Status Lists, if the bundle carries them: a revocation entry and
+  // a suspension entry, each into its own list. Bit n = byte n/8, bit n%8 from
+  // the most significant bit. A list not at hand is pending, never "clear".
+  const entries = statusEntries(vc).filter((e) => e.statusPurpose === 'revocation' || e.statusPurpose === 'suspension')
+  if (!entries.length) result.status = 'no status list named'
   else {
-    const list = context.statusLists?.[status.statusListCredential]
-    const index = Number.parseInt(status.statusListIndex, 10)
-    if (!list) result.status = isListUrl(status.statusListCredential)
-      ? 'pending: status list not fetched (run without --offline, or export a bundle)'
-      : 'pending: status list not supplied (export a bundle to include it)'
-    else if (!Number.isInteger(index) || index < 0 || index >= list.length * 8) { result.status = 'invalid status reference'; result.reasons.push('statusListIndex is out of range') }
-    else result.status = (list[index >> 3] >> (7 - (index & 7))) & 1 ? 'revoked' : 'active'
+    const read = (entry) => {
+      const list = context.statusLists?.[entry.statusListCredential]
+      const index = Number.parseInt(entry.statusListIndex, 10)
+      const what = entry.statusPurpose === 'suspension' ? 'suspension list' : 'status list'
+      if (!list) return isListUrl(entry.statusListCredential)
+        ? `pending: ${what} not fetched (run without --offline, or export a bundle)`
+        : `pending: ${what} not supplied (export a bundle to include it)`
+      if (!Number.isInteger(index) || index < 0 || index >= list.length * 8) return 'invalid'
+      return (list[index >> 3] >> (7 - (index & 7))) & 1 ? 'set' : 'clear'
+    }
+    const outcome = Object.fromEntries(entries.map((e) => [e.statusPurpose, read(e)]))
+    const pending = Object.values(outcome).find((o) => o.startsWith('pending'))
+    if (Object.values(outcome).includes('invalid')) { result.status = 'invalid status reference'; result.reasons.push('statusListIndex is out of range') }
+    else if (outcome.revocation === 'set') result.status = 'revoked'
+    else if (pending) result.status = pending
+    else if (outcome.suspension === 'set') { result.status = 'suspended'; result.reasons.push('suspended by its issuer') }
+    else result.status = 'active'
   }
 
   const rejected =
     result.signature === 'invalid' || !subjectBound || result.validity === 'expired' || result.validity === 'not yet valid'
-    || result.status === 'revoked' || result.status === 'invalid status reference'
+    || result.status === 'revoked' || result.status === 'suspended' || result.status === 'invalid status reference'
   const pending = result.signature.startsWith('unverified') || result.status.startsWith('pending')
   result.decision = rejected ? 'reject' : pending ? 'pending' : 'accept'
   return result
+}
+
+/** `credentialStatus` as a list: VC 2.0 allows one entry or several. */
+export function statusEntries(vc) {
+  const status = vc?.credentialStatus
+  return status == null ? [] : Array.isArray(status) ? status : [status]
 }
 
 /** Is this status list reference one a verifier can fetch? https, or http on loopback for development. */
@@ -216,9 +234,10 @@ export async function resolveStatusLists(credentials, statusLists, options = {})
   const problems = []
   const wanted = new Map()
   for (const vc of credentials) {
-    const reference = vc?.credentialStatus
-    if (reference && isListUrl(reference.statusListCredential)) {
-      wanted.set(reference.statusListCredential, { issuer: vc.issuer, purpose: reference.statusPurpose })
+    for (const reference of statusEntries(vc)) {
+      if (isListUrl(reference.statusListCredential)) {
+        wanted.set(reference.statusListCredential, { issuer: vc.issuer, purpose: reference.statusPurpose })
+      }
     }
   }
   for (const [url, { issuer, purpose }] of wanted) {
@@ -326,7 +345,7 @@ async function main(argv) {
     if (r.claim) console.log(`  claim      ${r.claim.skillId}  level ${r.claim.level}  score ${r.claim.score}`)
     console.log(`  signature  ${r.signature}`)
     console.log(`  validity   ${r.validity}`)
-    const listId = vc.credentialStatus?.statusListCredential
+    const listId = statusEntries(vc).find((e) => e.statusPurpose === 'revocation')?.statusListCredential
     console.log(`  status     ${r.status}${listId && statusLists[listId] ? describeListSource(listId, listInfo[listId]) : ''}`)
     console.log(`  decision   ${r.decision.toUpperCase()}`)
     for (const reason of r.reasons) console.log(`             - ${reason}`)
