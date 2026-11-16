@@ -47,3 +47,5 @@ Suspension is published in a Bitstring Status List of its own, so every verifier
 - Gossip: the status document carries a signed `status_purpose` (canonical bytes now `alexandria-status-list-v2`), so a gossiped suspension list is stored as one.
 - Scoring fingerprint covers every list a credential's entries name, so a suspension list change recomputes scores.
 - Vectors 13 (suspended), 14 (reinstated), 15 (suspension list missing); the runner now compares `suspended`. Vectors 07 and 11 keep the single-object form.
+
+2026-11-16 (review fixes): `lift_expired_suspensions` continues past a credential it cannot lift and returns a `LiftReport` (lifted count and one line per failure), which both callers log; a list the credential names but the store does not hold is `StatusListNotHeld`, not `NotIssuer`. A gossiped status list is applied only when its `list_id` names the signing issuer (hosted URL or URN form) and never over a row held under another issuer.
