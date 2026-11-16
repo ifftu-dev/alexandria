@@ -11,6 +11,7 @@
 //! - [`status_list`]: revocation status lists and their publication.
 //! - [`lifecycle`]: revoke, suspend and reinstate.
 //! - [`store`]: read stored credentials; decode untrusted payloads.
+//! - [`receive`]: verify and store a credential somebody else issued.
 //! - [`bundle`]: survivability bundles and offline verification.
 //! - [`trust`]: what a credential view states about its trust.
 //! - [`auto`]: self-issued credentials for observed completion mints.
@@ -25,6 +26,7 @@ pub mod evidence;
 pub mod issue;
 pub mod issuer;
 pub mod lifecycle;
+pub mod receive;
 pub mod status_list;
 pub mod store;
 pub mod trust;
