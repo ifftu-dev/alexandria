@@ -184,24 +184,35 @@ pub fn promote_pending_for(db: &Database, issuer_did: &str) -> Result<u32, Strin
     Ok(promoted)
 }
 
-/// Queue a signed VC whose issuer DID isn't yet known. Callers are
-/// typically the credential gossip handler (a future PR) — for now
-/// tests drive this directly.
+/// Queue a signed VC whose verification is pending. Queuing the same id
+/// again keeps the first copy. `credentials::collect` queues an
+/// organisation-issued credential whose status lists could not be read yet
+/// and retries it on the next pull.
 pub fn queue_pending(
-    db: &Database,
+    conn: &rusqlite::Connection,
     id: &str,
     issuer_did: &str,
     subject_did: &str,
     signed_vc_json: &str,
 ) -> Result<(), String> {
-    db.conn()
-        .execute(
-            "INSERT OR IGNORE INTO credentials_pending_verification \
-             (id, issuer_did, subject_did, signed_vc_json) \
-             VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![id, issuer_did, subject_did, signed_vc_json],
-        )
-        .map_err(|e| format!("queue_pending: {e}"))?;
+    conn.execute(
+        "INSERT OR IGNORE INTO credentials_pending_verification \
+         (id, issuer_did, subject_did, signed_vc_json) \
+         VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![id, issuer_did, subject_did, signed_vc_json],
+    )
+    .map_err(|e| format!("queue_pending: {e}"))?;
+    Ok(())
+}
+
+/// Take a credential out of the pending queue once a decision on it is no
+/// longer pending, accepted or refused.
+pub fn unqueue_pending(conn: &rusqlite::Connection, id: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM credentials_pending_verification WHERE id = ?1",
+        rusqlite::params![id],
+    )
+    .map_err(|e| format!("unqueue_pending: {e}"))?;
     Ok(())
 }
 
@@ -250,7 +261,7 @@ mod tests {
             "credentialSubject": {"id": "did:key:zSubject", "skillId": "s"},
         });
         queue_pending(
-            db,
+            db.conn(),
             "urn:uuid:queued",
             issuer,
             "did:key:zSubject",

@@ -16,16 +16,12 @@
 use std::str::FromStr;
 
 use crate::profile::scope::ProfileState as State;
-use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::content_store::{content, fetch};
+use crate::credentials::receive::{self, Receipt};
 use crate::db::executor::DatabaseWorkload;
-use crate::domain::vc::verify_credential_db;
-use crate::domain::vc::{
-    AcceptanceDecision, CredentialSubject, EntitlementClaim, RoleClaim, SkillClaim,
-    VerifiableCredential, VerificationPolicy,
-};
+use crate::domain::vc::VerifiableCredential;
 use crate::AppState;
 
 /// Outcome of an import.
@@ -40,49 +36,10 @@ pub struct ImportOutcome {
     pub stored: bool,
 }
 
-/// The policy an imported credential must satisfy.
+/// Verify a credential and store it ([`receive::receive`]).
 ///
-/// `allowed_types` is empty on purpose, which means "no type constraint". This
-/// is a general inbox: an entitlement, a membership role, a skill credential
-/// from an institution are all legitimate things to be handed, and deciding
-/// which ones *matter* belongs to whoever reads them later. Everything else is
-/// strict — an expired, revoked, suspended or superseded credential is not
-/// worth storing.
-fn import_policy() -> VerificationPolicy {
-    VerificationPolicy {
-        reject_expired: true,
-        require_integrity_anchor: false,
-        allowed_types: vec![],
-        reject_suspended: true,
-        reject_superseded: true,
-    }
-}
-
-/// The `claim_kind` column value for a subject, mirroring `Claim::kind_str`.
-///
-/// An imported credential arrives in its on-disk W3C shape with the claim
-/// inlined in the subject, so the discriminator has to be recovered from the
-/// marker properties rather than read off a `Claim` enum. Order matters: the
-/// markers are distinct (`skillId`, `role`, `entitlementPlan`), and anything
-/// carrying none of them is a custom claim, which is legitimate.
-fn claim_kind_of(subject: &CredentialSubject) -> &'static str {
-    if SkillClaim::extract(subject).is_some() {
-        "skill"
-    } else if RoleClaim::extract(subject).is_some() {
-        "role"
-    } else if EntitlementClaim::extract(subject).is_some() {
-        "entitlement"
-    } else {
-        "custom"
-    }
-}
-
-/// Verify a credential and store it.
-///
-/// Verification happens **before** the insert and a failure is an error, not a
-/// stored-but-flagged row. A credential that does not verify is not a
-/// credential, and letting one land in the table would put the burden of
-/// re-checking on every future reader — one of which would eventually forget.
+/// A credential that is not accepted is an error and is not stored; the
+/// error names the failed checks, or why the decision is pending.
 ///
 /// Idempotent on the envelope `id`: re-importing the same credential reports
 /// success with `stored: false` rather than raising a constraint violation.
@@ -93,124 +50,22 @@ pub fn import_credential_impl(
     vc: &VerifiableCredential,
     now: &str,
 ) -> Result<ImportOutcome, String> {
-    let credential_id = vc
-        .id
-        .clone()
-        .ok_or_else(|| "credential has no envelope id".to_string())?;
-
-    let result = verify_credential_db(conn, vc, now, &import_policy());
-    if result.acceptance_decision == AcceptanceDecision::Pending {
-        return Err(format!(
-            "credential verification pending: {}",
-            crate::credentials::bundle::rejection_reasons(&result).join(", ")
-        ));
-    }
-    if result.acceptance_decision != AcceptanceDecision::Accept {
-        // Report the failed checks rather than a bare "invalid" — an import
-        // that fails for an expired credential and one that fails for a bad
-        // signature call for very different responses from the user.
-        let mut why = Vec::new();
-        if !result.valid_signature {
-            why.push("signature");
+    let stored = match receive::receive(conn, vc, now)? {
+        Receipt::Stored => true,
+        Receipt::AlreadyPresent => false,
+        Receipt::Pending(reasons) => {
+            return Err(format!(
+                "credential verification pending: {}",
+                reasons.join(", ")
+            ))
         }
-        if !result.issuer_resolved {
-            why.push("issuer not resolvable");
+        Receipt::Rejected(why) => {
+            return Err(format!("credential did not verify: {}", why.join(", ")))
         }
-        if !result.subject_bound {
-            why.push("subject not a DID");
-        }
-        if result.revoked {
-            why.push("revoked");
-        }
-        if !result.status_valid {
-            why.push("invalid status reference");
-        }
-        if result.expired {
-            why.push("expired");
-        }
-        if result.suspended {
-            why.push("suspended");
-        }
-        if result.superseded {
-            why.push("superseded");
-        }
-        if why.is_empty() {
-            why.push("rejected by policy");
-        }
-        return Err(format!("credential did not verify: {}", why.join(", ")));
-    }
-
-    let already: Option<String> = conn
-        .query_row(
-            "SELECT id FROM credentials WHERE id = ?1",
-            params![credential_id],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(|e| e.to_string())?;
-    if already.is_some() {
-        return Ok(ImportOutcome {
-            credential_id,
-            stored: false,
-        });
-    }
-
-    // Derive the denormalized columns from the credential body. Nothing here
-    // is trusted input in its own right — every one of these is recomputed
-    // from the payload whose signature was just verified.
-    let claim_kind = claim_kind_of(&vc.credential_subject);
-    let skill_id = SkillClaim::extract(&vc.credential_subject).map(|s| s.skill_id);
-    let provenance = SkillClaim::extract(&vc.credential_subject)
-        .and_then(|s| s.provenance)
-        .map(|p| p.as_str().to_string());
-    let credential_type = vc
-        .type_
-        .iter()
-        .find(|t| t.as_str() != "VerifiableCredential")
-        .cloned()
-        .ok_or_else(|| "credential names no class beyond VerifiableCredential".to_string())?;
-    // The denormalised slot is the revocation entry's; every entry stays in
-    // the signed JSON, which is what verification reads.
-    let (list_id, list_index) = match vc.status_entry(crate::domain::vc::STATUS_PURPOSE_REVOCATION)
-    {
-        Some(s) => (
-            Some(s.status_list_credential.clone()),
-            Some(s.status_list_index.clone()),
-        ),
-        None => (None, None),
     };
-    // Same derivation `issue_credential` uses, reused rather than reimplemented
-    // so an imported credential and a locally issued one hash identically.
-    let integrity_hash = crate::domain::vc::integrity_hash_of(vc)?;
-    let signed_json = serde_json::to_string(vc).map_err(|e| e.to_string())?;
-
-    conn.execute(
-        "INSERT INTO credentials \
-         (id, issuer_did, subject_did, credential_type, claim_kind, skill_id, \
-          issuance_date, expiration_date, signed_vc_json, integrity_hash, \
-          status_list_id, status_list_index, provenance) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
-        params![
-            credential_id,
-            vc.issuer.as_str(),
-            vc.credential_subject.id.as_str(),
-            credential_type,
-            claim_kind,
-            skill_id,
-            vc.valid_from,
-            vc.valid_until,
-            signed_json,
-            integrity_hash,
-            list_id,
-            list_index,
-            provenance,
-        ],
-    )
-    .map_err(|e| format!("insert imported credential: {e}"))?;
-
     Ok(ImportOutcome {
-        credential_id,
-        stored: true,
+        credential_id: vc.id.clone().unwrap_or_default(),
+        stored,
     })
 }
 
@@ -485,8 +340,11 @@ mod tests {
     use crate::crypto::did::{derive_did_key, Did};
     use crate::db::Database;
     use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
-    use crate::domain::vc::{CredentialStatus, CredentialType, Proof};
+    use crate::domain::vc::{
+        CredentialStatus, CredentialSubject, CredentialType, EntitlementClaim, Proof,
+    };
     use ed25519_dalek::SigningKey;
+    use rusqlite::params;
 
     const NOW: &str = "2026-04-13T00:00:00Z";
 
@@ -739,7 +597,7 @@ mod tests {
     #[test]
     fn import_policy_accepts_any_credential_class() {
         assert!(
-            import_policy().allowed_types.is_empty(),
+            receive::policy().allowed_types.is_empty(),
             "an empty allowed_types is what makes this a general inbox"
         );
     }
