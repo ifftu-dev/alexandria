@@ -15,6 +15,7 @@ use rusqlite::Connection;
 
 use super::{store, CredentialError, Issuer};
 use crate::clock::now_rfc3339;
+use crate::domain::credential_trust::CredentialTrustView;
 use crate::domain::vc::{VerifiableCredential, VerificationPendingReason, VerificationResult};
 
 /// Bundle wire shape. Keys sort under JCS so the canonical bytes are
@@ -220,6 +221,12 @@ pub struct OfflineVerification {
     /// carries no status list, so "not revoked" means "not known to be
     /// revoked". A bundle carries its own, and is therefore conclusive.
     pub revocation_unknown: bool,
+    /// What the bundle view states about each credential, in the order of
+    /// `results`: provenance, suspension and coverage statement
+    /// ([`super::trust::trust_view`]). Offline there is no completion
+    /// endorsement evidence and no organisation descriptor, so an
+    /// organisation-named issuer reads as not checked.
+    pub trust: Vec<CredentialTrustView>,
 }
 
 /// Why a credential was rejected, in terms a reader can act on.
@@ -307,10 +314,21 @@ fn attestation_trust() -> &'static alexandria_verify::attestation::AttestationTr
 /// "not known", and `revocation_unknown` says so rather than letting a caller
 /// read the result as a clean bill of health.
 pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, CredentialError> {
-    use crate::domain::vc::{verify, AcceptanceDecision, NullStore, VerificationPolicy};
+    use crate::domain::vc::{
+        verify, AcceptanceDecision, NullStore, VerificationPolicy, VerificationStore,
+    };
 
     let policy = VerificationPolicy::default();
-    let tally = |results: Vec<VerificationResult>, source, revocation_unknown| {
+    let network_id = crate::network_profile::embedded_preprod()
+        .map(|profile| profile.network_id.clone())
+        .unwrap_or_default();
+    let view = |store: &dyn VerificationStore, vc: &VerifiableCredential| {
+        super::trust::trust_view(store, attestation_trust(), vc, now, &network_id, None, None)
+    };
+    let tally = |results: Vec<VerificationResult>,
+                 trust: Vec<CredentialTrustView>,
+                 source,
+                 revocation_unknown| {
         let total = results.len() as u32;
         let accepted = results
             .iter()
@@ -322,6 +340,7 @@ pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, Cred
             accepted,
             results,
             revocation_unknown,
+            trust,
         }
     };
 
@@ -346,7 +365,12 @@ pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, Cred
                 )
             })
             .collect();
-        return Ok(tally(results, OfflineSource::Bundle, false));
+        let trust = bundle
+            .credentials
+            .iter()
+            .map(|vc| view(&store, vc))
+            .collect();
+        return Ok(tally(results, trust, OfflineSource::Bundle, false));
     }
 
     if serde_json::from_value::<VerifiableCredential>(value.clone()).is_ok() {
@@ -362,7 +386,8 @@ pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, Cred
             &policy,
             attestation_trust(),
         )];
-        return Ok(tally(results, OfflineSource::Credential, true));
+        let trust = vec![view(&NullStore, &vc)];
+        return Ok(tally(results, trust, OfflineSource::Credential, true));
     }
 
     if let Some(entries) = value
@@ -382,7 +407,8 @@ pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, Cred
                 )
             })
             .collect();
-        return Ok(tally(results, OfflineSource::Credentials, true));
+        let trust = list.iter().map(|vc| view(&NullStore, vc)).collect();
+        return Ok(tally(results, trust, OfflineSource::Credentials, true));
     }
 
     // Say what was expected rather than echoing whichever parse failed last —
@@ -907,6 +933,50 @@ mod tests {
             rejection_reasons(&report.results[0]),
             vec!["suspension list is missing"]
         );
+    }
+
+    #[test]
+    fn the_bundle_view_states_each_credentials_provenance_and_suspension() {
+        use crate::domain::credential_trust::{Provenance, SuspensionState};
+        use alexandria_verify::attestation::AttestationOutcome;
+        let (db, key, issuer, subject) = setup();
+        let kept =
+            credentials::issue(db.conn(), &key, &sample_request(subject.clone()), NOW).unwrap();
+        let suspended = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
+        lifecycle::suspend(
+            db.conn(),
+            &issuer,
+            suspended.id.as_deref().unwrap(),
+            None,
+            None,
+            NOW,
+        )
+        .unwrap();
+        let mut bundle: CredentialBundle =
+            serde_json::from_str(&export_signed(db.conn(), Some(&key)).unwrap()).unwrap();
+        bundle.status_lists.clear();
+        let json = serde_json_canonicalizer::to_string(&bundle).unwrap();
+
+        let report = verify_offline(&json, NOW).unwrap();
+        assert_eq!(report.trust.len(), 2, "one view per credential");
+        let view_of = |id: Option<&str>| {
+            let index = report
+                .results
+                .iter()
+                .position(|result| Some(result.credential_id.as_str()) == id)
+                .unwrap();
+            &report.trust[index]
+        };
+        let signed_by_issuer = Some(Provenance::SelfReported {
+            attestation: AttestationOutcome::NotSupplied,
+        });
+        let kept = view_of(kept.id.as_deref());
+        assert_eq!(kept.provenance, signed_by_issuer);
+        assert_eq!(kept.issuer.as_ref(), Some(&issuer));
+        assert_eq!(kept.suspension, SuspensionState::NotSuspended);
+        let suspended = view_of(suspended.id.as_deref());
+        assert_eq!(suspended.provenance, signed_by_issuer);
+        assert_eq!(suspended.suspension, SuspensionState::Suspended);
     }
 
     #[test]

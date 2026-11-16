@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use alexandria_verify::attestation::{AttestationOutcome, Platform};
+pub use alexandria_verify::attestation::{AttestationOutcome, Platform};
 use alexandria_verify::did::Did;
 use alexandria_verify::org::OrganisationBacking;
 use alexandria_verify::trust::CredentialTrust;

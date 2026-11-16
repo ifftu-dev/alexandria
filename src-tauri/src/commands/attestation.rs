@@ -230,8 +230,8 @@ mod tests {
     use crate::evidence::completion::fixtures::fixture;
     use crate::evidence::completion::import_completion_endorsement_impl;
     use alexandria_verify::attestation::AttestationOutcome;
-    use alexandria_verify::trust::CredentialTrust;
     use alexandria_verify::did::did_from_verifying_key;
+    use alexandria_verify::trust::CredentialTrust;
     use ed25519_dalek::SigningKey;
     use rusqlite::params;
 
