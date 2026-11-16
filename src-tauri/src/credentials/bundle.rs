@@ -308,7 +308,16 @@ pub fn rejection_reasons(result: &VerificationResult) -> Vec<&'static str> {
     if result.superseded {
         reasons.push("superseded");
     }
+    if result.attestation.rejects() {
+        reasons.push("device attestation evidence is invalid");
+    }
     reasons
+}
+
+/// This build's attestation trust inputs, so offline verification checks a
+/// credential's device evidence exactly as the app does everywhere else.
+fn attestation_trust() -> &'static alexandria_verify::attestation::AttestationTrust {
+    crate::sentinel::attestation::profile_trust_inputs()
 }
 
 /// Verify a bundle, a single credential, or an array of credentials.
@@ -353,7 +362,15 @@ pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, Cred
         let results = bundle
             .credentials
             .iter()
-            .map(|vc| verify::verify_credential(&store, vc, now, &policy))
+            .map(|vc| {
+                verify::verify_credential_with_attestation(
+                    &store,
+                    vc,
+                    now,
+                    &policy,
+                    attestation_trust(),
+                )
+            })
             .collect();
         return Ok(tally(results, OfflineSource::Bundle, false));
     }
@@ -364,7 +381,13 @@ pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, Cred
                 index: None,
                 source,
             })?;
-        let results = vec![verify::verify_credential(&NullStore, &vc, now, &policy)];
+        let results = vec![verify::verify_credential_with_attestation(
+            &NullStore,
+            &vc,
+            now,
+            &policy,
+            attestation_trust(),
+        )];
         return Ok(tally(results, OfflineSource::Credential, true));
     }
 
@@ -375,7 +398,15 @@ pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, Cred
         let list = bounded_credentials(entries)?;
         let results = list
             .iter()
-            .map(|vc| verify::verify_credential(&NullStore, vc, now, &policy))
+            .map(|vc| {
+                verify::verify_credential_with_attestation(
+                    &NullStore,
+                    vc,
+                    now,
+                    &policy,
+                    attestation_trust(),
+                )
+            })
             .collect();
         return Ok(tally(results, OfflineSource::Credentials, true));
     }
@@ -401,7 +432,13 @@ pub fn verify_bundle_offline(
     let mut accepted = 0u32;
     let policy = VerificationPolicy::default();
     for vc in &bundle.credentials {
-        let result = verify::verify_credential(&store, vc, verification_time, &policy);
+        let result = verify::verify_credential_with_attestation(
+            &store,
+            vc,
+            verification_time,
+            &policy,
+            attestation_trust(),
+        );
         if result.acceptance_decision == AcceptanceDecision::Accept {
             accepted += 1;
         }
