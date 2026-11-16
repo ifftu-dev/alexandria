@@ -1821,7 +1821,8 @@ export type VerificationPendingReason =
   | 'issuer_key_unavailable'
   | 'status_list_missing'
   | 'status_list_unavailable'
-  | 'suspension_state_unavailable'
+  | 'suspension_list_missing'
+  | 'suspension_list_unavailable'
   | 'supersession_state_unavailable'
   | 'integrity_anchor_unavailable'
 
@@ -1993,7 +1994,8 @@ export interface VerifiableCredential {
   validFrom: string
   validUntil?: string | null
   credentialSubject: CredentialSubject
-  credentialStatus?: CredentialStatus | null
+  /** One entry or several (VC 2.0); issued credentials carry a revocation and a suspension entry. */
+  credentialStatus?: CredentialStatus | CredentialStatus[] | null
   termsOfUse?: TermsOfUse | null
   witness?: Witness | null
   integrity?: IntegrityAssertion | null
