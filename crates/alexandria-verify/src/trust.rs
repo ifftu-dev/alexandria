@@ -629,13 +629,16 @@ mod tests {
         let learner = key(1);
         let subject = derive_did_key(&learner);
         let mut vc = credential(&learner, &subject, completion_refs());
-        vc.credential_status = Some(CredentialStatus {
-            id: "urn:status:1#0".into(),
-            type_: "BitstringStatusListEntry".into(),
-            status_purpose: "revocation".into(),
-            status_list_index: "0".into(),
-            status_list_credential: "urn:status:1".into(),
-        });
+        vc.credential_status = Some(
+            CredentialStatus {
+                id: "urn:status:1#0".into(),
+                type_: "BitstringStatusListEntry".into(),
+                status_purpose: "revocation".into(),
+                status_list_index: "0".into(),
+                status_list_credential: "urn:status:1".into(),
+            }
+            .into(),
+        );
         let issuer_did = derive_did_key(&learner);
         let vc = sign_credential(UnsignedCredential { credential: vc }, &learner, &issuer_did)
             .expect("re-sign with status");

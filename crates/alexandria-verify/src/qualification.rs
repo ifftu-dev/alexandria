@@ -1031,13 +1031,16 @@ mod tests {
         );
 
         let mut with_status = skill_credential(&instructor, &learner, 3, vec![]);
-        with_status.credential_status = Some(CredentialStatus {
-            id: "urn:status:1#0".into(),
-            type_: "BitstringStatusListEntry".into(),
-            status_purpose: "revocation".into(),
-            status_list_index: "0".into(),
-            status_list_credential: "urn:status:1".into(),
-        });
+        with_status.credential_status = Some(
+            CredentialStatus {
+                id: "urn:status:1#0".into(),
+                type_: "BitstringStatusListEntry".into(),
+                status_purpose: "revocation".into(),
+                status_list_index: "0".into(),
+                status_list_credential: "urn:status:1".into(),
+            }
+            .into(),
+        );
         let issuer = derive_did_key(&instructor);
         let with_status = sign_credential(
             UnsignedCredential {

@@ -5,9 +5,10 @@
 //! `did:key` resolution.
 //!
 //! The crate performs no I/O. Verification needs to consult persistent state
-//! in five places — the issuer's key at a point in time, a status list's bits,
-//! a local suspension flag, whether something supersedes the credential, and
-//! an observed ledger anchor of its hash — and each of those arrives through
+//! in four places — the issuer's key at a point in time, a status list's bits
+//! (revocation and suspension alike), whether something supersedes the
+//! credential, and an observed ledger anchor of its hash — and each of those
+//! arrives through
 //! [`VerificationStore`] rather than a database handle or a chain client. Callers implement the trait over whatever they have:
 //! SQLite in the app, a credential bundle in the CLI, Postgres on a server.
 //!
@@ -41,12 +42,11 @@ pub trait VerificationStore {
     /// before a key rotation still verifies afterwards (spec §5.3).
     fn key_at(&self, did: &Did, at: &str) -> StoreLookup<KeyRegistryEntry>;
 
-    /// Raw bits of a known status list.
+    /// Raw bits of a known status list, whatever its purpose. Suspension is
+    /// read from here too: a credential's suspension entry names a list of
+    /// purpose `suspension`, and its bit is the only suspension state
+    /// verification reads.
     fn status_list_bits(&self, list_id: &str) -> StoreLookup<Vec<u8>>;
-
-    /// Local suspension state: `(suspended, suspended_until)`. A `None` inner
-    /// value means suspended indefinitely.
-    fn suspension(&self, credential_id: &str) -> StoreLookup<(bool, Option<String>)>;
 
     /// Whether a locally-held credential supersedes this one.
     fn is_superseded(&self, credential_id: &str) -> StoreLookup<bool>;
@@ -84,9 +84,6 @@ impl VerificationStore for NullStore {
         StoreLookup::Missing
     }
     fn status_list_bits(&self, _list_id: &str) -> StoreLookup<Vec<u8>> {
-        StoreLookup::Missing
-    }
-    fn suspension(&self, _credential_id: &str) -> StoreLookup<(bool, Option<String>)> {
         StoreLookup::Missing
     }
     fn is_superseded(&self, _credential_id: &str) -> StoreLookup<bool> {

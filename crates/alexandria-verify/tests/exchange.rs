@@ -178,6 +178,42 @@ fn signed_revocation_suspension_and_supersession_are_rejected() {
     }
 }
 
+/// A self-issued credential as issued today: a revocation entry and a
+/// suspension entry, each into its own list.
+fn with_both_status_entries(mut f: Fixture) -> Fixture {
+    let mut raw = serde_json::to_value(&f.credential).unwrap();
+    raw["credentialStatus"] = json!([
+        {"id":"urn:status:1#0","type":"BitstringStatusListEntry","statusPurpose":"revocation","statusListIndex":"0","statusListCredential":"urn:status:1"},
+        {"id":"urn:status:2#0","type":"BitstringStatusListEntry","statusPurpose":"suspension","statusListIndex":"0","statusListCredential":"urn:status:2"}
+    ]);
+    let vc: VerifiableCredential = serde_json::from_value(raw).unwrap();
+    let did = derive_did_key(&f.key);
+    f.credential = sign_credential(UnsignedCredential { credential: vc }, &f.key, &did).unwrap();
+    f
+}
+
+#[test]
+fn a_holder_issuers_suspension_reads_through_the_suspension_entry() {
+    let mut f = with_both_status_entries(fixture());
+    let state = f.issuer_state.as_mut().unwrap();
+    state.suspended = true;
+    let result = verify_share(&present(&f), &f.request, NOW + 10, NOW_ISO).unwrap();
+    assert!(result.suspended);
+    assert!(!result.revoked);
+    assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
+
+    // A timed suspension whose time has passed no longer holds.
+    f.issuer_state.as_mut().unwrap().suspended_until = Some("2026-05-01T00:00:00Z".into());
+    let result = verify_share(&present(&f), &f.request, NOW + 10, NOW_ISO).unwrap();
+    assert!(!result.suspended);
+    assert_eq!(result.acceptance_decision, AcceptanceDecision::Accept);
+
+    // Without the holder's word on status, both lists are unavailable.
+    f.issuer_state = None;
+    let result = verify_share(&present(&f), &f.request, NOW + 10, NOW_ISO).unwrap();
+    assert_eq!(result.acceptance_decision, AcceptanceDecision::Pending);
+}
+
 #[test]
 fn existing_credential_cannot_fulfill_new_assessment() {
     let mut f = fixture();

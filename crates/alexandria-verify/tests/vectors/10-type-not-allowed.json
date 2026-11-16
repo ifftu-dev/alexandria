@@ -40,7 +40,6 @@
   "store": {
     "keyRegistry": [],
     "statusLists": {},
-    "suspended": {},
     "superseded": []
   },
   "expect": {

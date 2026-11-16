@@ -322,6 +322,51 @@ pub struct CredentialStatus {
     pub status_list_credential: String,
 }
 
+/// `credentialStatus.statusPurpose` of the entry that revokes, permanently.
+pub const STATUS_PURPOSE_REVOCATION: &str = "revocation";
+/// `credentialStatus.statusPurpose` of the entry that suspends, reversibly.
+pub const STATUS_PURPOSE_SUSPENSION: &str = "suspension";
+
+/// The envelope's `credentialStatus`: one entry or several (VC Data Model
+/// 2.0 §4.10 allows either).
+///
+/// The form read is the form written back. A credential signed with a
+/// single object keeps it, so its proof still covers the bytes a verifier
+/// recomputes. Credentials issued here carry a list: one entry per purpose.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CredentialStatuses {
+    One(CredentialStatus),
+    Many(Vec<CredentialStatus>),
+}
+
+impl CredentialStatuses {
+    /// Every entry, in document order.
+    pub fn entries(&self) -> &[CredentialStatus] {
+        match self {
+            Self::One(entry) => std::slice::from_ref(entry),
+            Self::Many(entries) => entries,
+        }
+    }
+
+    /// The first entry of `purpose`, if any.
+    pub fn of_purpose(&self, purpose: &str) -> Option<&CredentialStatus> {
+        self.entries().iter().find(|e| e.status_purpose == purpose)
+    }
+}
+
+impl From<CredentialStatus> for CredentialStatuses {
+    fn from(entry: CredentialStatus) -> Self {
+        Self::One(entry)
+    }
+}
+
+impl From<Vec<CredentialStatus>> for CredentialStatuses {
+    fn from(entries: Vec<CredentialStatus>) -> Self {
+        Self::Many(entries)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TermsOfUse {
@@ -453,8 +498,11 @@ pub struct VerifiableCredential {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub valid_until: Option<String>,
     pub credential_subject: CredentialSubject,
+    /// Status entries: a revocation entry and a suspension entry on
+    /// credentials issued here, each into a Bitstring Status List of that
+    /// purpose.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub credential_status: Option<CredentialStatus>,
+    pub credential_status: Option<CredentialStatuses>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terms_of_use: Option<TermsOfUse>,
     /// On-chain witness for auto-earned credentials (§14.7). Signed
@@ -467,6 +515,21 @@ pub struct VerifiableCredential {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub integrity: Option<IntegrityAssertion>,
     pub proof: Proof,
+}
+
+impl VerifiableCredential {
+    /// The `credentialStatus` entries, empty when there are none.
+    pub fn status_entries(&self) -> &[CredentialStatus] {
+        self.credential_status
+            .as_ref()
+            .map(CredentialStatuses::entries)
+            .unwrap_or_default()
+    }
+
+    /// The first `credentialStatus` entry of `purpose`, if any.
+    pub fn status_entry(&self, purpose: &str) -> Option<&CredentialStatus> {
+        self.credential_status.as_ref()?.of_purpose(purpose)
+    }
 }
 
 /// `proof.type` for every credential this crate signs: W3C Data Integrity.
@@ -565,8 +628,9 @@ pub struct VerificationResult {
     pub expired: bool,
     pub subject_bound: bool,
     pub integrity_anchored: bool,
-    /// True if the credential is currently within an active
-    /// suspension window (§11.3).
+    /// True if the credential's bit is set in its suspension list (§11.3).
+    /// Read from the published list only; an issuer's own bookkeeping is
+    /// never consulted.
     #[serde(default)]
     pub suspended: bool,
     /// True if any newer credential claims to supersede this one
@@ -584,9 +648,13 @@ pub struct VerificationResult {
 pub enum VerificationPendingReason {
     IssuerKeyMissing,
     IssuerKeyUnavailable,
+    /// The revocation list a status entry names was not supplied.
     StatusListMissing,
     StatusListUnavailable,
-    SuspensionStateUnavailable,
+    /// The suspension list a status entry names was not supplied. Absence is
+    /// never read as "not suspended".
+    SuspensionListMissing,
+    SuspensionListUnavailable,
     SupersessionStateUnavailable,
     /// The policy requires an integrity anchor and the anchor lookup failed.
     /// A missing anchor is not pending: it is `integrityAnchored: false`.

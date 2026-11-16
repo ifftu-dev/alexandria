@@ -54,7 +54,6 @@
     "statusLists": {
       "urn:uuid:status-list-1": "0040000000000000"
     },
-    "suspended": {},
     "superseded": []
   },
   "expect": {
