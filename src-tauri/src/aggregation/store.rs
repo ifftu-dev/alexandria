@@ -422,6 +422,158 @@ mod tests {
         (db, subject, skill.to_string())
     }
 
+    /// Every declared type a scoring input can carry. `EntitlementCredential`
+    /// is absent because the default verification policy never accepts it as
+    /// a scoring input, whoever signs it.
+    const SCORED_TYPES: [CredentialType; 6] = [
+        CredentialType::FormalCredential,
+        CredentialType::AssessmentCredential,
+        CredentialType::AttestationCredential,
+        CredentialType::RoleCredential,
+        CredentialType::DerivedCredential,
+        CredentialType::SelfAssertion,
+    ];
+
+    fn skill_request(
+        credential_type: CredentialType,
+        subject: &Did,
+        score: f64,
+    ) -> IssueCredentialRequest {
+        IssueCredentialRequest {
+            credential_type,
+            subject: subject.clone(),
+            claim: Claim::Skill(SkillClaim {
+                skill_id: "skill_provenance".into(),
+                level: 3,
+                score,
+                evidence_refs: vec![],
+                rubric_version: None,
+                assessment_method: None,
+                provenance: None,
+            }),
+            evidence_refs: vec![],
+            expiration_date: None,
+            supersedes: None,
+            integrity_session_id: None,
+            integrity_policy: None,
+        }
+    }
+
+    /// The derived state for a learner holding the given credentials, each
+    /// `(signing key, declared type, score)`, all about the learner.
+    fn state_for(credentials: &[(&SigningKey, CredentialType, f64)]) -> DerivedSkillState {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let subject = derive_did_key(&key("subject"));
+        for (signer, credential_type, score) in credentials {
+            let issuer = crate::credentials::Issuer::from_key((*signer).clone());
+            credentials::issue(
+                db.conn(),
+                &issuer,
+                &skill_request(*credential_type, &subject, *score),
+                NOW,
+            )
+            .unwrap();
+        }
+        get_derived_skill_state_impl(db.conn(), &subject, "skill_provenance", NOW)
+            .unwrap()
+            .expect("derived state")
+    }
+
+    #[test]
+    fn a_self_issued_credential_of_any_type_scores_as_a_self_assertion() {
+        // Weight follows who signed, not the declared type: a learner who
+        // signs their own `AssessmentCredential` must not outweigh an
+        // organisation-signed `RoleCredential`.
+        let learner = key("subject");
+        let organisation = key("organisation");
+        let with_own = |declared: CredentialType| {
+            state_for(&[
+                (&organisation, CredentialType::RoleCredential, 0.5),
+                (&learner, declared, 1.0),
+            ])
+        };
+        let baseline = with_own(CredentialType::SelfAssertion);
+        for declared in SCORED_TYPES {
+            let state = with_own(declared);
+            assert!(
+                (state.raw_score - baseline.raw_score).abs() < 1e-12
+                    && (state.evidence_mass - baseline.evidence_mass).abs() < 1e-12
+                    && (state.trust_score - baseline.trust_score).abs() < 1e-12
+                    && state.unique_issuer_clusters == baseline.unique_issuer_clusters,
+                "self-issued {declared:?} scored {state:?}, a self-assertion {baseline:?}"
+            );
+        }
+        // Worked example (§25.1 weights, default issuer prior 0.8, fresh,
+        // full quality): Role 0.8·0.60 = 0.48 at 0.5, self-claim
+        // 0.8·0.25 = 0.20 at 1.0 ⇒ Q = (0.24 + 0.20) / 0.68.
+        assert!((baseline.evidence_mass - 0.68).abs() < 1e-9);
+        assert!((baseline.raw_score - 0.44 / 0.68).abs() < 1e-9);
+        assert_eq!(baseline.unique_issuer_clusters, 1);
+    }
+
+    #[test]
+    fn an_issuer_signed_credential_keeps_its_declared_type_weight() {
+        // §25.1 class weights under the default issuer prior 0.8, fresh and
+        // at full quality, so the evidence mass is 0.8 · w_type.
+        let organisation = key("organisation");
+        let expected = [
+            (CredentialType::FormalCredential, 1.00),
+            (CredentialType::AssessmentCredential, 0.90),
+            (CredentialType::AttestationCredential, 0.35),
+            (CredentialType::RoleCredential, 0.60),
+            (CredentialType::DerivedCredential, 0.00),
+            (CredentialType::SelfAssertion, 0.25),
+        ];
+        for (declared, class_weight) in expected {
+            let state = state_for(&[(&organisation, declared, 0.7)]);
+            assert!(
+                (state.evidence_mass - 0.8 * class_weight).abs() < 1e-9,
+                "issuer-signed {declared:?} has mass {}",
+                state.evidence_mass
+            );
+        }
+    }
+
+    #[test]
+    fn a_state_cached_under_the_type_weight_rule_is_recomputed_on_read() {
+        // Calculation version 1.2 weighted a self-issued credential by its
+        // declared type. A state it cached, with a fingerprint that still
+        // matches its inputs, must not outlive the provenance rule.
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let learner = key("subject");
+        let subject = derive_did_key(&learner);
+        let issuer = crate::credentials::Issuer::from_key(learner);
+        let request = skill_request(CredentialType::AssessmentCredential, &subject, 1.0);
+        credentials::issue(db.conn(), &issuer, &request, NOW).unwrap();
+
+        let old_version = "1.2";
+        let mut stale = get_derived_skill_state_impl(db.conn(), &subject, "skill_provenance", NOW)
+            .unwrap()
+            .expect("derived state");
+        stale.calculation_version = old_version.into();
+        stale.evidence_mass = 0.8 * 0.90;
+        db.conn()
+            .execute("DELETE FROM derived_skill_states", [])
+            .unwrap();
+        let fingerprint =
+            scoring_input_fingerprint(db.conn(), subject.as_str(), "skill_provenance", old_version)
+                .unwrap();
+        upsert_cached(db.conn(), &stale, &fingerprint, None).unwrap();
+
+        let read = get_derived_skill_state_impl(db.conn(), &subject, "skill_provenance", NOW)
+            .unwrap()
+            .expect("derived state");
+
+        assert_ne!(read.calculation_version, old_version);
+        assert!(
+            (read.evidence_mass - 0.8 * 0.25).abs() < 1e-9,
+            "expected the self-claim weight, got mass {}",
+            read.evidence_mass
+        );
+    }
+
     #[test]
     fn get_derived_skill_state_with_no_credentials_returns_none() {
         let db = Database::open_in_memory().unwrap();

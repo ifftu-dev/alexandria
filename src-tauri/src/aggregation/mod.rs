@@ -57,8 +57,10 @@ pub struct AggregationInput {
     pub rubric_completeness: f64,
     pub proctoring_reliability: f64,
     pub evidence_traceability: f64,
-    /// The subject signed this claim about themselves. It keeps its weighted
-    /// score but never counts as an independent issuer cluster.
+    /// The subject signed this claim about themselves. It takes the
+    /// self-claim weight whatever `credential_type` declares (see
+    /// [`weights::provenance_weight`]) and never counts as an independent
+    /// issuer cluster.
     pub self_issued: bool,
 }
 
@@ -72,7 +74,7 @@ pub fn aggregate_skill_state(
     config: &AggregationConfig,
 ) -> DerivedSkillState {
     use weights::{
-        freshness_weight, independence_weight, issuer_weight, quality_weight, type_weight,
+        freshness_weight, independence_weight, issuer_weight, provenance_weight, quality_weight,
     };
 
     let computed_at = verification_time.to_string();
@@ -101,7 +103,7 @@ pub fn aggregate_skill_state(
 
     for e in evidence {
         let w_issuer = issuer_weight(&e.issuer, config);
-        let w_type = type_weight(e.credential_type, config);
+        let w_type = provenance_weight(e, config);
         let w_fresh = freshness_weight(e, skill_id, verification_time, config);
         let w_quality = quality_weight(e, config);
         let w_ind = independence_weight(e, evidence, config);

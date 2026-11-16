@@ -28,6 +28,22 @@ pub fn type_weight(credential_type: CredentialType, config: &AggregationConfig) 
         .max(0.0)
 }
 
+/// Credential-class weight by verified provenance: the one place that
+/// decides which class weight a piece of evidence takes.
+///
+/// Weight follows who signed, not the type a credential declares. A
+/// self-issued credential (its issuer is its subject) is the holder's word,
+/// so it takes the `SelfAssertion` weight whatever type it names; an
+/// issuer-signed credential takes its declared type's weight.
+pub fn provenance_weight(evidence: &AggregationInput, config: &AggregationConfig) -> f64 {
+    let class = if evidence.self_issued {
+        CredentialType::SelfAssertion
+    } else {
+        evidence.credential_type
+    };
+    type_weight(class, config)
+}
+
 /// Freshness (§14.6): `w_fresh = e^{-λ · Δt_years}`.
 ///
 /// `Δt` is the positive difference between `verification_time` and
