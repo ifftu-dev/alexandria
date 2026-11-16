@@ -6,7 +6,7 @@ import type {
   CreatePresentationRequest,
   CredentialAnchorState,
   CredentialBundle,
-  CredentialTrust,
+  CredentialTrustView,
   DerivedSkillState,
   IssueCredentialRequest,
   PinboardCommitment,
@@ -102,10 +102,14 @@ export function useCredentials() {
     )
   }
 
-  /** Provenance of a stored credential; `null` when it is not stored locally. */
+  /**
+   * What the credential views state about a stored credential's trust:
+   * provenance, suspension and coverage statement. `null` when it is not
+   * stored locally.
+   */
   async function trust(credentialId: string) {
     return run(() =>
-      invoke<CredentialTrust | null>('get_credential_trust', { credentialId }),
+      invoke<CredentialTrustView | null>('get_credential_trust', { credentialId }),
     )
   }
 
