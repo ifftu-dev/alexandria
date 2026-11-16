@@ -185,12 +185,35 @@ export function verifyCredential(vc, context = {}) {
     else result.status = 'active'
   }
 
+  // 7. A coverage statement named by `relatedResource` must be the one the
+  // integrity assertion names by digest. The digest is the address's last
+  // part (URN, or a URL path ending `/coverage-statements/{digest}`), so this
+  // needs no statement registry.
+  const namedDigest = vc.integrity?.coverageStatementDigest ?? null
+  const coverageMismatch = (Array.isArray(vc.relatedResource) ? vc.relatedResource : [])
+    .map((r) => coverageStatementDigest(String(r?.id ?? '')))
+    .some((d) => d !== null && d !== namedDigest)
+  if (coverageMismatch) result.reasons.push('relatedResource names a coverage statement other than the integrity assertion’s')
+
   const rejected =
     result.signature === 'invalid' || !subjectBound || result.validity === 'expired' || result.validity === 'not yet valid'
     || result.status === 'revoked' || result.status === 'suspended' || result.status === 'invalid status reference'
+    || coverageMismatch
   const pending = result.signature.startsWith('unverified') || result.status.startsWith('pending')
   result.decision = rejected ? 'reject' : pending ? 'pending' : 'accept'
   return result
+}
+
+/** The digest a coverage statement address embeds, or null if `id` is not one. */
+export function coverageStatementDigest(id) {
+  const urn = 'urn:alexandria:coverage-statement:'
+  let digest = null
+  if (id.startsWith(urn)) digest = id.slice(urn.length)
+  else {
+    const at = id.lastIndexOf('/coverage-statements/')
+    if (at >= 0 && id.slice(0, at).includes('://')) digest = id.slice(at + '/coverage-statements/'.length)
+  }
+  return digest && !digest.includes('/') ? digest : null
 }
 
 /** `credentialStatus` as a list: VC 2.0 allows one entry or several. */
