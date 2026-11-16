@@ -391,6 +391,13 @@ async function submit() {
           ? $t('learn.assessment.passedNote')
           : $t('learn.assessment.retryNote') }}
       </p>
+      <p
+        v-if="result.attestation_evidence?.binding === 'session'"
+        class="text-sm text-muted-foreground"
+        data-testid="session-bound-evidence"
+      >
+        {{ $t('learn.assessment.sessionBoundEvidence', { reason: result.attestation_evidence.reason }) }}
+      </p>
       <div class="flex justify-center gap-2">
         <AppButton v-if="result.credential_id" @click="router.push('/credentials/' + encodeURIComponent(result.credential_id))">{{ $t('credentials.title') }}</AppButton>
         <AppButton v-if="result.credential_id" variant="outline" @click="router.push('/settings/organisations')">{{ $t('organisations.shareNext') }}</AppButton>

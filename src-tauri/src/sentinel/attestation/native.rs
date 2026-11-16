@@ -9,6 +9,10 @@
 //!   waits on the Play Integrity task and returns the encrypted token.
 //! * Everything else — unsupported; the session stays `local`.
 //!
+//! At issuance the same calls produce evidence over a credential's binding
+//! digest ([`bind_digest`]): an assertion from the session's key on iOS, a
+//! fresh token with the digest as nonce on Android.
+//!
 //! Only the opaque attestation material comes back. No identifiers, no
 //! device serials: the platform binds its statement to our app id and our
 //! nonce, nothing more.
@@ -39,6 +43,14 @@ pub fn capture(nonce: &[u8; 32]) -> Result<Option<Captured>, String> {
 /// assertion object, or `Ok(None)` where assertions do not exist.
 pub fn assert_commitment(key_id_b64: &str, root: &str) -> Result<Option<String>, String> {
     imp::assert_commitment(key_id_b64, root)
+}
+
+/// Platform evidence over a credential's binding digest: on iOS an
+/// assertion from the attested key `key_id_b64` whose client data is the 32
+/// digest bytes; on Android a fresh Play Integrity token with the digest as
+/// nonce. `Ok(None)` where the platform has neither.
+pub fn bind_digest(key_id_b64: Option<&str>, digest: &[u8; 32]) -> Result<Option<String>, String> {
+    imp::bind_digest(key_id_b64, digest)
 }
 
 #[cfg(target_os = "ios")]
@@ -220,11 +232,24 @@ mod imp {
     }
 
     pub fn assert_commitment(key_id_b64: &str, root: &str) -> Result<Option<String>, String> {
+        assert_client_data(key_id_b64, root.as_bytes())
+    }
+
+    pub fn bind_digest(
+        key_id_b64: Option<&str>,
+        digest: &[u8; 32],
+    ) -> Result<Option<String>, String> {
+        let key_id = key_id_b64.ok_or("an App Attest assertion needs the session's key")?;
+        assert_client_data(key_id, digest)
+    }
+
+    /// An assertion whose `clientDataHash` is SHA-256 of `client_data`.
+    fn assert_client_data(key_id_b64: &str, client_data: &[u8]) -> Result<Option<String>, String> {
         let svc = service()?;
         if !supported() {
             return Ok(None);
         }
-        let client_data_hash: [u8; 32] = Sha256::digest(root.as_bytes()).into();
+        let client_data_hash: [u8; 32] = Sha256::digest(client_data).into();
         let assertion = data_completion(&svc, "assert", key_id_b64, &client_data_hash)?;
         Ok(Some(b64(&assertion)))
     }
@@ -271,6 +296,16 @@ mod imp {
     pub fn assert_commitment(_key_id_b64: &str, _root: &str) -> Result<Option<String>, String> {
         Ok(None)
     }
+
+    pub fn bind_digest(
+        _key_id_b64: Option<&str>,
+        digest: &[u8; 32],
+    ) -> Result<Option<String>, String> {
+        Ok(capture(digest)?.and_then(|c| match c.payload {
+            AttestationPayload::PlayIntegrity { token } => Some(token),
+            AttestationPayload::AppAttest { .. } => None,
+        }))
+    }
 }
 
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
@@ -286,6 +321,13 @@ mod imp {
     }
 
     pub fn assert_commitment(_key_id_b64: &str, _root: &str) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    pub fn bind_digest(
+        _key_id_b64: Option<&str>,
+        _digest: &[u8; 32],
+    ) -> Result<Option<String>, String> {
         Ok(None)
     }
 }

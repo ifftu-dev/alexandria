@@ -180,7 +180,10 @@ pub async fn integrity_companion_join(
             &offer,
             &key,
             Box::new(|nonce| native::capture(&nonce)),
-            std::sync::Arc::new(native::assert_commitment),
+            crate::sentinel::companion::transport::PhoneSigner {
+                assert_root: std::sync::Arc::new(native::assert_commitment),
+                bind_digest: std::sync::Arc::new(native::bind_digest),
+            },
             benchmark,
         )
         .await?;

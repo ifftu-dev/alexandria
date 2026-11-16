@@ -209,6 +209,28 @@ pub struct GradeResult {
     pub score: f64,
     pub passed: bool,
     pub credential_id: Option<String>,
+    /// What attestation evidence the credential issued by this grading
+    /// carries, and why it is only session-bound when it is. Absent when
+    /// nothing was issued in this call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attestation_evidence: Option<crate::credentials::EvidenceBinding>,
+}
+
+/// What grading issues with: the ratio manifest that scores the attempt's
+/// consistency, and where the credential's attestation evidence comes from.
+pub(crate) struct GradeIssuance<'a> {
+    pub manifest: crate::sentinel::scoring::RatioManifest,
+    pub evidence: crate::credentials::EvidenceSource<'a>,
+}
+
+impl GradeIssuance<'static> {
+    /// The active manifest and this device's own platform.
+    pub(crate) fn native() -> Self {
+        Self {
+            manifest: crate::sentinel::scoring::active_manifest(),
+            evidence: crate::credentials::EvidenceSource::native(),
+        }
+    }
 }
 
 fn parse_json_vec<T: serde::de::DeserializeOwned>(s: &str) -> Vec<T> {
@@ -1081,6 +1103,12 @@ pub async fn assessment_grade(
     let now = crate::clock::now_rfc3339();
     #[cfg(desktop)]
     let grader_runtime = state.grader_runtime.clone();
+    // A paired phone is asked for evidence over the credential before its
+    // link closes; any other session uses this device's own platform.
+    let attester = crate::sentinel::companion::transport::PairedAttester {
+        hub: state.content_node.companion(),
+        runtime: tokio::runtime::Handle::current(),
+    };
     let graded = state
         .db_executor
         .execute(
@@ -1095,7 +1123,14 @@ pub async fn assessment_grade(
                 };
                 #[cfg(not(desktop))]
                 let engine = GradeEngine::default();
-                grade_attempt_impl(db, &engine, &signer, &attempt_id, &answers, &now)
+                let issuance = GradeIssuance {
+                    manifest: crate::sentinel::scoring::active_manifest(),
+                    evidence: crate::credentials::EvidenceSource {
+                        trust: crate::sentinel::attestation::TrustConfig::from_profile(),
+                        attester: &attester,
+                    },
+                };
+                grade_attempt_with(db, &engine, &signer, &attempt_id, &answers, &now, &issuance)
             },
         )
         .await?;
@@ -1121,28 +1156,31 @@ pub fn grade_attempt_impl(
     answers: &[SubmittedAnswer],
     now: &str,
 ) -> Result<GradeResult, String> {
-    grade_attempt_with_manifest(
+    grade_attempt_with(
         db,
         engine,
         issuer,
         attempt_id,
         answers,
         now,
-        &crate::sentinel::scoring::active_manifest(),
+        &GradeIssuance::native(),
     )
 }
 
 /// [`grade_attempt_impl`] against an explicit ratio manifest, which scores
-/// the attempt's longitudinal consistency before a credential is issued.
-pub(crate) fn grade_attempt_with_manifest(
+/// the attempt's longitudinal consistency before a credential is issued,
+/// and an explicit source of attestation evidence. A failure to obtain
+/// evidence never fails grading.
+pub(crate) fn grade_attempt_with(
     db: &crate::db::Database,
     engine: &GradeEngine<'_>,
     issuer: &Issuer,
     attempt_id: &str,
     answers: &[SubmittedAnswer],
     now: &str,
-    manifest: &crate::sentinel::scoring::RatioManifest,
+    issuance: &GradeIssuance<'_>,
 ) -> Result<GradeResult, String> {
+    let manifest = &issuance.manifest;
     let issuer_did = issuer.did();
     let conn = db.conn();
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
@@ -1151,7 +1189,7 @@ pub(crate) fn grade_attempt_with_manifest(
 
     let completed = conn.query_row(
         "SELECT score, passed, credential_id FROM assessment_attempts WHERE id=?1 AND graded_at IS NOT NULL",
-        [attempt_id], |r| Ok(GradeResult { score:r.get(0)?, passed:r.get(1)?, credential_id:r.get(2)? }))
+        [attempt_id], |r| Ok(GradeResult { score:r.get(0)?, passed:r.get(1)?, credential_id:r.get(2)?, attestation_evidence: None }))
         .optional().map_err(|e|e.to_string())?;
     if let Some(result) = completed {
         return Ok(result);
@@ -1322,6 +1360,7 @@ pub(crate) fn grade_attempt_with_manifest(
 
     // Issue an AssessmentCredential on pass, bound to the integrity session.
     let mut credential_id = None;
+    let mut attestation_evidence = None;
     if passed {
         // Carry each item's reproducibility triple into the credential, so a
         // verifier holding only the VC can re-run the graders and confirm the
@@ -1371,8 +1410,15 @@ pub(crate) fn grade_attempt_with_manifest(
             integrity_session_id: integrity_session_id.clone(),
             integrity_policy: None,
         };
-        let vc = crate::credentials::issue(conn, issuer, &req, now).map_err(|e| e.to_string())?;
-        credential_id = Some(vc.id.ok_or("issued assessment credential has no ID")?);
+        let issued = crate::credentials::issue_with(conn, issuer, &req, now, &issuance.evidence)
+            .map_err(|e| e.to_string())?;
+        credential_id = Some(
+            issued
+                .credential
+                .id
+                .ok_or("issued assessment credential has no ID")?,
+        );
+        attestation_evidence = Some(issued.evidence);
     }
 
     conn.execute(
@@ -1391,6 +1437,7 @@ pub(crate) fn grade_attempt_with_manifest(
         score,
         passed,
         credential_id,
+        attestation_evidence,
     })
 }
 
@@ -1649,6 +1696,95 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_pass_issues_even_when_evidence_over_the_credential_cannot_be_obtained() {
+        use crate::credentials::{EvidenceBinding, EvidenceSource};
+        use crate::sentinel::attestation::{
+            apple_app_id, session_nonce, AttestationPayload, BindingAttester, DeviceAttestation,
+            Platform, TrustConfig,
+        };
+        use alexandria_verify::attestation::test_support::{build_world, AAGUID_PROD};
+        use alexandria_verify::attestation::{verify_evidence, AttestationOutcome};
+
+        struct PhoneGone;
+        impl BindingAttester for PhoneGone {
+            fn bind(&self, _: &str, _: &DeviceAttestation, _: &[u8; 32]) -> Result<String, String> {
+                Err("the paired phone is no longer linked to this session".into())
+            }
+        }
+
+        let ctx = setup();
+        // The session ran on an iPhone whose App Attest key attested it.
+        let started = "2026-07-21T23:00:00Z";
+        let w = build_world(
+            &apple_app_id(),
+            session_nonce("test-session", started),
+            AAGUID_PROD,
+            0,
+        );
+        let record = DeviceAttestation {
+            platform: Platform::Ios,
+            nonce_hex: hex::encode(session_nonce("test-session", started)),
+            app_id: apple_app_id(),
+            payload: AttestationPayload::AppAttest {
+                key_id_b64: w.key_id_b64(),
+                attestation_b64: w.attestation_b64(),
+                assertion_b64: None,
+                asserted_root: None,
+            },
+            captured_at: started.into(),
+            companion: None,
+        };
+        ctx.db
+            .conn()
+            .execute(
+                "UPDATE integrity_sessions SET started_at = ?1, attestation_json = ?2,
+                        assurance_level = 'device_attested' WHERE id = 'test-session'",
+                params![started, serde_json::to_string(&record).unwrap()],
+            )
+            .unwrap();
+        let answers = [answer("q1", &[0]), answer("q2", &[1])];
+        prepare(&ctx, &answers);
+        let trust = TrustConfig {
+            apple_root_pem: w.root_pem.clone(),
+            ..TrustConfig::default()
+        };
+        let result = grade_attempt_with(
+            &ctx.db,
+            &ctx.engine(),
+            &ctx.issuer,
+            "att_1",
+            &answers,
+            NOW,
+            &GradeIssuance {
+                manifest: crate::sentinel::scoring::active_manifest(),
+                evidence: EvidenceSource {
+                    trust: trust.clone(),
+                    attester: &PhoneGone,
+                },
+            },
+        )
+        .expect("grading commits");
+        assert!(result.passed);
+        // The learner is told the credential could only be session-bound.
+        assert_eq!(
+            result.attestation_evidence,
+            Some(EvidenceBinding::Session {
+                reason: "the paired phone is no longer linked to this session".into()
+            })
+        );
+        let stored =
+            crate::credentials::store::get(ctx.db.conn(), result.credential_id.as_deref().unwrap())
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            verify_evidence(&stored, &trust.inputs()),
+            AttestationOutcome::VerifiedSessionBound {
+                platform: Platform::Ios
+            }
+        );
+    }
+
     /// An earlier attempt on the skill, the day before, with every item wrong.
     fn failed_earlier_attempt(ctx: &Ctx) {
         let conn = ctx.db.conn();
@@ -1701,14 +1837,17 @@ mod tests {
         );
         let answers = [answer("q1", &[0]), answer("q2", &[1])];
         prepare(&ctx, &answers);
-        let result = grade_attempt_with_manifest(
+        let result = grade_attempt_with(
             &ctx.db,
             &ctx.engine(),
             &ctx.issuer,
             "att_1",
             &answers,
             NOW,
-            &measured,
+            &GradeIssuance {
+                manifest: measured,
+                ..GradeIssuance::native()
+            },
         )
         .unwrap();
         assert!(result.passed, "review is not a verdict");
