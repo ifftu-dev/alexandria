@@ -5,6 +5,12 @@
 //! subject, skill and identifier match the indexed row. A stored
 //! `revoked = 0` or a readable JSON shape is not evidence on its own.
 //!
+//! Each input carries what scoring reads from the verified credential at
+//! scoring time: its attestation outcome, checked against this build's trust
+//! inputs, and the session status its integrity assertion states. Whether an
+//! input counts under that status is
+//! [`crate::aggregation::weights::session_status_counts`].
+//!
 //! Cached projections also record a fingerprint of the local state their
 //! inputs depend on: the rows, their revocation and suspension flags, the
 //! referenced status lists, issuer key history, supersession, completion
@@ -17,8 +23,11 @@ use rusqlite::{params, Connection};
 
 use alexandria_verify::trust::{classify_credential, CredentialTrust, TRUST_CALCULATION_VERSION};
 
+use alexandria_verify::attestation::{AttestationOutcome, AttestationTrust};
+
 use crate::domain::vc::{
-    verify_credential_db, SkillClaim, VerifiableCredential, VerificationPolicy,
+    verify::verify_credential_with_attestation, SkillClaim, SqliteVerificationStore,
+    VerifiableCredential, VerificationPolicy,
 };
 use crate::evidence::completion::{stored_completion_evidence, StoredCompletionEvidence};
 
@@ -44,6 +53,40 @@ impl VerifiedSkillInput {
     /// credentials credit the issuer as an instructor.
     pub(crate) fn issuer_signed(&self) -> bool {
         matches!(self.trust, CredentialTrust::VerifiedIssuerSigned { .. })
+    }
+
+    /// What this credential's device attestation evidence proved when it was
+    /// verified for scoring.
+    pub(crate) fn attestation(&self) -> AttestationOutcome {
+        match &self.trust {
+            CredentialTrust::VerifiedSelfClaim { attestation, .. }
+            | CredentialTrust::VerifiedIssuerSigned { attestation, .. }
+            | CredentialTrust::VerifiedCourseEndorsement { attestation, .. } => *attestation,
+            // Never scored: `verified_inputs` drops both.
+            CredentialTrust::Invalid { .. } | CredentialTrust::Pending { .. } => {
+                AttestationOutcome::NotSupplied
+            }
+        }
+    }
+
+    /// The session status the credential's signed integrity assertion
+    /// states, if it carries one.
+    pub(crate) fn session_status(&self) -> Option<&str> {
+        self.credential
+            .integrity
+            .as_ref()
+            .map(|integrity| integrity.status.as_str())
+    }
+
+    /// Whether this input counts under the session-status rule
+    /// ([`crate::aggregation::weights::session_status_counts`]). One that
+    /// does not contributes nothing to derived states or reputation.
+    pub(crate) fn counts(&self) -> bool {
+        crate::aggregation::weights::session_status_counts(
+            self.self_issued(),
+            &self.attestation(),
+            self.session_status(),
+        )
     }
 }
 
@@ -151,7 +194,13 @@ fn verified_inputs(
         if claim.skill_id != skill_id {
             continue;
         }
-        let verification = verify_credential_db(conn, &credential, verification_time, &policy);
+        let verification = verify_credential_with_attestation(
+            &SqliteVerificationStore(conn),
+            &credential,
+            verification_time,
+            &policy,
+            attestation_trust(),
+        );
         let evidence = stored_completion_evidence(conn, &credential_id)?;
         let trust = classify_credential(
             &credential,
@@ -175,6 +224,18 @@ fn verified_inputs(
         });
     }
     Ok(inputs)
+}
+
+/// The trust inputs scoring checks attestation evidence against: this build's
+/// (see [`crate::sentinel::attestation::profile_trust_inputs`]). Tests may
+/// substitute synthetic ones with [`test_support::with_test_trust`], since
+/// real platform evidence cannot be produced in a test.
+fn attestation_trust() -> &'static AttestationTrust {
+    #[cfg(test)]
+    if let Some(trust) = test_support::TEST_TRUST.with(std::cell::Cell::get) {
+        return trust;
+    }
+    crate::sentinel::attestation::profile_trust_inputs()
 }
 
 /// Fingerprint of the local state that can change the verified inputs for
@@ -301,6 +362,217 @@ fn update_value(hasher: &mut blake3::Hasher, value: ValueRef<'_>) {
             update_field(hasher, b"b");
             update_field(hasher, blob);
         }
+    }
+}
+
+/// Signed credentials carrying an integrity assertion and device attestation
+/// evidence, and synthetic trust inputs that verify that evidence.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::cell::Cell;
+    use std::sync::OnceLock;
+
+    use alexandria_verify::attestation::test_support::{
+        mint_play_token, p256_key, play_keys_b64, play_verdict,
+    };
+    use alexandria_verify::attestation::{
+        binding_digest_of, session_nonce, AttestationEvidence, AttestationPayload,
+        AttestationTrust, DeviceAttestation, Platform, PlayIntegrityKeys, PlayIntegrityTrust,
+    };
+    use alexandria_verify::did::derive_did_key;
+    use alexandria_verify::vc::sign::{sign_credential, UnsignedCredential};
+    use alexandria_verify::vc::{Claim, IntegrityAssertion, Proof, SkillClaim};
+    use alexandria_verify::Did;
+    use ed25519_dalek::SigningKey;
+    use rusqlite::params;
+
+    use super::VerifiableCredential;
+    use crate::db::Database;
+
+    thread_local! {
+        pub(super) static TEST_TRUST: Cell<Option<&'static AttestationTrust>> =
+            const { Cell::new(None) };
+    }
+
+    const PACKAGE: &str = "org.alexandria.scoring-test";
+    const KEK: [u8; 32] = [7u8; 32];
+    const SESSION_STARTED: &str = "2026-01-01T00:00:00Z";
+
+    fn play_signer() -> p256::ecdsa::SigningKey {
+        p256_key(b"scoring-test-play-signer")
+    }
+
+    fn trust() -> &'static AttestationTrust {
+        static TRUST: OnceLock<AttestationTrust> = OnceLock::new();
+        TRUST.get_or_init(|| {
+            let (decryption_key_b64, verification_key_b64) = play_keys_b64(&KEK, &play_signer());
+            AttestationTrust {
+                apple: None,
+                play_integrity: Some(PlayIntegrityTrust {
+                    package_name: PACKAGE.into(),
+                    keys: PlayIntegrityKeys {
+                        decryption_key_b64,
+                        verification_key_b64,
+                    },
+                }),
+            }
+        })
+    }
+
+    /// Run `f` with scoring checking attestation evidence against the
+    /// synthetic Play Integrity keys [`store_attested_credential`] signs with.
+    pub(crate) fn with_test_trust<T>(f: impl FnOnce() -> T) -> T {
+        struct Reset(Option<&'static AttestationTrust>);
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                TEST_TRUST.with(|cell| cell.set(self.0));
+            }
+        }
+        let _reset = Reset(TEST_TRUST.with(|cell| cell.replace(Some(trust()))));
+        f()
+    }
+
+    /// The device attestation evidence a test credential carries.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub(crate) enum Evidence {
+        /// No integrity assertion and no evidence: a plain claim.
+        NoAssertion,
+        /// An integrity assertion with no attestation evidence.
+        NotSupplied,
+        /// Play Integrity evidence over this credential's binding digest.
+        CredentialBound,
+        /// The session's Play Integrity evidence only.
+        SessionBound,
+    }
+
+    /// One test credential's content.
+    pub(crate) struct TestCredential<'a> {
+        pub(crate) id: &'a str,
+        pub(crate) signer: &'a SigningKey,
+        pub(crate) subject: &'a Did,
+        pub(crate) credential_type: &'a str,
+        pub(crate) skill_id: &'a str,
+        pub(crate) level: u8,
+        pub(crate) score: f64,
+        pub(crate) valid_from: &'a str,
+        /// The integrity assertion's session status.
+        pub(crate) session_status: &'a str,
+        pub(crate) evidence: Evidence,
+    }
+
+    /// Sign and store a skill credential with an integrity assertion in the
+    /// given session status and the given attestation evidence.
+    pub(crate) fn store_attested_credential(db: &Database, spec: &TestCredential<'_>) {
+        let issuer = derive_did_key(spec.signer);
+        let session_id = format!("isess_{}", spec.id);
+        let integrity = IntegrityAssertion {
+            session_id: session_id.clone(),
+            status: spec.session_status.into(),
+            integrity_score: Some(0.9),
+            critical_count: 0,
+            warning_count: 0,
+            assurance_level: match spec.evidence {
+                Evidence::CredentialBound => "device_attested",
+                _ => "local",
+            }
+            .into(),
+            commitment_root: Some("ab".repeat(32)),
+            anchor_ref: None,
+            generated_at: spec.valid_from.into(),
+            trust_profile: None,
+            verification_rung: None,
+            coverage_statement_digest: None,
+            signals_run: vec![],
+            signals_degraded: vec![],
+            signals_not_run: vec![],
+            probe: None,
+        };
+        let subject = Claim::Skill(SkillClaim {
+            skill_id: spec.skill_id.into(),
+            level: spec.level,
+            score: spec.score,
+            evidence_refs: vec![],
+            rubric_version: None,
+            assessment_method: None,
+            provenance: None,
+        })
+        .into_subject(spec.subject.clone());
+        let session = session_nonce(&session_id, SESSION_STARTED);
+        let record = DeviceAttestation {
+            platform: Platform::Android,
+            nonce_hex: hex::encode(session),
+            app_id: PACKAGE.into(),
+            payload: AttestationPayload::PlayIntegrity {
+                token: mint_play_token(
+                    &play_verdict(&session, PACKAGE),
+                    &KEK,
+                    &play_signer(),
+                    [1; 12],
+                ),
+            },
+            captured_at: SESSION_STARTED.into(),
+            companion: None,
+        };
+        let evidence = match spec.evidence {
+            Evidence::NoAssertion | Evidence::NotSupplied => vec![],
+            Evidence::SessionBound => {
+                vec![AttestationEvidence::session_bound(&record, SESSION_STARTED).into_entry()]
+            }
+            Evidence::CredentialBound => {
+                let digest = binding_digest_of(&subject, &integrity).unwrap();
+                let token = mint_play_token(
+                    &play_verdict(&digest, PACKAGE),
+                    &KEK,
+                    &play_signer(),
+                    [2; 12],
+                );
+                vec![
+                    AttestationEvidence::credential_bound(&record, SESSION_STARTED, token)
+                        .into_entry(),
+                ]
+            }
+        };
+        let unsigned = VerifiableCredential {
+            context: vec!["https://www.w3.org/ns/credentials/v2".into()],
+            id: Some(spec.id.into()),
+            type_: vec!["VerifiableCredential".into(), spec.credential_type.into()],
+            issuer: issuer.clone(),
+            valid_from: spec.valid_from.into(),
+            valid_until: None,
+            credential_subject: subject,
+            credential_status: None,
+            terms_of_use: None,
+            witness: None,
+            integrity: (spec.evidence != Evidence::NoAssertion).then_some(integrity),
+            evidence,
+            related_resource: Vec::new(),
+            proof: Proof::unsigned(spec.valid_from),
+        };
+        let credential = sign_credential(
+            UnsignedCredential {
+                credential: unsigned,
+            },
+            spec.signer,
+            &issuer,
+        )
+        .unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO credentials (id, issuer_did, subject_did, credential_type, \
+                 claim_kind, skill_id, issuance_date, signed_vc_json, integrity_hash, revoked) \
+                 VALUES (?1, ?2, ?3, ?4, 'skill', ?5, ?6, ?7, ?8, 0)",
+                params![
+                    spec.id,
+                    issuer.as_str(),
+                    spec.subject.as_str(),
+                    spec.credential_type,
+                    spec.skill_id,
+                    spec.valid_from,
+                    serde_json::to_string(&credential).unwrap(),
+                    crate::domain::vc::integrity_hash_of(&credential).unwrap()
+                ],
+            )
+            .unwrap();
     }
 }
 
