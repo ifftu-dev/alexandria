@@ -1142,14 +1142,17 @@ pub fn run() {
                                         let guard = db_for_queue.lock();
                                         match guard.as_deref() {
                                             Ok(Some(db)) => {
-                                                if let Err(e) =
-                                                    credentials::lifecycle::lift_expired_suspensions(
-                                                        db.conn(),
-                                                        issuer.did(),
-                                                        &crate::clock::now_rfc3339(),
-                                                    )
-                                                {
-                                                    log::warn!("timed suspensions: {e}");
+                                                match credentials::lifecycle::lift_expired_suspensions(
+                                                    db.conn(),
+                                                    issuer.did(),
+                                                    &crate::clock::now_rfc3339(),
+                                                ) {
+                                                    Ok(report) => {
+                                                        for error in report.errors {
+                                                            log::warn!("timed suspension not lifted: {error}");
+                                                        }
+                                                    }
+                                                    Err(e) => log::warn!("timed suspensions: {e}"),
                                                 }
                                                 credentials::status_list::pending(
                                                     db.conn(),

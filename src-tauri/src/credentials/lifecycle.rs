@@ -168,14 +168,28 @@ pub fn reinstate(
     Ok(())
 }
 
+/// What one timed-suspension pass did.
+#[derive(Debug, Default)]
+pub struct LiftReport {
+    /// Credentials reinstated.
+    pub lifted: usize,
+    /// One line per credential that could not be lifted, `"{id}: {error}"`.
+    /// Each stays suspended and is tried again on the next pass.
+    pub errors: Vec<String>,
+}
+
 /// Reinstate every credential `issuer_did` suspended until a time at or
 /// before `now`. Run on the status-list publication path, so the next
-/// publication carries the cleared bits. Returns how many were lifted.
+/// publication carries the cleared bits.
+///
+/// One credential that cannot be lifted does not stop the pass: the rest are
+/// lifted and the failure is reported. The error is only for failing to find
+/// which credentials are due.
 pub fn lift_expired_suspensions(
     conn: &Connection,
     issuer_did: &Did,
     now: &str,
-) -> Result<usize, CredentialError> {
+) -> Result<LiftReport, CredentialError> {
     let due: Vec<String> = {
         let mut statement = conn.prepare(
             "SELECT id FROM credentials \
@@ -186,10 +200,14 @@ pub fn lift_expired_suspensions(
         let rows = statement.query_map(params![issuer_did.as_str(), now], |r| r.get(0))?;
         rows.collect::<Result<_, _>>()?
     };
+    let mut report = LiftReport::default();
     for credential_id in &due {
-        reinstate(conn, issuer_did, credential_id, now)?;
+        match reinstate(conn, issuer_did, credential_id, now) {
+            Ok(()) => report.lifted += 1,
+            Err(error) => report.errors.push(format!("{credential_id}: {error}")),
+        }
     }
-    Ok(due.len())
+    Ok(report)
 }
 
 /// The suspension list and index a credential `issuer_did` issued names in
@@ -234,15 +252,18 @@ fn write_bit(
     change: StatusChange,
     now: &str,
 ) -> Result<(), CredentialError> {
-    let mut bits: Vec<u8> = conn
+    let (list_issuer, mut bits): (String, Vec<u8>) = conn
         .query_row(
-            "SELECT bits FROM credential_status_lists WHERE list_id = ?1 AND issuer_did = ?2",
-            params![list_id, issuer_did.as_str()],
-            |r| r.get(0),
+            "SELECT issuer_did, bits FROM credential_status_lists WHERE list_id = ?1",
+            params![list_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()
         .map_err(CredentialError::step("load status list"))?
-        .ok_or(CredentialError::NotIssuer(change))?;
+        .ok_or_else(|| CredentialError::StatusListNotHeld(list_id.to_string()))?;
+    if list_issuer != issuer_did.as_str() {
+        return Err(CredentialError::NotIssuer(change));
+    }
     if alexandria_verify::vc::status::get_bit(&bits, index) == Some(value) {
         return Ok(());
     }
@@ -590,7 +611,9 @@ mod tests {
 
         // Not yet due: nothing lifts, and the published bit stays set.
         assert_eq!(
-            lift_expired_suspensions(db.conn(), &issuer, NOW).unwrap(),
+            lift_expired_suspensions(db.conn(), &issuer, NOW)
+                .unwrap()
+                .lifted,
             0
         );
         publish(&db, &key, &issuer, &mut served);
@@ -601,7 +624,9 @@ mod tests {
         // carries the cleared list.
         let later = "2026-05-02T00:00:00Z";
         assert_eq!(
-            lift_expired_suspensions(db.conn(), &issuer, later).unwrap(),
+            lift_expired_suspensions(db.conn(), &issuer, later)
+                .unwrap()
+                .lifted,
             1
         );
         publish(&db, &key, &issuer, &mut served);
@@ -617,6 +642,74 @@ mod tests {
         assert_eq!(suspended, 0, "the issuer's bookkeeping follows the list");
     }
 
+    /// One credential that cannot be lifted does not hold up the others:
+    /// the pass lifts what it can and reports each failure.
+    #[test]
+    fn one_failing_credential_does_not_stop_the_lifting_pass() {
+        let (db, key, issuer, subject) = setup();
+        let broken =
+            credentials::issue(db.conn(), &key, &sample_request(subject.clone()), NOW).unwrap();
+        let healthy = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
+        for vc in [&broken, &healthy] {
+            let id = vc.id.as_deref().unwrap();
+            suspend(
+                db.conn(),
+                &issuer,
+                id,
+                Some("2026-05-01T00:00:00Z"),
+                None,
+                NOW,
+            )
+            .unwrap();
+        }
+        db.conn()
+            .execute(
+                "UPDATE credentials SET signed_vc_json = 'not json' WHERE id = ?1",
+                params![broken.id.as_deref().unwrap()],
+            )
+            .unwrap();
+
+        let report = lift_expired_suspensions(db.conn(), &issuer, "2026-05-02T00:00:00Z").unwrap();
+
+        assert_eq!(report.lifted, 1);
+        assert_eq!(report.errors.len(), 1);
+        assert!(
+            report.errors[0].starts_with(broken.id.as_deref().unwrap()),
+            "{:?}",
+            report.errors
+        );
+        let suspended: i64 = db
+            .conn()
+            .query_row(
+                "SELECT suspended FROM credentials WHERE id = ?1",
+                params![healthy.id.as_deref().unwrap()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(suspended, 0);
+    }
+
+    /// A list the credential names but this store does not hold is its own
+    /// error, not a claim that the caller is not the issuer.
+    #[test]
+    fn a_missing_suspension_list_is_reported_as_missing() {
+        let (db, key, issuer, subject) = setup();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
+        db.conn()
+            .execute(
+                "DELETE FROM credential_status_lists WHERE status_purpose = 'suspension'",
+                [],
+            )
+            .unwrap();
+
+        let error = reinstate(db.conn(), &issuer, vc.id.as_deref().unwrap(), NOW).unwrap_err();
+
+        assert!(
+            matches!(error, CredentialError::StatusListNotHeld(_)),
+            "{error:?}"
+        );
+    }
+
     #[test]
     fn an_indefinite_suspension_is_never_lifted_by_time() {
         let (db, _key, issuer, vc) = hosted();
@@ -630,7 +723,9 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            lift_expired_suspensions(db.conn(), &issuer, "2099-01-01T00:00:00Z").unwrap(),
+            lift_expired_suspensions(db.conn(), &issuer, "2099-01-01T00:00:00Z")
+                .unwrap()
+                .lifted,
             0
         );
     }

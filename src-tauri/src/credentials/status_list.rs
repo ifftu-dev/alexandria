@@ -292,9 +292,13 @@ pub(crate) async fn publish(
             lease.clone(),
             "credentials.status_lists.pending",
             move |db| {
-                super::lifecycle::lift_expired_suspensions(db.conn(), &issuer_for_read, &now)
-                    .and_then(|_| pending(db.conn(), &issuer_for_read))
-                    .map_err(|e| e.to_string())
+                let lifted =
+                    super::lifecycle::lift_expired_suspensions(db.conn(), &issuer_for_read, &now)
+                        .map_err(|e| e.to_string())?;
+                for error in &lifted.errors {
+                    log::warn!("timed suspension not lifted: {error}");
+                }
+                pending(db.conn(), &issuer_for_read).map_err(|e| e.to_string())
             },
         )
         .await

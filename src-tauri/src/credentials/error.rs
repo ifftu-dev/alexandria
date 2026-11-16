@@ -177,6 +177,9 @@ pub enum CredentialError {
     /// Suspension needs the credential to name a suspension list.
     #[error("credential {0} has no suspension status list")]
     NotSuspendable(String),
+    /// The credential names a status list this store does not hold.
+    #[error("status list {0} is not held here")]
+    StatusListNotHeld(String),
 
     // --- Failures beneath ------------------------------------------------
     #[error(transparent)]
