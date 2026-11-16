@@ -19,8 +19,9 @@ pub fn active_certification() -> Option<(measurement::Certification, String)> {
     None
 }
 
-/// The coverage statement with `digest`, resolved offline from the
-/// statements bundled with the app under the certification in force.
+/// The coverage statement with `digest`, of any published version, resolved
+/// offline from the verifier library's registry under the certification in
+/// force.
 pub fn resolve_coverage_statement(digest: &str) -> Option<CoverageStatement> {
     let certification = active_certification();
     resolve_coverage(digest, certification.as_ref().map(|(c, d)| (c, d.as_str())))

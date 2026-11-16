@@ -256,9 +256,9 @@ pub async fn integrity_select_profile(
 }
 
 /// The coverage statement a credential's integrity assertion names by
-/// digest, resolved offline from the statements bundled with the app.
-/// `None` when no bundled statement has that digest (another version, or a
-/// certification this build does not carry).
+/// digest, resolved offline from the verifier library's registry of every
+/// published statement version. `None` when no statement has that digest (a
+/// version newer than this build, or a certification it does not carry).
 #[tauri::command]
 pub async fn integrity_coverage_statement(
     digest: String,
@@ -268,7 +268,7 @@ pub async fn integrity_coverage_statement(
     ))
 }
 
-/// Every coverage statement bundled with the app under the certification in
+/// Every current-version coverage statement under the certification in
 /// force, one per trust profile and verification rung, so a sponsor reads
 /// what a policy's minimums cover before choosing them.
 #[tauri::command]

@@ -404,7 +404,8 @@ pub struct IntegrityAssertion {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification_rung: Option<String>,
     /// Digest of the coverage statement for this profile and rung: what was
-    /// checked, what was not, and the certified error rates.
+    /// checked, what was not, and the certified error rates. Any published
+    /// version resolves offline with [`crate::coverage::resolve`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_statement_digest: Option<String>,
     /// Signal sets the profile ran (`core`, `device_attestation`, `camera`).
@@ -471,6 +472,13 @@ pub struct VerifiableCredential {
     /// was attested. Signed over like every other field; absent when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<EvidenceEntry>,
+    /// Resources the credential names with a digest of their bytes (VC Data
+    /// Model 2.0 `relatedResource`). A credential with an integrity assertion
+    /// names its coverage statement here (see [`crate::coverage`]); the
+    /// verifier rejects one whose named statement is not the assertion's
+    /// `coverageStatementDigest`. Signed over by the proof.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related_resource: Vec<RelatedResource>,
     pub proof: Proof,
 }
 
@@ -492,6 +500,24 @@ impl EvidenceEntry {
             _ => false,
         }
     }
+}
+
+/// One `relatedResource` entry (VC Data Model 2.0 §5.3): a resource's `id`
+/// and a digest of its exact bytes, so a reader who fetches it can tell it
+/// is the resource the issuer signed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RelatedResource {
+    pub id: String,
+    /// Subresource Integrity digest of the resource's bytes, e.g.
+    /// `sha256-<base64>`.
+    #[serde(rename = "digestSRI", default, skip_serializing_if = "Option::is_none")]
+    pub digest_sri: Option<String>,
+    /// Multibase-encoded multihash of the resource's bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest_multibase: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
 }
 
 /// `proof.type` for every credential this crate signs: W3C Data Integrity.
@@ -598,6 +624,12 @@ pub struct VerificationResult {
     /// via `supersedes` (§11.4).
     #[serde(default)]
     pub superseded: bool,
+    /// True when a `relatedResource` names a coverage statement other than
+    /// the one the integrity assertion's `coverageStatementDigest` names (or
+    /// names one when the assertion names none). Always a rejection.
+    /// Omitted while false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub coverage_statement_mismatch: bool,
     pub verification_time: String,
     #[serde(default)]
     pub pending_reasons: Vec<VerificationPendingReason>,

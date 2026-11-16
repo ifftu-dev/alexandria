@@ -30,12 +30,13 @@ use std::path::PathBuf;
 use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 
+use alexandria_verify::coverage::{self, CoverageStatement};
 use alexandria_verify::did::{derive_did_key, Did, KeyRegistryEntry};
 use alexandria_verify::vc::sign::{sign_credential, UnsignedCredential};
 use alexandria_verify::vc::verify::verify_credential;
 use alexandria_verify::vc::{
-    AcceptanceDecision, CredentialStatus, CredentialSubject, CredentialType, Proof,
-    VerifiableCredential, VerificationPolicy, VerificationResult,
+    AcceptanceDecision, CredentialStatus, CredentialSubject, CredentialType, IntegrityAssertion,
+    Proof, VerifiableCredential, VerificationPolicy, VerificationResult,
 };
 use alexandria_verify::{StoreLookup, VerificationStore};
 
@@ -172,6 +173,7 @@ fn skeleton(issuer: Did, subject: Did, valid_until: Option<&str>) -> VerifiableC
         witness: None,
         integrity: None,
         evidence: Vec::new(),
+        related_resource: Vec::new(),
         proof: Proof::unsigned("2026-01-01T00:00:00Z"),
     }
 }
@@ -537,7 +539,107 @@ fn build_all() -> Vec<(&'static str, Vector)> {
         ));
     }
 
+    // --- coverage statements ----------------------------------------------
+    {
+        // Issued before credentials named their statement by relatedResource:
+        // only the integrity assertion's digest names it.
+        let v1 = coverage::statement("1", "core", "process", None).expect("v1 statement");
+        let mut vc = skeleton(issuer.clone(), subject.clone(), None);
+        vc.integrity = Some(integrity_naming(&v1));
+        let vc = signed(vc, &issuer_key, &issuer);
+        let expect = verify_credential(&VectorStore::default(), &vc, NOW, &default_policy);
+        out.push((
+            "13-coverage-statement-v1",
+            Vector {
+                description: "An integrity assertion names a version-1 coverage statement by \
+                              coverageStatementDigest alone, as credentials issued before \
+                              relatedResource did. The digest resolves from the statement \
+                              registry; there is nothing to cross-check, so it is accepted."
+                    .into(),
+                verification_time: NOW.into(),
+                policy: default_policy.clone(),
+                credential: vc,
+                store: VectorStore::default(),
+                expect,
+            },
+        ));
+    }
+    {
+        let v2 = coverage::statement("2", "full", "live", None).expect("v2 statement");
+        let mut vc = skeleton(issuer.clone(), subject.clone(), None);
+        vc.integrity = Some(integrity_naming(&v2));
+        vc.related_resource = vec![coverage::related_resource(
+            &v2,
+            Some("https://status.example"),
+        )];
+        let vc = signed(vc, &issuer_key, &issuer);
+        let expect = verify_credential(&VectorStore::default(), &vc, NOW, &default_policy);
+        out.push((
+            "14-coverage-statement-v2",
+            Vector {
+                description: "A version-2 coverage statement named twice: by the integrity \
+                              assertion's coverageStatementDigest and by a relatedResource whose \
+                              id is {host}/coverage-statements/{digest}, with digestSRI over the \
+                              statement's bytes. The digest in the id matches, so it is accepted."
+                    .into(),
+                verification_time: NOW.into(),
+                policy: default_policy.clone(),
+                credential: vc,
+                store: VectorStore::default(),
+                expect,
+            },
+        ));
+    }
+    {
+        let named = coverage::statement("2", "core", "process", None).expect("v2 statement");
+        let other = coverage::statement("2", "camera", "live", None).expect("v2 statement");
+        let mut vc = skeleton(issuer.clone(), subject.clone(), None);
+        vc.integrity = Some(integrity_naming(&named));
+        vc.related_resource = vec![coverage::related_resource(&other, None)];
+        let vc = signed(vc, &issuer_key, &issuer);
+        let expect = verify_credential(&VectorStore::default(), &vc, NOW, &default_policy);
+        out.push((
+            "15-coverage-statement-mismatch",
+            Vector {
+                description: "The relatedResource names a coverage statement \
+                              (urn:alexandria:coverage-statement:{digest}) whose digest differs \
+                              from the integrity assertion's coverageStatementDigest. The \
+                              signature is valid, but the credential names two statements, so \
+                              it is rejected with coverageStatementMismatch."
+                    .into(),
+                verification_time: NOW.into(),
+                policy: default_policy.clone(),
+                credential: vc,
+                store: VectorStore::default(),
+                expect,
+            },
+        ));
+    }
+
     out
+}
+
+/// A terminal integrity assertion on `statement`'s profile and rung that
+/// names it by digest.
+fn integrity_naming(statement: &CoverageStatement) -> IntegrityAssertion {
+    IntegrityAssertion {
+        session_id: "vector-session".into(),
+        status: "completed".into(),
+        integrity_score: None,
+        critical_count: 0,
+        warning_count: 0,
+        assurance_level: "local".into(),
+        commitment_root: None,
+        anchor_ref: None,
+        generated_at: "2026-01-01T00:00:00Z".into(),
+        trust_profile: Some(statement.profile.clone()),
+        verification_rung: Some(statement.rung.clone()),
+        coverage_statement_digest: Some(statement.digest()),
+        signals_run: Vec::new(),
+        signals_degraded: Vec::new(),
+        signals_not_run: Vec::new(),
+        probe: None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -611,6 +713,27 @@ fn vectors_match_this_implementation() {
             "{}: pendingReasons",
             path.display()
         );
+        assert_eq!(
+            got.coverage_statement_mismatch,
+            v.expect.coverage_statement_mismatch,
+            "{}: coverageStatementMismatch",
+            path.display()
+        );
+        // A coverage statement the credential names consistently resolves
+        // from the registry, whatever its version.
+        if let Some(digest) = v
+            .credential
+            .integrity
+            .as_ref()
+            .and_then(|a| a.coverage_statement_digest.as_deref())
+            .filter(|_| !got.coverage_statement_mismatch)
+        {
+            assert!(
+                coverage::resolve(digest, None).is_some(),
+                "{}: coverage statement {digest} does not resolve",
+                path.display()
+            );
+        }
     }
 }
 
@@ -654,6 +777,23 @@ fn the_suite_covers_distinct_failure_modes() {
         all.iter().any(|(_, v)| !v.expect.subject_bound),
         "no vector fails subject binding"
     );
+    assert!(
+        all.iter()
+            .any(|(_, v)| v.expect.coverage_statement_mismatch),
+        "no vector names a mismatched coverage statement"
+    );
+    for version in coverage::VERSIONS {
+        assert!(
+            all.iter().any(|(_, v)| v
+                .credential
+                .integrity
+                .as_ref()
+                .and_then(|a| a.coverage_statement_digest.as_deref())
+                .and_then(|d| coverage::resolve(d, None))
+                .is_some_and(|s| s.version == version)),
+            "no vector names a version-{version} coverage statement"
+        );
+    }
 }
 
 fn regenerate() {

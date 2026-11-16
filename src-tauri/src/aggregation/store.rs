@@ -761,6 +761,7 @@ mod tests {
             witness: None,
             integrity: None,
             evidence: Vec::new(),
+            related_resource: Vec::new(),
             proof: crate::domain::vc::Proof::unsigned(NOW),
         };
         assert_eq!(

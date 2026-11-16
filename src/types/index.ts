@@ -1997,7 +1997,17 @@ export interface VerifiableCredential {
   termsOfUse?: TermsOfUse | null
   witness?: Witness | null
   integrity?: IntegrityAssertion | null
+  /** VC 2.0 `relatedResource`; names the coverage statement when `integrity` does. */
+  relatedResource?: RelatedResource[]
   proof: Proof
+}
+
+/** Mirrors `alexandria_verify::vc::RelatedResource`. */
+export interface RelatedResource {
+  id: string
+  digestSRI?: string
+  digestMultibase?: string
+  mediaType?: string
 }
 
 // Issuance-time integrity gate (§ Integrity→VC bridge). Evaluated
@@ -2139,6 +2149,8 @@ export interface VerificationResult {
   suspended: boolean
   /** §11.4: a newer credential supersedes this one. */
   superseded: boolean
+  /** A `relatedResource` names a coverage statement other than the assertion's; omitted while false. */
+  coverageStatementMismatch?: boolean
   verificationTime: string
   pendingReasons: VerificationPendingReason[]
   /** What the credential's device attestation evidence proved. */

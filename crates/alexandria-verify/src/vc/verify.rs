@@ -13,7 +13,9 @@
 //! 7. Check a caller-observed integrity anchor against the recomputed hash.
 //! 8. Check device attestation evidence against the caller's trust inputs
 //!    (`crate::attestation`); invalid evidence rejects.
-//! 9. Emit an accepted, pending, or rejected `VerificationResult`.
+//! 9. Check that a coverage statement named by `relatedResource` is the one
+//!    the integrity assertion names by digest.
+//! 10. Emit an accepted, pending, or rejected `VerificationResult`.
 //!
 //! Missing or unavailable issuer/status evidence produces a typed pending
 //! result. A malformed reference or a failed cryptographic/policy check is a
@@ -76,6 +78,7 @@ pub fn verify_credential_with_attestation(
         integrity_anchored: false,
         suspended: false,
         superseded: false,
+        coverage_statement_mismatch: false,
         verification_time: verification_time.to_string(),
         pending_reasons: Vec::new(),
         attestation: AttestationOutcome::NotSupplied,
@@ -169,6 +172,11 @@ pub fn verify_credential_with_attestation(
                 .push(VerificationPendingReason::SupersessionStateUnavailable),
         }
     }
+
+    // -- coverage statement -------------------------------------------------
+    // A credential that names its coverage statement twice must name one
+    // statement. Comparing digests needs no registry lookup.
+    result.coverage_statement_mismatch = crate::coverage::names_mismatched_statement(credential);
 
     // -- integrity anchor (§11.3.1) ------------------------------------------
     // The store supplies what the caller saw on the ledger; the hash is
@@ -363,7 +371,8 @@ fn finalize(
         && (!policy.require_integrity_anchor || result.integrity_anchored || anchor_pending)
         && !(policy.reject_expired && result.expired)
         && !(policy.reject_suspended && result.suspended)
-        && !(policy.reject_superseded && result.superseded);
+        && !(policy.reject_superseded && result.superseded)
+        && !result.coverage_statement_mismatch;
     result.acceptance_decision = if !accept {
         AcceptanceDecision::Reject
     } else if result.pending_reasons.is_empty() {
@@ -419,6 +428,7 @@ mod tests {
             witness: None,
             integrity: None,
             evidence: Vec::new(),
+            related_resource: Vec::new(),
             proof: Proof::unsigned("2026-01-01T00:00:00Z"),
         }
     }

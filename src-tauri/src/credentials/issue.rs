@@ -328,6 +328,28 @@ pub struct IssueCredentialRequest {
     pub integrity_policy: Option<IssuancePolicy>,
 }
 
+/// The `relatedResource` entry naming the coverage statement `integrity`
+/// names by digest: at the profile's status host when one is configured,
+/// else by URN (as status lists fall back). Empty when there is no assertion
+/// or it names no statement.
+fn coverage_related_resource(
+    conn: &Connection,
+    integrity: Option<&IntegrityAssertion>,
+) -> Result<Vec<alexandria_verify::vc::RelatedResource>, CredentialError> {
+    let Some(digest) = integrity.and_then(|a| a.coverage_statement_digest.as_deref()) else {
+        return Ok(Vec::new());
+    };
+    let statement =
+        crate::sentinel::scoring::resolve_coverage_statement(digest).ok_or_else(|| {
+            CredentialError::Envelope(format!("coverage statement {digest} does not resolve"))
+        })?;
+    let host = status_list::host(conn);
+    Ok(vec![alexandria_verify::coverage::related_resource(
+        &statement,
+        host.as_deref(),
+    )])
+}
+
 /// Pure-function issuance pipeline. Allocates the next status-list
 /// slot, builds the VC envelope, signs it, persists both the signed
 /// VC and its status-list slot, and returns the signed credential.
@@ -418,6 +440,7 @@ pub fn issue(
         }),
         terms_of_use: None,
         witness: None,
+        related_resource: coverage_related_resource(conn, integrity.as_ref())?,
         integrity,
         evidence: Vec::new(),
         proof: Proof::unsigned(now.to_string()),
@@ -694,14 +717,96 @@ mod tests {
         let digest = a.coverage_statement_digest.expect("coverage digest");
         let statement = resolve_coverage_statement(&digest).expect("bundled statement");
         assert_eq!(
-            (statement.profile, statement.rung),
-            (TrustProfile::Core, VerificationRung::Process)
+            (statement.profile.as_str(), statement.rung.as_str()),
+            (
+                TrustProfile::Core.as_str(),
+                VerificationRung::Process.as_str()
+            )
         );
+        assert_eq!(statement.version, "2", "new credentials name version 2");
         assert!(statement.certification.is_none());
         assert!(statement
             .not_checked
             .iter()
             .any(|line| line.contains("second person")));
+    }
+
+    /// The `relatedResource` entry of `vc`, as a verifier receives it.
+    fn related_resources(vc: &VerifiableCredential) -> Vec<serde_json::Value> {
+        serde_json::to_value(vc).unwrap()["relatedResource"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_credential_with_an_integrity_assertion_names_its_statement_by_related_resource() {
+        use crate::domain::vc::{verify_credential_db, VerificationPolicy};
+        use crate::sentinel::scoring::resolve_coverage_statement;
+        use base64::Engine as _;
+        let (db, key, _, subject) = setup();
+        assessed(db.conn(), "named", false, 3, 3);
+        let mut req = sample_request(subject.clone());
+        req.integrity_session_id = Some("named".into());
+        let vc = issue(db.conn(), &key, &req, NOW).unwrap();
+
+        let digest = vc
+            .integrity
+            .as_ref()
+            .and_then(|a| a.coverage_statement_digest.clone())
+            .expect("the assertion keeps coverageStatementDigest");
+        let related = related_resources(&vc);
+        assert_eq!(related.len(), 1);
+        assert_eq!(
+            related[0]["id"],
+            format!("urn:alexandria:coverage-statement:{digest}"),
+            "no status host: the URN form"
+        );
+        let statement = resolve_coverage_statement(&digest).unwrap();
+        let sha256 = <sha2::Sha256 as sha2::Digest>::digest(statement.bytes());
+        assert_eq!(
+            related[0]["digestSRI"],
+            format!(
+                "sha256-{}",
+                base64::engine::general_purpose::STANDARD.encode(sha256)
+            )
+        );
+        let verified = verify_credential_db(db.conn(), &vc, NOW, &VerificationPolicy::default());
+        assert!(verified.valid_signature);
+        assert!(!verified.coverage_statement_mismatch);
+    }
+
+    #[test]
+    fn with_a_status_host_the_statement_is_named_at_that_host() {
+        use crate::settings::{registry::keys, SettingsStore};
+        let (db, key, _, subject) = setup();
+        SettingsStore::set(
+            db.conn(),
+            keys::CREDENTIAL_STATUS_HOST,
+            "https://cloud.example/".to_string(),
+        )
+        .unwrap();
+        assessed(db.conn(), "hosted", false, 3, 3);
+        let mut req = sample_request(subject.clone());
+        req.integrity_session_id = Some("hosted".into());
+        let vc = issue(db.conn(), &key, &req, NOW).unwrap();
+        let related = related_resources(&vc);
+        let digest = vc.integrity.unwrap().coverage_statement_digest.unwrap();
+        assert_eq!(
+            related[0]["id"],
+            format!("https://cloud.example/coverage-statements/{digest}")
+        );
+    }
+
+    #[test]
+    fn a_credential_without_an_integrity_assertion_names_no_related_resource() {
+        let (db, key, _, subject) = setup();
+        let vc = issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
+        assert!(vc.integrity.is_none());
+        assert!(related_resources(&vc).is_empty());
+        assert!(!serde_json::to_string(&vc)
+            .unwrap()
+            .contains("relatedResource"));
     }
 
     #[test]

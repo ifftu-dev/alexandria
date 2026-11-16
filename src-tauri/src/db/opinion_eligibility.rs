@@ -356,6 +356,7 @@ pub(crate) mod test_support {
             witness: None,
             integrity: None,
             evidence: Vec::new(),
+            related_resource: Vec::new(),
             proof: Proof::unsigned("2026-01-01T00:00:00Z"),
         };
         let credential = sign_credential(

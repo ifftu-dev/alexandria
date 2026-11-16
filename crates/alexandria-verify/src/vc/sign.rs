@@ -239,6 +239,7 @@ mod tests {
                 witness: None,
                 integrity: None,
                 evidence: Vec::new(),
+                related_resource: Vec::new(),
                 proof: Proof::unsigned("2026-04-13T00:00:00Z"),
             },
         }

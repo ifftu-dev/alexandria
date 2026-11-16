@@ -18,16 +18,9 @@ pub const CERTIFICATION_FORMAT: u32 = 1;
 /// at four decimals still matches the replay it came from.
 const RATE_EPSILON: f64 = 1e-9;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CertifiedSignal {
-    /// Log-likelihood ratio the fusion adds each window the signal fires.
-    pub llr: f64,
-    /// Session-level precision measured at certification; the floor CI holds.
-    pub precision: f64,
-    /// Session-level recall measured at certification; the floor CI holds.
-    pub recall: f64,
-}
+/// A signal's certified rates. Defined in the verifier library because
+/// coverage statements embed it.
+pub use alexandria_verify::coverage::CertifiedSignal;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

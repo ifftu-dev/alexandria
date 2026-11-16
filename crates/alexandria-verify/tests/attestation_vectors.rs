@@ -153,6 +153,7 @@ fn credential(
         witness: None,
         integrity: Some(integrity()),
         evidence: evidence.into_iter().map(|e| e.into_entry()).collect(),
+        related_resource: Vec::new(),
         proof: Proof::unsigned(GENERATED),
     }
 }

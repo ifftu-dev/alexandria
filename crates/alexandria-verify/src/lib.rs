@@ -17,6 +17,7 @@
 pub mod access;
 pub mod attestation;
 pub mod course;
+pub mod coverage;
 pub mod did;
 pub mod exchange;
 pub mod governance;
