@@ -21,9 +21,9 @@ An organisation's run record shows what was verified, not only what the candidat
 
 ## Acceptance criteria
 
-- [ ] Assessment exchange tests cover: no evidence (self-reported), credential-bound (verified), invalid (refused, audited), stated `device_attested` with session-bound evidence (review case opened).
-- [ ] Vendor check passes against the app integration branch.
-- [ ] `cargo fmt --check`, `cargo clippy -- -D warnings`, console `vue-tsc` and `npm test` pass.
+- [x] Assessment exchange tests cover: no evidence (self-reported), credential-bound (verified), invalid (refused, audited), stated `device_attested` with session-bound evidence (review case opened).
+- [x] Vendor check passes against the app integration branch.
+- [x] `cargo fmt --check`, `cargo clippy -- -D warnings`, console `vue-tsc` and `npm test` pass.
 
 ## Pointers
 

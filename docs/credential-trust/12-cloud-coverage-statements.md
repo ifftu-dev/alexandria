@@ -15,9 +15,9 @@ Spec sections: *Coverage statements stay resolvable* (address bullet), story 11.
 
 ## Acceptance criteria
 
-- [ ] An HTTP test fetches a version-1 and a version-2 statement by digest and checks the bytes hash to the digest.
-- [ ] Unknown digest returns 404; a malformed digest returns 400.
-- [ ] Vendor check, fmt and clippy pass.
+- [x] An HTTP test fetches a version-1 and a version-2 statement by digest and checks the bytes hash to the digest.
+- [x] Unknown digest returns 404; a malformed digest returns 400.
+- [x] Vendor check, fmt and clippy pass.
 
 ## Pointers
 
