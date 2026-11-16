@@ -77,7 +77,7 @@ impl P2pNode {
             .await
     }
 
-    /// Publish a revocation status list snapshot or delta (§11.2).
+    /// Publish a status list snapshot or delta, revocation or suspension (§11.2).
     pub async fn publish_vc_status(
         &self,
         payload: Vec<u8>,

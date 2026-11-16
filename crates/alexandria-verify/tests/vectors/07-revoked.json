@@ -54,7 +54,6 @@
     "statusLists": {
       "urn:uuid:status-list-1": "0040000000000000"
     },
-    "suspended": {},
     "superseded": []
   },
   "expect": {
@@ -70,6 +69,10 @@
     "superseded": false,
     "verificationTime": "2026-06-01T00:00:00Z",
     "pendingReasons": [],
+    "attestation": {
+      "outcome": "not_supplied"
+    },
+    "verifiedAssuranceLevel": "local",
     "acceptanceDecision": "reject"
   }
 }

@@ -217,21 +217,34 @@ pub fn verify_share(
     if share.issuer_state.is_some() && vc.issuer.as_str() != expected.subject_did {
         return Err("a holder cannot assert another issuer's credential status".into());
     }
-    let store = ShareStore { share };
+    let store = ShareStore {
+        share,
+        now: now_iso,
+    };
     let mut result = verify_credential(&store, vc, now_iso, &VerificationPolicy::default());
-    if share
-        .issuer_state
-        .as_ref()
-        .is_some_and(|state| state.revoked)
-    {
-        result.revoked = true;
-        result.acceptance_decision = crate::vc::AcceptanceDecision::Reject;
+    // The holder-issuer's own word against their credential stands even
+    // when the credential names no list for it.
+    if let Some(state) = &share.issuer_state {
+        if state.revoked {
+            result.revoked = true;
+            result.acceptance_decision = crate::vc::AcceptanceDecision::Reject;
+        }
+        if state.suspended
+            && state
+                .suspended_until
+                .as_deref()
+                .is_none_or(|until| until > now_iso)
+        {
+            result.suspended = true;
+            result.acceptance_decision = crate::vc::AcceptanceDecision::Reject;
+        }
     }
     Ok(result)
 }
 
 struct ShareStore<'a> {
     share: &'a SharedCredential,
+    now: &'a str,
 }
 
 impl VerificationStore for ShareStore<'_> {
@@ -239,34 +252,44 @@ impl VerificationStore for ShareStore<'_> {
         StoreLookup::Missing
     }
 
+    /// The holder-issuer's own status claim, as the one-bit list each of the
+    /// credential's entries names: the revocation entry's bit is `revoked`,
+    /// the suspension entry's bit is a suspension still in force at `now`.
     fn status_list_bits(&self, list_id: &str) -> StoreLookup<Vec<u8>> {
         let Some(state) = &self.share.issuer_state else {
             return StoreLookup::Unavailable;
         };
-        let Some(status) = &self.share.credential.credential_status else {
+        let Some(status) = self
+            .share
+            .credential
+            .status_entries()
+            .iter()
+            .find(|s| s.status_list_credential == list_id)
+        else {
             return StoreLookup::Missing;
         };
-        if status.status_list_credential != list_id {
-            return StoreLookup::Missing;
-        }
         let Ok(index) = status.status_list_index.parse::<usize>() else {
             return StoreLookup::Missing;
         };
         if index >= 8 * 1024 * 1024 {
             return StoreLookup::Missing;
         }
+        let set = match status.status_purpose.as_str() {
+            crate::vc::STATUS_PURPOSE_REVOCATION => state.revoked,
+            crate::vc::STATUS_PURPOSE_SUSPENSION => {
+                state.suspended
+                    && state
+                        .suspended_until
+                        .as_deref()
+                        .is_none_or(|until| until > self.now)
+            }
+            _ => false,
+        };
         let mut bits = vec![0; index / 8 + 1];
-        if state.revoked {
+        if set {
             crate::vc::status::set_bit(&mut bits, index, true).ok();
         }
         StoreLookup::Found(bits)
-    }
-
-    fn suspension(&self, _: &str) -> StoreLookup<(bool, Option<String>)> {
-        match &self.share.issuer_state {
-            Some(state) => StoreLookup::Found((state.suspended, state.suspended_until.clone())),
-            None => StoreLookup::Unavailable,
-        }
     }
 
     fn is_superseded(&self, _: &str) -> StoreLookup<bool> {

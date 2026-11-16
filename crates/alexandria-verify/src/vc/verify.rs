@@ -9,7 +9,8 @@
 //! 3. Verify the Ed25519 `proofValue` over that hash data.
 //! 4. Check subject binding (subject.id is a well-formed DID).
 //! 5. Check expiration against `verification_time`.
-//! 6. Resolve referenced status and local lifecycle state.
+//! 6. Resolve each referenced status list (revocation and suspension) and
+//!    local supersession state.
 //! 7. Check a caller-observed integrity anchor against the recomputed hash.
 //! 8. Check device attestation evidence against the caller's trust inputs
 //!    (`crate::attestation`); invalid evidence rejects.
@@ -109,56 +110,52 @@ pub fn verify_credential_with_attestation(
         }
     }
 
-    // -- revocation via credential_status -----------------------------------
-    // §11.2: a status-bearing credential is conclusive only when the supplied
-    // store can read the referenced bit. Missing/unavailable evidence is a
-    // pending result, while malformed or out-of-range indices are invalid.
-    if let Some(status) = &credential.credential_status {
-        match status.status_list_index.parse::<usize>() {
+    // -- status entries: revocation and suspension (§11.2, §11.3) ----------
+    // A status-bearing credential is conclusive only when the supplied store
+    // can read each referenced bit. Missing/unavailable evidence is a pending
+    // result, while malformed or out-of-range indices are invalid. Each
+    // purpose reads its own list, so a revocation bit never reads as a
+    // suspension or the reverse. Entries of other purposes are not ours to
+    // interpret and are skipped.
+    for status in credential.status_entries() {
+        let (flag, missing, unavailable) = match status.status_purpose.as_str() {
+            super::STATUS_PURPOSE_REVOCATION => (
+                &mut result.revoked,
+                VerificationPendingReason::StatusListMissing,
+                VerificationPendingReason::StatusListUnavailable,
+            ),
+            super::STATUS_PURPOSE_SUSPENSION => (
+                &mut result.suspended,
+                VerificationPendingReason::SuspensionListMissing,
+                VerificationPendingReason::SuspensionListUnavailable,
+            ),
+            _ => continue,
+        };
+        let pending = match status.status_list_index.parse::<usize>() {
             Ok(idx) => match db.status_list_bits(&status.status_list_credential) {
+                // Bitstring Status List: most significant bit first.
                 StoreLookup::Found(bits) => {
-                    // Bitstring Status List: most significant bit first.
                     match super::status::get_bit(&bits, idx) {
-                        Some(set) => result.revoked = set,
+                        Some(set) => *flag |= set,
                         None => result.status_valid = false,
                     }
+                    None
                 }
-                StoreLookup::Missing => result
-                    .pending_reasons
-                    .push(VerificationPendingReason::StatusListMissing),
-                StoreLookup::Unavailable => result
-                    .pending_reasons
-                    .push(VerificationPendingReason::StatusListUnavailable),
+                StoreLookup::Missing => Some(missing),
+                StoreLookup::Unavailable => Some(unavailable),
             },
-            Err(_) => result.status_valid = false,
+            Err(_) => {
+                result.status_valid = false;
+                None
+            }
+        };
+        if let Some(reason) = pending.filter(|r| !result.pending_reasons.contains(r)) {
+            result.pending_reasons.push(reason);
         }
     }
 
-    // -- suspension (§11.3) -------------------------------------------------
-    // Local `credentials.suspended` flag set by `suspend_credential_impl`.
-    // `suspended_until` NULL means "suspended indefinitely"; a set value
-    // is compared against `verification_time` for automatic reinstatement.
-    // Skipped when the envelope has no `id` — local revocation/suspension
-    // state is keyed by id and an id-less VC can't have any.
+    // Supersession is local state keyed by id; an id-less VC can't have any.
     if !credential_id.is_empty() {
-        match db.suspension(&credential_id) {
-            StoreLookup::Found((sus_flag, sus_until)) => {
-                if sus_flag {
-                    let active = match sus_until {
-                        Some(until) => until.as_str() > verification_time,
-                        None => true,
-                    };
-                    if active {
-                        result.suspended = true;
-                    }
-                }
-            }
-            StoreLookup::Missing => {}
-            StoreLookup::Unavailable => result
-                .pending_reasons
-                .push(VerificationPendingReason::SuspensionStateUnavailable),
-        }
-
         // -- supersession (§11.4) -------------------------------------------
         // A newer credential in the local store pointing to this one via
         // `supersedes` marks it as superseded. The match is on id only — the
@@ -440,10 +437,6 @@ mod tests {
             StoreLookup::Unavailable
         }
 
-        fn suspension(&self, _credential_id: &str) -> StoreLookup<(bool, Option<String>)> {
-            StoreLookup::Unavailable
-        }
-
         fn is_superseded(&self, _credential_id: &str) -> StoreLookup<bool> {
             StoreLookup::Unavailable
         }
@@ -557,13 +550,16 @@ mod tests {
         let issuer = derive_did_key(&key);
         let subject = derive_did_key(&test_signing_key("subject"));
         let mut credential = skeleton(issuer.clone(), subject, None);
-        credential.credential_status = Some(CredentialStatus {
-            id: "urn:uuid:entry".into(),
-            type_: "BitstringStatusListEntry".into(),
-            status_purpose: "revocation".into(),
-            status_list_index: "0".into(),
-            status_list_credential: "urn:uuid:missing-list".into(),
-        });
+        credential.credential_status = Some(
+            CredentialStatus {
+                id: "urn:uuid:entry".into(),
+                type_: "BitstringStatusListEntry".into(),
+                status_purpose: "revocation".into(),
+                status_list_index: "0".into(),
+                status_list_credential: "urn:uuid:missing-list".into(),
+            }
+            .into(),
+        );
         let credential = sign_credential(UnsignedCredential { credential }, &key, &issuer).unwrap();
 
         let result = verify_credential(&NullStore, &credential, NOW, &Default::default());
@@ -593,9 +589,6 @@ mod tests {
         assert!(!result
             .pending_reasons
             .contains(&VerificationPendingReason::IssuerKeyUnavailable));
-        assert!(result
-            .pending_reasons
-            .contains(&VerificationPendingReason::SuspensionStateUnavailable));
         assert!(result
             .pending_reasons
             .contains(&VerificationPendingReason::SupersessionStateUnavailable));
@@ -630,19 +623,148 @@ mod tests {
             .contains(&VerificationPendingReason::IssuerKeyMissing));
     }
 
+    const REVOCATION_LIST: &str = "urn:uuid:revocation-list";
+    const SUSPENSION_LIST: &str = "urn:uuid:suspension-list";
+
+    fn entry(purpose: &str, list: &str, index: usize) -> CredentialStatus {
+        CredentialStatus {
+            id: format!("{list}#{index}"),
+            type_: "BitstringStatusListEntry".into(),
+            status_purpose: purpose.into(),
+            status_list_index: index.to_string(),
+            status_list_credential: list.into(),
+        }
+    }
+
+    /// A credential carrying both entries at index 3, as issuance writes it.
+    fn with_both_entries() -> VerifiableCredential {
+        let key = test_signing_key("issuer");
+        let issuer = derive_did_key(&key);
+        let subject = derive_did_key(&test_signing_key("subject"));
+        let mut credential = skeleton(issuer.clone(), subject, None);
+        credential.credential_status = Some(
+            vec![
+                entry("revocation", REVOCATION_LIST, 3),
+                entry("suspension", SUSPENSION_LIST, 3),
+            ]
+            .into(),
+        );
+        sign_credential(UnsignedCredential { credential }, &key, &issuer).unwrap()
+    }
+
+    /// Lists by id; a list not named is missing.
+    struct Lists(Vec<(&'static str, Vec<u8>)>);
+
+    impl VerificationStore for Lists {
+        fn registered_key(&self, _did: &Did) -> StoreLookup<KeyRegistryEntry> {
+            StoreLookup::Missing
+        }
+        fn status_list_bits(&self, list_id: &str) -> StoreLookup<Vec<u8>> {
+            self.0
+                .iter()
+                .find(|(id, _)| *id == list_id)
+                .map(|(_, bits)| StoreLookup::Found(bits.clone()))
+                .unwrap_or(StoreLookup::Missing)
+        }
+        fn is_superseded(&self, _credential_id: &str) -> StoreLookup<bool> {
+            StoreLookup::Found(false)
+        }
+    }
+
+    /// Bit 3 of a one-byte list, most significant first: mask 0x10.
+    const BIT_3: u8 = 0x10;
+
+    #[test]
+    fn suspension_is_read_from_the_suspension_list_bit() {
+        let credential = with_both_entries();
+        let suspended = Lists(vec![
+            (REVOCATION_LIST, vec![0]),
+            (SUSPENSION_LIST, vec![BIT_3]),
+        ]);
+        let result = verify_credential(&suspended, &credential, NOW, &Default::default());
+        assert!(result.valid_signature);
+        assert!(result.suspended);
+        assert!(!result.revoked, "suspension is not revocation");
+        assert!(result.pending_reasons.is_empty());
+        assert_eq!(result.acceptance_decision, AcceptanceDecision::Reject);
+
+        let cleared = Lists(vec![(REVOCATION_LIST, vec![0]), (SUSPENSION_LIST, vec![0])]);
+        let result = verify_credential(&cleared, &credential, NOW, &Default::default());
+        assert!(!result.suspended);
+        assert_eq!(result.acceptance_decision, AcceptanceDecision::Accept);
+    }
+
+    #[test]
+    fn a_revocation_bit_never_reads_as_suspension_nor_the_reverse() {
+        let credential = with_both_entries();
+        let revoked = Lists(vec![
+            (REVOCATION_LIST, vec![BIT_3]),
+            (SUSPENSION_LIST, vec![0]),
+        ]);
+        let result = verify_credential(&revoked, &credential, NOW, &Default::default());
+        assert!(result.revoked);
+        assert!(!result.suspended);
+    }
+
+    #[test]
+    fn a_missing_or_unreachable_suspension_list_is_pending_with_its_own_reason() {
+        let credential = with_both_entries();
+        let missing = Lists(vec![(REVOCATION_LIST, vec![0])]);
+        let result = verify_credential(&missing, &credential, NOW, &Default::default());
+        assert!(!result.suspended);
+        assert_eq!(result.acceptance_decision, AcceptanceDecision::Pending);
+        assert_eq!(
+            result.pending_reasons,
+            vec![VerificationPendingReason::SuspensionListMissing]
+        );
+
+        let result = verify_credential(&UnavailableStore, &credential, NOW, &Default::default());
+        assert!(result
+            .pending_reasons
+            .contains(&VerificationPendingReason::SuspensionListUnavailable));
+        assert!(result
+            .pending_reasons
+            .contains(&VerificationPendingReason::StatusListUnavailable));
+    }
+
+    #[test]
+    fn a_single_object_credential_status_round_trips_and_verifies() {
+        // VC 2.0 allows `credentialStatus` to be one object or a list. A
+        // credential signed with the single-object form must keep it on
+        // re-serialisation, or its signature would no longer cover it.
+        let key = test_signing_key("issuer");
+        let issuer = derive_did_key(&key);
+        let subject = derive_did_key(&test_signing_key("subject"));
+        let mut credential = skeleton(issuer.clone(), subject, None);
+        credential.credential_status = Some(entry("revocation", REVOCATION_LIST, 3).into());
+        let signed = sign_credential(UnsignedCredential { credential }, &key, &issuer).unwrap();
+        let json = serde_json::to_value(&signed).unwrap();
+        assert!(json["credentialStatus"].is_object(), "{json}");
+        let parsed: VerifiableCredential = serde_json::from_value(json).unwrap();
+        let store = Lists(vec![(REVOCATION_LIST, vec![0])]);
+        let result = verify_credential(&store, &parsed, NOW, &Default::default());
+        assert_eq!(result.acceptance_decision, AcceptanceDecision::Accept);
+
+        let json = serde_json::to_value(with_both_entries()).unwrap();
+        assert!(json["credentialStatus"].is_array(), "{json}");
+    }
+
     #[test]
     fn malformed_or_out_of_range_status_reference_is_rejected() {
         let key = test_signing_key("issuer");
         let issuer = derive_did_key(&key);
         let subject = derive_did_key(&test_signing_key("subject"));
         let mut credential = skeleton(issuer.clone(), subject, None);
-        credential.credential_status = Some(CredentialStatus {
-            id: "urn:uuid:entry".into(),
-            type_: "BitstringStatusListEntry".into(),
-            status_purpose: "revocation".into(),
-            status_list_index: "9".into(),
-            status_list_credential: "urn:uuid:short-list".into(),
-        });
+        credential.credential_status = Some(
+            CredentialStatus {
+                id: "urn:uuid:entry".into(),
+                type_: "BitstringStatusListEntry".into(),
+                status_purpose: "revocation".into(),
+                status_list_index: "9".into(),
+                status_list_credential: "urn:uuid:short-list".into(),
+            }
+            .into(),
+        );
         let credential = sign_credential(UnsignedCredential { credential }, &key, &issuer).unwrap();
         struct ShortList;
         impl VerificationStore for ShortList {
@@ -651,9 +773,6 @@ mod tests {
             }
             fn status_list_bits(&self, _list_id: &str) -> StoreLookup<Vec<u8>> {
                 StoreLookup::Found(vec![0])
-            }
-            fn suspension(&self, _credential_id: &str) -> StoreLookup<(bool, Option<String>)> {
-                StoreLookup::Missing
             }
             fn is_superseded(&self, _credential_id: &str) -> StoreLookup<bool> {
                 StoreLookup::Found(false)
@@ -767,9 +886,6 @@ mod tests {
             StoreLookup::Missing
         }
         fn status_list_bits(&self, _list_id: &str) -> StoreLookup<Vec<u8>> {
-            StoreLookup::Missing
-        }
-        fn suspension(&self, _credential_id: &str) -> StoreLookup<(bool, Option<String>)> {
             StoreLookup::Missing
         }
         fn is_superseded(&self, _credential_id: &str) -> StoreLookup<bool> {

@@ -113,7 +113,7 @@ test('fetches a URL-named status list, checks it is the issuer’s, and reads th
   // be rejected, and a fresh fixture is built from the bundle shape instead.
   const bundle = JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures/status-list-bundle.json'), 'utf8'))
   const { credentials, keyRegistry, statusLists: offline } = loadInput(bundle)
-  const listVc = bundle.status_list_credentials[0]
+  const listVcs = bundle.status_list_credentials
   const pathOf = (id) => new URL(id).pathname
   const served = new Map()
   const server = createServer((request, response) => {
@@ -127,22 +127,28 @@ test('fetches a URL-named status list, checks it is the issuer’s, and reads th
   try {
     // Rewrite both the credential reference and the list id to the live origin.
     const rebase = (s) => s.replace(bundle.origin, origin)
-    const live = structuredClone(listVc); live.id = rebase(live.id); live.credentialSubject.id = rebase(live.credentialSubject.id)
-    served.set(pathOf(live.id), live)
-    const vcs = credentials.map((vc) => { const c = structuredClone(vc); c.credentialStatus.statusListCredential = rebase(c.credentialStatus.statusListCredential); c.credentialStatus.id = rebase(c.credentialStatus.id); return c })
-    assert.equal(Object.keys(offline).length, 1, 'the export carries the list offline too; the fetch path below ignores it')
+    for (const listVc of listVcs) {
+      const live = structuredClone(listVc); live.id = rebase(live.id); live.credentialSubject.id = rebase(live.credentialSubject.id)
+      served.set(pathOf(live.id), live)
+    }
+    const vcs = credentials.map((vc) => {
+      const c = structuredClone(vc)
+      for (const entry of c.credentialStatus) { entry.statusListCredential = rebase(entry.statusListCredential); entry.id = rebase(entry.id) }
+      return c
+    })
+    assert.equal(Object.keys(offline).length, 2, 'the export carries both lists offline too; the fetch path below ignores them')
 
-    // The rebased list document was signed under its original id, so its
-    // signature no longer verifies: a list that is not what the issuer signed
-    // is left out and the credential stays pending.
+    // The rebased list documents were signed under their original ids, so
+    // their signatures no longer verify: a list that is not what the issuer
+    // signed is left out and the credential stays pending.
     const lists = {}
     let problems = await resolveStatusLists(vcs, lists)
-    assert.equal(problems.length, 1)
-    assert.match(problems[0], /signature/)
+    assert.equal(problems.length, 2)
+    for (const problem of problems) assert.match(problem, /signature/)
     assert.match(verifyCredential(vcs[0], { keyRegistry, statusLists: lists }).status, /^pending/)
 
-    // Serve the document exactly as signed, at its own URL.
-    served.set(pathOf(listVc.id), listVc)
+    // Serve the documents exactly as signed, at their own URLs.
+    for (const listVc of listVcs) served.set(pathOf(listVc.id), listVc)
     const fetchAt = (url, init) => fetch(rebase(url), init)
     const lists2 = {}
     problems = await resolveStatusLists(credentials, lists2, { fetch: fetchAt })
@@ -152,8 +158,8 @@ test('fetches a URL-named status list, checks it is the issuer’s, and reads th
     assert.deepEqual(results.map((r) => r.decision), ['reject', 'accept'])
 
     // A list signed by somebody else for the same URL is refused.
-    const forged = structuredClone(listVc); forged.issuer = credentials[1].credentialSubject.id
-    served.set(pathOf(listVc.id), forged)
+    const forged = structuredClone(listVcs[0]); forged.issuer = credentials[1].credentialSubject.id
+    served.set(pathOf(listVcs[0].id), forged)
     const lists3 = {}
     problems = await resolveStatusLists(credentials, lists3, { fetch: fetchAt })
     assert.equal(problems.length, 1)
@@ -175,7 +181,7 @@ test('a bundle copy of a URL-named list is refreshed from the host, unless the h
   // carries the list as it was; the host has the revocation. The fetched list
   // must win, and the report must say which one was read.
   const bundle = JSON.parse(readFileSync(join(import.meta.dirname, 'fixtures/status-list-bundle.json'), 'utf8'))
-  const listVc = bundle.status_list_credentials[0]
+  const [listVc, suspensionVc] = bundle.status_list_credentials
   const listId = listVc.id
   const [revokedVc, activeVc] = bundle.credentials
   const served = new Map()
@@ -192,11 +198,15 @@ test('a bundle copy of a URL-named list is refreshed from the host, unless the h
   const beforeRevocation = () => {
     const stale = structuredClone(bundle)
     stale.status_list_credentials = []
-    stale.status_lists = [{ list_id: listId, issuer_did: listVc.issuer, version: 1, status_purpose: 'revocation', bits_b64: Buffer.alloc(16).toString('base64'), bit_length: 128 }]
+    stale.status_lists = [
+      { list_id: listId, issuer_did: listVc.issuer, version: 1, status_purpose: 'revocation', bits_b64: Buffer.alloc(16).toString('base64'), bit_length: 128 },
+      { list_id: suspensionVc.id, issuer_did: listVc.issuer, version: 1, status_purpose: 'suspension', bits_b64: Buffer.alloc(16).toString('base64'), bit_length: 128 },
+    ]
     return loadInput(stale)
   }
+  const serveBoth = () => { for (const vc of [listVc, suspensionVc]) served.set(new URL(vc.id).pathname, vc) }
   try {
-    served.set(new URL(listId).pathname, listVc)
+    serveBoth()
 
     // Offline, the export's copy is all there is, and the report says so.
     let { statusLists, listInfo, keyRegistry } = beforeRevocation()
@@ -216,14 +226,14 @@ test('a bundle copy of a URL-named list is refreshed from the host, unless the h
     served.clear()
     ;({ statusLists, listInfo, keyRegistry } = beforeRevocation())
     problems = await resolveStatusLists(bundle.credentials, statusLists, { fetch: fetchAt, keyRegistry, listInfo })
-    assert.equal(problems.length, 1)
+    assert.equal(problems.length, 2)
     assert.match(problems[0], /404; using the exported copy/)
     assert.equal(verifyCredential(revokedVc, { keyRegistry, statusLists }).status, 'active')
     assert.equal(listInfo[listId].source, 'bundle')
 
     // A host serving a list older than the copy must not undo what the copy
     // shows: the copy here is dated after the served list and is kept.
-    served.set(new URL(listId).pathname, listVc)
+    serveBoth()
     ;({ statusLists, listInfo, keyRegistry } = beforeRevocation())
     listInfo[listId] = { source: 'bundle', validFrom: '2999-01-01T00:00:00Z' }
     problems = await resolveStatusLists(bundle.credentials, statusLists, { fetch: fetchAt, keyRegistry, listInfo })

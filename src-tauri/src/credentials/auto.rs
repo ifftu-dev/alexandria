@@ -25,7 +25,7 @@ use crate::credentials::{status_list, CredentialError, Issuer};
 use crate::domain::vc::context::W3C_VC_V2;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
 use crate::domain::vc::{
-    integrity_hash_of, Claim, CredentialStatus, CustomClaim, Proof, VerifiableCredential, Witness,
+    integrity_hash_of, Claim, CustomClaim, Proof, VerifiableCredential, Witness,
 };
 
 /// Outcome of a single auto-issuance pipeline run.
@@ -122,7 +122,9 @@ fn issue_new_observation(
     obs: &CompletionObservation,
 ) -> Result<String, CredentialError> {
     let learner_did = learner.did();
-    let list_id = status_list::ensure(conn, learner_did)?;
+    // The revocation list's slot is the credential's slot in both lists.
+    let lists = status_list::ensure(conn, learner_did)?;
+    let list_id = lists.revocation.clone();
     let index = status_list::allocate(conn, &list_id)?;
 
     let now = crate::clock::now_rfc3339();
@@ -172,13 +174,7 @@ fn issue_new_observation(
         valid_from: now.clone(),
         valid_until: None,
         credential_subject: claim.into_subject(learner_did.clone()),
-        credential_status: Some(CredentialStatus {
-            id: format!("{list_id}#{index}"),
-            type_: status_list::ENTRY_TYPE.into(),
-            status_purpose: "revocation".into(),
-            status_list_index: index.to_string(),
-            status_list_credential: list_id.clone(),
-        }),
+        credential_status: Some(lists.entries(index)),
         terms_of_use: None,
         witness: Some(witness),
         integrity: None,

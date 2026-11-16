@@ -2,11 +2,11 @@
 //! and deltas for revocation/suspension.
 //!
 //! A status list decides whether every credential an issuer ever signed reads
-//! as revoked, so the only thing that may write one is the issuer. The payload
-//! carries a detached Ed25519 signature over the canonical
-//! `(list_id, issuer, version, bits)` tuple, verified against the key the
-//! issuer's `did:key` self-resolves to. An unsigned or wrongly-signed document
-//! is dropped.
+//! as revoked (or suspended, by the list's purpose), so the only thing that may
+//! write one is the issuer. The payload carries a detached Ed25519 signature
+//! over the canonical `(list_id, issuer, purpose, version, bits)` tuple,
+//! verified against the key the issuer's `did:key` self-resolves to. An
+//! unsigned or wrongly-signed document is dropped.
 //!
 //! This used to check only that the issuer DID appeared in the local
 //! `key_registry` — which any peer could arrange through `TOPIC_VC_DID` — and
@@ -40,10 +40,15 @@ pub enum StatusIngest {
 struct StatusMessage {
     issuer: String,
     /// Optional explicit list_id — if absent we derive
-    /// `urn:alexandria:status-list:<issuer>:1` so this matches the
-    /// list_id format `credentials::status_list` uses for local issuance.
+    /// `urn:alexandria:status-list:<issuer>:<n>`, `n` the purpose's list
+    /// number, so this matches the list_id format `credentials::status_list`
+    /// uses for local issuance.
     #[serde(default)]
     list_id: Option<String>,
+    /// `revocation` (the default) or `suspension`. Signed, so a list cannot
+    /// be relabelled in flight.
+    #[serde(default = "revocation")]
+    status_purpose: String,
     version: i64,
     /// Base64-encoded bitmap.
     bits: String,
@@ -53,18 +58,45 @@ struct StatusMessage {
     proof: Option<String>,
 }
 
+fn revocation() -> String {
+    crate::domain::vc::STATUS_PURPOSE_REVOCATION.to_string()
+}
+
+/// The list id a document without one names: the issuer's URN-named list of
+/// `status_purpose`, as `credentials::status_list` would name it.
+fn default_list_id(issuer: &str, status_purpose: &str) -> String {
+    use crate::credentials::status_list::{REVOCATION_LIST_NUMBER, SUSPENSION_LIST_NUMBER};
+    let number = if status_purpose == crate::domain::vc::STATUS_PURPOSE_SUSPENSION {
+        SUSPENSION_LIST_NUMBER
+    } else {
+        REVOCATION_LIST_NUMBER
+    };
+    format!("urn:alexandria:status-list:{issuer}:{number}")
+}
+
 /// The bytes an issuer signs to authorise a status list.
 ///
 /// Every field that changes the meaning of the document is covered:
 /// `list_id` so a signature cannot be moved onto a different list, `issuer` so
-/// it cannot be re-attributed, `version` so the rollback guard cannot be
-/// weaponised by replaying an old signature at a new number, and `bits` so the
-/// revocation state itself is authenticated. Length-prefixed so no two
+/// it cannot be re-attributed, `status_purpose` so a suspension list cannot be
+/// passed off as a revocation list or the reverse, `version` so the rollback
+/// guard cannot be weaponised by replaying an old signature at a new number,
+/// and `bits` so the status itself is authenticated. Length-prefixed so no two
 /// different tuples can produce the same byte string.
-pub fn canonical_status_bytes(list_id: &str, issuer: &str, version: i64, bits: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(list_id.len() + issuer.len() + bits.len() + 32);
-    out.extend_from_slice(b"alexandria-status-list-v1");
-    for field in [list_id.as_bytes(), issuer.as_bytes()] {
+pub fn canonical_status_bytes(
+    list_id: &str,
+    issuer: &str,
+    status_purpose: &str,
+    version: i64,
+    bits: &[u8],
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(list_id.len() + issuer.len() + bits.len() + 48);
+    out.extend_from_slice(b"alexandria-status-list-v2");
+    for field in [
+        list_id.as_bytes(),
+        issuer.as_bytes(),
+        status_purpose.as_bytes(),
+    ] {
         out.extend_from_slice(&(field.len() as u64).to_be_bytes());
         out.extend_from_slice(field);
     }
@@ -87,6 +119,7 @@ pub fn canonical_status_bytes(list_id: &str, issuer: &str, version: i64, bits: &
 pub fn build_signed_status_document(
     signing_key: &ed25519_dalek::SigningKey,
     list_id: Option<&str>,
+    status_purpose: &str,
     version: i64,
     bits: &[u8],
 ) -> Result<Vec<u8>, String> {
@@ -101,16 +134,18 @@ pub fn build_signed_status_document(
     let issuer = alexandria_verify::did::derive_did_key(signing_key);
     let list_id = list_id
         .map(str::to_string)
-        .unwrap_or_else(|| format!("urn:alexandria:status-list:{}:1", issuer.as_str()));
+        .unwrap_or_else(|| default_list_id(issuer.as_str(), status_purpose));
     let sig = signing_key.sign(&canonical_status_bytes(
         &list_id,
         issuer.as_str(),
+        status_purpose,
         version,
         bits,
     ));
     serde_json::to_vec(&serde_json::json!({
         "issuer": issuer.as_str(),
         "list_id": list_id,
+        "status_purpose": status_purpose,
         "version": version,
         "bits": base64::engine::general_purpose::STANDARD.encode(bits),
         "proof": base64::engine::general_purpose::STANDARD.encode(sig.to_bytes()),
@@ -153,10 +188,21 @@ pub fn handle_status_message(
         return Ok(StatusIngest::IgnoredUnknownIssuer);
     }
 
+    if ![
+        crate::domain::vc::STATUS_PURPOSE_REVOCATION,
+        crate::domain::vc::STATUS_PURPOSE_SUSPENSION,
+    ]
+    .contains(&parsed.status_purpose.as_str())
+    {
+        return Err(format!(
+            "status purpose {:?} is not one a status list may carry",
+            parsed.status_purpose
+        ));
+    }
     let list_id = parsed
         .list_id
         .clone()
-        .unwrap_or_else(|| format!("urn:alexandria:status-list:{}:1", parsed.issuer));
+        .unwrap_or_else(|| default_list_id(&parsed.issuer, &parsed.status_purpose));
 
     // Refuse older versions to prevent rollback (§11.2). Checked before the
     // signature so a replayed old document costs nothing.
@@ -194,7 +240,13 @@ pub fn handle_status_message(
         );
         return Ok(StatusIngest::IgnoredBadSignature);
     };
-    let signed = canonical_status_bytes(&list_id, &parsed.issuer, parsed.version, &bits);
+    let signed = canonical_status_bytes(
+        &list_id,
+        &parsed.issuer,
+        &parsed.status_purpose,
+        parsed.version,
+        &bits,
+    );
     if !issuer_signed(&parsed.issuer, proof, &signed) {
         log::warn!(
             "vc-status: status list for {} does not verify against that DID — dropping",
@@ -209,9 +261,10 @@ pub fn handle_status_message(
         .execute(
             "INSERT INTO credential_status_lists \
              (list_id, issuer_did, version, status_purpose, bits, bit_length, updated_at) \
-             VALUES (?1, ?2, ?3, 'revocation', ?4, ?5, ?6) \
+             VALUES (?1, ?2, ?3, ?7, ?4, ?5, ?6) \
              ON CONFLICT(list_id) DO UPDATE SET \
                 version = excluded.version, \
+                status_purpose = excluded.status_purpose, \
                 bits = excluded.bits, \
                 bit_length = excluded.bit_length, \
                 updated_at = excluded.updated_at",
@@ -221,7 +274,8 @@ pub fn handle_status_message(
                 parsed.version,
                 bits,
                 bit_length,
-                &now
+                &now,
+                &parsed.status_purpose
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -260,6 +314,7 @@ mod tests {
         let sig = sk.sign(&canonical_status_bytes(
             &list_id,
             issuer.as_str(),
+            "revocation",
             version,
             &bits,
         ));
@@ -321,7 +376,13 @@ mod tests {
         let issuer = alexandria_verify::did::derive_did_key(&real);
         let list_id = format!("urn:alexandria:status-list:{}:1", issuer.as_str());
         let bits = vec![0xffu8; 4];
-        let sig = impostor.sign(&canonical_status_bytes(&list_id, issuer.as_str(), 1, &bits));
+        let sig = impostor.sign(&canonical_status_bytes(
+            &list_id,
+            issuer.as_str(),
+            "revocation",
+            1,
+            &bits,
+        ));
         let payload = serde_json::to_vec(&serde_json::json!({
             "issuer": issuer.as_str(),
             "version": 1,
@@ -404,11 +465,46 @@ mod tests {
     fn the_builder_produces_a_document_the_handler_accepts() {
         let sk = issuer_key();
         let db = db_with_issuer(&sk);
-        let doc = build_signed_status_document(&sk, None, 1, &[0x01, 0x02, 0x03]).unwrap();
+        let doc =
+            build_signed_status_document(&sk, None, "revocation", 1, &[0x01, 0x02, 0x03]).unwrap();
         assert_eq!(
             handle_status_message(&db, &stub_msg(&doc)).unwrap(),
             StatusIngest::Applied
         );
+    }
+
+    /// A gossiped suspension list lands as one: its own list id and purpose,
+    /// so a receiver reads the suspension bit from it, and relabelling it in
+    /// flight breaks the signature.
+    #[test]
+    fn a_suspension_list_arrives_as_a_suspension_list() {
+        let sk = issuer_key();
+        let db = db_with_issuer(&sk);
+        let issuer = alexandria_verify::did::derive_did_key(&sk);
+        let doc = build_signed_status_document(&sk, None, "suspension", 1, &[0x80]).unwrap();
+
+        let mut relabelled: serde_json::Value = serde_json::from_slice(&doc).unwrap();
+        relabelled["status_purpose"] = serde_json::json!("revocation");
+        let relabelled = serde_json::to_vec(&relabelled).unwrap();
+        assert_eq!(
+            handle_status_message(&db, &stub_msg(&relabelled)).unwrap(),
+            StatusIngest::IgnoredBadSignature
+        );
+
+        assert_eq!(
+            handle_status_message(&db, &stub_msg(&doc)).unwrap(),
+            StatusIngest::Applied
+        );
+        let (purpose, bits): (String, Vec<u8>) = db
+            .conn()
+            .query_row(
+                "SELECT status_purpose, bits FROM credential_status_lists WHERE list_id = ?1",
+                rusqlite::params![format!("urn:alexandria:status-list:{}:2", issuer.as_str())],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(purpose, "suspension");
+        assert_eq!(bits, vec![0x80]);
     }
 
     #[test]

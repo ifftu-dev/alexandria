@@ -105,31 +105,33 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
   // 6: expiry, subject binding, and conclusive status evidence
   const expired = !!(vc.validUntil && vc.validUntil < v.verificationTime)
   const subjectBound = String(vc.credentialSubject.id).startsWith('did:')
-  let revoked = false
+  // `credentialStatus` is one entry or a list of them. Each entry's purpose
+  // says which fact its list's bit decides; other purposes are skipped.
+  const facts = { revocation: false, suspension: false }
+  const missingReason = { revocation: 'status_list_missing', suspension: 'suspension_list_missing' }
   let statusValid = true
-  if (vc.credentialStatus) {
-    const listId = vc.credentialStatus.statusListCredential
+  const entries = vc.credentialStatus == null ? []
+    : Array.isArray(vc.credentialStatus) ? vc.credentialStatus : [vc.credentialStatus]
+  for (const entry of entries) {
+    const purpose = entry.statusPurpose
+    if (!Object.hasOwn(facts, purpose)) continue
+    const indexText = entry.statusListIndex
+    if (!/^\d+$/.test(indexText)) { statusValid = false; continue }
+    const listId = entry.statusListCredential
     const lists = v.store?.statusLists ?? {}
     if (Object.hasOwn(lists, listId)) {
-      const indexText = vc.credentialStatus.statusListIndex
       const bits = Buffer.from(lists[listId], 'hex')
-      if (!/^\d+$/.test(indexText)) {
-        statusValid = false
-      } else {
-        const n = Number(indexText)
-        const byte = Math.floor(n / 8)
-        // Bitstring Status List: bit 0 of each byte is the most significant.
-        if (!Number.isSafeInteger(n) || byte >= bits.length) statusValid = false
-        else revoked = ((bits[byte] >> (7 - (n % 8))) & 1) === 1
-      }
-    } else {
-      pendingReasons.push('status_list_missing')
+      const n = Number(indexText)
+      const byte = Math.floor(n / 8)
+      // Bitstring Status List: bit 0 of each byte is the most significant.
+      if (!Number.isSafeInteger(n) || byte >= bits.length) statusValid = false
+      else if (((bits[byte] >> (7 - (n % 8))) & 1) === 1) facts[purpose] = true
+    } else if (!pendingReasons.includes(missingReason[purpose])) {
+      pendingReasons.push(missingReason[purpose])
     }
   }
-
-  const suspendedUntil = v.store?.suspended?.[vc.id]
-  const suspended = Object.hasOwn(v.store?.suspended ?? {}, vc.id) &&
-    (suspendedUntil === null || suspendedUntil > v.verificationTime)
+  const revoked = facts.revocation
+  const suspended = facts.suspension
   const superseded = (v.store?.superseded ?? []).includes(vc.id)
   const integrityAnchored = false
 

@@ -1352,7 +1352,8 @@ impl App {
                 .signer
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-            app_lib::credentials::lifecycle::reinstate(&signer.conn, signer.issuer.did(), id)
+            let now = vault::now_rfc3339();
+            app_lib::credentials::lifecycle::reinstate(&signer.conn, signer.issuer.did(), id, &now)
                 .map_err(|e| anyhow::anyhow!(e))?;
             Ok(format!("Reinstated {id}"))
         })();

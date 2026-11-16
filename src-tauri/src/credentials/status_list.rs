@@ -1,10 +1,13 @@
-//! Revocation status lists: one Bitstring Status List per issuer per host.
+//! Status lists: per issuer per host, one Bitstring Status List for
+//! revocation and one for suspension.
 //!
-//! Issuing a credential takes the next slot in its issuer's list
-//! ([`ensure`], [`allocate`]); revoking it sets that slot's bit. A list
-//! named at a host is a URL the host serves, so a verifier can fetch it,
-//! and every version the host has not acknowledged is [`pending`] until
-//! [`push`] delivers it signed and [`mark_published`] records that.
+//! Issuing a credential takes the next slot, the same index in both of its
+//! issuer's lists ([`ensure`], [`allocate`]); revoking it sets that slot's
+//! bit in the revocation list, suspending it sets the bit in the suspension
+//! list and reinstating clears it. A list named at a host is a URL the host
+//! serves, so a verifier can fetch it, and every version the host has not
+//! acknowledged is [`pending`] until [`push`] delivers it signed and
+//! [`mark_published`] records that.
 
 use rusqlite::{params, Connection};
 
@@ -12,7 +15,10 @@ use super::{CredentialError, Issuer};
 use crate::clock::now_rfc3339;
 use crate::crypto::did::Did;
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
-use crate::domain::vc::VerifiableCredential;
+use crate::domain::vc::{
+    CredentialStatus, CredentialStatuses, VerifiableCredential, STATUS_PURPOSE_REVOCATION,
+    STATUS_PURPOSE_SUSPENSION,
+};
 use crate::profile::scope::ProfileLease;
 
 /// Slots per list: a 16 KiB bitmap.
@@ -46,33 +52,76 @@ pub fn host(conn: &Connection) -> Option<String> {
     })
 }
 
-/// The list a credential issued now by `issuer_did` belongs to.
-///
-/// One list per issuer per host. With a host configured the id is the URL the
-/// host serves it at (§14.11.2), so any verifier can fetch it; without one it
-/// is a URN and the list travels only in exported bundles. A host that
-/// changes later starts a fresh list — ids already written into credentials
-/// are never rewritten.
-pub fn ensure(conn: &Connection, issuer_did: &Did) -> Result<String, CredentialError> {
-    let list_id = match host(conn) {
-        Some(origin) => alexandria_verify::vc::status::list_url(&origin, issuer_did, 1),
-        None => format!("urn:alexandria:status-list:{}:1", issuer_did.as_str()),
-    };
-    let exists: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM credential_status_lists WHERE list_id = ?1",
-        params![list_id],
-        |r| r.get(0),
-    )?;
-    if exists == 0 {
-        let bits = vec![0u8; BITS / 8];
-        conn.execute(
-            "INSERT INTO credential_status_lists \
-             (list_id, issuer_did, version, status_purpose, bits, bit_length) \
-             VALUES (?1, ?2, 1, 'revocation', ?3, ?4)",
-            params![list_id, issuer_did.as_str(), bits, BITS as i64],
-        )?;
+/// The list number of an issuer's revocation list at a host.
+pub const REVOCATION_LIST_NUMBER: u32 = 1;
+/// The list number of the issuer's suspension list at the same host.
+pub const SUSPENSION_LIST_NUMBER: u32 = 2;
+
+/// The pair of lists a credential issued now takes a slot in: one per
+/// status purpose, the same index in each.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusLists {
+    pub revocation: String,
+    pub suspension: String,
+}
+
+impl StatusLists {
+    /// The credential's `credentialStatus`: a revocation entry and a
+    /// suspension entry, each a `BitstringStatusListEntry` at `index`.
+    pub fn entries(&self, index: i64) -> CredentialStatuses {
+        let entry = |purpose: &str, list_id: &str| CredentialStatus {
+            id: format!("{list_id}#{index}"),
+            type_: ENTRY_TYPE.into(),
+            status_purpose: purpose.into(),
+            status_list_index: index.to_string(),
+            status_list_credential: list_id.to_string(),
+        };
+        vec![
+            entry(STATUS_PURPOSE_REVOCATION, &self.revocation),
+            entry(STATUS_PURPOSE_SUSPENSION, &self.suspension),
+        ]
+        .into()
     }
-    Ok(list_id)
+}
+
+/// The lists a credential issued now by `issuer_did` belongs to.
+///
+/// One revocation list and one suspension list per issuer per host, list
+/// numbers [`REVOCATION_LIST_NUMBER`] and [`SUSPENSION_LIST_NUMBER`]. With a
+/// host configured each id is the URL the host serves it at (§14.11.2), so
+/// any verifier can fetch it; without one it is a URN and the list travels
+/// only in exported bundles. A host that changes later starts a fresh pair —
+/// ids already written into credentials are never rewritten.
+pub fn ensure(conn: &Connection, issuer_did: &Did) -> Result<StatusLists, CredentialError> {
+    let origin = host(conn);
+    let ensure_one = |number: u32, purpose: &str| -> Result<String, CredentialError> {
+        let list_id = match &origin {
+            Some(origin) => alexandria_verify::vc::status::list_url(origin, issuer_did, number),
+            None => format!(
+                "urn:alexandria:status-list:{}:{number}",
+                issuer_did.as_str()
+            ),
+        };
+        let exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM credential_status_lists WHERE list_id = ?1",
+            params![list_id],
+            |r| r.get(0),
+        )?;
+        if exists == 0 {
+            let bits = vec![0u8; BITS / 8];
+            conn.execute(
+                "INSERT INTO credential_status_lists \
+                 (list_id, issuer_did, version, status_purpose, bits, bit_length) \
+                 VALUES (?1, ?2, 1, ?3, ?4, ?5)",
+                params![list_id, issuer_did.as_str(), purpose, bits, BITS as i64],
+            )?;
+        }
+        Ok(list_id)
+    };
+    Ok(StatusLists {
+        revocation: ensure_one(REVOCATION_LIST_NUMBER, STATUS_PURPOSE_REVOCATION)?,
+        suspension: ensure_one(SUSPENSION_LIST_NUMBER, STATUS_PURPOSE_SUSPENSION)?,
+    })
 }
 
 pub fn allocate(conn: &Connection, list_id: &str) -> Result<i64, CredentialError> {
@@ -226,21 +275,27 @@ async fn push_one(
 
 /// Publish every pending list `issuer` owns, and record what landed.
 ///
-/// Called after anything that creates or changes a list, and on demand. A
-/// failed push is reported and left pending; the local revocation already
-/// happened and stands regardless.
+/// Called after anything that creates or changes a list, and on demand.
+/// Timed suspensions whose time has come are lifted first, so the lists
+/// pushed carry the cleared bits. A failed push is reported and left
+/// pending; the local change already happened and stands regardless.
 pub(crate) async fn publish(
     executor: &DatabaseExecutor,
     lease: &ProfileLease,
     issuer: &Issuer,
 ) -> Result<StatusPublishReport, CredentialError> {
     let issuer_for_read = issuer.did().clone();
+    let now = now_rfc3339();
     let pending = executor
         .execute(
             DatabaseWorkload::Instructor,
             lease.clone(),
             "credentials.status_lists.pending",
-            move |db| pending(db.conn(), &issuer_for_read).map_err(|e| e.to_string()),
+            move |db| {
+                super::lifecycle::lift_expired_suspensions(db.conn(), &issuer_for_read, &now)
+                    .and_then(|_| pending(db.conn(), &issuer_for_read))
+                    .map_err(|e| e.to_string())
+            },
         )
         .await
         .map_err(CredentialError::Profile)?;
@@ -413,20 +468,30 @@ mod tests {
         assert_eq!(host(db.conn()).as_deref(), Some("http://127.0.0.1:8080"));
 
         let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
-        let reference = vc.credential_status.expect("status attached");
         let expected = status::list_url("http://127.0.0.1:8080", &issuer, 1);
+        let suspension = status::list_url("http://127.0.0.1:8080", &issuer, 2);
+        let reference = vc.status_entry("revocation").expect("revocation entry");
         assert_eq!(reference.status_list_credential, expected);
         assert_eq!(reference.id, format!("{expected}#0"));
+        let reference = vc.status_entry("suspension").expect("suspension entry");
+        assert_eq!(reference.status_list_credential, suspension);
+        assert_eq!(reference.id, format!("{suspension}#0"));
 
-        // A new list is version 1 and nothing has served it: pending.
+        // New lists are version 1 and nothing has served them: pending, each
+        // signed with its own purpose.
         let pending = super::pending(db.conn(), &issuer).unwrap();
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].version, 1);
-        let signed = super::signed(&pending[0], &key, NOW).unwrap();
-        let bits = status::verify_fetched_list(&signed, &expected, &issuer, "revocation").unwrap();
-        assert_eq!(status::get_bit(&bits, 0), Some(false));
+        assert_eq!(pending.len(), 2);
+        for (list, (id, purpose)) in pending
+            .iter()
+            .zip([(&expected, "revocation"), (&suspension, "suspension")])
+        {
+            assert_eq!((&list.list_id, list.version), (id, 1));
+            let signed = super::signed(list, &key, NOW).unwrap();
+            let bits = status::verify_fetched_list(&signed, id, &issuer, purpose).unwrap();
+            assert_eq!(status::get_bit(&bits, 0), Some(false));
+        }
 
-        mark_published(db.conn(), &[(expected.clone(), 1)]).unwrap();
+        mark_published(db.conn(), &[(expected.clone(), 1), (suspension, 1)]).unwrap();
         assert!(super::pending(db.conn(), &issuer).unwrap().is_empty());
 
         // Revocation bumps the version past what the host has.

@@ -231,6 +231,10 @@ fn input_fingerprint(
                             c.status_list_id, \
                             json_extract(c.signed_vc_json, '$.credentialStatus.statusListCredential'), \
                             json_extract(c.signed_vc_json, '$.credentialStatus.id') \
+                        ) OR l.list_id IN ( \
+                            SELECT json_extract(e.value, '$.statusListCredential') \
+                            FROM json_each(c.signed_vc_json, '$.credentialStatus') e \
+                            WHERE e.type = 'object' \
                         ) \
                         ORDER BY l.list_id)), \
                     (SELECT group_concat(entry, ';') FROM ( \
@@ -550,5 +554,58 @@ mod tests {
             )
             .unwrap();
         assert_ne!(first_version, fingerprint());
+    }
+
+    #[test]
+    fn fingerprint_tracks_the_suspension_list_a_credential_names() {
+        // Suspension is a bit in the issuer's suspension list, so a new
+        // version of that list must invalidate derived scores the way a
+        // revocation list change does.
+        let db = test_db();
+        let instructor = key(3);
+        let learner = derive_did_key(&key(1));
+        let entry = |purpose: &str, list: &str| CredentialStatus {
+            id: format!("{list}#0"),
+            type_: "BitstringStatusListEntry".into(),
+            status_purpose: purpose.into(),
+            status_list_index: "0".into(),
+            status_list_credential: list.into(),
+        };
+        crate::db::opinion_eligibility::test_support::store_scored_credential(
+            &db,
+            "listed",
+            &instructor,
+            &learner,
+            "skill",
+            3,
+            0.9,
+            Some(
+                vec![
+                    entry("revocation", "urn:status:1"),
+                    entry("suspension", "urn:status:2"),
+                ]
+                .into(),
+            ),
+        );
+        for list in ["urn:status:1", "urn:status:2"] {
+            db.conn()
+                .execute(
+                    "INSERT INTO credential_status_lists (list_id, issuer_did, version, bits, bit_length) \
+                     VALUES (?1, ?2, 1, X'00', 8)",
+                    params![list, derive_did_key(&instructor).as_str()],
+                )
+                .unwrap();
+        }
+        let fingerprint =
+            || scoring_input_fingerprint(db.conn(), learner.as_str(), "skill", VERSION).unwrap();
+        let before = fingerprint();
+        db.conn()
+            .execute(
+                "UPDATE credential_status_lists SET version = 2, bits = X'80' \
+                 WHERE list_id = 'urn:status:2'",
+                [],
+            )
+            .unwrap();
+        assert_ne!(before, fingerprint());
     }
 }

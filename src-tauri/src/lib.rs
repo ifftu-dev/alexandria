@@ -1135,15 +1135,28 @@ pub fn run() {
                                 // issuance site creates or changes a list; the
                                 // commands that do so publish inline, and this
                                 // pass catches the rest and any push that failed.
+                                // Timed suspensions that have come due are
+                                // lifted first, so the lists pushed carry it.
                                 if let Some(issuer) = issuer.as_ref() {
                                     let pending = {
                                         let guard = db_for_queue.lock();
                                         match guard.as_deref() {
-                                            Ok(Some(db)) => credentials::status_list::pending(
-                                                db.conn(),
-                                                issuer.did(),
-                                            )
-                                            .unwrap_or_default(),
+                                            Ok(Some(db)) => {
+                                                if let Err(e) =
+                                                    credentials::lifecycle::lift_expired_suspensions(
+                                                        db.conn(),
+                                                        issuer.did(),
+                                                        &crate::clock::now_rfc3339(),
+                                                    )
+                                                {
+                                                    log::warn!("timed suspensions: {e}");
+                                                }
+                                                credentials::status_list::pending(
+                                                    db.conn(),
+                                                    issuer.did(),
+                                                )
+                                                .unwrap_or_default()
+                                            }
                                             _ => Vec::new(),
                                         }
                                     };

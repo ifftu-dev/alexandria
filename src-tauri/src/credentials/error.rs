@@ -193,6 +193,9 @@ pub enum CredentialError {
     /// Revocation needs the credential and the status list it sits in.
     #[error("credential {0} not found or has no status list")]
     NotRevocable(String),
+    /// Suspension needs the credential to name a suspension list.
+    #[error("credential {0} has no suspension status list")]
+    NotSuspendable(String),
 
     // --- Failures beneath ------------------------------------------------
     #[error(transparent)]

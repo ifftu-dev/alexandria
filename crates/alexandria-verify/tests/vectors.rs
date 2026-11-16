@@ -61,7 +61,8 @@ struct Vector {
     expect: VerificationResult,
 }
 
-/// The four lookups verification performs, as data.
+/// The lookups verification performs, as data. Suspension has no lookup of
+/// its own: it is a bit in a status list of purpose `suspension`.
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct VectorStore {
@@ -72,8 +73,6 @@ struct VectorStore {
     /// Status-list bits, hex-encoded, keyed by list id.
     #[serde(default)]
     status_lists: BTreeMap<String, String>,
-    #[serde(default)]
-    suspended: BTreeMap<String, Option<String>>,
     #[serde(default)]
     superseded: Vec<String>,
 }
@@ -106,14 +105,6 @@ impl VerificationStore for VectorStore {
         self.status_lists
             .get(list_id)
             .and_then(|h| hex::decode(h).ok())
-            .map(StoreLookup::Found)
-            .unwrap_or(StoreLookup::Missing)
-    }
-
-    fn suspension(&self, credential_id: &str) -> StoreLookup<(bool, Option<String>)> {
-        self.suspended
-            .get(credential_id)
-            .map(|until| (true, until.clone()))
             .map(StoreLookup::Found)
             .unwrap_or(StoreLookup::Missing)
     }
@@ -216,13 +207,16 @@ fn build_all() -> Vec<(&'static str, Vector)> {
     // --- incomplete verification evidence -------------------------------
     {
         let mut vc = skeleton(issuer.clone(), subject.clone(), None);
-        vc.credential_status = Some(CredentialStatus {
-            id: "urn:uuid:missing-status-entry".into(),
-            type_: "BitstringStatusListEntry".into(),
-            status_purpose: "revocation".into(),
-            status_list_credential: "urn:uuid:missing-status-list".into(),
-            status_list_index: "0".into(),
-        });
+        vc.credential_status = Some(
+            CredentialStatus {
+                id: "urn:uuid:missing-status-entry".into(),
+                type_: "BitstringStatusListEntry".into(),
+                status_purpose: "revocation".into(),
+                status_list_credential: "urn:uuid:missing-status-list".into(),
+                status_list_index: "0".into(),
+            }
+            .into(),
+        );
         let vc = signed(vc, &issuer_key, &issuer);
         let expect = verify_credential(&VectorStore::default(), &vc, NOW, &default_policy);
         out.push((
@@ -387,13 +381,16 @@ fn build_all() -> Vec<(&'static str, Vector)> {
     // --- revocation -------------------------------------------------------
     {
         let mut vc = skeleton(issuer.clone(), subject.clone(), None);
-        vc.credential_status = Some(CredentialStatus {
-            id: "urn:uuid:status-entry".into(),
-            type_: "BitstringStatusListEntry".into(),
-            status_purpose: "revocation".into(),
-            status_list_credential: "urn:uuid:status-list-1".into(),
-            status_list_index: "9".into(),
-        });
+        vc.credential_status = Some(
+            CredentialStatus {
+                id: "urn:uuid:status-entry".into(),
+                type_: "BitstringStatusListEntry".into(),
+                status_purpose: "revocation".into(),
+                status_list_credential: "urn:uuid:status-list-1".into(),
+                status_list_index: "9".into(),
+            }
+            .into(),
+        );
         let vc = signed(vc, &issuer_key, &issuer);
         // Bit 9 set: byte 1, second-most-significant bit (0x40). Bitstring
         // Status List counts from the left, which is what trips verifiers
@@ -415,6 +412,103 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                               1, second from the left (mask 0x40): Bitstring Status List counts \
                               from the most significant bit, which is the detail an independent \
                               implementation most often gets backwards."
+                    .into(),
+                verification_time: NOW.into(),
+                policy: default_policy.clone(),
+                credential: vc,
+                store,
+                expect,
+            },
+        ));
+    }
+
+    // --- suspension -------------------------------------------------------
+    // Two entries, as credentials are issued today: revocation and
+    // suspension, each into a list of that purpose, at the same index.
+    let both_entries = |index: &str| -> VerifiableCredential {
+        let mut vc = skeleton(issuer.clone(), subject.clone(), None);
+        vc.credential_status = Some(
+            vec![
+                CredentialStatus {
+                    id: format!("urn:uuid:revocation-list#{index}"),
+                    type_: "BitstringStatusListEntry".into(),
+                    status_purpose: "revocation".into(),
+                    status_list_credential: "urn:uuid:revocation-list".into(),
+                    status_list_index: index.into(),
+                },
+                CredentialStatus {
+                    id: format!("urn:uuid:suspension-list#{index}"),
+                    type_: "BitstringStatusListEntry".into(),
+                    status_purpose: "suspension".into(),
+                    status_list_credential: "urn:uuid:suspension-list".into(),
+                    status_list_index: index.into(),
+                },
+            ]
+            .into(),
+        );
+        signed(vc, &issuer_key, &issuer)
+    };
+    let lists = |suspension: Option<&[u8]>| VectorStore {
+        status_lists: [
+            ("urn:uuid:revocation-list", Some(&[0u8; 8][..])),
+            ("urn:uuid:suspension-list", suspension),
+        ]
+        .into_iter()
+        .filter_map(|(id, bits)| Some((id.to_string(), hex::encode(bits?))))
+        .collect(),
+        ..Default::default()
+    };
+    {
+        let vc = both_entries("4");
+        // Bit 4: byte 0, mask 0x08.
+        let store = lists(Some(&[0x08, 0, 0, 0, 0, 0, 0, 0]));
+        let expect = verify_credential(&store, &vc, NOW, &default_policy);
+        out.push((
+            "16-suspended",
+            Vector {
+                description: "The credential carries a revocation entry and a suspension entry. The \
+                              suspension list has its index bit set (index 4: byte 0, mask 0x08), so \
+                              the credential is suspended and rejected while the revocation list, \
+                              clear at that index, leaves it unrevoked. Suspension is read from the \
+                              published list alone."
+                    .into(),
+                verification_time: NOW.into(),
+                policy: default_policy.clone(),
+                credential: vc,
+                store,
+                expect,
+            },
+        ));
+    }
+    {
+        let vc = both_entries("4");
+        let store = lists(Some(&[0u8; 8]));
+        let expect = verify_credential(&store, &vc, NOW, &default_policy);
+        out.push((
+            "17-reinstated",
+            Vector {
+                description: "The same credential after its issuer reinstated it: the suspension \
+                              list's bit is clear again, and the credential is accepted. Suspension \
+                              is reversible; revocation is not."
+                    .into(),
+                verification_time: NOW.into(),
+                policy: default_policy.clone(),
+                credential: vc,
+                store,
+                expect,
+            },
+        ));
+    }
+    {
+        let vc = both_entries("4");
+        let store = lists(None);
+        let expect = verify_credential(&store, &vc, NOW, &default_policy);
+        out.push((
+            "18-suspension-list-missing",
+            Vector {
+                description: "The revocation list is supplied but the suspension list is not. The \
+                              decision is pending with reason suspension_list_missing: an \
+                              unreachable list is never read as \"not suspended\"."
                     .into(),
                 verification_time: NOW.into(),
                 policy: default_policy.clone(),
@@ -676,6 +770,12 @@ fn vectors_match_this_implementation() {
         );
         assert_eq!(got.expired, v.expect.expired, "{}: expired", path.display());
         assert_eq!(
+            got.suspended,
+            v.expect.suspended,
+            "{}: suspended",
+            path.display()
+        );
+        assert_eq!(
             got.subject_bound,
             v.expect.subject_bound,
             "{}: subjectBound",
@@ -774,6 +874,10 @@ fn the_suite_covers_distinct_failure_modes() {
             "no vector names a version-{version} coverage statement"
         );
     }
+    assert!(
+        all.iter().any(|(_, v)| v.expect.suspended),
+        "no vector is suspended"
+    );
 }
 
 /// A `did:key` resolves to the key in its identifier whatever registry state
@@ -792,6 +896,41 @@ fn a_did_key_issuer_resolves_its_embedded_key_despite_registry_state() {
     assert!(v.expect.issuer_resolved);
     assert!(v.expect.valid_signature);
     assert_eq!(v.expect.acceptance_decision, AcceptanceDecision::Accept);
+}
+
+/// The suspension vectors state facts an implementer can check by hand:
+/// the bit, not any issuer record, decides suspension, and a list that is not
+/// supplied leaves the decision pending.
+#[test]
+fn suspension_vectors_assert_what_the_list_says() {
+    use alexandria_verify::vc::VerificationPendingReason;
+    let all = build_all();
+    let get = |name: &str| &all.iter().find(|(n, _)| *n == name).expect(name).1;
+
+    let suspended = get("16-suspended");
+    assert!(suspended.expect.suspended && !suspended.expect.revoked);
+    assert_eq!(
+        suspended.expect.acceptance_decision,
+        AcceptanceDecision::Reject
+    );
+
+    let reinstated = get("17-reinstated");
+    assert!(!reinstated.expect.suspended);
+    assert_eq!(
+        reinstated.expect.acceptance_decision,
+        AcceptanceDecision::Accept
+    );
+
+    let missing = get("18-suspension-list-missing");
+    assert!(!missing.expect.suspended);
+    assert_eq!(
+        missing.expect.acceptance_decision,
+        AcceptanceDecision::Pending
+    );
+    assert_eq!(
+        missing.expect.pending_reasons,
+        vec![VerificationPendingReason::SuspensionListMissing]
+    );
 }
 
 fn regenerate() {

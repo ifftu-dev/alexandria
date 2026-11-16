@@ -313,7 +313,7 @@ pub(crate) mod test_support {
             skill_id,
             level,
             0.9,
-            status,
+            status.map(Into::into),
         );
     }
 
@@ -326,7 +326,7 @@ pub(crate) mod test_support {
         skill_id: &str,
         level: u8,
         score: f64,
-        status: Option<CredentialStatus>,
+        status: Option<crate::domain::vc::CredentialStatuses>,
     ) {
         let issuer_did = derive_did_key(issuer);
         let class = if issuer_did == *subject {

@@ -56,7 +56,6 @@
   "store": {
     "keyRegistry": [],
     "statusLists": {},
-    "suspended": {},
     "superseded": []
   },
   "expect": {
@@ -72,6 +71,10 @@
     "superseded": false,
     "verificationTime": "2026-06-01T00:00:00Z",
     "pendingReasons": [],
+    "attestation": {
+      "outcome": "not_supplied"
+    },
+    "verifiedAssuranceLevel": "local",
     "acceptanceDecision": "accept"
   }
 }

@@ -1,6 +1,7 @@
 //! Changing a credential's standing after it was issued: revoking it
-//! (permanent, through its status list), suspending it and reinstating it.
-//! Only the credential's issuer may do any of them.
+//! (permanent, through its revocation list), suspending it and reinstating
+//! it (reversible, through its suspension list). Only the credential's
+//! issuer may do any of them.
 
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -84,9 +85,11 @@ pub fn revoke(
     Ok(())
 }
 
-/// §11.3 suspension. Set `suspended = 1` plus optional
-/// `suspended_until` for automatic reinstatement at verify time.
-/// Idempotent — re-suspending updates the until window.
+/// §11.3 suspension: set the credential's bit in its suspension list, so
+/// every verifier that reads the list sees it, and record the issuer's own
+/// bookkeeping (`suspended_until`, reason) beside it. Idempotent —
+/// re-suspending updates the until window; a timed suspension is lifted by
+/// [`lift_expired_suspensions`] when its time comes.
 pub fn suspend(
     conn: &Connection,
     issuer_did: &Did,
@@ -95,7 +98,24 @@ pub fn suspend(
     reason: Option<&str>,
     now: &str,
 ) -> Result<(), CredentialError> {
-    let updated = conn
+    let transaction = conn.unchecked_transaction()?;
+    let (list_id, index) = suspension_slot(
+        &transaction,
+        issuer_did,
+        credential_id,
+        StatusChange::Suspend,
+    )?
+    .ok_or_else(|| CredentialError::NotSuspendable(credential_id.to_string()))?;
+    write_bit(
+        &transaction,
+        issuer_did,
+        &list_id,
+        index,
+        true,
+        StatusChange::Suspend,
+        now,
+    )?;
+    transaction
         .execute(
             "UPDATE credentials \
              SET suspended = 1, suspended_at = ?2, \
@@ -104,19 +124,38 @@ pub fn suspend(
             params![credential_id, now, until, reason, issuer_did.as_str()],
         )
         .map_err(CredentialError::step("suspend credential"))?;
-    if updated == 0 {
-        return Err(unchanged(conn, credential_id, StatusChange::Suspend));
-    }
+    transaction.commit()?;
     Ok(())
 }
 
-/// §11.3 reinstatement — clear the suspension flag. Idempotent.
+/// §11.3 reinstatement: clear the credential's bit in its suspension list
+/// and the issuer's bookkeeping. Idempotent. A credential that names no
+/// suspension list has no published suspension to clear, so only the
+/// bookkeeping changes.
 pub fn reinstate(
     conn: &Connection,
     issuer_did: &Did,
     credential_id: &str,
+    now: &str,
 ) -> Result<(), CredentialError> {
-    let updated = conn
+    let transaction = conn.unchecked_transaction()?;
+    if let Some((list_id, index)) = suspension_slot(
+        &transaction,
+        issuer_did,
+        credential_id,
+        StatusChange::Reinstate,
+    )? {
+        write_bit(
+            &transaction,
+            issuer_did,
+            &list_id,
+            index,
+            false,
+            StatusChange::Reinstate,
+            now,
+        )?;
+    }
+    transaction
         .execute(
             "UPDATE credentials \
          SET suspended = 0, suspended_at = NULL, \
@@ -125,25 +164,98 @@ pub fn reinstate(
             params![credential_id, issuer_did.as_str()],
         )
         .map_err(CredentialError::step("reinstate credential"))?;
-    if updated == 0 {
-        return Err(unchanged(conn, credential_id, StatusChange::Reinstate));
-    }
+    transaction.commit()?;
     Ok(())
 }
 
-/// Why an issuer-bound update touched no row: the credential is not here,
-/// or it is another issuer's.
-fn unchanged(conn: &Connection, credential_id: &str, change: StatusChange) -> CredentialError {
-    let exists = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM credentials WHERE id = ?1)",
-        params![credential_id],
-        |row| row.get::<_, bool>(0),
-    );
-    match exists {
-        Ok(true) => CredentialError::NotIssuer(change),
-        Ok(false) => CredentialError::NotFound(credential_id.to_string()),
-        Err(error) => CredentialError::Database(error),
+/// Reinstate every credential `issuer_did` suspended until a time at or
+/// before `now`. Run on the status-list publication path, so the next
+/// publication carries the cleared bits. Returns how many were lifted.
+pub fn lift_expired_suspensions(
+    conn: &Connection,
+    issuer_did: &Did,
+    now: &str,
+) -> Result<usize, CredentialError> {
+    let due: Vec<String> = {
+        let mut statement = conn.prepare(
+            "SELECT id FROM credentials \
+             WHERE issuer_did = ?1 AND suspended = 1 \
+               AND suspended_until IS NOT NULL AND suspended_until <= ?2 \
+             ORDER BY id",
+        )?;
+        let rows = statement.query_map(params![issuer_did.as_str(), now], |r| r.get(0))?;
+        rows.collect::<Result<_, _>>()?
+    };
+    for credential_id in &due {
+        reinstate(conn, issuer_did, credential_id, now)?;
     }
+    Ok(due.len())
+}
+
+/// The suspension list and index a credential `issuer_did` issued names in
+/// its signed `credentialStatus`, or `None` when it names none.
+fn suspension_slot(
+    conn: &Connection,
+    issuer_did: &Did,
+    credential_id: &str,
+    change: StatusChange,
+) -> Result<Option<(String, usize)>, CredentialError> {
+    let row: Option<(String, String)> = conn
+        .query_row(
+            "SELECT issuer_did, signed_vc_json FROM credentials WHERE id = ?1",
+            params![credential_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let (credential_issuer, signed_json) =
+        row.ok_or_else(|| CredentialError::NotFound(credential_id.to_string()))?;
+    if credential_issuer != issuer_did.as_str() {
+        return Err(CredentialError::NotIssuer(change));
+    }
+    let credential: crate::domain::vc::VerifiableCredential = serde_json::from_str(&signed_json)?;
+    let Some(entry) = credential.status_entry(crate::domain::vc::STATUS_PURPOSE_SUSPENSION) else {
+        return Ok(None);
+    };
+    let index = entry
+        .status_list_index
+        .parse::<usize>()
+        .map_err(|_| CredentialError::NotSuspendable(credential_id.to_string()))?;
+    Ok(Some((entry.status_list_credential.clone(), index)))
+}
+
+/// Set or clear one bit in a list `issuer_did` owns, bumping its version
+/// when the bit changes so the host learns of it.
+fn write_bit(
+    conn: &Connection,
+    issuer_did: &Did,
+    list_id: &str,
+    index: usize,
+    value: bool,
+    change: StatusChange,
+    now: &str,
+) -> Result<(), CredentialError> {
+    let mut bits: Vec<u8> = conn
+        .query_row(
+            "SELECT bits FROM credential_status_lists WHERE list_id = ?1 AND issuer_did = ?2",
+            params![list_id, issuer_did.as_str()],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(CredentialError::step("load status list"))?
+        .ok_or(CredentialError::NotIssuer(change))?;
+    if alexandria_verify::vc::status::get_bit(&bits, index) == Some(value) {
+        return Ok(());
+    }
+    alexandria_verify::vc::status::set_bit(&mut bits, index, value)
+        .map_err(CredentialError::StatusBit)?;
+    conn.execute(
+        "UPDATE credential_status_lists \
+         SET bits = ?2, version = version + 1, updated_at = ?3 \
+         WHERE list_id = ?1 AND issuer_did = ?4",
+        params![list_id, bits, now, issuer_did.as_str()],
+    )
+    .map_err(CredentialError::step("update status list"))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -286,7 +398,7 @@ mod tests {
             NOW,
         )
         .unwrap();
-        let reinstate_error = reinstate(db.conn(), &local_issuer, credential_id).unwrap_err();
+        let reinstate_error = reinstate(db.conn(), &local_issuer, credential_id, NOW).unwrap_err();
         assert!(
             matches!(
                 reinstate_error,
@@ -319,7 +431,7 @@ mod tests {
             CredentialError::NotFound(id) if id == missing
         ));
         assert!(matches!(
-            reinstate(db.conn(), &issuer, missing).unwrap_err(),
+            reinstate(db.conn(), &issuer, missing, NOW).unwrap_err(),
             CredentialError::NotFound(id) if id == missing
         ));
     }
@@ -352,33 +464,189 @@ mod tests {
         assert_eq!(mid.acceptance_decision, AcceptanceDecision::Reject);
 
         // Reinstate.
-        reinstate(db.conn(), &issuer, vc.id.as_deref().unwrap()).unwrap();
+        reinstate(db.conn(), &issuer, vc.id.as_deref().unwrap(), NOW).unwrap();
         let after = verify_credential_db(db.conn(), &vc, NOW, &VerificationPolicy::default());
         assert!(!after.suspended);
         assert_eq!(after.acceptance_decision, AcceptanceDecision::Accept);
     }
 
-    #[test]
-    fn suspension_with_until_in_past_is_no_longer_active() {
-        use crate::domain::vc::verify_credential_db;
-        use crate::domain::vc::VerificationPolicy;
+    /// Only what a status host would serve: each pending list signed by the
+    /// issuer and checked as a fetched document, keyed by its URL.
+    struct Served(Vec<(String, Vec<u8>)>);
 
+    impl crate::domain::vc::VerificationStore for Served {
+        fn registered_key(
+            &self,
+            _did: &Did,
+        ) -> crate::domain::vc::StoreLookup<alexandria_verify::did::KeyRegistryEntry> {
+            crate::domain::vc::StoreLookup::Missing
+        }
+        fn status_list_bits(&self, list_id: &str) -> crate::domain::vc::StoreLookup<Vec<u8>> {
+            self.0
+                .iter()
+                .find(|(id, _)| id == list_id)
+                .map(|(_, bits)| crate::domain::vc::StoreLookup::Found(bits.clone()))
+                .unwrap_or(crate::domain::vc::StoreLookup::Missing)
+        }
+        fn is_superseded(&self, _credential_id: &str) -> crate::domain::vc::StoreLookup<bool> {
+            crate::domain::vc::StoreLookup::Missing
+        }
+    }
+
+    /// Issue against a configured status host, as an issuer that publishes.
+    fn hosted() -> (
+        crate::db::Database,
+        credentials::Issuer,
+        Did,
+        crate::domain::vc::VerifiableCredential,
+    ) {
+        use crate::settings::{registry::keys, SettingsStore};
         let (db, key, issuer, subject) = setup();
+        SettingsStore::set(
+            db.conn(),
+            keys::CREDENTIAL_STATUS_HOST,
+            "https://cloud.example".to_string(),
+        )
+        .unwrap();
         let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
+        (db, key, issuer, vc)
+    }
 
-        // Suspended until a time before NOW — verifier sees the
-        // suspension as auto-expired and treats the credential as
-        // active again.
+    /// Publish what is pending and return what the host now serves: every
+    /// list this issuer has published so far, newest version winning.
+    fn publish(
+        db: &crate::db::Database,
+        key: &credentials::Issuer,
+        issuer: &Did,
+        served: &mut Served,
+    ) {
+        use crate::credentials::status_list;
+        for list in status_list::pending(db.conn(), issuer).unwrap() {
+            let document = status_list::signed(&list, key, NOW).unwrap();
+            let bits = alexandria_verify::vc::status::verify_fetched_list(
+                &document,
+                &list.list_id,
+                issuer,
+                &list.status_purpose,
+            )
+            .unwrap();
+            served.0.retain(|(id, _)| id != &list.list_id);
+            served.0.push((list.list_id.clone(), bits));
+            status_list::mark_published(db.conn(), &[(list.list_id, list.version)]).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_suspended_credential_verifies_as_suspended_from_its_published_list_alone() {
+        use crate::domain::vc::{verify, AcceptanceDecision, VerificationPolicy};
+        let (db, key, issuer, vc) = hosted();
+        let mut served = Served(Vec::new());
+        publish(&db, &key, &issuer, &mut served);
+        let policy = VerificationPolicy::default();
+        let before = verify::verify_credential(&served, &vc, NOW, &policy);
+        assert_eq!(before.acceptance_decision, AcceptanceDecision::Accept);
+
         suspend(
             db.conn(),
             &issuer,
             vc.id.as_deref().unwrap(),
-            Some("2026-01-01T00:00:00Z"),
+            None,
+            Some("under review"),
+            NOW,
+        )
+        .unwrap();
+        publish(&db, &key, &issuer, &mut served);
+        // No issuer database: only the lists as the host serves them.
+        let after = verify::verify_credential(&served, &vc, NOW, &policy);
+        assert!(after.suspended);
+        assert!(
+            !after.revoked,
+            "suspension never touches the revocation list"
+        );
+        assert_eq!(after.acceptance_decision, AcceptanceDecision::Reject);
+
+        reinstate(db.conn(), &issuer, vc.id.as_deref().unwrap(), NOW).unwrap();
+        publish(&db, &key, &issuer, &mut served);
+        let reinstated = verify::verify_credential(&served, &vc, NOW, &policy);
+        assert!(!reinstated.suspended);
+        assert_eq!(reinstated.acceptance_decision, AcceptanceDecision::Accept);
+    }
+
+    #[test]
+    fn a_timed_suspension_is_lifted_in_the_published_list_when_its_time_comes() {
+        use crate::domain::vc::{verify, VerificationPolicy};
+        let (db, key, issuer, vc) = hosted();
+        let id = vc.id.as_deref().unwrap();
+        let mut served = Served(Vec::new());
+        suspend(
+            db.conn(),
+            &issuer,
+            id,
+            Some("2026-05-01T00:00:00Z"),
             None,
             NOW,
         )
         .unwrap();
+
+        // Not yet due: nothing lifts, and the published bit stays set.
+        assert_eq!(
+            lift_expired_suspensions(db.conn(), &issuer, NOW).unwrap(),
+            0
+        );
+        publish(&db, &key, &issuer, &mut served);
+        let policy = VerificationPolicy::default();
+        assert!(verify::verify_credential(&served, &vc, NOW, &policy).suspended);
+
+        // Due: the issuer's node clears the bit, and the next publication
+        // carries the cleared list.
+        let later = "2026-05-02T00:00:00Z";
+        assert_eq!(
+            lift_expired_suspensions(db.conn(), &issuer, later).unwrap(),
+            1
+        );
+        publish(&db, &key, &issuer, &mut served);
+        assert!(!verify::verify_credential(&served, &vc, later, &policy).suspended);
+        let suspended: i64 = db
+            .conn()
+            .query_row(
+                "SELECT suspended FROM credentials WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(suspended, 0, "the issuer's bookkeeping follows the list");
+    }
+
+    #[test]
+    fn an_indefinite_suspension_is_never_lifted_by_time() {
+        let (db, _key, issuer, vc) = hosted();
+        suspend(
+            db.conn(),
+            &issuer,
+            vc.id.as_deref().unwrap(),
+            None,
+            None,
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(
+            lift_expired_suspensions(db.conn(), &issuer, "2099-01-01T00:00:00Z").unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn suspension_leaves_revocation_permanent_and_separate() {
+        use crate::domain::vc::verify_credential_db;
+        use crate::domain::vc::VerificationPolicy;
+        let (db, key, issuer, subject) = setup();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
+        let id = vc.id.as_deref().unwrap();
+        revoke(db.conn(), &issuer, id, "withdrawn", NOW).unwrap();
+        suspend(db.conn(), &issuer, id, None, None, NOW).unwrap();
+        reinstate(db.conn(), &issuer, id, NOW).unwrap();
         let result = verify_credential_db(db.conn(), &vc, NOW, &VerificationPolicy::default());
+        assert!(result.revoked, "reinstating never clears a revocation");
         assert!(!result.suspended);
     }
 

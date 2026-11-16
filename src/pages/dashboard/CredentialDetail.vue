@@ -140,7 +140,8 @@ function pendingReasonLabel(reason: VerificationPendingReason): string {
     case 'issuer_key_unavailable': return t('credentials.detail.trustPending.issuerKeyUnavailable')
     case 'status_list_missing': return t('credentials.detail.trustPending.statusListMissing')
     case 'status_list_unavailable': return t('credentials.detail.trustPending.statusListUnavailable')
-    case 'suspension_state_unavailable': return t('credentials.detail.trustPending.suspensionUnavailable')
+    case 'suspension_list_missing': return t('credentials.detail.trustPending.suspensionListMissing')
+    case 'suspension_list_unavailable': return t('credentials.detail.trustPending.suspensionListUnavailable')
     case 'supersession_state_unavailable': return t('credentials.detail.trustPending.supersessionUnavailable')
     case 'integrity_anchor_unavailable': return t('credentials.detail.trustPending.anchorUnavailable')
   }
