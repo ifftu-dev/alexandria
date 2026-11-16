@@ -91,11 +91,19 @@ pub(crate) fn attach(
         }
     };
     let trust = source.trust.inputs();
+    // Only the attestation entry is placed or removed: any other entry the
+    // credential carries stays.
+    let without_attestation = |vc: &mut VerifiableCredential| {
+        vc.evidence.retain(|entry| {
+            !entry.has_type(alexandria_verify::attestation::ATTESTATION_EVIDENCE_TYPE)
+        });
+    };
     let check = |vc: &mut VerifiableCredential, evidence: AttestationEvidence| {
-        vc.evidence = vec![evidence.into_entry()];
+        without_attestation(vc);
+        vc.evidence.push(evidence.into_entry());
         let outcome = verify_evidence(vc, &trust);
         if outcome.rejects() {
-            vc.evidence.clear();
+            without_attestation(vc);
         }
         outcome
     };

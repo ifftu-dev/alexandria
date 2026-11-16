@@ -4,7 +4,9 @@
 //! self-contained: an issuance policy, the integrity assertion a credential
 //! carries, the attestation outcome a verifier established for that
 //! credential, and the expected result: no refusal, or the first unmet
-//! requirement with its stable code. The app and the hosted service judge a
+//! requirement with its stable code. A vector with an `assessed` entry is a
+//! role credential issued on an assessed credential, judged from that entry
+//! (`evaluate_assessed`). The app and the hosted service judge a
 //! role's policy with this one rule, so both must reproduce every file.
 //!
 //! # Regenerating
@@ -21,9 +23,12 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use alexandria_verify::attestation::{AttestationOutcome, Platform};
+use alexandria_verify::assessed::{AssessedCredentialEvidence, ASSESSED_CREDENTIAL_EVIDENCE_TYPE};
+use alexandria_verify::attestation::{AttestationOutcome, Platform, VerifiedAssuranceLevel};
 use alexandria_verify::integrity::{TrustProfile, VerificationRung};
-use alexandria_verify::policy::{evaluate, IssuancePolicy, PolicyRefusal, ProbePolicy};
+use alexandria_verify::policy::{
+    evaluate, evaluate_assessed, IssuancePolicy, PolicyRefusal, ProbePolicy,
+};
 use alexandria_verify::vc::{IntegrityAssertion, ProbeSummary};
 
 // ---------------------------------------------------------------------------
@@ -37,6 +42,10 @@ struct Vector {
     policy: IssuancePolicy,
     integrity: IntegrityAssertion,
     attestation: AttestationOutcome,
+    /// For a role credential: the entry naming the credential it was issued
+    /// on, from which the rule takes its assurance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    assessed: Option<AssessedCredentialEvidence>,
     expect: Expect,
 }
 
@@ -112,6 +121,30 @@ fn build_all() -> Vec<(&'static str, Vector)> {
         policy,
         integrity,
         attestation,
+        assessed: None,
+        expect: Expect { refusal },
+    };
+    let role_on = |description: &str,
+                   assessed_outcome: AttestationOutcome,
+                   stated: VerifiedAssuranceLevel,
+                   refusal: Option<PolicyRefusal>| Vector {
+        description: description.into(),
+        policy: IssuancePolicy {
+            required_assurance_level: Some("device_attested".into()),
+            ..Default::default()
+        },
+        integrity: attested(),
+        // The role credential's own evidence: the issuer's device could
+        // only carry the session's.
+        attestation: session_bound,
+        assessed: Some(AssessedCredentialEvidence {
+            type_: ASSESSED_CREDENTIAL_EVIDENCE_TYPE.into(),
+            credential_id: Some("urn:uuid:11111111-1111-4111-8111-111111111111".into()),
+            integrity_hash: "4f0c3a1e9b2d7c6a5e8f1b0d2c4a6e8f0b1d3c5a7e9f2b4d6c8a0e1f3b5d7c9a"
+                .into(),
+            attestation: assessed_outcome,
+            verified_assurance_level: stated,
+        }),
         expect: Expect { refusal },
     };
     let every_bound = IssuancePolicy {
@@ -452,6 +485,43 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 }),
             ),
         ),
+        (
+            "20-role-on-credential-bound-assessment",
+            role_on(
+                "A role credential requiring `device_attested`, issued on an assessed \
+                 credential whose evidence verified credential-bound. Its own evidence is \
+                 only session-bound; the entry's verified level meets the requirement.",
+                credential_bound,
+                VerifiedAssuranceLevel::DeviceAttested,
+                None,
+            ),
+        ),
+        (
+            "21-role-on-session-bound-assessment",
+            role_on(
+                "A role credential requiring `device_attested`, issued on an assessed \
+                 credential whose evidence verified only session-bound.",
+                session_bound,
+                VerifiedAssuranceLevel::Local,
+                Some(PolicyRefusal::AssuranceBelowRequired {
+                    level: "local".into(),
+                    required: "device_attested".into(),
+                }),
+            ),
+        ),
+        (
+            "22-role-entry-level-not-evidenced",
+            role_on(
+                "The entry states `device_attested` beside an outcome that does not \
+                 verify it: judged `local`.",
+                none,
+                VerifiedAssuranceLevel::DeviceAttested,
+                Some(PolicyRefusal::AssuranceBelowRequired {
+                    level: "local".into(),
+                    required: "device_attested".into(),
+                }),
+            ),
+        ),
     ]
 }
 
@@ -491,8 +561,12 @@ fn policy_vectors_match_this_implementation() {
         return;
     }
     for (path, v) in load() {
+        let judged = match &v.assessed {
+            Some(assessed) => evaluate_assessed(&v.policy, &v.integrity, assessed),
+            None => evaluate(&v.policy, &v.integrity, &v.attestation),
+        };
         let got = Expect {
-            refusal: evaluate(&v.policy, &v.integrity, &v.attestation).err(),
+            refusal: judged.err(),
         };
         assert_eq!(got, v.expect, "{}", path.display());
     }

@@ -561,7 +561,7 @@ mod tests {
     /// A role credential as Cloud issues it: signed by the organisation's
     /// hosted key, an issuer object naming the organisation, the candidate's
     /// integrity assertion, revocation and suspension entries in lists hosted
-    /// at `origin`, and the Cloud-only `AssessedCredentialEvidence` entry
+    /// at `origin`, and the `AssessedCredentialEvidence` entry
     /// naming the candidate's own credential.
     fn organisation_credential(
         origin: &str,
@@ -653,7 +653,7 @@ mod tests {
             .unwrap()
     }
 
-    /// The organisation-issued credential, Cloud-only evidence entry and all,
+    /// The organisation-issued credential, assessed-credential entry and all,
     /// verifies and lands in the credential list, and its trust view says
     /// who issued it.
     #[tokio::test]

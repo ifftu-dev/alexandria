@@ -82,9 +82,19 @@ signature on a result, and a credential can be suspended as well as revoked.
   verified level, never the stated one; a degraded signal never carries a
   policy floor. `TrustProfile`, `ProfileSignal`, `VerificationRung`,
   `PolicyFloor` and `evaluate_floor` moved here from the studio crate.
+- **Assessed credential evidence** (`assessed`): `AssessedCredentialEvidence`
+  (`ASSESSED_CREDENTIAL_EVIDENCE_TYPE`), the `evidence` entry a role credential
+  carries naming the credential it was issued on by `credentialId` and
+  `integrityHash`, with the `attestation` outcome and
+  `verifiedAssuranceLevel` the issuer established for it (`new`, `find`,
+  `into_entry`, `assurance_level`). `policy::evaluate_assessed` judges a role
+  credential's policy from that entry: its verified level, counted only as
+  far as its own outcome verifies it, and its outcome for a floor's device
+  attestation.
 - **Vectors**: credential vectors 13–23 (coverage statements, suspension,
   issuer objects, organisation backing), and separate attestation and
-  issuance-policy vector sets with their own runners. The independent
+  issuance-policy vector sets with their own runners (policy vectors 20–22
+  judge role credentials from their assessed-credential entry). The independent
   JavaScript verifier runs from any directory.
 
 ### Fixed

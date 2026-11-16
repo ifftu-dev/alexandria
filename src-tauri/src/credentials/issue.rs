@@ -42,8 +42,19 @@ fn gate(
     let Some(assertion) = &vc.integrity else {
         return Err(CredentialError::PolicyWithoutSession);
     };
-    let attestation = alexandria_verify::attestation::verify_evidence(vc, trust);
-    alexandria_verify::policy::evaluate(policy, assertion, &attestation)?;
+    // A role credential issued on an assessed credential is judged by what
+    // was verified about that credential; any other by its own evidence.
+    match alexandria_verify::assessed::AssessedCredentialEvidence::find(vc)
+        .map_err(|e| CredentialError::Envelope(e.to_string()))?
+    {
+        Some(assessed) => {
+            alexandria_verify::policy::evaluate_assessed(policy, assertion, &assessed)?
+        }
+        None => {
+            let attestation = alexandria_verify::attestation::verify_evidence(vc, trust);
+            alexandria_verify::policy::evaluate(policy, assertion, &attestation)?;
+        }
+    }
     if let Some(floor) = policy.min_trust_profile {
         if !facts.floor_agrees(floor) {
             return Err(CredentialError::PolicyFloorDisagrees {
@@ -283,6 +294,21 @@ pub fn issue_with(
     now: &str,
     evidence: &EvidenceSource<'_>,
 ) -> Result<Issued, CredentialError> {
+    issue_with_evidence(conn, issuer, req, now, evidence, Vec::new())
+}
+
+/// [`issue_with`] for a credential that also carries `entries` in its
+/// `evidence` beside its attestation evidence, such as the
+/// `AssessedCredentialEvidence` naming the credential a role credential is
+/// issued on. The issuance policy sees them.
+pub fn issue_with_evidence(
+    conn: &Connection,
+    issuer: &Issuer,
+    req: &IssueCredentialRequest,
+    now: &str,
+    evidence: &EvidenceSource<'_>,
+    entries: Vec<alexandria_verify::vc::EvidenceEntry>,
+) -> Result<Issued, CredentialError> {
     let (issuer_key, issuer_did) = (issuer.key(), issuer.did());
     if !req.subject.as_str().starts_with("did:") {
         return Err(CredentialError::SubjectNotDid);
@@ -355,7 +381,7 @@ pub fn issue_with(
         witness: None,
         related_resource: coverage_related_resource(conn, integrity.as_ref())?,
         integrity,
-        evidence: Vec::new(),
+        evidence: entries,
         proof: Proof::unsigned(now.to_string()),
     };
     // Attestation evidence over the finished content, then the policy over

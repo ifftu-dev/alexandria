@@ -1,0 +1,61 @@
+{
+  "description": "A role credential requiring `device_attested`, issued on an assessed credential whose evidence verified only session-bound.",
+  "policy": {
+    "min_integrity": null,
+    "max_critical": null,
+    "max_warning": null,
+    "require_clean": false,
+    "required_assurance_level": "device_attested",
+    "probe_policy": null,
+    "min_trust_profile": null,
+    "min_verification_rung": null
+  },
+  "integrity": {
+    "sessionId": "isess_policy_vector",
+    "status": "completed",
+    "integrityScore": 0.91,
+    "criticalCount": 0,
+    "warningCount": 1,
+    "assuranceLevel": "device_attested",
+    "generatedAt": "2026-06-01T00:00:00Z",
+    "trustProfile": "attested",
+    "verificationRung": "probed",
+    "signalsRun": [
+      "core",
+      "device_attestation"
+    ],
+    "signalsNotRun": [
+      "camera"
+    ],
+    "probe": {
+      "outcome": "satisfied",
+      "policies": [
+        "reseed"
+      ],
+      "satisfied": 2,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "attestation": {
+    "outcome": "verified_session_bound",
+    "platform": "ios"
+  },
+  "assessed": {
+    "type": "AssessedCredentialEvidence",
+    "credentialId": "urn:uuid:11111111-1111-4111-8111-111111111111",
+    "integrityHash": "4f0c3a1e9b2d7c6a5e8f1b0d2c4a6e8f0b1d3c5a7e9f2b4d6c8a0e1f3b5d7c9a",
+    "attestation": {
+      "outcome": "verified_session_bound",
+      "platform": "ios"
+    },
+    "verifiedAssuranceLevel": "local"
+  },
+  "expect": {
+    "refusal": {
+      "code": "assurance_below_required",
+      "level": "local",
+      "required": "device_attested"
+    }
+  }
+}

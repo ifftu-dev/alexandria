@@ -18,12 +18,17 @@
 //! A signal the assertion lists as degraded never carries a floor: a
 //! verifier cannot see how much of the session it covered.
 //!
+//! A role credential issued on an assessed credential is judged by
+//! [`evaluate_assessed`]: its assurance comes from the
+//! [`AssessedCredentialEvidence`] entry naming that credential.
+//!
 //! What needs the session itself stays with the issuing app: that the floor
 //! judged at attempt start agrees with the one judged at issuance, and that
 //! the assertion was re-derived from the session.
 
 use serde::{Deserialize, Serialize};
 
+use crate::assessed::AssessedCredentialEvidence;
 use crate::attestation::{AttestationOutcome, VerifiedAssuranceLevel};
 use crate::integrity::{ProfileSignal, TrustProfile, VerificationRung};
 use crate::vc::IntegrityAssertion;
@@ -169,6 +174,41 @@ pub fn evaluate(
     integrity: &IntegrityAssertion,
     attestation: &AttestationOutcome,
 ) -> Result<(), PolicyRefusal> {
+    judge(
+        policy,
+        integrity,
+        attestation,
+        attestation.verified_assurance_level(),
+    )
+}
+
+/// [`evaluate`] for a role credential issued on an assessed credential: the
+/// verified assurance level and the device attestation a floor credits are
+/// the ones its [`AssessedCredentialEvidence`] entry records, the issuer's
+/// signed statement of what it verified about the assessed credential. The
+/// role credential's own attestation evidence (none, or session-bound: the
+/// issuer's device cannot bind the candidate's session) is not judged.
+/// The entry's level counts only as far as its own outcome verifies it
+/// ([`AssessedCredentialEvidence::assurance_level`]).
+pub fn evaluate_assessed(
+    policy: &IssuancePolicy,
+    integrity: &IntegrityAssertion,
+    assessed: &AssessedCredentialEvidence,
+) -> Result<(), PolicyRefusal> {
+    judge(
+        policy,
+        integrity,
+        &assessed.attestation,
+        assessed.assurance_level(),
+    )
+}
+
+fn judge(
+    policy: &IssuancePolicy,
+    integrity: &IntegrityAssertion,
+    attestation: &AttestationOutcome,
+    level: VerifiedAssuranceLevel,
+) -> Result<(), PolicyRefusal> {
     let a = integrity;
     if policy.require_clean && a.status != "completed" {
         return Err(PolicyRefusal::NotClean {
@@ -199,7 +239,6 @@ pub fn evaluate(
         }
     }
     if let Some(required) = &policy.required_assurance_level {
-        let level = attestation.verified_assurance_level();
         if !meets_assurance(level, required) {
             return Err(PolicyRefusal::AssuranceBelowRequired {
                 level: level.as_str().to_string(),

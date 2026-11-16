@@ -37,7 +37,9 @@ pub use error::{CredentialError, PolicyRefusal, StatusChange, SupersessionRequir
 pub use evidence::{
     BindRequest, EvidenceBinding, EvidenceSource, PreparedEvidence, RecordingAttester,
 };
-pub use issue::{issue, issue_with, IssuancePolicy, IssueCredentialRequest, Issued};
+pub use issue::{
+    issue, issue_with, issue_with_evidence, IssuancePolicy, IssueCredentialRequest, Issued,
+};
 pub use issuer::Issuer;
 
 #[cfg(test)]

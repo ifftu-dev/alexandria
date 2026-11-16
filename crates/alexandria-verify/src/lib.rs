@@ -6,8 +6,10 @@
 //! resolution, and Bitstring Status List revocation and suspension. Around
 //! them sit the checks a reader makes of what a credential says: device
 //! attestation evidence ([`attestation`]), organisation backing ([`org`]),
-//! the coverage statement registry ([`coverage`]) and the issuance policy
-//! rule an issuer and a hosted service share ([`policy`]).
+//! the coverage statement registry ([`coverage`]), the issuance policy
+//! rule an issuer and a hosted service share ([`policy`]), and the evidence
+//! entry naming the credential a role credential was issued on
+//! ([`assessed`]).
 //!
 //! The crate performs no I/O. Verification needs to consult persistent state
 //! in four places — the key registered for an issuer whose DID is not
@@ -21,6 +23,7 @@
 //! not an application.
 
 pub mod access;
+pub mod assessed;
 pub mod attestation;
 pub mod course;
 pub mod coverage;
