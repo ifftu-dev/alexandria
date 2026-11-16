@@ -378,11 +378,97 @@ fn map_role_assessment(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleAssessment
 // Keystone — issue a role credential gated by the role's policy
 // ============================================================================
 
+/// Why a sponsor's device refuses to bind an integrity session to a role
+/// credential: the session must be the named subject's passed attempt at
+/// that role assessment.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+enum AttemptBindingRefusal {
+    #[error("integrity session {0} is unknown on this device")]
+    UnknownSession(String),
+    #[error("integrity session {0} is not an attempt for this role assessment")]
+    NotRoleAttempt(String),
+    #[error("integrity session {0} belongs to another subject's attempt")]
+    OtherSubject(String),
+    #[error("the attempt for integrity session {0} has not been graded")]
+    NotGraded(String),
+    #[error("the attempt for integrity session {0} did not pass")]
+    NotPassed(String),
+}
+
+/// Check that `integrity_session_id` belongs to an attempt `subject` made
+/// for `role_assessment_id`, and that the attempt was graded as passed.
+fn check_attempt_binding(
+    conn: &Connection,
+    role_assessment_id: &str,
+    subject: &Did,
+    integrity_session_id: &str,
+) -> Result<(), String> {
+    let known: bool = conn
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM integrity_sessions WHERE id = ?1)",
+            params![integrity_session_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !known {
+        return Err(AttemptBindingRefusal::UnknownSession(integrity_session_id.into()).to_string());
+    }
+    let mut stmt = conn
+        .prepare(
+            "SELECT subject_did, passed, graded_at FROM assessment_attempts \
+              WHERE role_assessment_id = ?1 AND integrity_session_id = ?2",
+        )
+        .map_err(|e| e.to_string())?;
+    let attempts = stmt
+        .query_map(params![role_assessment_id, integrity_session_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<i64>>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    if attempts.is_empty() {
+        return Err(AttemptBindingRefusal::NotRoleAttempt(integrity_session_id.into()).to_string());
+    }
+    let mut own = attempts
+        .iter()
+        .filter(|(attempt_subject, ..)| *attempt_subject == subject.0)
+        .peekable();
+    if own.peek().is_none() {
+        return Err(AttemptBindingRefusal::OtherSubject(integrity_session_id.into()).to_string());
+    }
+    // An attempt is graded once it has both a grade time and a pass bit.
+    let mut graded = false;
+    for (_, passed, graded_at) in own {
+        if let (Some(passed), Some(_)) = (passed, graded_at) {
+            if *passed != 0 {
+                return Ok(());
+            }
+            graded = true;
+        }
+    }
+    let session = integrity_session_id.to_string();
+    Err(if graded {
+        AttemptBindingRefusal::NotPassed(session)
+    } else {
+        AttemptBindingRefusal::NotGraded(session)
+    }
+    .to_string())
+}
+
 /// Issue a `RoleCredential` for `subject` against `role_assessment_id`,
 /// bound to `integrity_session_id` and gated by the role's policy +
 /// required assurance level. Reuses the P0 issuance pipeline, so the
 /// resulting VC carries the integrity attestation and is refused if the
 /// session doesn't satisfy the role's bounds.
+///
+/// Before anything is written, the session must be an attempt `subject`
+/// made for this role and passed (`AttemptBindingRefusal`), so a sponsor
+/// cannot sign the wrong person's session. The role's policy is then judged
+/// by the shared rule inside `credentials::issue`.
 pub fn issue_role_credential_impl(
     conn: &Connection,
     signer: &Issuer,
@@ -395,6 +481,7 @@ pub fn issue_role_credential_impl(
         .ok_or_else(|| format!("role assessment {role_assessment_id} not found"))?;
     let org = get_organization_impl(conn, &ra.org_id)?
         .ok_or_else(|| format!("organization {} not found", ra.org_id))?;
+    check_attempt_binding(conn, &ra.id, subject, integrity_session_id)?;
 
     // Issue under the organisation's own DID, not the caller's personal one.
     //
@@ -1029,6 +1116,7 @@ mod tests {
         )
         .unwrap();
         seed_session(conn, "sess_ok", "completed", 0.9, 0);
+        seed_attempt(conn, "att_ok", &ra.id, &subject.0, "sess_ok", Some(true));
 
         let vc = issue_role_credential_impl(
             conn,
@@ -1071,6 +1159,7 @@ mod tests {
         )
         .unwrap();
         seed_session(conn, "sess_bad", "suspended", 0.3, 2);
+        seed_attempt(conn, "att_bad", &ra.id, &subject.0, "sess_bad", Some(true));
         let err = issue_role_credential_impl(
             conn,
             &Issuer::from_key(key.clone()),
@@ -1083,15 +1172,24 @@ mod tests {
         assert!(err.contains("issuance policy"), "got: {err}");
     }
 
-    /// Helper: a completed org + role assessment + clean session, ready to
-    /// issue. `org_did` seeds the organization's DID column (None to adopt).
-    fn ready_to_issue(conn: &Connection, org_did: Option<&str>) -> String {
+    /// `org_did` seeds the organization's DID column (None to adopt).
+    /// Helper: an org + role assessment + clean session `sess_ok` that
+    /// `subject` passed for the role, ready to issue.
+    fn ready_to_issue(conn: &Connection, org_did: Option<&str>, subject: &Did) -> String {
+        let ra = ready_to_issue_role(conn, org_did, "SRE L4");
+        seed_session(conn, "sess_ok", "completed", 0.95, 0);
+        seed_attempt(conn, "att_ok", &ra, &subject.0, "sess_ok", Some(true));
+        ra
+    }
+
+    /// An org + role assessment titled `title`, with no session.
+    fn ready_to_issue_role(conn: &Connection, org_did: Option<&str>, title: &str) -> String {
         let org = create_organization_impl(conn, "Acme", "stake_owner", org_did, NOW).unwrap();
-        let ra = create_role_assessment_impl(
+        create_role_assessment_impl(
             conn,
             &CreateRoleAssessmentRequest {
                 org_id: org.id,
-                role_title: "SRE L4".into(),
+                role_title: title.into(),
                 job_description: None,
                 course_id: None,
                 skill_ids: vec![],
@@ -1100,9 +1198,8 @@ mod tests {
             },
             NOW,
         )
-        .unwrap();
-        seed_session(conn, "sess_ok", "completed", 0.95, 0);
-        ra.id
+        .unwrap()
+        .id
     }
 
     #[test]
@@ -1112,7 +1209,7 @@ mod tests {
         // personal identity.
         let (db, key, owner, subject) = setup();
         let conn = db.conn();
-        let ra = ready_to_issue(conn, Some(&owner.0)); // org DID == owner DID
+        let ra = ready_to_issue(conn, Some(&owner.0), &subject); // org DID == owner DID
         let vc = issue_role_credential_impl(
             conn,
             &Issuer::from_key(key.clone()),
@@ -1134,7 +1231,7 @@ mod tests {
     fn an_org_without_a_did_adopts_the_owners_on_first_issuance() {
         let (db, key, owner, subject) = setup();
         let conn = db.conn();
-        let ra = ready_to_issue(conn, None);
+        let ra = ready_to_issue(conn, None, &subject);
         issue_role_credential_impl(
             conn,
             &Issuer::from_key(key.clone()),
@@ -1161,7 +1258,7 @@ mod tests {
     fn failed_credential_insert_rolls_back_org_did_adoption() {
         let (db, key, _, subject) = setup();
         let conn = db.conn();
-        let role_assessment_id = ready_to_issue(conn, None);
+        let role_assessment_id = ready_to_issue(conn, None, &subject);
         conn.execute_batch(
             "CREATE TRIGGER fail_role_credential_insert BEFORE INSERT ON credentials \
              BEGIN SELECT RAISE(ABORT, 'injected credential failure'); END;",
@@ -1215,7 +1312,7 @@ mod tests {
         let (db, key, _, subject) = setup();
         let conn = db.conn();
         let other_org_did = derive_did_key(&SigningKey::from_bytes(&[9u8; 32])).0;
-        let ra = ready_to_issue(conn, Some(&other_org_did));
+        let ra = ready_to_issue(conn, Some(&other_org_did), &subject);
         let err = issue_role_credential_impl(
             conn,
             &Issuer::from_key(key.clone()),
@@ -1237,7 +1334,7 @@ mod tests {
         // must not count as an independent cluster.
         let (db, key, owner, _subject) = setup();
         let conn = db.conn();
-        let ra = ready_to_issue(conn, Some(&owner.0));
+        let ra = ready_to_issue(conn, Some(&owner.0), &owner);
         let err = issue_role_credential_impl(
             conn,
             &Issuer::from_key(key.clone()),
@@ -1248,6 +1345,152 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("to itself"), "unexpected: {err}");
+    }
+
+    /// Record an attempt for `role` by `subject` on `session`. `passed` is
+    /// the grade (`None` leaves the attempt ungraded).
+    fn seed_attempt(
+        conn: &Connection,
+        id: &str,
+        role: &str,
+        subject: &str,
+        session: &str,
+        passed: Option<bool>,
+    ) {
+        conn.execute_batch(
+            "INSERT OR IGNORE INTO question_banks (id, skill_id, label, ratified) \
+             VALUES ('bank', 'skill_rust', 'T', 1);",
+        )
+        .unwrap();
+        let graded_at = passed.map(|_| NOW);
+        conn.execute(
+            "INSERT INTO assessment_attempts \
+             (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
+              integrity_session_id, started_at, role_assessment_id, passed, graded_at) \
+             VALUES (?1, ?2, 'bank', 'skill_rust', 1, '[]', '[]', ?3, ?4, ?5, ?6, ?7)",
+            params![
+                id,
+                subject,
+                session,
+                NOW,
+                role,
+                passed.map(i64::from),
+                graded_at
+            ],
+        )
+        .unwrap();
+    }
+
+    fn issue_on(
+        conn: &Connection,
+        key: &SigningKey,
+        role: &str,
+        subject: &Did,
+        session: &str,
+    ) -> Result<VerifiableCredential, String> {
+        issue_role_credential_impl(
+            conn,
+            &Issuer::from_key(key.clone()),
+            role,
+            subject,
+            session,
+            NOW,
+        )
+    }
+
+    #[test]
+    fn sponsor_issuance_refuses_an_unknown_session() {
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let ra = ready_to_issue(conn, Some(&owner.0), &subject);
+        let err = issue_on(conn, &key, &ra, &subject, "sess_missing").unwrap_err();
+        assert_eq!(
+            err,
+            "integrity session sess_missing is unknown on this device"
+        );
+    }
+
+    #[test]
+    fn sponsor_issuance_refuses_a_session_that_is_not_an_attempt_for_the_role() {
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let ra = ready_to_issue_role(conn, Some(&owner.0), "SRE L4");
+        seed_session(conn, "sess_ok", "completed", 0.95, 0);
+        // The subject passed with this session, but for another role.
+        let other = ready_to_issue_role(conn, Some(&owner.0), "Other role");
+        seed_attempt(conn, "att_other", &other, &subject.0, "sess_ok", Some(true));
+        let err = issue_on(conn, &key, &ra, &subject, "sess_ok").unwrap_err();
+        assert_eq!(
+            err,
+            "integrity session sess_ok is not an attempt for this role assessment"
+        );
+    }
+
+    #[test]
+    fn sponsor_issuance_refuses_another_subjects_attempt() {
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let someone_else = derive_did_key(&SigningKey::from_bytes(&[5u8; 32]));
+        // Someone else passed the role with this session.
+        let ra = ready_to_issue(conn, Some(&owner.0), &someone_else);
+        let err = issue_on(conn, &key, &ra, &subject, "sess_ok").unwrap_err();
+        assert_eq!(
+            err,
+            "integrity session sess_ok belongs to another subject's attempt"
+        );
+    }
+
+    #[test]
+    fn sponsor_issuance_refuses_an_ungraded_attempt() {
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let ra = ready_to_issue_role(conn, Some(&owner.0), "SRE L4");
+        seed_session(conn, "sess_ok", "completed", 0.95, 0);
+        seed_attempt(conn, "att_open", &ra, &subject.0, "sess_ok", None);
+        let err = issue_on(conn, &key, &ra, &subject, "sess_ok").unwrap_err();
+        assert_eq!(
+            err,
+            "the attempt for integrity session sess_ok has not been graded"
+        );
+    }
+
+    #[test]
+    fn sponsor_issuance_refuses_a_failed_attempt() {
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let ra = ready_to_issue_role(conn, Some(&owner.0), "SRE L4");
+        seed_session(conn, "sess_ok", "completed", 0.95, 0);
+        seed_attempt(conn, "att_failed", &ra, &subject.0, "sess_ok", Some(false));
+        let err = issue_on(conn, &key, &ra, &subject, "sess_ok").unwrap_err();
+        assert_eq!(
+            err,
+            "the attempt for integrity session sess_ok did not pass"
+        );
+    }
+
+    #[test]
+    fn sponsor_issuance_accepts_the_subjects_passed_attempt_for_the_role() {
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let ra = ready_to_issue(conn, Some(&owner.0), &subject);
+        // Another candidate's failed attempt at the same role does not interfere.
+        let someone_else = derive_did_key(&SigningKey::from_bytes(&[5u8; 32]));
+        seed_session(conn, "sess_other", "completed", 0.95, 0);
+        seed_attempt(
+            conn,
+            "att_other",
+            &ra,
+            &someone_else.0,
+            "sess_other",
+            Some(false),
+        );
+
+        let vc = issue_on(conn, &key, &ra, &subject, "sess_ok").unwrap();
+        assert_eq!(vc.credential_subject.id, subject);
+        assert_eq!(
+            vc.integrity.expect("integrity embedded").session_id,
+            "sess_ok"
+        );
     }
 
     #[test]
