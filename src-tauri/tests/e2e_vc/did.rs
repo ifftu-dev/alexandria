@@ -51,7 +51,7 @@ async fn a_registry_row_cannot_change_how_a_did_key_issuer_verifies() {
             context: vec!["https://www.w3.org/ns/credentials/v2".into()],
             id: Some("urn:uuid:did-key-is-its-key".into()),
             type_: vec!["VerifiableCredential".into(), "FormalCredential".into()],
-            issuer: issuer.clone(),
+            issuer: issuer.clone().into(),
             valid_from: TEST_NOW.into(),
             valid_until: None,
             credential_subject: Claim::Skill(SkillClaim {

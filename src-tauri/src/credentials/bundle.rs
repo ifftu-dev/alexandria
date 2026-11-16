@@ -451,7 +451,7 @@ impl BundleStore {
             let Some(id) = list_vc.id.as_deref() else {
                 return Err(CredentialError::StatusListWithoutId);
             };
-            let key = alexandria_verify::did::resolve_did_key(&list_vc.issuer)
+            let key = alexandria_verify::did::resolve_did_key(list_vc.issuer.id())
                 .map_err(CredentialError::StatusListIssuer)?;
             let bits = alexandria_verify::vc::status::verify_status_list_credential(list_vc, &key)
                 .map_err(|source| CredentialError::StatusListInvalid {

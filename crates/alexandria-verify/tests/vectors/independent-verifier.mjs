@@ -64,7 +64,9 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
     createHash('sha256').update(Buffer.from(jcs(document), 'utf8')).digest(),
   ])
 
-  // 3-5: the issuer's key, then the multibase proofValue over the hash data
+  // 3-5: the issuer's key, then the multibase proofValue over the hash data.
+  // `issuer` is the DID, or an object whose `id` is the DID (VC 2.0).
+  const issuerId = typeof vc.issuer === 'string' ? vc.issuer : String(vc.issuer?.id)
   let validSignature = false
   let issuerResolved = false
   const pendingReasons = []
@@ -72,9 +74,9 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
   try {
     // Key: a did:key is its key, whatever the registry says; any other DID
     // method is looked up in the registry.
-    const row = (v.store?.keyRegistry ?? []).find(r => r.did === vc.issuer)
-    if (vc.issuer.startsWith('did:key:')) {
-      key = pubkeyFromDidKey(vc.issuer)
+    const row = (v.store?.keyRegistry ?? []).find(r => r.did === issuerId)
+    if (issuerId.startsWith('did:key:')) {
+      key = pubkeyFromDidKey(issuerId)
       issuerResolved = true
     } else if (row) {
       const spki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'),
@@ -94,7 +96,7 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
           p.proofPurpose !== 'assertionMethod') throw new Error('unsupported proof')
       // The verification method must be the issuer's: `<issuer DID>#<fragment>`.
       const [controller, fragment] = String(p.verificationMethod).split('#')
-      if (controller !== vc.issuer || !fragment) throw new Error('method not controlled by issuer')
+      if (controller !== issuerId || !fragment) throw new Error('method not controlled by issuer')
       if (!String(p.proofValue).startsWith('z')) throw new Error('not multibase base58btc')
       const sig = b58decode(p.proofValue.slice(1))
       if (sig.length !== 64) throw new Error('not an Ed25519 signature')

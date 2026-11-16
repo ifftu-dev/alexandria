@@ -35,8 +35,8 @@ use alexandria_verify::did::{derive_did_key, Did, KeyRegistryEntry};
 use alexandria_verify::vc::sign::{sign_credential, UnsignedCredential};
 use alexandria_verify::vc::verify::verify_credential;
 use alexandria_verify::vc::{
-    AcceptanceDecision, CredentialStatus, CredentialSubject, CredentialType, IntegrityAssertion,
-    Proof, VerifiableCredential, VerificationPolicy, VerificationResult,
+    AcceptanceDecision, CredentialIssuer, CredentialStatus, CredentialSubject, CredentialType,
+    IntegrityAssertion, Proof, VerifiableCredential, VerificationPolicy, VerificationResult,
 };
 use alexandria_verify::{StoreLookup, VerificationStore};
 
@@ -131,13 +131,15 @@ fn key(label: &str) -> SigningKey {
 
 const V2_CONTEXT: &str = "https://www.w3.org/ns/credentials/v2";
 const NOW: &str = "2026-06-01T00:00:00Z";
+const ORG_NAME: &str = "Vector Organisation";
+const ORG_DOMAIN: &str = "org.example";
 
 fn skeleton(issuer: Did, subject: Did, valid_until: Option<&str>) -> VerifiableCredential {
     VerifiableCredential {
         context: vec![V2_CONTEXT.into()],
         id: Some("urn:uuid:vector-credential".into()),
         type_: vec!["VerifiableCredential".into(), "FormalCredential".into()],
-        issuer,
+        issuer: issuer.into(),
         valid_from: "2026-01-01T00:00:00Z".into(),
         valid_until: valid_until.map(str::to_string),
         credential_subject: CredentialSubject {
@@ -290,7 +292,7 @@ fn build_all() -> Vec<(&'static str, Vector)> {
             &impostor,
             &issuer,
         );
-        vc.issuer = issuer.clone();
+        vc.issuer = issuer.clone().into();
         let expect = verify_credential(&VectorStore::default(), &vc, NOW, &default_policy);
         out.push((
             "03-wrong-signing-key",
@@ -551,6 +553,32 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 policy: default_policy.clone(),
                 credential: vc,
                 store,
+                expect,
+            },
+        ));
+    }
+
+    // --- organisation backing --------------------------------------------
+    {
+        // VC 2.0 allows `issuer` as an object. The proof is checked against
+        // its `id`; `name` and `domain` are the issuer's own statement until
+        // a descriptor from that domain backs them.
+        let mut vc = skeleton(issuer.clone(), subject.clone(), None);
+        vc.issuer = CredentialIssuer::organisation(issuer.clone(), ORG_NAME, ORG_DOMAIN);
+        let vc = signed(vc, &issuer_key, &issuer);
+        let expect = verify_credential(&VectorStore::default(), &vc, NOW, &default_policy);
+        out.push((
+            "19-object-issuer",
+            Vector {
+                description: "The issuer is an object carrying the signing key's DID as `id` \
+                              with the organisation's `name` and `domain`, as VC 2.0 allows. \
+                              The key is resolved from `id` and the proof's verification \
+                              method sits under `id`; the credential is accepted."
+                    .into(),
+                verification_time: NOW.into(),
+                policy: default_policy.clone(),
+                credential: vc,
+                store: VectorStore::default(),
                 expect,
             },
         ));
@@ -896,6 +924,33 @@ fn a_did_key_issuer_resolves_its_embedded_key_despite_registry_state() {
     assert!(v.expect.issuer_resolved);
     assert!(v.expect.valid_signature);
     assert_eq!(v.expect.acceptance_decision, AcceptanceDecision::Accept);
+}
+
+/// An object issuer verifies against its `id` and keeps its object form on
+/// the wire, so the signature covers the name and domain the issuer stated.
+#[test]
+fn an_object_issuer_verifies_against_its_id() {
+    let (_, v) = build_all()
+        .into_iter()
+        .find(|(name, _)| *name == "19-object-issuer")
+        .expect("the object-issuer vector exists");
+    let wire = serde_json::to_value(&v.credential).expect("serialize");
+    assert_eq!(wire["issuer"]["id"], v.credential.issuer.id().as_str());
+    assert_eq!(wire["issuer"]["name"], ORG_NAME);
+    assert_eq!(wire["issuer"]["domain"], ORG_DOMAIN);
+    assert!(v.expect.issuer_resolved);
+    assert!(v.expect.valid_signature);
+    assert_eq!(v.expect.acceptance_decision, AcceptanceDecision::Accept);
+
+    // Renaming the organisation after signing breaks the signature.
+    let mut tampered = v.credential.clone();
+    tampered.issuer = CredentialIssuer::organisation(
+        tampered.issuer.id().clone(),
+        "Another Organisation",
+        ORG_DOMAIN,
+    );
+    let got = verify_credential(&VectorStore::default(), &tampered, NOW, &v.policy);
+    assert!(!got.valid_signature);
 }
 
 /// The suspension vectors state facts an implementer can check by hand:

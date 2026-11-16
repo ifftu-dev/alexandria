@@ -248,7 +248,7 @@ mod tests {
             context: vec!["https://www.w3.org/ns/credentials/v2".into()],
             id: Some(CREDENTIAL_ID.into()),
             type_: vec!["VerifiableCredential".into(), "SelfAssertion".into()],
-            issuer: subject_did.clone(),
+            issuer: subject_did.clone().into(),
             valid_from: "2026-01-01T00:00:00Z".into(),
             valid_until: None,
             credential_subject: claim.into_subject(subject_did.clone()),

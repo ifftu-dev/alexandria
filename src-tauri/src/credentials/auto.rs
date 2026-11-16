@@ -170,7 +170,7 @@ fn issue_new_observation(
         context: vec![W3C_VC_V2.into()],
         id: Some(credential_id.clone()),
         type_: vec!["VerifiableCredential".into(), "SelfAssertion".into()],
-        issuer: learner_did.clone(),
+        issuer: learner_did.clone().into(),
         valid_from: now.clone(),
         valid_until: None,
         credential_subject: claim.into_subject(learner_did.clone()),

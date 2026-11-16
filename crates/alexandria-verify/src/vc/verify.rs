@@ -195,7 +195,7 @@ pub fn verify_credential_with_attestation(
     }
 
     // -- issuer resolution --------------------------------------------------
-    let issuer_pk = match resolve_issuer_key(db, &credential.issuer) {
+    let issuer_pk = match resolve_issuer_key(db, credential.issuer.id()) {
         IssuerKeyResolution::Found(pk) => {
             result.issuer_resolved = true;
             pk
@@ -397,7 +397,7 @@ mod tests {
             context: vec!["https://www.w3.org/ns/credentials/v2".into()],
             id: Some("urn:uuid:verify-unit-test".into()),
             type_: vec!["VerifiableCredential".into(), "FormalCredential".into()],
-            issuer,
+            issuer: issuer.into(),
             valid_from: "2026-01-01T00:00:00Z".into(),
             valid_until: expiration,
             credential_subject: claim.into_subject(subject),

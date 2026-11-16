@@ -133,16 +133,20 @@ pub fn did_key_verification_method(
 /// Sign the unsigned credential with `signing_key`.
 ///
 /// `issuer_did` is embedded as-is: callers are expected to pass the DID
-/// that `signing_key` controls. When the proof's verification method is
-/// blank it is set to the `did:key` method of `signing_key`; a method the
-/// caller already set under `issuer_did` is kept.
+/// that `signing_key` controls. An issuer object the caller already set
+/// whose `id` is `issuer_did` is kept, name and domain included; any other
+/// issuer is replaced by the string form. When the proof's verification
+/// method is blank it is set to the `did:key` method of `signing_key`; a
+/// method the caller already set under `issuer_did` is kept.
 pub fn sign_credential(
     mut unsigned: UnsignedCredential,
     signing_key: &SigningKey,
     issuer_did: &Did,
 ) -> Result<VerifiableCredential, VcError> {
     let vc = &mut unsigned.credential;
-    vc.issuer = issuer_did.clone();
+    if vc.issuer.id() != issuer_did {
+        vc.issuer = issuer_did.clone().into();
+    }
     vc.proof.type_ = super::DATA_INTEGRITY_PROOF.into();
     vc.proof.cryptosuite = EDDSA_JCS_2022.into();
     if vc.proof.proof_purpose.is_empty() {
@@ -227,7 +231,7 @@ mod tests {
                 context: vec!["https://www.w3.org/ns/credentials/v2".into()],
                 id: Some("urn:uuid:sign-unit-test".into()),
                 type_: vec!["VerifiableCredential".into(), "FormalCredential".into()],
-                issuer,
+                issuer: issuer.into(),
                 valid_from: "2026-04-13T00:00:00Z".into(),
                 valid_until: None,
                 credential_subject: claim.into_subject(subject),

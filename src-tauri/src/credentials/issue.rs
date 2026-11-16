@@ -429,7 +429,7 @@ pub fn issue(
         context: vec![W3C_VC_V2.into()],
         id: Some(credential_id.clone()),
         type_: vec!["VerifiableCredential".into(), type_name.to_string()],
-        issuer: issuer_did.clone(),
+        issuer: issuer_did.clone().into(),
         valid_from: now.to_string(),
         valid_until: req.expiration_date.clone(),
         credential_subject: claim.into_subject(req.subject.clone()),

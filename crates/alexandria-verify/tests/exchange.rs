@@ -230,7 +230,7 @@ fn holder_cannot_assert_another_issuers_status_or_hide_bad_vc_signature() {
         AcceptanceDecision::Reject
     );
     let mut f = fixture();
-    f.credential.issuer = derive_did_key(&SigningKey::from_bytes(&[92; 32]));
+    f.credential.issuer = derive_did_key(&SigningKey::from_bytes(&[92; 32])).into();
     assert!(verify_share(&present(&f), &f.request, NOW + 10, NOW_ISO).is_err());
 }
 
