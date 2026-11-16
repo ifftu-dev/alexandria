@@ -1,4 +1,4 @@
-//! §5.3 + §11.2 — DID doc + status list propagation.
+//! DID announcement + status list propagation (§11.2).
 //!
 //! Two-node tests connect real loopback swarms directly and fail on missed
 //! delivery. The local-only test (`credential_queued_until_issuer_did_doc_arrives`)
@@ -15,48 +15,40 @@ use base64::Engine as _;
 use ed25519_dalek::Signer as _;
 
 #[tokio::test]
-async fn did_doc_rotation_propagates_to_second_node() {
-    // Node A publishes a DID rotation message → Node B receives
-    // the gossip → Node B's DB reflects the rotated_by linkage.
-    let (mut a, rx_a) = start_test_node("did-rotation-a", 32).await;
+async fn did_announcement_propagates_and_records_nothing() {
+    // Node A announces its DID → Node B receives the gossip. A did:key is its
+    // key, so B records nothing in its key registry, and a payload that still
+    // carries the retired `rotated_to` field is read as a plain announcement.
+    let (mut a, rx_a) = start_test_node("did-announce-a", 32).await;
     let _events_a = discard_events(rx_a);
-    let (mut b, mut rx_b) = start_test_node("did-rotation-b", 64).await;
+    let (mut b, mut rx_b) = start_test_node("did-announce-b", 64).await;
     await_peers_connected(&a, &b, 10).await;
-    let key = super::common::test_key("did-rotation-a");
+    let key = super::common::test_key("did-announce-a");
     let did = alexandria_verify::did::derive_did_key(&key);
-    let successor = super::common::test_did("did-rotation-successor");
-    let announcement = serde_json::to_vec(&serde_json::json!({"did": did.as_str()})).unwrap();
-    publish_until_ready(|| a.publish_vc_did(announcement.clone(), &key, "stake_test1urotation"))
-        .await;
-    let announcement = await_gossip_on(&mut rx_b, "vc-did", 5).await;
+    let successor = super::common::test_did("did-announce-successor");
 
-    // Drive the handler against the received bytes to simulate what
-    // the application-layer dispatcher would do. Assert the DB
-    // records the rotated_by linkage.
     let db = new_test_db();
-    assert_eq!(
-        handle_did_message(&db, &announcement).unwrap(),
-        DidIngest::Stored
-    );
-    let payload = serde_json::to_vec(
-        &serde_json::json!({"did": did.as_str(), "rotated_to": successor.as_str()}),
-    )
-    .unwrap();
-    publish_until_ready(|| a.publish_vc_did(payload.clone(), &key, "stake_test1urotation")).await;
-    let msg = await_gossip_on(&mut rx_b, "vc-did", 5).await;
-    assert_eq!(msg.payload, payload);
-    let outcome = handle_did_message(&db, &msg).unwrap();
-    assert_eq!(outcome, DidIngest::UpdatedRegistry);
-    let rotated_by: Option<String> = db
+    for payload in [
+        serde_json::json!({"did": did.as_str()}),
+        serde_json::json!({"did": did.as_str(), "rotated_to": successor.as_str()}),
+    ] {
+        let payload = serde_json::to_vec(&payload).unwrap();
+        publish_until_ready(|| a.publish_vc_did(payload.clone(), &key, "stake_test1uannounce"))
+            .await;
+        let msg = await_gossip_on(&mut rx_b, "vc-did", 5).await;
+        assert_eq!(msg.payload, payload);
+        // Drive the handler against the received bytes, as the
+        // application-layer dispatcher would.
+        assert_eq!(
+            handle_did_message(&db, &msg).unwrap(),
+            DidIngest::Announced { promoted: 0 }
+        );
+    }
+    let rows: i64 = db
         .conn()
-        .query_row(
-            "SELECT rotated_by FROM key_registry \
-             WHERE did = ?1 AND rotated_by IS NOT NULL",
-            [did.as_str()],
-            |r| r.get(0),
-        )
-        .ok();
-    assert_eq!(rotated_by.as_deref(), Some(successor.as_str()));
+        .query_row("SELECT COUNT(*) FROM key_registry", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(rows, 0);
 
     a.shutdown().await;
     b.shutdown().await;
@@ -65,10 +57,8 @@ async fn did_doc_rotation_propagates_to_second_node() {
 #[tokio::test]
 async fn status_list_revocation_propagates() {
     // Node A publishes a status list → Node B receives it → Node B's
-    // DB has the bits. Handler-side we still have to pre-register
-    // the issuer in B's key_registry (the handler defers otherwise);
-    // the real P2P flow is a DID doc landing before the status list,
-    // which is what the application dispatcher coordinates.
+    // DB has the bits. The issuer's did:key is its key, so B needs no
+    // prior record of it.
     let (mut a, rx_a) = start_test_node("status-a", 32).await;
     let _events_a = discard_events(rx_a);
     let (mut b, mut rx_b) = start_test_node("status-b", 64).await;
@@ -111,15 +101,8 @@ async fn status_list_revocation_propagates() {
     let msg = await_gossip_on(&mut rx_b, "vc-status", 5).await;
     assert_eq!(msg.payload, payload);
 
-    // Drive the handler against a seeded DB where the issuer is known.
+    // Drive the handler against a fresh DB.
     let db = new_test_db();
-    db.conn()
-        .execute(
-            "INSERT INTO key_registry (did, key_id, public_key_hex, valid_from) \
-             VALUES (?1, 'key-1', '', '1970-01-01T00:00:00Z')",
-            rusqlite::params![issuer.as_str()],
-        )
-        .unwrap();
     let outcome = handle_status_message(&db, &msg).unwrap();
     assert_eq!(outcome, StatusIngest::Applied);
     let version: i64 = db
@@ -144,7 +127,7 @@ async fn credential_queued_until_issuer_did_doc_arrives() {
     // promotes it into `credentials`.
     let db = new_test_db();
 
-    // Queue a credential whose issuer isn't yet in key_registry.
+    // Queue a credential whose issuer has not announced itself yet.
     let vc_json = serde_json::json!({
         "@context": ["https://www.w3.org/ns/credentials/v2"],
         "id": "urn:uuid:pending-cred",
@@ -187,16 +170,9 @@ async fn credential_queued_until_issuer_did_doc_arrives() {
         .unwrap();
     assert_eq!(pre, 0);
 
-    // DID doc arrives — either via the gossip handler (which calls
-    // promote_pending_for internally) or directly. Drive the
-    // promoter directly to isolate the sweeper behaviour.
-    db.conn()
-        .execute(
-            "INSERT INTO key_registry (did, key_id, public_key_hex, valid_from) \
-             VALUES ('did:key:zPendingIssuer', 'key-1', '', '1970-01-01T00:00:00Z')",
-            [],
-        )
-        .unwrap();
+    // The issuer announces itself — via the gossip handler (which calls
+    // promote_pending_for internally) or directly. Drive the promoter
+    // directly to isolate the sweeper behaviour.
     let promoted = promote_pending_for(&db, "did:key:zPendingIssuer").unwrap();
     assert_eq!(promoted, 1);
 

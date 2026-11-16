@@ -65,9 +65,8 @@ impl P2pNode {
 
     // ---- VC-first migration (PRs 9, 10, 11) -----------------------------
 
-    /// Publish a DID document announcement or key-rotation record
-    /// (§5.3). Receivers reflect into their local `key_registry` so
-    /// historical verification works across peers.
+    /// Publish a DID announcement. Receivers promote credentials that were
+    /// waiting on that issuer; nothing is written to their key registry.
     pub async fn publish_vc_did(
         &self,
         payload: Vec<u8>,
