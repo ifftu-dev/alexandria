@@ -7,7 +7,8 @@
 //!
 //! The envelope is a W3C VC Data Model 2.0 credential secured with a Data
 //! Integrity proof (`DataIntegrityProof`, cryptosuite `eddsa-jcs-2022`) and,
-//! when revocable, a Bitstring Status List entry.
+//! when its status can change, Bitstring Status List entries: one for
+//! revocation and one for suspension.
 
 pub mod anchor;
 pub mod canonicalize;
@@ -381,7 +382,7 @@ pub struct TermsOfUse {
 /// the observer auto-issues a self-signed VC referencing that tx.
 /// The witness block is part of the signed envelope — the learner
 /// asserts *"this credential is authorised by on-chain tx X under
-/// validator script Y"* and the JWS covers that assertion.
+/// validator script Y"* and the proof covers that assertion.
 ///
 /// Verifiers resolve the `tx_hash` on Cardano and check that it locks
 /// at `validator_script_hash`; if it does not, the credential MUST be
@@ -402,17 +403,21 @@ pub struct Witness {
 /// at issuance time (§ Integrity→VC bridge). It records the terminal
 /// state of the integrity session that backed the assessment so a
 /// verifier can see *how the credential was earned*, not just that it
-/// was issued. Part of the signed envelope — the JWS covers it, so the
+/// was issued. Part of the signed envelope — the proof covers it, so the
 /// issuer attests to these numbers and they cannot be altered after the
-/// fact.
+/// fact. Every figure is still the issuer's word: on a self-issued
+/// credential, the holder's.
 ///
-/// `assurance_level` is `"local"` by default: the figures are
-/// device-reported and a determined attacker could suppress flags, so
-/// downstream verifiers should weight it accordingly. `"device_attested"`
-/// means the issuing device re-verified a platform attestation (Apple App
-/// Attest or Google Play Integrity) bound to the session nonce and, on
-/// iOS, to the terminal commitment root: the platform vouched that an
-/// unmodified build of the app on a genuine device produced this session.
+/// `assurance_level` is the level the issuer states, `"local"` by default:
+/// the figures are device-reported and a determined attacker could suppress
+/// flags, so downstream verifiers should weight them accordingly. An issuer
+/// states `"device_attested"` when the session's platform attestation (Apple
+/// App Attest or Google Play Integrity) verified on the issuing device, and
+/// carries that attestation in the credential's `evidence`. A verifier never
+/// takes the stated level on trust: it reports
+/// `device_attested` as the result's `verifiedAssuranceLevel` only when that
+/// evidence verifies and is bound to this credential (see
+/// [`crate::attestation`]), and `local` otherwise, whatever this field says.
 /// `"anchored"` and `"high_assurance"` are reserved ladder values with no
 /// verified production path; the value alone is not evidence of either.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -420,7 +425,10 @@ pub struct Witness {
 pub struct IntegrityAssertion {
     /// The `integrity_sessions.id` this attestation summarises.
     pub session_id: String,
-    /// Terminal session status: `completed` / `flagged` / `suspended`.
+    /// Terminal session status: `completed` (clean), `review` (sent for a
+    /// human decision, for example when the measured answers diverge from
+    /// the learner's practice), `flagged` or `suspended`. Readers should treat
+    /// an unrecognised value as not clean.
     pub status: String,
     /// Final weighted integrity score in `[0,1]`, if the session
     /// recorded one.
@@ -428,8 +436,9 @@ pub struct IntegrityAssertion {
     pub integrity_score: Option<f64>,
     pub critical_count: i64,
     pub warning_count: i64,
-    /// Achieved assurance: `"local"` or `"device_attested"`. `"anchored"`
-    /// and `"high_assurance"` are reserved ladder values.
+    /// Stated assurance: `"local"` or `"device_attested"`. `"anchored"` and
+    /// `"high_assurance"` are reserved ladder values. Only the verifier's
+    /// `verifiedAssuranceLevel`, established from `evidence`, is checked.
     pub assurance_level: String,
     /// Terminal commitment root of the device's snapshot stream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -509,12 +518,12 @@ pub struct VerifiableCredential {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terms_of_use: Option<TermsOfUse>,
     /// On-chain witness for auto-earned credentials (§14.7). Signed
-    /// over by the JWS when present.
+    /// over by the proof when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub witness: Option<Witness>,
     /// Sentinel assessment-integrity attestation (§ Integrity→VC
     /// bridge). Present when the credential was issued against a
-    /// monitored assessment session. Signed over by the JWS.
+    /// monitored assessment session. Signed over by the proof.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub integrity: Option<IntegrityAssertion>,
     /// W3C VC Data Model 2.0 `evidence`. Carries the device attestation

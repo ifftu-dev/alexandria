@@ -5,6 +5,10 @@ Verifiable Credentials Data Model 2.0 secured with Data Integrity proofs
 (`DataIntegrityProof`, cryptosuite `eddsa-jcs-2022`), Bitstring Status List
 revocation, `did:key` resolution, and JCS canonicalization (RFC 8785).
 
+New in 0.7.0: suspension lists, device attestation evidence, organisation
+backing, the coverage statement registry and the shared issuance policy. It
+breaks the 0.6 API; see [CHANGELOG.md](CHANGELOG.md).
+
 `MIT OR Apache-2.0`, while the Alexandria application itself is
 AGPL-3.0-or-later. That split is deliberate. Alexandria promises that checking a
 credential is free, offline-capable, and permanent — a copyleft verification

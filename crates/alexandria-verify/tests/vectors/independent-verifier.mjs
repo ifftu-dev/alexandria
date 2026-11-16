@@ -9,17 +9,22 @@
 // the whole claim. It also implements the strict bounded JSON limits by hand
 // and checks them against the exact bytes in `limits/`.
 //
-//   node independent-verifier.mjs
+//   node crates/alexandria-verify/tests/vectors/independent-verifier.mjs
 //
-// Run it from this directory. It is not part of the Rust test suite, but CI runs
-// it on every backend change and fails the build if any vector disagrees: a
-// second implementation that nothing checks proves nothing, and the claim is
-// only worth making if a divergence is caught rather than believed away.
+// It reads the vectors beside it, so it runs from any directory. It is not
+// part of the Rust test suite, but CI runs it on every backend change and
+// fails the build if any vector disagrees: a second implementation that
+// nothing checks proves nothing, and the claim is only worth making if a
+// divergence is caught rather than believed away.
 //
 // Note what is absent: no network, no JSON-LD processor, no DID resolver
 // service, no Alexandria anything. It is intentionally small and auditable.
 import { readFileSync, readdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { createHash, createPublicKey, verify } from 'node:crypto'
+
+// Vector paths resolve against this file, not the working directory.
+const here = path => fileURLToPath(new URL(path, import.meta.url))
 
 const ALPHA = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 function b58decode(s) {
@@ -82,8 +87,8 @@ function organisationBacking(issuerId, issuerDomain, descriptor) {
 }
 
 let pass = 0, fail = 0
-for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
-  const v = JSON.parse(readFileSync(f, 'utf8'))
+for (const f of readdirSync(here('.')).filter(f => f.endsWith('.json')).sort()) {
+  const v = JSON.parse(readFileSync(here(f), 'utf8'))
   const vc = v.credential
 
   // 1-2: eddsa-jcs-2022 hash data = SHA-256(JCS(proof config)) || SHA-256(JCS(document))
@@ -344,9 +349,9 @@ function strictParse(bytes, limits) {
   }
 }
 
-const manifest = JSON.parse(readFileSync('limits/manifest.json', 'utf8'))
+const manifest = JSON.parse(readFileSync(here('limits/manifest.json'), 'utf8'))
 for (const c of manifest.cases) {
-  const got = strictParse(readFileSync(`limits/${c.file}`), manifest.limits)
+  const got = strictParse(readFileSync(here(`limits/${c.file}`)), manifest.limits)
   const ok = got === c.expect
   console.log(`${ok ? 'PASS' : 'FAIL'}  limits/${c.file}`)
   if (!ok) {
@@ -402,9 +407,9 @@ function endorsementOutcome(bytes, context) {
     : 'invalid_signature'
 }
 
-const endorsements = JSON.parse(readFileSync('endorsements/manifest.json', 'utf8'))
+const endorsements = JSON.parse(readFileSync(here('endorsements/manifest.json'), 'utf8'))
 for (const c of endorsements.cases) {
-  const got = endorsementOutcome(readFileSync(`endorsements/${c.file}`), endorsements)
+  const got = endorsementOutcome(readFileSync(here(`endorsements/${c.file}`)), endorsements)
   const ok = got === c.expect
   console.log(`${ok ? 'PASS' : 'FAIL'}  endorsements/${c.file}`)
   if (!ok) {
@@ -416,7 +421,7 @@ for (const t of endorsements.thresholds) {
   const counted = new Set()
   let rejected = 0
   for (const file of t.files) {
-    const bytes = readFileSync(`endorsements/${file}`)
+    const bytes = readFileSync(here(`endorsements/${file}`))
     const attestor = JSON.parse(bytes.toString('utf8')).attestor_did
     if (endorsementOutcome(bytes, endorsements) === 'valid' && !counted.has(attestor)) {
       counted.add(attestor)
