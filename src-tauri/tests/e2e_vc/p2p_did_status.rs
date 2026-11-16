@@ -152,7 +152,7 @@ async fn credential_queued_until_issuer_did_doc_arrives() {
     })
     .to_string();
     queue_pending(
-        &db,
+        db.conn(),
         "urn:uuid:pending-cred",
         "did:key:zPendingIssuer",
         "did:key:zPendingSubject",

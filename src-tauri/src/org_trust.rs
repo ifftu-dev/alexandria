@@ -17,7 +17,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::db::executor::DatabaseWorkload;
+use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
+use crate::profile::scope::ProfileLease;
 use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
@@ -121,31 +122,40 @@ pub(crate) async fn refresh_descriptor(
     state: &State<'_, AppState>,
     domain: &str,
 ) -> Result<OrgDescriptor, String> {
+    refresh_descriptor_for(
+        &state.db_executor,
+        DatabaseWorkload::Learner,
+        state.profile_lease(),
+        domain,
+    )
+    .await
+}
+
+/// [`refresh_descriptor`] for callers outside a command, such as the
+/// background pass, which hold the executor and a lease themselves.
+pub(crate) async fn refresh_descriptor_for(
+    executor: &DatabaseExecutor,
+    workload: DatabaseWorkload,
+    lease: ProfileLease,
+    domain: &str,
+) -> Result<OrgDescriptor, String> {
     let domain = org::normalise_domain(domain).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().timestamp();
     let lookup = domain.clone();
-    let cached = state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            "org.descriptor.read",
-            move |db| fresh_descriptor(db.conn(), &lookup, now),
-        )
+    let cached = executor
+        .execute(workload, lease.clone(), "org.descriptor.read", move |db| {
+            fresh_descriptor(db.conn(), &lookup, now)
+        })
         .await?;
     if let Some(descriptor) = cached {
         return Ok(descriptor);
     }
     let descriptor = fetch_descriptor(&domain).await?;
     let stored = descriptor.clone();
-    state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            "org.descriptor.store",
-            move |db| store(db.conn(), &stored, now),
-        )
+    executor
+        .execute(workload, lease, "org.descriptor.store", move |db| {
+            store(db.conn(), &stored, now)
+        })
         .await?;
     Ok(descriptor)
 }

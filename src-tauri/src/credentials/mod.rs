@@ -15,12 +15,14 @@
 //! - [`bundle`]: survivability bundles and offline verification.
 //! - [`trust`]: what a credential view states about its trust.
 //! - [`auto`]: self-issued credentials for observed completion mints.
+//! - [`collect`]: credentials organisations issued through Alexandria Cloud.
 //!
 //! Every function here returns [`CredentialError`]; commands convert it to
 //! a string at their boundary.
 
 pub mod auto;
 pub mod bundle;
+pub mod collect;
 mod error;
 pub mod evidence;
 pub mod issue;
