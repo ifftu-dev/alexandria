@@ -2,8 +2,9 @@
 //!
 //! A `did:key` is its key, so an announcement records nothing: no registry
 //! row is written and nothing can change how the DID resolves. Its one effect
-//! is to promote credentials that were waiting on that issuer. Rotation
-//! announcements are retired; a `rotated_to` field is ignored.
+//! is to retry, through full verification, the credentials from that issuer
+//! still waiting in the pending queue. Rotation announcements are retired; a
+//! `rotated_to` field is ignored.
 
 use crate::crypto::did::Did;
 use crate::db::Database;
@@ -19,7 +20,7 @@ struct DidMessage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DidIngest {
     /// The DID's holder announced it; `promoted` credentials waiting on it
-    /// moved into the main table.
+    /// verified and moved into the main table.
     Announced {
         promoted: u32,
     },
@@ -78,107 +79,60 @@ pub fn handle_did_message(
     Ok(DidIngest::Announced { promoted })
 }
 
-/// Promote credentials queued in `credentials_pending_verification`
-/// that match `issuer_did` into the main `credentials` table.
-/// Called by the DID-doc gossip handler whenever an issuer becomes
-/// resolvable. Returns the number of rows promoted.
+/// Retry the credentials queued in `credentials_pending_verification` under
+/// `issuer_did`, each through [`crate::credentials::receive::receive`], the
+/// same full verification every received credential gets.
+///
+/// An accepted credential is stored and leaves the queue; a refused one, or
+/// one that does not parse, leaves the queue unstored; one still pending (a
+/// status list not yet held, say) stays queued. Nothing reaches `credentials`
+/// without verifying. Returns the number stored.
 pub fn promote_pending_for(db: &Database, issuer_did: &str) -> Result<u32, String> {
+    use crate::credentials::receive::{receive, Receipt};
+
     let conn = db.conn();
-    let rows: Vec<(String, String, String)> = {
+    let rows: Vec<(String, String)> = {
         let mut stmt = conn
             .prepare(
-                "SELECT id, subject_did, signed_vc_json \
-                 FROM credentials_pending_verification \
+                "SELECT id, signed_vc_json FROM credentials_pending_verification \
                  WHERE issuer_did = ?1",
             )
             .map_err(|e| e.to_string())?;
-        let iter = stmt
+        let rows = stmt
             .query_map(rusqlite::params![issuer_did], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                ))
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
             })
             .map_err(|e| e.to_string())?;
-        let mut out = Vec::new();
-        for r in iter {
-            out.push(r.map_err(|e| e.to_string())?);
-        }
-        out
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?
     };
 
+    let now = crate::clock::now_rfc3339();
     let mut promoted = 0u32;
-    for (id, subject_did, json) in rows {
-        // Parse + extract minimal fields for the hoisted columns.
-        // If parsing fails, leave the row in pending — a future DID
-        // doc version might fix it, or an operator can clean up.
-        let vc: Result<serde_json::Value, _> = serde_json::from_str(&json);
-        let vc = match vc {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let type_str = vc
-            .get("type")
-            .and_then(|v| v.as_array())
-            .and_then(|a| {
-                a.iter()
-                    .find_map(|x| x.as_str().filter(|s| *s != "VerifiableCredential"))
-            })
-            .unwrap_or("Credential")
-            .to_string();
-        let issuance_date = vc
-            .get("validFrom")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        // W3C VC v2: claim properties are inline on credentialSubject
-        // rather than nested under a `claim` discriminator. We classify
-        // by marker property: `skillId` ⇒ skill, `role` ⇒ role, else
-        // custom.
-        let subject = vc.pointer("/credentialSubject");
-        let skill_id = subject
-            .and_then(|s| s.get("skillId"))
-            .and_then(|v| v.as_str())
-            .map(str::to_string);
-        let claim_kind = if skill_id.is_some() {
-            "skill"
-        } else if subject
-            .and_then(|s| s.get("role"))
-            .and_then(|v| v.as_str())
-            .is_some()
-        {
-            "role"
-        } else {
-            "custom"
-        }
-        .to_string();
-
-        let inserted = conn.execute(
-            "INSERT OR IGNORE INTO credentials \
-             (id, issuer_did, subject_did, credential_type, claim_kind, skill_id, \
-              issuance_date, signed_vc_json, integrity_hash) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '')",
-            rusqlite::params![
-                id,
-                issuer_did,
-                subject_did,
-                type_str,
-                claim_kind,
-                skill_id,
-                issuance_date,
-                json,
-            ],
-        );
-        if let Ok(n) = inserted {
-            if n > 0 {
-                conn.execute(
-                    "DELETE FROM credentials_pending_verification WHERE id = ?1",
-                    rusqlite::params![id],
-                )
-                .map_err(|e| e.to_string())?;
-                promoted += 1;
+    for (id, json) in rows {
+        let decided = match alexandria_verify::vc::decode_credential(json.as_bytes()) {
+            Err(error) => {
+                log::warn!("vc-did: queued credential {id} does not parse: {error}");
+                true
             }
+            Ok(vc) => match receive(conn, &vc, &now) {
+                Ok(Receipt::Stored) => {
+                    promoted += 1;
+                    true
+                }
+                Ok(Receipt::AlreadyPresent) => true,
+                Ok(Receipt::Rejected(why)) => {
+                    log::info!("vc-did: queued credential {id} refused: {}", why.join(", "));
+                    true
+                }
+                Ok(Receipt::Pending(_)) => false,
+                Err(error) => {
+                    log::warn!("vc-did: queued credential {id}: {error}");
+                    false
+                }
+            },
+        };
+        if decided {
+            unqueue_pending(conn, &id)?;
         }
     }
     Ok(promoted)
@@ -253,21 +207,127 @@ mod tests {
             .unwrap()
     }
 
-    fn queue_credential_from(db: &Database, issuer: &str) {
-        let vc = serde_json::json!({
-            "type": ["VerifiableCredential", "FormalCredential"],
-            "issuer": issuer,
-            "validFrom": "2026-04-13T00:00:00Z",
-            "credentialSubject": {"id": "did:key:zSubject", "skillId": "s"},
-        });
+    const QUEUED_ID: &str = "urn:uuid:queued";
+
+    /// Queue a credential `sk` signed, with `status` as its status entries.
+    fn queue_credential_from(
+        db: &Database,
+        sk: &SigningKey,
+        status: Option<crate::domain::vc::CredentialStatuses>,
+    ) {
+        use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
+        use crate::domain::vc::{CredentialSubject, Proof, VerifiableCredential};
+        let issuer = alexandria_verify::did::derive_did_key(sk);
+        let mut properties = serde_json::Map::new();
+        properties.insert("skillId".into(), serde_json::json!("s"));
+        let vc = VerifiableCredential {
+            context: vec!["https://www.w3.org/ns/credentials/v2".into()],
+            id: Some(QUEUED_ID.into()),
+            type_: vec!["VerifiableCredential".into(), "FormalCredential".into()],
+            issuer: issuer.clone().into(),
+            valid_from: "2026-04-13T00:00:00Z".into(),
+            valid_until: None,
+            credential_subject: CredentialSubject {
+                id: Did("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK".into()),
+                properties,
+            },
+            credential_status: status,
+            terms_of_use: None,
+            witness: None,
+            integrity: None,
+            evidence: Vec::new(),
+            related_resource: Vec::new(),
+            proof: Proof::unsigned("2026-04-13T00:00:00Z"),
+        };
+        let vc = sign_credential(UnsignedCredential { credential: vc }, sk, &issuer).unwrap();
         queue_pending(
             db.conn(),
-            "urn:uuid:queued",
-            issuer,
-            "did:key:zSubject",
-            &vc.to_string(),
+            QUEUED_ID,
+            issuer.as_str(),
+            vc.credential_subject.id.as_str(),
+            &serde_json::to_string(&vc).unwrap(),
         )
         .unwrap();
+    }
+
+    /// A revocation entry at slot 0 of `list_id`.
+    fn revocation_entry(list_id: &str) -> crate::domain::vc::CredentialStatuses {
+        crate::domain::vc::CredentialStatus {
+            id: format!("{list_id}#0"),
+            type_: "BitstringStatusListEntry".into(),
+            status_purpose: "revocation".into(),
+            status_list_index: "0".into(),
+            status_list_credential: list_id.into(),
+        }
+        .into()
+    }
+
+    fn count(db: &Database, table: &str) -> i64 {
+        db.conn()
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap()
+    }
+
+    fn announce(db: &Database, sk: &SigningKey) -> DidIngest {
+        let did = alexandria_verify::did::derive_did_key(sk);
+        let payload = format!(r#"{{"did":"{}"}}"#, did.as_str());
+        handle_did_message(db, &msg_from(sk, payload.as_bytes())).unwrap()
+    }
+
+    /// An announcement retries the queue through full verification: a
+    /// credential whose list is not held stays queued, unstored.
+    #[test]
+    fn a_credential_with_an_unfetchable_list_is_not_promoted() {
+        let db = test_db();
+        let sk = SigningKey::from_bytes(&[3u8; 32]);
+        queue_credential_from(&db, &sk, Some(revocation_entry("urn:test:never-fetched")));
+
+        assert_eq!(announce(&db, &sk), DidIngest::Announced { promoted: 0 });
+        assert_eq!(count(&db, "credentials"), 0);
+        assert_eq!(count(&db, "credentials_pending_verification"), 1);
+    }
+
+    /// A credential its issuer revoked is refused and leaves the queue.
+    #[test]
+    fn a_revoked_credential_is_not_promoted() {
+        let db = test_db();
+        let sk = SigningKey::from_bytes(&[4u8; 32]);
+        let issuer = alexandria_verify::did::derive_did_key(&sk);
+        let list_id = format!("urn:alexandria:status-list:{}:1", issuer.as_str());
+        let mut bits = vec![0u8; alexandria_verify::vc::status::MIN_BITS / 8];
+        bits[0] = 0x80;
+        db.conn()
+            .execute(
+                "INSERT INTO credential_status_lists \
+                 (list_id, issuer_did, version, status_purpose, bits, bit_length) \
+                 VALUES (?1, ?2, 1, 'revocation', ?3, ?4)",
+                rusqlite::params![list_id, issuer.as_str(), bits, bits.len() as i64 * 8],
+            )
+            .unwrap();
+        queue_credential_from(&db, &sk, Some(revocation_entry(&list_id)));
+
+        assert_eq!(announce(&db, &sk), DidIngest::Announced { promoted: 0 });
+        assert_eq!(count(&db, "credentials"), 0);
+        assert_eq!(count(&db, "credentials_pending_verification"), 0);
+    }
+
+    /// A queued credential that was never signed by its issuer is dropped.
+    #[test]
+    fn a_forged_queued_credential_is_not_promoted() {
+        let db = test_db();
+        let sk = SigningKey::from_bytes(&[8u8; 32]);
+        queue_credential_from(&db, &sk, None);
+        db.conn()
+            .execute(
+                "UPDATE credentials_pending_verification \
+                 SET signed_vc_json = replace(signed_vc_json, '\"skillId\":\"s\"', '\"skillId\":\"t\"')",
+                [],
+            )
+            .unwrap();
+
+        assert_eq!(announce(&db, &sk), DidIngest::Announced { promoted: 0 });
+        assert_eq!(count(&db, "credentials"), 0);
+        assert_eq!(count(&db, "credentials_pending_verification"), 0);
     }
 
     /// A `did:key` is its key, so an announcement has nothing to record: it
@@ -277,12 +337,11 @@ mod tests {
         let db = test_db();
         let sk = SigningKey::from_bytes(&[1u8; 32]);
         let did = alexandria_verify::did::derive_did_key(&sk);
-        queue_credential_from(&db, did.as_str());
+        queue_credential_from(&db, &sk, None);
 
-        let payload = format!(r#"{{"did":"{}"}}"#, did.as_str());
-        let outcome = handle_did_message(&db, &msg_from(&sk, payload.as_bytes())).unwrap();
-
-        assert_eq!(outcome, DidIngest::Announced { promoted: 1 });
+        assert_eq!(announce(&db, &sk), DidIngest::Announced { promoted: 1 });
+        assert_eq!(count(&db, "credentials"), 1);
+        assert_eq!(count(&db, "credentials_pending_verification"), 0);
         assert_eq!(registry_rows(&db, did.as_str()), 0);
     }
 

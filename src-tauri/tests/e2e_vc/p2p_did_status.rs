@@ -1,7 +1,7 @@
 //! DID announcement + status list propagation (§11.2).
 //!
 //! Two-node tests connect real loopback swarms directly and fail on missed
-//! delivery. The local-only test (`credential_queued_until_issuer_did_doc_arrives`)
+//! delivery. The local-only test (`queued_credentials_are_promoted_only_when_they_verify`)
 //! exercises the pending-verification sweeper in `p2p::vc_did`
 //! without a network.
 
@@ -121,77 +121,74 @@ async fn status_list_revocation_propagates() {
 }
 
 #[tokio::test]
-async fn credential_queued_until_issuer_did_doc_arrives() {
-    // Local test — no network needed. A credential from an unknown
-    // issuer lands in `credentials_pending_verification` until a
-    // DID doc for that issuer arrives, at which point the sweeper
-    // promotes it into `credentials`.
+async fn queued_credentials_are_promoted_only_when_they_verify() {
+    // Local test — no network needed. Credentials waiting in
+    // `credentials_pending_verification` are retried when their issuer
+    // announces itself, each through full verification: a signed credential
+    // with nothing outstanding is promoted, a forged one is dropped.
+    use app_lib::domain::vc::sign::{sign_credential, UnsignedCredential};
+    use app_lib::domain::vc::{CredentialSubject, Proof, VerifiableCredential};
+
     let db = new_test_db();
-
-    // Queue a credential whose issuer has not announced itself yet.
-    let vc_json = serde_json::json!({
-        "@context": ["https://www.w3.org/ns/credentials/v2"],
-        "id": "urn:uuid:pending-cred",
-        "type": ["VerifiableCredential", "FormalCredential"],
-        "issuer": "did:key:zPendingIssuer",
-        "validFrom": "2026-04-13T00:00:00Z",
-        "credentialSubject": {
-            "id": "did:key:zPendingSubject",
-            "skillId": "s",
-            "level": 4,
-            "score": 0.9,
-            "evidenceRefs": [],
-        },
-        "proof": {
-            "type": "DataIntegrityProof", "cryptosuite": "eddsa-jcs-2022",
-            "created": "2026-04-13T00:00:00Z",
-            "verificationMethod": "did:key:zPendingIssuer#key-1",
-            "proofPurpose": "assertionMethod",
-            "proofValue": "zfake..jws"
-        }
-    })
-    .to_string();
-    queue_pending(
-        db.conn(),
-        "urn:uuid:pending-cred",
-        "did:key:zPendingIssuer",
-        "did:key:zPendingSubject",
-        &vc_json,
-    )
-    .unwrap();
-
-    // Pre-arrival: no credentials row.
-    let pre: i64 = db
-        .conn()
-        .query_row(
-            "SELECT COUNT(*) FROM credentials WHERE id = 'urn:uuid:pending-cred'",
-            [],
-            |r| r.get(0),
+    let key = super::common::test_key("pending-issuer");
+    let issuer = alexandria_verify::did::derive_did_key(&key);
+    let subject = super::common::test_did("pending-subject");
+    let signed = |id: &str| {
+        let mut properties = serde_json::Map::new();
+        properties.insert("skillId".into(), serde_json::json!("s"));
+        let vc = VerifiableCredential {
+            context: vec!["https://www.w3.org/ns/credentials/v2".into()],
+            id: Some(id.into()),
+            type_: vec!["VerifiableCredential".into(), "FormalCredential".into()],
+            issuer: issuer.clone().into(),
+            valid_from: super::common::TEST_NOW.into(),
+            valid_until: None,
+            credential_subject: CredentialSubject {
+                id: subject.clone(),
+                properties,
+            },
+            credential_status: None,
+            terms_of_use: None,
+            witness: None,
+            integrity: None,
+            evidence: Vec::new(),
+            related_resource: Vec::new(),
+            proof: Proof::unsigned(super::common::TEST_NOW),
+        };
+        sign_credential(UnsignedCredential { credential: vc }, &key, &issuer).unwrap()
+    };
+    let genuine = signed("urn:uuid:pending-genuine");
+    let mut forged = signed("urn:uuid:pending-forged");
+    forged
+        .credential_subject
+        .properties
+        .insert("skillId".into(), serde_json::json!("another"));
+    for vc in [&genuine, &forged] {
+        queue_pending(
+            db.conn(),
+            vc.id.as_deref().unwrap(),
+            issuer.as_str(),
+            subject.as_str(),
+            &serde_json::to_string(vc).unwrap(),
         )
         .unwrap();
-    assert_eq!(pre, 0);
+    }
 
-    // The issuer announces itself — via the gossip handler (which calls
-    // promote_pending_for internally) or directly. Drive the promoter
-    // directly to isolate the sweeper behaviour.
-    let promoted = promote_pending_for(&db, "did:key:zPendingIssuer").unwrap();
+    let promoted = promote_pending_for(&db, issuer.as_str()).unwrap();
     assert_eq!(promoted, 1);
 
-    // Post-sweeper: credentials row exists, pending row is gone.
-    let post: i64 = db
-        .conn()
-        .query_row(
-            "SELECT COUNT(*) FROM credentials WHERE id = 'urn:uuid:pending-cred'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(post, 1);
+    let stored: Vec<String> = {
+        let mut stmt = db.conn().prepare("SELECT id FROM credentials").unwrap();
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    };
+    assert_eq!(stored, vec!["urn:uuid:pending-genuine".to_string()]);
     let still_pending: i64 = db
         .conn()
         .query_row(
-            "SELECT COUNT(*) FROM credentials_pending_verification \
-             WHERE id = 'urn:uuid:pending-cred'",
+            "SELECT COUNT(*) FROM credentials_pending_verification",
             [],
             |r| r.get(0),
         )
