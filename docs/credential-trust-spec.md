@@ -252,22 +252,22 @@ Sub-tickets live in `credential-trust/`; each names its blockers. The Sequence a
 
 | Ticket | Repo | Blocked by | Triage |
 |---|---|---|---|
-| [01 Provenance scoring](credential-trust/01-provenance-scoring.md) | alexandria | none | ready-for-agent |
-| [02 Coverage statement registry](credential-trust/02-coverage-statement-registry.md) | alexandria | none | ready-for-agent |
-| [03 Suspension status list](credential-trust/03-suspension-status-list.md) | alexandria | none | ready-for-agent |
-| [04 Delete key rotation](credential-trust/04-delete-key-rotation.md) | alexandria | none | ready-for-agent |
-| [05 Attestation verification](credential-trust/05-attestation-verification.md) | alexandria | none | ready-for-agent |
-| [06 Attestation evidence at issuance](credential-trust/06-attestation-evidence-at-issuance.md) | alexandria | 05 | ready-for-agent |
-| [07 Attested scoring](credential-trust/07-attested-scoring.md) | alexandria | 01, 05 | ready-for-agent |
-| [08 Shared issuance policy](credential-trust/08-shared-issuance-policy.md) | alexandria | 05 | ready-for-agent |
-| [09 Organisation backing](credential-trust/09-organisation-backing.md) | alexandria | 04 | ready-for-agent |
-| [10 Sponsor issuance binding](credential-trust/10-sponsor-issuance-binding.md) | alexandria | 08 | ready-for-agent |
-| [11 Cloud verified runs](credential-trust/11-cloud-verified-runs.md) | alexandria-cloud | 05 | ready-for-agent |
-| [12 Cloud coverage statements](credential-trust/12-cloud-coverage-statements.md) | alexandria-cloud | 02 | ready-for-agent |
-| [13 Cloud organisation-issued credentials](credential-trust/13-cloud-org-issued-credentials.md) | alexandria-cloud | 03, 08, 09, 11 | ready-for-agent |
-| [14 Collect organisation-issued credentials](credential-trust/14-collect-org-credentials.md) | alexandria | 13 | ready-for-agent |
-| [15 Trust surfaces](credential-trust/15-trust-surfaces.md) | alexandria | 03, 06, 09 | ready-for-agent |
-| [16 Verifier release](credential-trust/16-verifier-release.md) | alexandria, alexandria-cloud | 02, 03, 04, 05, 08, 09 | ready-for-agent |
+| [01 Provenance scoring](credential-trust/01-provenance-scoring.md) | alexandria | none | done |
+| [02 Coverage statement registry](credential-trust/02-coverage-statement-registry.md) | alexandria | none | done |
+| [03 Suspension status list](credential-trust/03-suspension-status-list.md) | alexandria | none | done |
+| [04 Delete key rotation](credential-trust/04-delete-key-rotation.md) | alexandria | none | done |
+| [05 Attestation verification](credential-trust/05-attestation-verification.md) | alexandria | none | done |
+| [06 Attestation evidence at issuance](credential-trust/06-attestation-evidence-at-issuance.md) | alexandria | 05 | done |
+| [07 Attested scoring](credential-trust/07-attested-scoring.md) | alexandria | 01, 05 | done |
+| [08 Shared issuance policy](credential-trust/08-shared-issuance-policy.md) | alexandria | 05 | done |
+| [09 Organisation backing](credential-trust/09-organisation-backing.md) | alexandria | 04 | done |
+| [10 Sponsor issuance binding](credential-trust/10-sponsor-issuance-binding.md) | alexandria | 08 | done |
+| [11 Cloud verified runs](credential-trust/11-cloud-verified-runs.md) | alexandria-cloud | 05 | done |
+| [12 Cloud coverage statements](credential-trust/12-cloud-coverage-statements.md) | alexandria-cloud | 02 | done |
+| [13 Cloud organisation-issued credentials](credential-trust/13-cloud-org-issued-credentials.md) | alexandria-cloud | 03, 08, 09, 11 | done |
+| [14 Collect organisation-issued credentials](credential-trust/14-collect-org-credentials.md) | alexandria | 13 | done |
+| [15 Trust surfaces](credential-trust/15-trust-surfaces.md) | alexandria | 03, 06, 09 | done |
+| [16 Verifier release](credential-trust/16-verifier-release.md) | alexandria, alexandria-cloud | 02, 03, 04, 05, 08, 09 | done |
 
 ## Decisions
 
@@ -276,3 +276,13 @@ Owner answers, 2026-11-16:
 - **Test seams confirmed**: verifier interoperability vectors, credential issuance over an in-memory database, hosted assessment exchange over HTTP. No new seam.
 - **Organisation signer**: the hosted service signs with the organisation's hosted key. Sponsor-device issuance gains only the session-to-subject binding.
 - **Personal key rotation**: deleted.
+
+## Notes
+
+2026-11-16: all sixteen tickets built and merged on `feat/credential-trust` in `alexandria` and `alexandria-cloud`, followed by a code review of each branch and one round of fixes (recorded in the affected tickets' Notes). Status stays `active` until the owner settles the open items:
+
+- Ticket 08 made the camera floor strict: a degraded camera signal never carries a floor, because a verifier cannot see coverage. Keeping the 90% tolerance needs a verifier-visible coverage field in the integrity assertion.
+- Story 28 (telling a candidate the role's policy before they start) is not built: the exchange request carries no policy.
+- Markdown doc edits proposed by each ticket await approval, including regenerating the generated schema document.
+- `alexandria-verify` 0.7.0 is not published to crates.io.
+

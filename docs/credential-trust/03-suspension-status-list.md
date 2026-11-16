@@ -21,12 +21,12 @@ Suspension is published in a Bitstring Status List of its own, so every verifier
 
 ## Acceptance criteria
 
-- [ ] A suspended credential verifies as suspended from its published list alone, with no issuer database.
-- [ ] Reinstate and timed expiry clear the bit in the published list.
-- [ ] A credential whose suspension list is absent is `pending` with a suspension-list reason.
-- [ ] A credential with a single-object `credentialStatus` still verifies.
-- [ ] Vectors added for suspended, reinstated and suspension-list-missing.
-- [ ] Receivers of a credential by gossip or fetch see suspension from the list.
+- [x] A suspended credential verifies as suspended from its published list alone, with no issuer database.
+- [x] Reinstate and timed expiry clear the bit in the published list.
+- [x] A credential whose suspension list is absent is `pending` with a suspension-list reason.
+- [x] A credential with a single-object `credentialStatus` still verifies.
+- [x] Vectors added for suspended, reinstated and suspension-list-missing.
+- [x] Receivers of a credential by gossip or fetch see suspension from the list.
 
 ## Pointers
 
@@ -49,3 +49,5 @@ Suspension is published in a Bitstring Status List of its own, so every verifier
 - Vectors 13 (suspended), 14 (reinstated), 15 (suspension list missing); the runner now compares `suspended`. Vectors 07 and 11 keep the single-object form.
 
 2026-11-16 (review fixes): `lift_expired_suspensions` continues past a credential it cannot lift and returns a `LiftReport` (lifted count and one line per failure), which both callers log; a list the credential names but the store does not hold is `StatusListNotHeld`, not `NotIssuer`. A gossiped status list is applied only when its `list_id` names the signing issuer (hosted URL or URN form) and never over a row held under another issuer.
+
+2026-11-16 (merge): vectors renumbered to 16 (suspended), 17 (reinstated) and 18 (suspension list missing), because ticket 02 took 13–15. Criteria checked against vectors 07, 11 and 16–18, the gossip test `a_suspension_list_arrives_as_a_suspension_list` and ticket 14's collection tests.
