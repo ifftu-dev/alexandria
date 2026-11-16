@@ -52,7 +52,9 @@ use crate::network_profile::embedded_preprod;
 
 /// The computation spec stamped on rows this engine writes. It is part of
 /// every row's input fingerprint, so changing it recomputes stored rows.
-const COMPUTATION_SPEC: &str = "v4-verified-vc";
+/// v5: a suspended or flagged session that an issuer or credential-bound
+/// attestation evidence vouches for no longer enters a row.
+pub(crate) const COMPUTATION_SPEC: &str = "v5-session-status";
 
 /// Map a SkillClaim integer level (0..=5) to the canonical string.
 pub fn level_to_str(level: i64) -> &'static str {
@@ -322,7 +324,9 @@ pub fn compute_distribution(scores: &[f64]) -> Distribution {
 /// The verified credentials backing one reputation row, ordered by
 /// credential id. `learner` rows use every verified credential about the
 /// actor at (skill, level); `instructor` rows use only credentials the actor
-/// verifiably issued to someone else. Reputation and snapshot evidence share
+/// verifiably issued to someone else. An input the session-status rule rules
+/// out (a suspended or flagged session an issuer or credential-bound evidence
+/// vouches for) is left out of both. Reputation and snapshot evidence share
 /// this set so their counts cannot diverge.
 pub(crate) fn verified_reputation_inputs(
     conn: &Connection,
@@ -345,7 +349,7 @@ pub(crate) fn verified_reputation_inputs(
     };
     let mut inputs = inputs
         .into_iter()
-        .filter(|input| i64::from(input.claim.level) == level)
+        .filter(|input| i64::from(input.claim.level) == level && input.counts())
         .collect::<Vec<_>>();
     inputs.sort_by(|left, right| left.credential_id.cmp(&right.credential_id));
     Ok(inputs)
@@ -508,6 +512,9 @@ fn upsert_row(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::scoring_inputs::test_support::{
+        store_attested_credential, with_test_trust, Evidence, TestCredential,
+    };
     use crate::db::Database;
 
     fn test_db() -> Database {
@@ -571,6 +578,146 @@ mod tests {
             score,
             None,
         );
+    }
+
+    /// Store a skill_a, level 3 credential with an integrity assertion in
+    /// `session_status` and the given attestation evidence, then accept it
+    /// under the synthetic attestation trust inputs.
+    fn accept_attested(
+        db: &Database,
+        id: &str,
+        issuer: &str,
+        subject: &str,
+        score: f64,
+        session_status: &str,
+        evidence: Evidence,
+    ) {
+        store_attested_credential(
+            db,
+            &TestCredential {
+                id,
+                signer: &key(issuer),
+                subject: &crate::crypto::did::Did(did(subject)),
+                credential_type: "AssessmentCredential",
+                skill_id: "skill_a",
+                level: 3,
+                score,
+                valid_from: "2026-01-01T00:00:00Z",
+                session_status,
+                evidence,
+            },
+        );
+        with_test_trust(|| on_credential_accepted(db.conn(), id)).unwrap();
+    }
+
+    /// `(score, evidence_count)` of the actor's valid row in `role`, if any.
+    fn row(db: &Database, actor: &str, role: &str) -> Option<(f64, i64)> {
+        db.conn()
+            .query_row(
+                "SELECT score, evidence_count FROM reputation_assertions \
+                 WHERE actor_address = ?1 AND role = ?2 AND input_policy_state = 'valid'",
+                params![did(actor), role],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .unwrap()
+    }
+
+    #[test]
+    fn a_relied_on_suspended_or_flagged_session_never_enters_a_row() {
+        let db = test_db();
+        let learner = "learner";
+        let instructor = "instructor";
+        accept_attested(
+            &db,
+            "issued",
+            instructor,
+            learner,
+            0.5,
+            "completed",
+            Evidence::NotSupplied,
+        );
+        // The platform vouches for this self-claim's flagged status.
+        accept_attested(
+            &db,
+            "own-flagged",
+            learner,
+            learner,
+            0.95,
+            "flagged",
+            Evidence::CredentialBound,
+        );
+        // The issuer vouches for this suspended session.
+        accept_attested(
+            &db,
+            "issued-suspended",
+            instructor,
+            "other",
+            0.1,
+            "suspended",
+            Evidence::NotSupplied,
+        );
+
+        assert_eq!(row(&db, learner, "learner"), Some((0.5, 1)));
+        assert_eq!(row(&db, instructor, "instructor"), Some((0.5, 1)));
+        assert_eq!(row(&db, "other", "learner"), None);
+    }
+
+    #[test]
+    fn an_unvouched_session_status_is_ignored_by_reputation() {
+        // A suspended session nobody vouches for is the holder's word: the
+        // self-claim counts as if the session completed.
+        let db = test_db();
+        accept_attested(
+            &db,
+            "own",
+            "learner",
+            "learner",
+            0.7,
+            "suspended",
+            Evidence::SessionBound,
+        );
+        assert_eq!(row(&db, "learner", "learner"), Some((0.7, 1)));
+    }
+
+    #[test]
+    fn a_row_computed_under_the_previous_spec_is_recomputed() {
+        // Rows stamped with the previous spec counted relied-on suspended
+        // sessions. Their fingerprint embeds the spec, so revalidation
+        // recomputes them even though no input changed.
+        let db = test_db();
+        accept_attested(
+            &db,
+            "own",
+            "learner",
+            "learner",
+            0.95,
+            "completed",
+            Evidence::CredentialBound,
+        );
+        accept_attested(
+            &db,
+            "own-flagged",
+            "learner",
+            "learner",
+            0.99,
+            "flagged",
+            Evidence::CredentialBound,
+        );
+        let previous =
+            scoring_input_fingerprint(db.conn(), &did("learner"), "skill_a", "v4-verified-vc")
+                .unwrap();
+        db.conn()
+            .execute(
+                "UPDATE reputation_assertions SET score = 0.99, evidence_count = 2, \
+                 computation_spec = 'v4-verified-vc', input_fingerprint = ?1",
+                [&previous],
+            )
+            .unwrap();
+
+        with_test_trust(|| revalidate_rows(db.conn(), None)).unwrap();
+
+        assert_eq!(row(&db, "learner", "learner"), Some((0.95, 1)));
     }
 
     #[test]
