@@ -1,6 +1,6 @@
 # 10 Sponsor issuance binding
 
-Triage: ready-for-agent
+Triage: done
 Type: task
 Repos: alexandria
 Part of: alexandria/docs/credential-trust-spec.md
@@ -16,11 +16,21 @@ Spec sections: *Role credential issuance on a sponsor's own device*, stories 38â
 
 ## Acceptance criteria
 
-- [ ] Tests for each refusal and for the accepted case, over an in-memory database.
-- [ ] Existing role assessment tests pass.
-- [ ] `vue-tsc -b --noEmit` passes if the page changes.
+- [x] Tests for each refusal and for the accepted case, over an in-memory database.
+- [x] Existing role assessment tests pass.
+- [x] `vue-tsc -b --noEmit` passes if the page changes.
 
 ## Pointers
 
 - `src-tauri/src/commands/role_assessment.rs` (`issue_role_credential_impl`, `list_role_attempts_impl`).
 - `src/pages/dashboard/Sponsor.vue`, `src/composables/useSponsor.ts`.
+
+## Notes
+
+2026-11-16: built.
+
+- `issue_role_credential_impl` checks the binding before anything is written (the org DID adoption included), so the desktop command and the CLI both refuse. Order: the session exists on this device; an attempt for this role names it; one of those attempts is the subject's; the subject's attempt is graded (grade time and pass bit set) and passed. Messages: `integrity session <id> is unknown on this device`, `... is not an attempt for this role assessment`, `... belongs to another subject's attempt`, `the attempt for integrity session <id> has not been graded`, `... did not pass`.
+- Decision: "not graded" and "not passed" are two messages, so a sponsor can tell a pending grade from a fail.
+- The policy is still judged by `credentials::issue`, which runs the shared rule from ticket 08; nothing changed there.
+- Sponsor page: Use appears only on passed attempts with a session, the newest is picked when a role is chosen, and a role change clears the previous pick. No new strings.
+- Existing role issuance tests now seed a passed attempt for their subject.
