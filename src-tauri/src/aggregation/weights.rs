@@ -1,5 +1,7 @@
 //! Per-evidence weight components (§14.3–§14.8).
 
+use alexandria_verify::attestation::AttestationOutcome;
+
 use crate::crypto::did::Did;
 use crate::domain::vc::CredentialType;
 
@@ -33,15 +35,61 @@ pub fn type_weight(credential_type: CredentialType, config: &AggregationConfig) 
 ///
 /// Weight follows who signed, not the type a credential declares. A
 /// self-issued credential (its issuer is its subject) is the holder's word,
-/// so it takes the `SelfAssertion` weight whatever type it names; an
-/// issuer-signed credential takes its declared type's weight.
+/// so it takes the `SelfAssertion` weight whatever type it names, or
+/// `attested_weight` when its attestation evidence verified credential-bound;
+/// an issuer-signed credential takes its declared type's weight.
+///
+/// An input whose session status rules it out ([`counts`]) weighs 0.
 pub fn provenance_weight(evidence: &AggregationInput, config: &AggregationConfig) -> f64 {
-    let class = if evidence.self_issued {
-        CredentialType::SelfAssertion
+    if !counts(evidence) {
+        return 0.0;
+    }
+    if !evidence.self_issued {
+        return type_weight(evidence.credential_type, config);
+    }
+    if credential_bound(&evidence.attestation) {
+        config.attested_weight.max(0.0)
     } else {
-        evidence.credential_type
-    };
-    type_weight(class, config)
+        type_weight(CredentialType::SelfAssertion, config)
+    }
+}
+
+/// Whether the platform vouched for this credential's own content.
+fn credential_bound(attestation: &AttestationOutcome) -> bool {
+    matches!(
+        attestation,
+        AttestationOutcome::VerifiedCredentialBound { .. }
+    )
+}
+
+/// Whether a scoring input counts at all under its session status. An input
+/// that does not count contributes nothing: no weight, no issuer cluster, no
+/// active evidence.
+pub fn counts(evidence: &AggregationInput) -> bool {
+    session_status_counts(
+        evidence.self_issued,
+        &evidence.attestation,
+        evidence.session_status.as_deref(),
+    )
+}
+
+/// The session-status rule, shared by derived states and reputation.
+///
+/// Status matters only where a reader can rely on it: an issuer-signed
+/// credential (the issuer vouches for it) or one whose attestation evidence
+/// verified credential-bound (the platform vouches for the content that
+/// states it). For these, a `suspended` or `flagged` session counts for
+/// nothing and every other status, `review` included, counts in full. For
+/// any other credential the status is the holder's word either way, so it
+/// is ignored: reporting a bad session honestly must not score below
+/// forging a clean one.
+pub fn session_status_counts(
+    self_issued: bool,
+    attestation: &AttestationOutcome,
+    session_status: Option<&str>,
+) -> bool {
+    let reliable = !self_issued || credential_bound(attestation);
+    !(reliable && matches!(session_status, Some("suspended" | "flagged")))
 }
 
 /// Freshness (§14.6): `w_fresh = e^{-λ · Δt_years}`.
@@ -136,6 +184,8 @@ mod tests {
             proctoring_reliability: proctor,
             evidence_traceability: trace,
             self_issued: false,
+            attestation: Default::default(),
+            session_status: None,
         }
     }
 

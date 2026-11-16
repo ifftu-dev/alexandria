@@ -120,8 +120,9 @@ fn candidate_skills(conn: &Connection, subject_did: &str) -> Result<Vec<Candidat
             |(skill_id, name, level, clusters, score, confidence, trust_score)| {
                 // Strength (level, Q, C, T, U) is the aggregation output. The
                 // Bloom level is the highest cognitive level any verified input
-                // attests, read from the signed `credentialSubject.level` that
-                // content ratification also gates on. 2 (`apply`) matches
+                // that counts under the session-status rule attests, read from
+                // the signed `credentialSubject.level` that content
+                // ratification also gates on. 2 (`apply`) matches
                 // BloomLevel::default() if no verified level is readable.
                 let bloom_level = crate::db::scoring_inputs::verified_skill_inputs(
                     conn,
@@ -131,6 +132,7 @@ fn candidate_skills(conn: &Connection, subject_did: &str) -> Result<Vec<Candidat
                     network_id,
                 )?
                 .iter()
+                .filter(|input| input.counts())
                 .map(|input| input.claim.level)
                 .max()
                 .unwrap_or(2)
@@ -703,6 +705,38 @@ mod tests {
         let preview = get_talent_index_preview_impl(db.conn(), &learner_did(), NOW).unwrap();
         assert_eq!(preview.candidates.len(), 1);
         assert_eq!(preview.candidates[0].name, "skill_orphan");
+    }
+
+    /// An issuer vouches for the session status it signs, so a flagged
+    /// session contributes nothing, Bloom level included.
+    #[test]
+    fn an_issuer_signed_flagged_session_does_not_raise_the_bloom_level() {
+        use crate::db::scoring_inputs::test_support::{
+            store_attested_credential, Evidence, TestCredential,
+        };
+        let db = open_db();
+        seed_taxonomy(&db, "skill_rust", "Rust");
+        store_attested_credential(
+            &db,
+            &TestCredential {
+                id: "flagged",
+                signer: &SigningKey::from_bytes(&[50; 32]),
+                subject: &Did(learner_did()),
+                credential_type: "AssessmentCredential",
+                skill_id: "skill_rust",
+                level: 5,
+                score: 0.9,
+                valid_from: NOW,
+                session_status: "flagged",
+                evidence: Evidence::NotSupplied,
+            },
+        );
+        seed_credentials(&db, "skill_rust", 2, 1);
+
+        let preview = get_talent_index_preview_impl(db.conn(), &learner_did(), NOW).unwrap();
+        assert_eq!(preview.candidates.len(), 1);
+        assert_eq!(preview.candidates[0].bloom_level, 2);
+        assert_eq!(preview.candidates[0].issuer_clusters, 1);
     }
 
     /// A listing is only as good as its verified inputs. Altering a signed
