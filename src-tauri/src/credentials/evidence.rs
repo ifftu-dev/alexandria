@@ -309,6 +309,52 @@ mod tests {
         );
     }
 
+    /// A role policy requiring `device_attested` is judged on the evidence
+    /// issuance attaches: credential-bound evidence from the phone meets it,
+    /// session-bound evidence does not, and the refusal mints nothing.
+    #[test]
+    fn a_device_attested_policy_is_met_only_by_credential_bound_evidence() {
+        use crate::credentials::{CredentialError, IssuancePolicy, PolicyRefusal};
+        let issue_under_policy = |phone_present: bool| {
+            let (db, key, _, subject) = setup();
+            let w = attested_session(db.conn());
+            let mut req = sample_request(subject);
+            req.integrity_session_id = Some(SESSION.into());
+            req.integrity_policy = Some(IssuancePolicy {
+                required_assurance_level: Some("device_attested".into()),
+                ..Default::default()
+            });
+            let phone = FakePhone(&w);
+            let attester: &dyn BindingAttester = if phone_present { &phone } else { &Unavailable };
+            let source = EvidenceSource {
+                trust: trust(&w),
+                attester,
+            };
+            let result = issue_with(db.conn(), &key, &req, NOW, &source);
+            let stored: i64 = db
+                .conn()
+                .query_row("SELECT COUNT(*) FROM credentials", [], |r| r.get(0))
+                .unwrap();
+            (result, stored)
+        };
+
+        let (bound, stored) = issue_under_policy(true);
+        let bound = bound.expect("credential-bound evidence meets device_attested");
+        assert_eq!(bound.evidence, EvidenceBinding::Credential);
+        assert_eq!(stored, 1);
+
+        let (refused, stored) = issue_under_policy(false);
+        assert!(
+            matches!(
+                &refused,
+                Err(CredentialError::Policy(PolicyRefusal::AssuranceBelowRequired { level, required }))
+                    if level == "local" && required == "device_attested"
+            ),
+            "{refused:?}"
+        );
+        assert_eq!(stored, 0, "a refused credential is never signed or stored");
+    }
+
     #[test]
     fn an_unattested_session_issues_a_credential_with_no_attestation_evidence() {
         let (db, key, _, subject) = setup();
