@@ -6,8 +6,6 @@
 
 use std::fmt;
 
-use crate::crypto::did::Did;
-
 /// A change to an issued credential's standing. Each is issuer-bound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusChange {
@@ -83,9 +81,6 @@ pub enum CredentialError {
     /// The vault or the wallet it holds could not give the issuer key.
     #[error("{0}")]
     Vault(String),
-    /// A rotated DID offered a key that is not its key at issuance time.
-    #[error("the signing key is not this DID's current key: {}", .0.as_str())]
-    NotCurrentKey(Did),
 
     // --- Issuance --------------------------------------------------------
     #[error("subject MUST be a DID (§10 non-transferability)")]
@@ -204,8 +199,6 @@ pub enum CredentialError {
     Database(#[from] rusqlite::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
-    #[error(transparent)]
-    KeyRegistry(#[from] crate::crypto::key_registry::KeyRegistryError),
     /// A `did:key` did not resolve to a key.
     #[error(transparent)]
     Did(#[from] alexandria_verify::did::DidError),

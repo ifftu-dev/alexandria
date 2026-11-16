@@ -14,7 +14,7 @@
 //
 // <file.json> may be: a bare credential, an array of credentials, or the
 // bundle the app exports from Credentials → Export (which also carries the
-// issuer key registry and status lists, so revocation can be checked offline).
+// status lists, so revocation can be checked offline).
 //
 // A credential whose `statusListCredential` is an https URL names a list the
 // issuer publishes; this fetches it (plain GET, one request per list), checks
@@ -92,7 +92,7 @@ function ed25519Verify(publicKey, message, signature) {
 /**
  * Verify one credential.
  * @param {object} vc the signed credential
- * @param {object} [context] { now: Date, keyRegistry: [{did,key_id,public_key_hex,valid_from,valid_until}], statusLists: { [listId]: Uint8Array } }
+ * @param {object} [context] { now: Date, keyRegistry: [{did,key_id,public_key_hex}], statusLists: { [listId]: Uint8Array } }
  */
 export function verifyCredential(vc, context = {}) {
   const now = context.now ?? new Date()
@@ -111,11 +111,11 @@ export function verifyCredential(vc, context = {}) {
     reasons: [],
   }
 
-  // 1. Issuer key: a registry entry covering `now`, else did:key self-resolution.
+  // 1. Issuer key: a did:key is its key, whatever the registry says; any
+  // other DID method is looked up in the registry.
   let publicKey = null
-  const registry = (context.keyRegistry ?? []).filter((k) => k.did === vc.issuer)
-  const covering = registry.find((k) => new Date(k.valid_from) <= now && (!k.valid_until || now < new Date(k.valid_until)))
-  if (covering) publicKey = Buffer.from(covering.public_key_hex, 'hex')
+  const registered = (context.keyRegistry ?? []).find((k) => k.did === vc.issuer)
+  if (registered && !String(vc.issuer).startsWith('did:key:')) publicKey = Buffer.from(registered.public_key_hex, 'hex')
   else {
     try { publicKey = didKeyToPublicKey(vc.issuer) } catch (e) {
       // Not self-resolving and no registry entry: the signature cannot be
@@ -284,7 +284,9 @@ export function loadInput(json) {
   if (json && typeof json.format_version === 'string' && Array.isArray(json.credentials)) {
     const statusLists = {}
     const listInfo = {}
-    const keyRegistry = json.key_registry ?? []
+    // A `key_registry` field in an older bundle is ignored: issuer keys come
+    // from the issuers' did:key identifiers.
+    const keyRegistry = []
     for (const listVc of json.status_list_credentials ?? []) {
       const checked = verifyCredential(listVc, { keyRegistry })
       const subject = listVc.credentialSubject ?? {}

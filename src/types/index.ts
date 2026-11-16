@@ -2200,15 +2200,6 @@ export type CredentialTrust =
 
 // --- Survivability bundle (§20.4) ----------------------------------------
 
-export interface KeyRegistryRow {
-  did: string
-  key_id: string
-  public_key_hex: string
-  valid_from: string
-  valid_until: string | null
-  rotated_by: string | null
-}
-
 export interface StatusListRow {
   list_id: string
   issuer_did: string
@@ -2221,7 +2212,6 @@ export interface StatusListRow {
 export interface CredentialBundle {
   format_version: string
   credentials: VerifiableCredential[]
-  key_registry: KeyRegistryRow[]
   status_lists: StatusListRow[]
   status_list_credentials?: VerifiableCredential[]
   /** The coverage statements the credentials' integrity assertions name. */

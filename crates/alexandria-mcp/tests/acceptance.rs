@@ -274,14 +274,14 @@ async fn every_credential_failure_is_told_apart_and_none_is_called_valid() {
                 "revoked on a status list this tool cannot see — reported as unknown, never as good",
         },
         Vector {
-            file: "08-rotated-issuer-key",
+            file: "08-did-key-ignores-registry",
             credential: include_str!(
-                "../../alexandria-verify/tests/vectors/08-rotated-issuer-key.json"
+                "../../alexandria-verify/tests/vectors/08-did-key-ignores-registry.json"
             ),
-            signature_valid: false,
+            signature_valid: true,
             expired: false,
             subject_bound: true,
-            note: "signed with a rotated key; without the registry the honest answer is no",
+            note: "a did:key is its key; the same answer with or without registry state",
         },
         Vector {
             file: "09-expired-permissive-policy",

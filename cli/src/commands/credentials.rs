@@ -111,10 +111,9 @@ pub enum CredentialsCommand {
 
         /// Verify as of this moment (ISO 8601 UTC), rather than now.
         ///
-        /// Changes three things: whether a credential had expired, whether a
-        /// suspension window was still open, and which issuer key was current
-        /// — so a credential signed before a key rotation still verifies when
-        /// checked at a time when that key was valid.
+        /// Changes whether a credential had expired and whether a suspension
+        /// window was still open. The issuer key does not depend on time: a
+        /// `did:key` is its key.
         #[arg(long)]
         at: Option<String>,
     },

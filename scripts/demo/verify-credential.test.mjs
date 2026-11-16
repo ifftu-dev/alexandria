@@ -18,7 +18,7 @@ function contextOf(v) {
   const statusLists = {}
   for (const [id, hex] of Object.entries(v.store?.statusLists ?? {})) statusLists[id] = new Uint8Array(Buffer.from(hex, 'hex'))
   const keyRegistry = (v.store?.keyRegistry ?? []).map((k) => ({
-    did: k.did, key_id: k.keyId, public_key_hex: k.publicKeyHex, valid_from: k.validFrom, valid_until: k.validUntil ?? null,
+    did: k.did, key_id: k.keyId, public_key_hex: k.publicKeyHex,
   }))
   return { now: new Date(v.verificationTime), keyRegistry, statusLists }
 }

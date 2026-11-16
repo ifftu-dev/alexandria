@@ -235,7 +235,7 @@ struct ShareStore<'a> {
 }
 
 impl VerificationStore for ShareStore<'_> {
-    fn key_at(&self, _: &Did, _: &str) -> StoreLookup<KeyRegistryEntry> {
+    fn registered_key(&self, _: &Did) -> StoreLookup<KeyRegistryEntry> {
         StoreLookup::Missing
     }
 

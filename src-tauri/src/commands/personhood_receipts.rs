@@ -145,30 +145,6 @@ mod implementation {
         ))
     }
 
-    fn current_account(db: &rusqlite::Connection, account: &SigningKey) -> Result<(), String> {
-        let did = alexandria_verify::did::did_from_verifying_key(&account.verifying_key());
-        let time = crate::clock::now_rfc3339();
-        let current = crate::crypto::key_registry::resolve_key_at(db, &did, &time)
-            .map_err(|e| e.to_string())?;
-        if let Some(entry) = current {
-            if entry.public_key_bytes != account.verifying_key().as_bytes() {
-                return Err("Account signing key is no longer current".into());
-            }
-        } else {
-            let registered: bool = db
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM key_registry WHERE did = ?1)",
-                    [&did.0],
-                    |row| row.get(0),
-                )
-                .map_err(|e| e.to_string())?;
-            if registered {
-                return Err("Account has no currently valid registered key".into());
-            }
-        }
-        Ok(())
-    }
-
     pub async fn prepare(state: State<'_, AppState>) -> Result<String, String> {
         let account = account(&state).await?;
         let (policy, verifier) = policy(&account)?;
@@ -194,7 +170,6 @@ mod implementation {
                 lease.clone(),
                 "personhood.prepare",
                 move |db| {
-                    current_account(db.conn(), &account)?;
                     lease.with_current(|| {
                         store::prepare(db.conn(), lease.session_id().as_str(), &challenge)
                     })
@@ -237,7 +212,6 @@ mod implementation {
                 lease.clone(),
                 "personhood.pending",
                 move |db| {
-                    current_account(db.conn(), &account)?;
                     store::pending(
                         db.conn(),
                         lease.session_id().as_str(),
@@ -271,7 +245,6 @@ mod implementation {
                 lookup_lease.clone(),
                 "personhood.retry",
                 move |db| {
-                    current_account(db.conn(), &lookup_account)?;
                     store::existing(
                         db.conn(),
                         lookup_lease.session_id().as_str(),
@@ -349,7 +322,6 @@ mod implementation {
                         .conn()
                         .unchecked_transaction()
                         .map_err(|e| e.to_string())?;
-                    current_account(&tx, &account)?;
                     let receipt = store::consume(
                         &tx,
                         lease.session_id().as_str(),
@@ -405,7 +377,6 @@ mod implementation {
                 state.profile_lease(),
                 "personhood.list",
                 move |db| {
-                    current_account(db.conn(), &account)?;
                     store::receipts(db.conn(), &did, &policy.network_id)?
                         .into_iter()
                         .map(|receipt| {
@@ -417,20 +388,6 @@ mod implementation {
                 },
             )
             .await
-    }
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-        #[test]
-        fn expired_registered_key_does_not_fall_back_to_did_key() {
-            let db = crate::db::Database::open_in_memory().unwrap();
-            db.run_migrations().unwrap();
-            let account = SigningKey::from_bytes(&[1; 32]);
-            current_account(db.conn(), &account).unwrap();
-            let did = alexandria_verify::did::did_from_verifying_key(&account.verifying_key()).0;
-            db.conn().execute("INSERT INTO key_registry(did, key_id, public_key_hex, valid_from, valid_until) VALUES (?1,'test',?2,'2000-01-01T00:00:00Z','2001-01-01T00:00:00Z')", rusqlite::params![did,hex::encode(account.verifying_key().as_bytes())]).unwrap();
-            assert!(current_account(db.conn(), &account).is_err());
-        }
     }
 }
 

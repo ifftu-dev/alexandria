@@ -109,10 +109,9 @@ async fn did_docs_and_status_lists_retained_for_verification() {
     let db = new_test_db();
     db.conn()
         .execute(
-            "INSERT INTO key_registry \
-             (did, key_id, public_key_hex, valid_from) \
-             VALUES ('did:key:zI', 'key-1', 'ab', '2026-04-13T00:00:00Z')",
-            [],
+            "INSERT INTO key_registry (did, key_id, public_key_hex) \
+             VALUES ('did:web:issuer.example', 'key-1', ?1)",
+            ["ab".repeat(32)],
         )
         .unwrap();
     db.conn()

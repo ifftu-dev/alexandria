@@ -252,7 +252,6 @@ pub fn credential_for_witness_tx(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::did::did_from_verifying_key;
     use crate::db::Database;
     use ed25519_dalek::SigningKey;
 
@@ -442,46 +441,6 @@ mod tests {
         assert_eq!(
             row_count, 1,
             "must use the stored issuance even with a stale caller snapshot"
-        );
-    }
-
-    #[test]
-    fn a_rotated_issuer_self_issues_under_its_own_did() {
-        let db = test_db();
-        let original = SigningKey::from_bytes(&[3u8; 32]);
-        let did = did_from_verifying_key(&original.verifying_key());
-        let rotated = SigningKey::from_bytes(&[4u8; 32]);
-        crate::crypto::key_registry::rotate_key(db.conn(), &did, &rotated).unwrap();
-        let now = crate::clock::now_rfc3339();
-        let issuer =
-            crate::credentials::Issuer::rotated(db.conn(), did.clone(), rotated.clone(), &now)
-                .unwrap();
-        // The mint was signed by the key the DID holds now.
-        let obs = CompletionObservation {
-            policy_id: "01".repeat(28),
-            asset_name_hex: "02".repeat(16),
-            tx_hash: "03".repeat(32),
-            subject_pubkey: hex::encode(rotated.verifying_key().as_bytes()),
-            course_id: "04".repeat(16),
-            completion_root: "05".repeat(32),
-            completion_time: "2026-04-24T12:00:00Z".into(),
-            credential_id: None,
-            observed_at: "2026-04-24 12:00:00".into(),
-            issued_at: None,
-        };
-        seed_observation(&db, &obs);
-        let id = issue_for_observation(db.conn(), &issuer, &obs).unwrap();
-        let (issuer_did, subject_did): (String, String) = db
-            .conn()
-            .query_row(
-                "SELECT issuer_did, subject_did FROM credentials WHERE id = ?1",
-                [&id],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(
-            (issuer_did.as_str(), subject_did.as_str()),
-            (did.as_str(), did.as_str())
         );
     }
 

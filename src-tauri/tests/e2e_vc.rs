@@ -8,12 +8,12 @@
 //! Structure: the top-level module is the test binary; each sub-module
 //! below mirrors one scenario area of the plan:
 //!
-//!   - `did` — §4.1, §5.1, §5.3: DID derivation, rotation, historical verify
+//!   - `did` — §4.1, §5.1: DID derivation; a did:key resolves to its own key
 //!   - `vc_issue_verify` — §7, §9, §10, §11, §13: issue → verify → revoke
 //!   - `aggregation` — §14: weighted mean, saturating confidence, levels
 //!   - `antigaming` — §15: clustering, z-score, re-issuance dedup
 //!   - `anchor` — §12.3: auto-anchor credential hash to Cardano
-//!   - `p2p_did_status` — two-node: DID doc + status list propagation
+//!   - `p2p_did_status` — two-node: DID announcement + status list propagation
 //!   - `p2p_vc_fetch` — pull-based credential retrieval + authority
 //!   - `p2p_survival` — subject offline, PinBoard pinner serves
 //!   - `pinning` — 5-tier eviction precedence
