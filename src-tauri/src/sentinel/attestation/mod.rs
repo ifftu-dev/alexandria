@@ -107,6 +107,47 @@ pub fn profile_trust_inputs() -> &'static AttestationTrust {
     INPUTS.get_or_init(|| TrustConfig::from_profile().inputs())
 }
 
+/// Obtains platform evidence over a credential's binding digest at issuance
+/// (the port issuance goes through; tests supply a fake).
+///
+/// `record` is the session's stored attestation. A proof is, on iOS, a
+/// standard-base64 assertion from the session's attested key whose client
+/// data is the 32 digest bytes; on Android, a Play Integrity token requested
+/// with the digest as nonce. `Err` says why none could be obtained; issuance
+/// then carries the session's evidence as session-bound.
+pub trait BindingAttester {
+    fn bind(
+        &self,
+        session_id: &str,
+        record: &DeviceAttestation,
+        digest: &[u8; 32],
+    ) -> Result<String, String>;
+}
+
+/// This device's own platform ([`native::bind_digest`]). A paired phone's
+/// record needs the phone, which this attester cannot reach.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NativeAttester;
+
+impl BindingAttester for NativeAttester {
+    fn bind(
+        &self,
+        _session_id: &str,
+        record: &DeviceAttestation,
+        digest: &[u8; 32],
+    ) -> Result<String, String> {
+        if record.companion.is_some() {
+            return Err("the paired phone is no longer linked to this session".into());
+        }
+        let key_id = match &record.payload {
+            AttestationPayload::AppAttest { key_id_b64, .. } => Some(key_id_b64.as_str()),
+            AttestationPayload::PlayIntegrity { .. } => None,
+        };
+        native::bind_digest(key_id, digest)?
+            .ok_or_else(|| "this device cannot produce attestation evidence".into())
+    }
+}
+
 /// The session columns the assurance decision reads.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionAttestationFacts {

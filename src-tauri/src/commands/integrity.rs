@@ -441,7 +441,7 @@ pub async fn integrity_end_session(
         None => None,
     };
     let closing = session_id.clone();
-    state
+    let (session, purpose) = state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
@@ -457,12 +457,33 @@ pub async fn integrity_end_session(
                         )
                         .map_err(|e| e.to_string())?;
                 }
-                finish_session(db.conn(), &session_id)
+                let session = finish_session(db.conn(), &session_id)?;
+                let purpose: String = db
+                    .conn()
+                    .query_row(
+                        "SELECT purpose FROM integrity_sessions WHERE id = ?1",
+                        params![session_id],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok((session, purpose))
             },
         )
-        .await
-        .inspect(|_| companion.close(&closing))
+        .await?;
+    // An assessment is graded after monitoring ends, and grading asks a
+    // paired phone for evidence over the credential: its link stays up for
+    // that, within a bound.
+    if purpose == "assessment" {
+        companion.close_after(&closing, COMPANION_ISSUANCE_WAIT);
+    } else {
+        companion.close(&closing);
+    }
+    Ok(session)
 }
+
+/// How long a paired phone's link outlives the end of an assessment session,
+/// for grading to ask it for evidence over the credential.
+const COMPANION_ISSUANCE_WAIT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
 fn finish_session(
     connection: &rusqlite::Connection,

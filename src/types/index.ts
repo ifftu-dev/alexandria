@@ -2678,7 +2678,18 @@ export interface GradeResult {
   score: number
   passed: boolean
   credential_id: string | null
+  /** What attestation evidence the credential issued by this grading
+   *  carries. Absent when nothing was issued. */
+  attestation_evidence?: AttestationEvidenceBinding
 }
+
+/** Device attestation evidence in an issued credential: none, bound to this
+ *  credential, or only the session's evidence (and why it could not be
+ *  bound). */
+export type AttestationEvidenceBinding =
+  | { binding: 'none' }
+  | { binding: 'credential' }
+  | { binding: 'session'; reason: string }
 
 /** Where an attempt's follow-up probes come from (assessment or role policy). */
 export type ProbePolicy = 'none' | 'reseed' | 'authored' | 'plugin' | 'llm'

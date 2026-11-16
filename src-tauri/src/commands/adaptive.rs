@@ -512,6 +512,7 @@ pub fn finalize_adaptive_impl(
     )?;
 
     let mut credential_id = None;
+    let mut attestation_evidence = None;
     if passed {
         // Carry the per-item reproducibility triples and the ability estimate
         // into the credential, same shape as the fixed path.
@@ -555,8 +556,21 @@ pub fn finalize_adaptive_impl(
             integrity_session_id: integrity_session_id.clone(),
             integrity_policy: None,
         };
-        let vc = crate::credentials::issue(conn, issuer, &req, now).map_err(|e| e.to_string())?;
-        credential_id = Some(vc.id.ok_or("issued assessment credential has no ID")?);
+        let issued = crate::credentials::issue_with(
+            conn,
+            issuer,
+            &req,
+            now,
+            &crate::credentials::EvidenceSource::native(),
+        )
+        .map_err(|e| e.to_string())?;
+        credential_id = Some(
+            issued
+                .credential
+                .id
+                .ok_or("issued assessment credential has no ID")?,
+        );
+        attestation_evidence = Some(issued.evidence);
     }
 
     conn.execute(
@@ -575,6 +589,7 @@ pub fn finalize_adaptive_impl(
         score,
         passed,
         credential_id,
+        attestation_evidence,
     })
 }
 

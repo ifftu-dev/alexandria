@@ -5,6 +5,8 @@
 //! owns the rest, and the credential commands are thin wrappers over it:
 //!
 //! - [`issue`]: issue a credential, gated on its integrity session.
+//! - [`evidence`]: the session's attestation evidence, bound to the
+//!   credential when the platform allows.
 //! - [`issuer`]: the [`Issuer`], a signing key and its DID as one value.
 //! - [`status_list`]: revocation status lists and their publication.
 //! - [`lifecycle`]: revoke, suspend and reinstate.
@@ -18,6 +20,7 @@
 pub mod auto;
 pub mod bundle;
 mod error;
+pub mod evidence;
 pub mod issue;
 pub mod issuer;
 pub mod lifecycle;
@@ -25,7 +28,8 @@ pub mod status_list;
 pub mod store;
 
 pub use error::{CredentialError, PolicyViolation, StatusChange, SupersessionRequires};
-pub use issue::{issue, IssuancePolicy, IssueCredentialRequest};
+pub use evidence::{EvidenceBinding, EvidenceSource};
+pub use issue::{issue, issue_with, IssuancePolicy, IssueCredentialRequest, Issued};
 pub use issuer::Issuer;
 
 #[cfg(test)]

@@ -49,6 +49,9 @@ const PENDING_TRANSLATION = [
   // Sentinel probes after an attempt (trust profiles ticket 07): English-only
   // until the next learner translation pass; renders via the i18n fallback.
   'learn.assessment.probe',
+  // Session-bound attestation note on the assessment result (credential
+  // trust ticket 06): English-only until the next learner translation pass.
+  'learn.assessment.sessionBoundEvidence',
   // Jev goal entry: English fallback pending the next learner translation pass.
   'goals.picker.learningGoal',
   'goals.picker.goalPlaceholder',

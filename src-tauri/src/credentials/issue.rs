@@ -9,6 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 // the rest of the codebase had moved to v2.
 use alexandria_verify::vc::context::W3C_VC_V2;
 
+use super::evidence::{EvidenceBinding, EvidenceSource};
 use super::{status_list, CredentialError, Issuer, PolicyViolation, SupersessionRequires};
 use crate::crypto::did::Did;
 use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
@@ -350,15 +351,35 @@ fn coverage_related_resource(
     )])
 }
 
-/// Pure-function issuance pipeline. Allocates the next status-list
-/// slot, builds the VC envelope, signs it, persists both the signed
-/// VC and its status-list slot, and returns the signed credential.
+/// A signed credential and what attestation evidence it carries.
+#[derive(Debug, Clone)]
+pub struct Issued {
+    pub credential: VerifiableCredential,
+    pub evidence: EvidenceBinding,
+}
+
+/// [`issue_with`] this build's trust inputs and this device's own platform
+/// as the evidence source ([`EvidenceSource::native`]).
 pub fn issue(
     conn: &Connection,
     issuer: &Issuer,
     req: &IssueCredentialRequest,
     now: &str,
 ) -> Result<VerifiableCredential, CredentialError> {
+    issue_with(conn, issuer, req, now, &EvidenceSource::native()).map(|i| i.credential)
+}
+
+/// Pure-function issuance pipeline. Allocates the next status-list
+/// slot, builds the VC envelope, embeds the bound session's attestation
+/// evidence (obtained through `evidence`), signs it, persists both the
+/// signed VC and its status-list slot, and returns the signed credential.
+pub fn issue_with(
+    conn: &Connection,
+    issuer: &Issuer,
+    req: &IssueCredentialRequest,
+    now: &str,
+    evidence: &EvidenceSource<'_>,
+) -> Result<Issued, CredentialError> {
     let (issuer_key, issuer_did) = (issuer.key(), issuer.did());
     if !req.subject.as_str().starts_with("did:") {
         return Err(CredentialError::SubjectNotDid);
@@ -406,12 +427,8 @@ pub fn issue(
     // policy embeds the attestation but gates on nothing.
     let integrity = match &req.integrity_session_id {
         Some(session_id) => {
-            let (assertion, facts) = build_integrity_assertion(
-                conn,
-                session_id,
-                now,
-                &crate::sentinel::attestation::TrustConfig::from_profile(),
-            )?;
+            let (assertion, facts) =
+                build_integrity_assertion(conn, session_id, now, &evidence.trust)?;
             if let Some(policy) = &req.integrity_policy {
                 policy.evaluate(&assertion, &facts)?;
             }
@@ -425,7 +442,7 @@ pub fn issue(
         }
     };
 
-    let vc = VerifiableCredential {
+    let mut vc = VerifiableCredential {
         context: vec![W3C_VC_V2.into()],
         id: Some(credential_id.clone()),
         type_: vec!["VerifiableCredential".into(), type_name.to_string()],
@@ -441,6 +458,8 @@ pub fn issue(
         evidence: Vec::new(),
         proof: Proof::unsigned(now.to_string()),
     };
+    // Attestation evidence over the finished content, before signing.
+    let evidence_binding = super::evidence::attach(conn, &mut vc, evidence)?;
     let signed = sign_credential(
         UnsignedCredential { credential: vc },
         issuer_key,
@@ -522,7 +541,10 @@ pub fn issue(
         log::warn!("reputation update failed for {credential_id}: {e}");
     }
 
-    Ok(signed)
+    Ok(Issued {
+        credential: signed,
+        evidence: evidence_binding,
+    })
 }
 
 #[cfg(test)]
@@ -681,8 +703,9 @@ mod tests {
         let verified =
             verify_credential_db(db.conn(), &stored, NOW, &VerificationPolicy::default());
         assert!(verified.valid_signature);
-        // No evidence is carried yet: the attestation is not supplied and the
-        // verified level is local, and the credential is accepted as before.
+        // An unattested session carries no evidence: the attestation is not
+        // supplied, the verified level is local, and the credential is
+        // accepted as before.
         assert_eq!(
             verified.attestation,
             alexandria_verify::attestation::AttestationOutcome::NotSupplied

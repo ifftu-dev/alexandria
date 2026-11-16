@@ -536,4 +536,30 @@ describe('question rendering', () => {
     await flushPromises()
     expect(wrapper.get('[data-testid="result-skill"]').text()).toBe('Big-O Analysis')
   })
+
+  it('tells the learner when the credential could only carry session-bound evidence', async () => {
+    const graded: GradeResult = {
+      score: 1,
+      passed: true,
+      credential_id: 'credential-1',
+      attestation_evidence: { binding: 'session', reason: 'the paired phone is no longer linked to this session' },
+    }
+    mocks.invoke.mockImplementation(async (command: string) => (command === 'assessment_recover' ? graded : null))
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="session-bound-evidence"]').exists()).toBe(true)
+  })
+
+  it('says nothing about evidence when the credential is bound to it', async () => {
+    const graded: GradeResult = {
+      score: 1,
+      passed: true,
+      credential_id: 'credential-1',
+      attestation_evidence: { binding: 'credential' },
+    }
+    mocks.invoke.mockImplementation(async (command: string) => (command === 'assessment_recover' ? graded : null))
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="session-bound-evidence"]').exists()).toBe(false)
+  })
 })
