@@ -88,6 +88,9 @@ const PENDING_TRANSLATION = [
   'credentials.detail.trust',
   // Local status-evidence limitation note. English-only pending a translate pass.
   'credentials.detail.statusEvidence',
+  // Suspension check in the proof panel (credential trust ticket 15).
+  // English-only pending a translate pass.
+  'credentials.detail.suspended',
   // Exact course-completion policy and manual endorsement exchange. English
   // fallback is temporary pending the next instructor/learner translation pass.
   'instructor.compose.policy',

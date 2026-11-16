@@ -436,6 +436,17 @@ fn run_verify(bundle_path: &Path, at: Option<&str>) -> Result<()> {
         output::warning(&format!("{id}: {}", reasons.join(", ")));
     }
 
+    // What each credential's provenance and suspension are, in plain words.
+    output::blank();
+    for (result, view) in report.results.iter().zip(&report.trust) {
+        let id = if result.credential_id.is_empty() {
+            "(no envelope id)"
+        } else {
+            &result.credential_id
+        };
+        output::kv(id, &trust_summary(view));
+    }
+
     output::blank();
     if report.accepted == report.total {
         output::success("Every credential verifies offline.");
@@ -457,6 +468,47 @@ fn run_verify(bundle_path: &Path, at: Option<&str>) -> Result<()> {
     output::emit(&report)
 }
 
+/// One credential's provenance and suspension as the bundle view states
+/// them: exactly one of self-reported, device-attested and verified, or
+/// issued by a named organisation, then the suspension state.
+pub(crate) fn trust_summary(
+    view: &app_lib::domain::credential_trust::CredentialTrustView,
+) -> String {
+    use app_lib::domain::credential_trust::{
+        AttestationOutcome, Platform, Provenance, SuspensionState,
+    };
+
+    let platform = |platform: Platform| match platform {
+        Platform::Ios => "Apple",
+        Platform::Android => "Android",
+    };
+    let provenance = match &view.provenance {
+        Some(Provenance::Organisation { name, domain }) => format!("Issued by {name} ({domain})"),
+        Some(Provenance::DeviceAttested { platform: p }) => {
+            format!("Device-attested and verified ({})", platform(*p))
+        }
+        Some(Provenance::SelfReported { attestation }) => match attestation {
+            AttestationOutcome::VerifiedSessionBound { platform: p } => format!(
+                "Self-reported ({} attestation covers the session, not this credential)",
+                platform(*p)
+            ),
+            AttestationOutcome::Unverifiable { platform: p } => format!(
+                "Self-reported ({} attestation evidence cannot be checked here)",
+                platform(*p)
+            ),
+            _ => "Self-reported".to_string(),
+        },
+        None => "Not verified".to_string(),
+    };
+    let suspension = match view.suspension {
+        SuspensionState::NotSuspended => "not suspended",
+        SuspensionState::Suspended => "suspended",
+        SuspensionState::Unknown { .. } => "suspension unknown",
+        SuspensionState::NoList => "names no suspension list",
+    };
+    format!("{provenance} · {suspension}")
+}
+
 /// Verification failures are a result, not a crash — the command still exits
 /// 0 and reports the counts, so a caller can act on `allAccepted`.
 #[cfg(test)]
@@ -468,6 +520,54 @@ mod tests {
     struct TestCli {
         #[command(subcommand)]
         cmd: CredentialsCommand,
+    }
+
+    fn view(
+        provenance: serde_json::Value,
+        suspension: &str,
+    ) -> app_lib::domain::credential_trust::CredentialTrustView {
+        serde_json::from_value(serde_json::json!({
+            "trust": { "state": "invalid", "reasons": ["suspended"] },
+            "provenance": provenance,
+            "issuer": null,
+            "organisation": null,
+            "suspension": { "state": suspension },
+            "coverage_statement": null,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_bundle_view_states_one_provenance_and_the_suspension() {
+        assert_eq!(
+            trust_summary(&view(
+                serde_json::json!({ "kind": "organisation", "name": "Org Ltd", "domain": "org.example" }),
+                "suspended",
+            )),
+            "Issued by Org Ltd (org.example) · suspended"
+        );
+        assert_eq!(
+            trust_summary(&view(
+                serde_json::json!({ "kind": "device_attested", "platform": "android" }),
+                "not_suspended",
+            )),
+            "Device-attested and verified (Android) · not suspended"
+        );
+        assert_eq!(
+            trust_summary(&view(
+                serde_json::json!({
+                    "kind": "self_reported",
+                    "attestation": { "outcome": "verified_session_bound", "platform": "ios" },
+                }),
+                "no_list",
+            )),
+            "Self-reported (Apple attestation covers the session, not this credential) · \
+             names no suspension list"
+        );
+        assert_eq!(
+            trust_summary(&view(serde_json::Value::Null, "not_suspended")),
+            "Not verified · not suspended"
+        );
     }
 
     #[test]

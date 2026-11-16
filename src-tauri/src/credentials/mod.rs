@@ -12,6 +12,7 @@
 //! - [`lifecycle`]: revoke, suspend and reinstate.
 //! - [`store`]: read stored credentials; decode untrusted payloads.
 //! - [`bundle`]: survivability bundles and offline verification.
+//! - [`trust`]: what a credential view states about its trust.
 //! - [`auto`]: self-issued credentials for observed completion mints.
 //!
 //! Every function here returns [`CredentialError`]; commands convert it to
@@ -26,6 +27,7 @@ pub mod issuer;
 pub mod lifecycle;
 pub mod status_list;
 pub mod store;
+pub mod trust;
 
 pub use error::{CredentialError, PolicyRefusal, StatusChange, SupersessionRequires};
 pub use evidence::{EvidenceBinding, EvidenceSource};

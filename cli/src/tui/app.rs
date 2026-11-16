@@ -1549,6 +1549,16 @@ impl App {
             lines.push((id, reasons.join(", ")));
         }
 
+        // Each credential's provenance and suspension, in plain words.
+        for (result, view) in report.results.iter().zip(&report.trust) {
+            let id = if result.credential_id.is_empty() {
+                "(no id)".to_string()
+            } else {
+                result.credential_id.clone()
+            };
+            lines.push((id, crate::commands::credentials::trust_summary(view)));
+        }
+
         if report.revocation_unknown {
             lines.push((
                 "Note".into(),

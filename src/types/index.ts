@@ -2277,6 +2277,41 @@ export type CredentialTrust =
     attestation: AttestationOutcome
   }
 
+/**
+ * Mirrors `domain::credential_trust::Provenance`: exactly one of the three
+ * things a reader can rely on for a verified credential, strongest first.
+ */
+export type Provenance =
+  | { kind: 'organisation'; name: string; domain: string }
+  | { kind: 'device_attested'; platform: AttestationPlatform }
+  /** `attestation` says what the credential's evidence, if any, did prove. */
+  | { kind: 'self_reported'; attestation: AttestationOutcome }
+
+/** Mirrors `domain::credential_trust::SuspensionState`, read from the suspension list. */
+export type SuspensionState =
+  | { state: 'not_suspended' }
+  | { state: 'suspended' }
+  | { state: 'unknown'; reason: VerificationPendingReason }
+  | { state: 'no_list' }
+
+/**
+ * Mirrors `domain::credential_trust::CredentialTrustView`, what
+ * `get_credential_trust` returns: what a credential view states about trust.
+ */
+export interface CredentialTrustView {
+  /** Classification under the default policy, which rejects a suspended credential. */
+  trust: CredentialTrust
+  /** Judged with suspension set aside; `null` while invalid for another reason or pending. */
+  provenance: Provenance | null
+  /** Who signed the credential, when that is not its subject. */
+  issuer: string | null
+  /** Organisation backing of the issuer key, when it was judged. */
+  organisation: OrganisationBacking | null
+  suspension: SuspensionState
+  /** The coverage statement the integrity assertion names, when this build resolves it. */
+  coverage_statement: CoverageStatement | null
+}
+
 // --- Survivability bundle (§20.4) ----------------------------------------
 
 export interface StatusListRow {

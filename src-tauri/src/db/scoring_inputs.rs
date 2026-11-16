@@ -402,7 +402,9 @@ pub(crate) mod test_support {
         p256_key(b"scoring-test-play-signer")
     }
 
-    fn trust() -> &'static AttestationTrust {
+    /// The synthetic Play Integrity trust inputs [`store_attested_credential`]
+    /// signs for.
+    pub(crate) fn trust() -> &'static AttestationTrust {
         static TRUST: OnceLock<AttestationTrust> = OnceLock::new();
         TRUST.get_or_init(|| {
             let (decryption_key_b64, verification_key_b64) = play_keys_b64(&KEK, &play_signer());

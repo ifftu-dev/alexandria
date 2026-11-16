@@ -175,28 +175,141 @@ const statement = {
   certification: null, certified_signals: {},
 }
 
-describe('CredentialDetail coverage', () => {
+describe('CredentialDetail integrity', () => {
   beforeEach(() => {
     Object.values(mocks).forEach(m => m.mockReset())
   })
 
-  it('names the profile and rung and shows the coverage statement the credential names', async () => {
-    mocks.coverageStatement.mockResolvedValue(statement)
-    const wrapper = await open({ ...credential, integrity })
-    expect(mocks.coverageStatement).toHaveBeenCalledWith('blake3:abc')
-    const section = wrapper.get('[data-integrity-section]')
+  it('names the profile, rung, signals and follow-up questions of the session', async () => {
+    const section = (await open({ ...credential, integrity })).get('[data-integrity-section]')
     expect(section.text()).toContain('sentinel.trust.profile.core')
     expect(section.text()).toContain('sentinel.trust.rung.probed')
     expect(section.text()).toContain('sentinel.trust.signal.camera')
     expect(section.text()).toContain('credentials.detail.probeValue')
+  })
+})
+
+// What the provenance section states comes from the trust command alone: the
+// page renders the view, it never classifies the credential itself.
+const trustView = (over: Record<string, unknown> = {}) => ({
+  trust: { state: 'verified_self_claim', endorsement: { outcome: 'not_supplied' }, attestation: { outcome: 'not_supplied' } },
+  provenance: { kind: 'self_reported', attestation: { outcome: 'not_supplied' } },
+  issuer: null,
+  organisation: null,
+  suspension: { state: 'not_suspended' },
+  coverage_statement: null,
+  ...over,
+})
+
+async function openWithTrust(view: Record<string, unknown>, subject: Record<string, unknown> = credential) {
+  mocks.get.mockResolvedValue(subject)
+  mocks.verify.mockResolvedValue(verification)
+  mocks.trust.mockResolvedValue(view)
+  mocks.anchor.mockResolvedValue(null)
+  const wrapper = mount(CredentialDetail, { global: { stubs, mocks: { $t: (k: string) => k } } })
+  await flushPromises()
+  return wrapper.get('[data-trust-section]')
+}
+
+describe('CredentialDetail provenance', () => {
+  beforeEach(() => {
+    Object.values(mocks).forEach(m => m.mockReset())
+  })
+
+  it('says a credential without bound evidence is self-reported, from the holder\'s own device', async () => {
+    const section = await openWithTrust(trustView())
+    expect(section.get('[data-provenance]').text()).toBe('credentials.detail.trustProvenance.selfReported')
+    expect(section.text()).toContain('credentials.detail.trustProvenance.selfReportedBody')
+    expect(section.text()).not.toContain('credentials.detail.trustProvenance.deviceAttested')
+  })
+
+  it('says why evidence that covered only the session still reads as self-reported', async () => {
+    const section = await openWithTrust(trustView({
+      provenance: { kind: 'self_reported', attestation: { outcome: 'verified_session_bound', platform: 'ios' } },
+    }))
+    expect(section.get('[data-provenance]').text()).toBe('credentials.detail.trustProvenance.selfReported')
+    expect(section.text()).toContain('credentials.detail.trustProvenance.sessionBound')
+  })
+
+  it('says what device attestation proves and what it does not', async () => {
+    const section = await openWithTrust(trustView({
+      provenance: { kind: 'device_attested', platform: 'android' },
+    }))
+    expect(section.get('[data-provenance]').text()).toBe('credentials.detail.trustProvenance.deviceAttested')
+    expect(section.text()).toContain('credentials.detail.trustProvenance.deviceAttestedBody')
+    expect(section.text()).toContain('credentials.detail.trustProvenance.deviceAttestedLimits')
+  })
+
+  it('names the organisation and domain that list the signing key', async () => {
+    const section = await openWithTrust(trustView({
+      trust: { state: 'verified_issuer_signed', issuer: 'did:key:z6MkOrg', attestation: { outcome: 'not_supplied' }, organisation: { outcome: 'verified', name: 'Org Ltd', domain: 'org.example' } },
+      provenance: { kind: 'organisation', name: 'Org Ltd', domain: 'org.example' },
+      issuer: 'did:key:z6MkOrg',
+      organisation: { outcome: 'verified', name: 'Org Ltd', domain: 'org.example' },
+    }))
+    expect(section.get('[data-provenance]').text()).toBe(
+      'credentials.detail.trustProvenance.organisation {"name":"Org Ltd","domain":"org.example"}',
+    )
+  })
+
+  it('says when the domain no longer lists the key that signed it', async () => {
+    const section = await openWithTrust(trustView({
+      trust: { state: 'verified_issuer_signed', issuer: 'did:key:z6MkOrg', attestation: { outcome: 'not_supplied' }, organisation: { outcome: 'key_not_listed' } },
+      issuer: 'did:key:z6MkOrg',
+      organisation: { outcome: 'key_not_listed' },
+    }))
+    expect(section.get('[data-provenance]').text()).toBe('credentials.detail.trustProvenance.selfReported')
+    expect(section.text()).toContain('credentials.detail.trustProvenance.signedBy {"issuer":"did:key:z6MkOrg"}')
+    expect(section.text()).toContain('credentials.detail.trustProvenance.keyNotListed')
+  })
+
+  it('states the provenance of a suspended credential and that it is suspended', async () => {
+    const section = await openWithTrust(trustView({
+      trust: { state: 'invalid', reasons: ['suspended'] },
+      suspension: { state: 'suspended' },
+    }))
+    expect(section.get('[data-provenance]').text()).toBe('credentials.detail.trustProvenance.selfReported')
+    expect(section.get('[data-suspension]').text()).toBe('credentials.detail.trustSuspension.suspended')
+  })
+
+  it('says suspension is unknown while the suspension list is missing', async () => {
+    const section = await openWithTrust(trustView({
+      trust: { state: 'pending', reasons: ['suspension_list_missing'] },
+      provenance: null,
+      suspension: { state: 'unknown', reason: 'suspension_list_missing' },
+    }))
+    expect(section.find('[data-provenance]').exists()).toBe(false)
+    expect(section.text()).toContain('credentials.detail.trustState.pending')
+    expect(section.get('[data-suspension]').text()).toBe('credentials.detail.trustSuspension.unknown')
+  })
+
+  it('shows the coverage statement the trust command resolved', async () => {
+    const section = await openWithTrust(trustView({ coverage_statement: statement }), { ...credential, integrity })
+    expect(mocks.coverageStatement).not.toHaveBeenCalled()
     expect(section.get('[data-testid="coverage-statement"]').text()).toContain('a second device out of view')
   })
 
-  it('says when this build does not carry the named statement', async () => {
-    mocks.coverageStatement.mockResolvedValue(null)
-    const wrapper = await open({ ...credential, integrity })
-    const coverage = wrapper.get('[data-testid="coverage-statement"]')
+  it('says when the named coverage statement could not be resolved', async () => {
+    const section = await openWithTrust(trustView(), { ...credential, integrity })
+    const coverage = section.get('[data-testid="coverage-statement"]')
     expect(coverage.text()).toContain('sentinel.trust.coverage.unresolved')
     expect(coverage.text()).toContain('blake3:abc')
+  })
+})
+
+describe('CredentialDetail suspension check', () => {
+  beforeEach(() => {
+    Object.values(mocks).forEach(m => m.mockReset())
+  })
+
+  it('shows suspension as pending, not "no", while the suspension list is missing', async () => {
+    mocks.get.mockResolvedValue(credential)
+    mocks.verify.mockResolvedValue({ ...verification, acceptanceDecision: 'pending', pendingReasons: ['suspension_list_missing'] })
+    mocks.trust.mockResolvedValue(null)
+    mocks.anchor.mockResolvedValue(null)
+    const wrapper = mount(CredentialDetail, { global: { stubs, mocks: { $t: (k: string) => k } } })
+    await flushPromises()
+    const row = wrapper.get('[data-suspended-check]')
+    expect(row.text()).toContain('credentials.value.pending')
   })
 })
