@@ -3,8 +3,9 @@
 //!
 //! The export bundle is a single JSON document carrying everything a
 //! third-party verifier needs to re-check the credentials without any
-//! Alexandria infrastructure: the signed VCs themselves, the historical
-//! key registry, and the revocation status lists.
+//! Alexandria infrastructure: the signed VCs themselves and the revocation
+//! status lists. Issuer keys need no carrying: a `did:key` is its key. A
+//! `key_registry` field in an older bundle is ignored on import.
 //!
 //! Determinism comes from JCS canonicalization — same inputs ⇒
 //! byte-identical bundle, which is what the survivability tests assert
@@ -22,7 +23,6 @@ use crate::domain::vc::{VerifiableCredential, VerificationPendingReason, Verific
 pub struct CredentialBundle {
     pub format_version: String,
     pub credentials: Vec<VerifiableCredential>,
-    pub key_registry: Vec<KeyRegistryRow>,
     pub status_lists: Vec<StatusListRow>,
     /// The same lists as signed `BitstringStatusListCredential` documents,
     /// for the lists this node issues. A verifier that trusts nothing about
@@ -39,16 +39,6 @@ pub struct CredentialBundle {
     /// statement's digest is over its own bytes, so it checks itself.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub coverage_statements: Vec<crate::sentinel::scoring::CoverageStatement>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct KeyRegistryRow {
-    pub did: String,
-    pub key_id: String,
-    pub public_key_hex: String,
-    pub valid_from: String,
-    pub valid_until: Option<String>,
-    pub rotated_by: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -101,8 +91,8 @@ fn bundle_from_payload(
     Ok(Some(bundle))
 }
 
-/// Build a JCS-canonical export bundle of every credential, key
-/// registry row, and status list known to this node.
+/// Build a JCS-canonical export bundle of every credential and status list
+/// known to this node.
 pub fn export(conn: &Connection) -> Result<String, CredentialError> {
     export_signed(conn, None)
 }
@@ -133,22 +123,6 @@ pub fn export_signed(
             anchor_receipts.push(receipt);
         }
     }
-
-    let mut stmt = conn.prepare(
-        "SELECT did, key_id, public_key_hex, valid_from, valid_until, rotated_by \
-         FROM key_registry ORDER BY did, key_id",
-    )?;
-    let key_rows = stmt.query_map([], |r| {
-        Ok(KeyRegistryRow {
-            did: r.get(0)?,
-            key_id: r.get(1)?,
-            public_key_hex: r.get(2)?,
-            valid_from: r.get(3)?,
-            valid_until: r.get(4)?,
-            rotated_by: r.get(5)?,
-        })
-    })?;
-    let key_registry = key_rows.collect::<Result<Vec<_>, _>>()?;
 
     let mut stmt = conn.prepare(
         "SELECT list_id, issuer_did, version, status_purpose, bits, bit_length \
@@ -204,7 +178,6 @@ pub fn export_signed(
     let bundle = CredentialBundle {
         format_version: BUNDLE_FORMAT_VERSION.into(),
         credentials,
-        key_registry,
         status_lists,
         status_list_credentials,
         anchor_receipts,
@@ -448,8 +421,9 @@ pub fn verify_bundle_offline(
 
 /// A [`VerificationStore`] over a credential bundle's own contents.
 ///
-/// A bundle is self-contained: it carries the key registry entries and status
-/// lists needed to check the credentials inside it, and nothing else. So the
+/// A bundle is self-contained: it carries the status lists needed to check the
+/// credentials inside it, and nothing else. Issuer keys come from the issuers'
+/// `did:key` identifiers, so no registry key is ever found here. So the
 /// answer to "is this suspended?" or "is this superseded?" is always no — those
 /// are facts about a local collection, and a bundle is not one.
 ///
@@ -458,7 +432,6 @@ pub fn verify_bundle_offline(
 /// rows — solely because `verify_credential` demanded a `&Connection`. It never
 /// needed a database; it needed four lookups.
 struct BundleStore {
-    keys: Vec<KeyRegistryRow>,
     status_lists: Vec<(String, Vec<u8>)>,
     anchor_receipts: Vec<alexandria_verify::vc::anchor::AnchorReceipt>,
 }
@@ -494,7 +467,6 @@ impl BundleStore {
             status_lists.push((list.list_id.clone(), bits));
         }
         Ok(Self {
-            keys: bundle.key_registry.clone(),
             status_lists,
             anchor_receipts: bundle.anchor_receipts.clone(),
         })
@@ -502,34 +474,11 @@ impl BundleStore {
 }
 
 impl crate::domain::vc::VerificationStore for BundleStore {
-    /// Mirrors the registry query in `crypto::key_registry::resolve_key_at`:
-    /// the entry whose `[valid_from, valid_until)` window contains `at`, latest
-    /// `valid_from` first.
-    fn key_at(
+    fn registered_key(
         &self,
-        did: &alexandria_verify::did::Did,
-        at: &str,
+        _did: &alexandria_verify::did::Did,
     ) -> crate::domain::vc::StoreLookup<alexandria_verify::did::KeyRegistryEntry> {
-        self.keys
-            .iter()
-            .filter(|e| {
-                e.did == did.as_str()
-                    && e.valid_from.as_str() <= at
-                    && e.valid_until.as_deref().is_none_or(|u| u > at)
-            })
-            .max_by(|a, b| a.valid_from.cmp(&b.valid_from))
-            .and_then(|e| {
-                Some(alexandria_verify::did::KeyRegistryEntry {
-                    did: did.clone(),
-                    key_id: e.key_id.clone(),
-                    public_key_bytes: hex::decode(&e.public_key_hex).ok()?,
-                    valid_from: e.valid_from.clone(),
-                    valid_until: e.valid_until.clone(),
-                    rotated_by: e.rotated_by.clone(),
-                })
-            })
-            .map(crate::domain::vc::StoreLookup::Found)
-            .unwrap_or(crate::domain::vc::StoreLookup::Missing)
+        crate::domain::vc::StoreLookup::Missing
     }
 
     fn status_list_bits(&self, list_id: &str) -> crate::domain::vc::StoreLookup<Vec<u8>> {
@@ -1043,6 +992,37 @@ mod tests {
         let (accepted, total) = verify_bundle_offline(&json, NOW).unwrap();
         assert_eq!(total, 1);
         assert_eq!(accepted, 1, "round-tripped credential must verify");
+    }
+
+    /// A `did:key` is its key, so a bundle has no key history to carry.
+    #[test]
+    fn an_exported_bundle_carries_no_key_registry() {
+        let (db, key, _, subject) = setup();
+        credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&export(db.conn()).unwrap()).unwrap();
+        assert!(bundle.get("key_registry").is_none(), "{bundle}");
+    }
+
+    /// A bundle written while rotation existed may still carry registry rows.
+    /// Import ignores them: a row naming another key for the issuer's
+    /// `did:key` changes nothing.
+    #[test]
+    fn a_bundle_carrying_rotation_history_verifies_under_the_embedded_key() {
+        let (db, key, issuer, subject) = setup();
+        credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
+        let mut bundle: serde_json::Value =
+            serde_json::from_str(&export(db.conn()).unwrap()).unwrap();
+        let other = ed25519_dalek::SigningKey::from_bytes(&[42u8; 32]);
+        bundle["key_registry"] = serde_json::json!([{
+            "did": issuer.as_str(),
+            "key_id": "key-2",
+            "public_key_hex": hex::encode(other.verifying_key().as_bytes()),
+            "valid_from": "1970-01-01T00:00:00Z",
+            "valid_until": null,
+            "rotated_by": null,
+        }]);
+        let (accepted, total) = verify_bundle_offline(&bundle.to_string(), NOW).unwrap();
+        assert_eq!((accepted, total), (1, 1));
     }
 
     #[test]

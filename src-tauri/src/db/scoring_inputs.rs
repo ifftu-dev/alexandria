@@ -234,8 +234,7 @@ fn input_fingerprint(
                         ) \
                         ORDER BY l.list_id)), \
                     (SELECT group_concat(entry, ';') FROM ( \
-                        SELECT k.key_id || '|' || k.public_key_hex || '|' || k.valid_from \
-                               || '|' || COALESCE(k.valid_until, '') AS entry \
+                        SELECT k.key_id || '|' || k.public_key_hex AS entry \
                         FROM key_registry k WHERE k.did = c.issuer_did \
                         ORDER BY k.key_id)), \
                     (SELECT group_concat(entry, ';') FROM ( \

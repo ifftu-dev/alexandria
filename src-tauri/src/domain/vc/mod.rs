@@ -20,8 +20,8 @@ use rusqlite::{Connection, OptionalExtension};
 pub struct SqliteVerificationStore<'a>(pub &'a Connection);
 
 impl VerificationStore for SqliteVerificationStore<'_> {
-    fn key_at(&self, did: &Did, at: &str) -> StoreLookup<KeyRegistryEntry> {
-        match crate::crypto::key_registry::resolve_key_at(self.0, did, at) {
+    fn registered_key(&self, did: &Did) -> StoreLookup<KeyRegistryEntry> {
+        match crate::crypto::key_registry::registered_key(self.0, did) {
             Ok(Some(entry)) => StoreLookup::Found(entry),
             Ok(None) => StoreLookup::Missing,
             Err(_) => StoreLookup::Unavailable,
@@ -118,7 +118,7 @@ mod tests {
         let unavailable = Connection::open_in_memory().unwrap();
         let unavailable = SqliteVerificationStore(&unavailable);
         assert!(matches!(
-            unavailable.key_at(&did, "2026-01-01T00:00:00Z"),
+            unavailable.registered_key(&did),
             StoreLookup::Unavailable
         ));
         assert_eq!(
@@ -135,7 +135,7 @@ mod tests {
         db.run_migrations().unwrap();
         let available = SqliteVerificationStore(db.conn());
         assert!(matches!(
-            available.key_at(&did, "2026-01-01T00:00:00Z"),
+            available.registered_key(&did),
             StoreLookup::Missing
         ));
         assert_eq!(available.status_list_bits("missing"), StoreLookup::Missing);

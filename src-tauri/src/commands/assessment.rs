@@ -1871,34 +1871,6 @@ mod tests {
     }
 
     #[test]
-    fn a_rotated_issuer_earns_the_credential_for_its_own_did() {
-        let ctx = setup();
-        let rotated = SigningKey::from_bytes(&[9u8; 32]);
-        crate::crypto::key_registry::rotate_key(ctx.db.conn(), &ctx.did, &rotated).unwrap();
-        // A rotation takes effect at the wall clock; grade after it.
-        let now = crate::clock::now_rfc3339();
-        let issuer =
-            Issuer::rotated(ctx.db.conn(), ctx.did.clone(), rotated.clone(), &now).unwrap();
-        let answers = [answer("q1", &[0]), answer("q2", &[1])];
-        prepare(&ctx, &answers);
-        let result = grade_attempt_impl(&ctx.db, &ctx.engine(), &issuer, "att_1", &answers, &now)
-            .expect("a rotated issuer grades its own attempt");
-        let json: String = ctx
-            .db
-            .conn()
-            .query_row(
-                "SELECT signed_vc_json FROM credentials WHERE id=?1",
-                [result.credential_id.unwrap()],
-                |r| r.get(0),
-            )
-            .unwrap();
-        let vc: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let rotated_did = serde_json::json!(ctx.did.as_str());
-        assert_eq!(vc.pointer("/issuer"), Some(&rotated_did));
-        assert_eq!(vc.pointer("/credentialSubject/id"), Some(&rotated_did));
-    }
-
-    #[test]
     fn submission_freezes_answers_and_requires_terminal_monitoring() {
         let ctx = setup();
         let answers = [answer("q1", &[0]), answer("q2", &[1])];
@@ -1934,11 +1906,6 @@ mod tests {
             NOW
         )
         .is_err());
-        // A key that is not the learner's cannot sign as the learner at all.
-        assert!(matches!(
-            Issuer::rotated(ctx.db.conn(), ctx.did.clone(), other_key, NOW),
-            Err(crate::credentials::CredentialError::NotCurrentKey(_))
-        ));
         let rows: i64 = ctx
             .db
             .conn()

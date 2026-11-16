@@ -1,7 +1,12 @@
-//! §4.1 / §5.1 / §5.3 — DID derivation, rotation, historical verification.
+//! §4.1 / §5.1 — DID derivation, and a `did:key` resolving to its own key.
 
-use super::common::{new_test_db, test_key, TEST_NOW};
-use app_lib::crypto::did::{derive_did_key, resolve_did_key, resolve_key_at, rotate_key};
+use super::common::{new_test_db, test_did, test_key, TEST_NOW};
+use app_lib::crypto::did::{derive_did_key, resolve_did_key};
+use app_lib::domain::vc::{
+    sign::{sign_credential, UnsignedCredential},
+    verify_credential_db, AcceptanceDecision, Claim, Proof, SkillClaim, VerifiableCredential,
+    VerificationPolicy,
+};
 use ed25519_dalek::Signer;
 
 #[tokio::test]
@@ -24,17 +29,51 @@ async fn did_key_resolves_to_original_public_key() {
 }
 
 #[tokio::test]
-async fn rotated_keys_preserve_historical_verification() {
-    // A VC signed under key_v1 at T1 must remain verifiable at T2
-    // after the issuer has rotated to key_v2. Spec §5.3.
+async fn a_registry_row_cannot_change_how_a_did_key_issuer_verifies() {
+    // A did:key is its key. A key_registry row for the issuer's DID naming
+    // another key — stale, or left from the retired rotation feature — must
+    // not change which key the credential is checked against.
     let db = new_test_db();
-    let initial = test_key("issuer");
-    let did = derive_did_key(&initial);
-    let new_key = test_key("issuer-rotated");
-    rotate_key(db.conn(), &did, &new_key).expect("rotate");
+    let issuer_key = test_key("issuer");
+    let issuer = derive_did_key(&issuer_key);
+    db.conn()
+        .execute(
+            "INSERT INTO key_registry (did, key_id, public_key_hex) VALUES (?1, 'key-2', ?2)",
+            rusqlite::params![
+                issuer.as_str(),
+                hex::encode(test_key("issuer-other").verifying_key().as_bytes())
+            ],
+        )
+        .expect("a well-formed registry row");
 
-    let entry = resolve_key_at(db.conn(), &did, TEST_NOW)
-        .expect("lookup")
-        .expect("historical entry exists");
-    assert_eq!(entry.did, did);
+    let unsigned = UnsignedCredential {
+        credential: VerifiableCredential {
+            context: vec!["https://www.w3.org/ns/credentials/v2".into()],
+            id: Some("urn:uuid:did-key-is-its-key".into()),
+            type_: vec!["VerifiableCredential".into(), "FormalCredential".into()],
+            issuer: issuer.clone(),
+            valid_from: TEST_NOW.into(),
+            valid_until: None,
+            credential_subject: Claim::Skill(SkillClaim {
+                skill_id: "skill_did_key".into(),
+                level: 3,
+                score: 0.8,
+                evidence_refs: vec![],
+                rubric_version: None,
+                assessment_method: None,
+                provenance: None,
+            })
+            .into_subject(test_did("subject")),
+            credential_status: None,
+            terms_of_use: None,
+            witness: None,
+            integrity: None,
+            proof: Proof::unsigned(TEST_NOW),
+        },
+    };
+    let signed = sign_credential(unsigned, &issuer_key, &issuer).expect("sign");
+    let result = verify_credential_db(db.conn(), &signed, TEST_NOW, &VerificationPolicy::default());
+    assert!(result.issuer_resolved);
+    assert!(result.valid_signature);
+    assert_eq!(result.acceptance_decision, AcceptanceDecision::Accept);
 }

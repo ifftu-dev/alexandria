@@ -65,7 +65,8 @@ struct Vector {
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct VectorStore {
-    /// Historical issuer keys, hex-encoded, keyed by DID.
+    /// Registered issuer keys, hex-encoded, keyed by DID. Consulted only for
+    /// an issuer whose DID is not self-resolving; a `did:key` ignores it.
     #[serde(default)]
     key_registry: Vec<RegistryRow>,
     /// Status-list bits, hex-encoded, keyed by list id.
@@ -83,28 +84,18 @@ struct RegistryRow {
     did: String,
     key_id: String,
     public_key_hex: String,
-    valid_from: String,
-    valid_until: Option<String>,
 }
 
 impl VerificationStore for VectorStore {
-    fn key_at(&self, did: &Did, at: &str) -> StoreLookup<KeyRegistryEntry> {
+    fn registered_key(&self, did: &Did) -> StoreLookup<KeyRegistryEntry> {
         self.key_registry
             .iter()
-            .filter(|r| {
-                r.did == did.as_str()
-                    && r.valid_from.as_str() <= at
-                    && r.valid_until.as_deref().is_none_or(|u| u > at)
-            })
-            .max_by(|a, b| a.valid_from.cmp(&b.valid_from))
+            .find(|r| r.did == did.as_str())
             .and_then(|r| {
                 Some(KeyRegistryEntry {
                     did: did.clone(),
                     key_id: r.key_id.clone(),
                     public_key_bytes: hex::decode(&r.public_key_hex).ok()?,
-                    valid_from: r.valid_from.clone(),
-                    valid_until: r.valid_until.clone(),
-                    rotated_by: None,
                 })
             })
             .map(StoreLookup::Found)
@@ -434,44 +425,33 @@ fn build_all() -> Vec<(&'static str, Vector)> {
         ));
     }
 
-    // --- key rotation -----------------------------------------------------
+    // --- issuer resolution ----------------------------------------------
     {
-        // Signed with a rotated key while keeping the original DID. did:key
-        // self-resolution yields the OLD key and fails; only the registry entry
-        // for the post-rotation window produces the right one.
-        let rotated = key("vector-issuer-v2");
+        // A did:key is its key. The verifier is handed registry state for the
+        // issuer's DID naming some other key (stale, forged, or left over from
+        // the retired rotation feature): it must not change which key the
+        // signature is checked against.
         let vc = signed(
             skeleton(issuer.clone(), subject.clone(), None),
-            &rotated,
+            &issuer_key,
             &issuer,
         );
         let store = VectorStore {
-            key_registry: vec![
-                RegistryRow {
-                    did: issuer.as_str().to_string(),
-                    key_id: "key-1".into(),
-                    public_key_hex: hex::encode(issuer_key.verifying_key().as_bytes()),
-                    valid_from: "1970-01-01T00:00:00Z".into(),
-                    valid_until: Some("2026-02-01T00:00:00Z".into()),
-                },
-                RegistryRow {
-                    did: issuer.as_str().to_string(),
-                    key_id: "key-2".into(),
-                    public_key_hex: hex::encode(rotated.verifying_key().as_bytes()),
-                    valid_from: "2026-02-01T00:00:00Z".into(),
-                    valid_until: None,
-                },
-            ],
+            key_registry: vec![RegistryRow {
+                did: issuer.as_str().to_string(),
+                key_id: "key-2".into(),
+                public_key_hex: hex::encode(key("vector-issuer-v2").verifying_key().as_bytes()),
+            }],
             ..Default::default()
         };
         let expect = verify_credential(&store, &vc, NOW, &default_policy);
         out.push((
-            "08-rotated-issuer-key",
+            "08-did-key-ignores-registry",
             Vector {
-                description: "The issuer rotated keys and signed with the new one while keeping \
-                              their DID. did:key self-resolution returns the pre-rotation key and \
-                              fails; the registry entry covering the verification time is what \
-                              makes this verify."
+                description: "A did:key issuer, verified with registry state supplied for that \
+                              DID that names a different key. A did:key resolves to the key in \
+                              its identifier, always: the registry entry is ignored and the \
+                              credential verifies under the embedded key."
                     .into(),
                 verification_time: NOW.into(),
                 policy: default_policy.clone(),
@@ -794,6 +774,24 @@ fn the_suite_covers_distinct_failure_modes() {
             "no vector names a version-{version} coverage statement"
         );
     }
+}
+
+/// A `did:key` resolves to the key in its identifier whatever registry state
+/// the verifier holds for it. Asserted against the spec's rule rather than the
+/// implementation's own output.
+#[test]
+fn a_did_key_issuer_resolves_its_embedded_key_despite_registry_state() {
+    let (_, v) = build_all()
+        .into_iter()
+        .find(|(name, _)| *name == "08-did-key-ignores-registry")
+        .expect("the stale-registry vector exists");
+    assert!(
+        !v.store.key_registry.is_empty(),
+        "the vector must supply registry state for the issuer"
+    );
+    assert!(v.expect.issuer_resolved);
+    assert!(v.expect.valid_signature);
+    assert_eq!(v.expect.acceptance_decision, AcceptanceDecision::Accept);
 }
 
 fn regenerate() {

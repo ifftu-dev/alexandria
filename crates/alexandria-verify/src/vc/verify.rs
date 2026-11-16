@@ -3,9 +3,9 @@
 //! Procedure:
 //! 1. Recompute the `eddsa-jcs-2022` hash data: SHA-256 of the JCS proof
 //!    configuration and SHA-256 of the JCS document without its proof.
-//! 2. Resolve the issuer DID. For `did:key` this is self-resolving;
-//!    if the current DID document doesn't match (e.g. the key was
-//!    rotated), fall back to the `key_registry` via `resolve_key_at`.
+//! 2. Resolve the issuer DID. A `did:key` resolves to the key in its
+//!    identifier, always; only a DID that is not self-resolving is looked
+//!    up in the caller's key registry.
 //! 3. Verify the Ed25519 `proofValue` over that hash data.
 //! 4. Check subject binding (subject.id is a well-formed DID).
 //! 5. Check expiration against `verification_time`.
@@ -198,16 +198,9 @@ pub fn verify_credential_with_attestation(
     }
 
     // -- issuer resolution --------------------------------------------------
-    let issuer_pk = match resolve_issuer_key(db, &credential.issuer, verification_time) {
+    let issuer_pk = match resolve_issuer_key(db, &credential.issuer) {
         IssuerKeyResolution::Found(pk) => {
             result.issuer_resolved = true;
-            pk
-        }
-        IssuerKeyResolution::FoundWithUnavailableStore(pk) => {
-            result.issuer_resolved = true;
-            result
-                .pending_reasons
-                .push(VerificationPendingReason::IssuerKeyUnavailable);
             pk
         }
         IssuerKeyResolution::Missing => {
@@ -231,46 +224,34 @@ pub fn verify_credential_with_attestation(
     finalize(result, credential, policy)
 }
 
-/// Resolve an issuer DID to a `VerifyingKey` valid at `at`.
-///
-/// The key registry is consulted first so a historical entry whose window
-/// contains `at` can verify credentials across rotation (§5.3). When the
-/// registry has no entry, `did:key` falls back to the public key embedded in
-/// the identifier.
+/// How an issuer DID resolved to a `VerifyingKey`.
 enum IssuerKeyResolution {
     Found(VerifyingKey),
-    FoundWithUnavailableStore(VerifyingKey),
     Missing,
     Unavailable,
     Invalid,
 }
 
-fn resolve_issuer_key(db: &dyn VerificationStore, issuer: &Did, at: &str) -> IssuerKeyResolution {
-    // Prefer the time-anchored historical entry (§5.3) when present.
-    let store_unavailable = match db.key_at(issuer, at) {
-        StoreLookup::Found(entry) => {
-            return verifying_key_from_slice(&entry.public_key_bytes)
+/// Resolve an issuer DID to its `VerifyingKey`.
+///
+/// A `did:key` is its key: it resolves to the key in its identifier and the
+/// store is never asked, so no registry state can change the result. Only a
+/// DID method that is not self-resolving is looked up in the registry; such
+/// an issuer can be resolved later by acquiring its key binding. Malformed
+/// `did:key` bytes are permanently invalid.
+fn resolve_issuer_key(db: &dyn VerificationStore, issuer: &Did) -> IssuerKeyResolution {
+    match parse_did_key(issuer.as_str()) {
+        Ok(_) => resolve_did_key(issuer)
+            .map(IssuerKeyResolution::Found)
+            .unwrap_or(IssuerKeyResolution::Invalid),
+        Err(DidError::InvalidFormat(_)) => IssuerKeyResolution::Invalid,
+        Err(DidError::UnsupportedMethod) => match db.registered_key(issuer) {
+            StoreLookup::Found(entry) => verifying_key_from_slice(&entry.public_key_bytes)
                 .map(IssuerKeyResolution::Found)
-                .unwrap_or(IssuerKeyResolution::Invalid);
-        }
-        StoreLookup::Missing => false,
-        StoreLookup::Unavailable => true,
-    };
-    // Fall back to did:key self-resolution. An unsupported DID method can be
-    // resolved later by acquiring its key binding; malformed did:key bytes are
-    // permanently invalid.
-    let resolved = match parse_did_key(issuer.as_str()) {
-        Ok(_) => resolve_did_key(issuer),
-        Err(DidError::UnsupportedMethod) if store_unavailable => {
-            return IssuerKeyResolution::Unavailable;
-        }
-        Err(DidError::UnsupportedMethod) => return IssuerKeyResolution::Missing,
-        Err(DidError::InvalidFormat(_)) => return IssuerKeyResolution::Invalid,
-    };
-    match resolved {
-        Ok(key) if store_unavailable => IssuerKeyResolution::FoundWithUnavailableStore(key),
-        Ok(key) => IssuerKeyResolution::Found(key),
-        Err(_) => IssuerKeyResolution::Invalid,
+                .unwrap_or(IssuerKeyResolution::Invalid),
+            StoreLookup::Missing => IssuerKeyResolution::Missing,
+            StoreLookup::Unavailable => IssuerKeyResolution::Unavailable,
+        },
     }
 }
 
@@ -451,7 +432,7 @@ mod tests {
     struct UnavailableStore;
 
     impl VerificationStore for UnavailableStore {
-        fn key_at(&self, _did: &Did, _at: &str) -> StoreLookup<KeyRegistryEntry> {
+        fn registered_key(&self, _did: &Did) -> StoreLookup<KeyRegistryEntry> {
             StoreLookup::Unavailable
         }
 
@@ -607,7 +588,9 @@ mod tests {
         assert!(result.valid_signature);
         assert!(result.issuer_resolved);
         assert_eq!(result.acceptance_decision, AcceptanceDecision::Pending);
-        assert!(result
+        // A did:key never asks the store for its key, so an unavailable
+        // registry is not a reason the issuer is unresolved.
+        assert!(!result
             .pending_reasons
             .contains(&VerificationPendingReason::IssuerKeyUnavailable));
         assert!(result
@@ -663,7 +646,7 @@ mod tests {
         let credential = sign_credential(UnsignedCredential { credential }, &key, &issuer).unwrap();
         struct ShortList;
         impl VerificationStore for ShortList {
-            fn key_at(&self, _did: &Did, _at: &str) -> StoreLookup<KeyRegistryEntry> {
+            fn registered_key(&self, _did: &Did) -> StoreLookup<KeyRegistryEntry> {
                 StoreLookup::Missing
             }
             fn status_list_bits(&self, _list_id: &str) -> StoreLookup<Vec<u8>> {
@@ -780,7 +763,7 @@ mod tests {
     struct AnchorStore(StoreLookup<AnchorEvidence>);
 
     impl VerificationStore for AnchorStore {
-        fn key_at(&self, _did: &Did, _at: &str) -> StoreLookup<KeyRegistryEntry> {
+        fn registered_key(&self, _did: &Did) -> StoreLookup<KeyRegistryEntry> {
             StoreLookup::Missing
         }
         fn status_list_bits(&self, _list_id: &str) -> StoreLookup<Vec<u8>> {

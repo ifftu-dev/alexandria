@@ -561,7 +561,7 @@ pub struct Proof {
 impl Proof {
     /// Proof options for a credential about to be signed. The verification
     /// method is filled by `sign_credential` from the signing key unless the
-    /// caller sets one (a rotated registry key, for instance).
+    /// caller sets one under the issuer's DID.
     pub fn unsigned(created: impl Into<String>) -> Self {
         Proof {
             type_: DATA_INTEGRITY_PROOF.into(),

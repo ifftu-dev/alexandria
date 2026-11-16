@@ -1,5 +1,5 @@
 {
-  "description": "The issuer rotated keys and signed with the new one while keeping their DID. did:key self-resolution returns the pre-rotation key and fails; the registry entry covering the verification time is what makes this verify.",
+  "description": "A did:key issuer, verified with registry state supplied for that DID that names a different key. A did:key resolves to the key in its identifier, always: the registry entry is ignored and the credential verifies under the embedded key.",
   "verificationTime": "2026-06-01T00:00:00Z",
   "policy": {
     "reject_expired": true,
@@ -37,26 +37,17 @@
       "type": "DataIntegrityProof",
       "cryptosuite": "eddsa-jcs-2022",
       "created": "2026-01-01T00:00:00Z",
-      "verificationMethod": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT#z6MkrqDKuXTHNaAW4f19nuTxfxZhXQ9RMKvQiZ5vT5oB599T",
+      "verificationMethod": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT#z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
       "proofPurpose": "assertionMethod",
-      "proofValue": "zxzPWgDZGraHgo5yNKZX9zqmXGv8q1TsFC3EXZxatUTYywVHNxjiPHRfRRWN3XpN7ZjDfwJxHCtWqjbkcmWH7Dtv"
+      "proofValue": "z2C9xc5zwkT42hMqLgrxx3RVBiJ92XUWDcFsTZ9tTJGa7NKJNKJKkCrSTrZGBNae6CT55F1u4jG91nMeq59P9Sr9h"
     }
   },
   "store": {
     "keyRegistry": [
       {
         "did": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
-        "keyId": "key-1",
-        "publicKeyHex": "f510edb23365ea32000e4d367e0210fbae27cfeeb39c431cd51fc3600124d800",
-        "validFrom": "1970-01-01T00:00:00Z",
-        "validUntil": "2026-02-01T00:00:00Z"
-      },
-      {
-        "did": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
         "keyId": "key-2",
-        "publicKeyHex": "b7ebf265e5f9104e83588f2b4584e336f69470351004bb160f033e84feced80a",
-        "validFrom": "2026-02-01T00:00:00Z",
-        "validUntil": null
+        "publicKeyHex": "b7ebf265e5f9104e83588f2b4584e336f69470351004bb160f033e84feced80a"
       }
     ],
     "statusLists": {},

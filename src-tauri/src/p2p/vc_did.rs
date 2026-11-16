@@ -1,27 +1,28 @@
-//! `TOPIC_VC_DID` handler — issuers broadcast their DID document and
-//! key rotations. Receivers reflect the broadcast into their local
-//! `key_registry` so historical verification (§5.3) survives across
-//! peers.
+//! `TOPIC_VC_DID` handler — issuers announce their DID.
+//!
+//! A `did:key` is its key, so an announcement records nothing: no registry
+//! row is written and nothing can change how the DID resolves. Its one effect
+//! is to promote credentials that were waiting on that issuer. Rotation
+//! announcements are retired; a `rotated_to` field is ignored.
 
 use crate::crypto::did::Did;
 use crate::db::Database;
 use crate::p2p::types::SignedGossipMessage;
 
-/// Wire shape of a DID gossip payload. The unit tests pin two
-/// shapes: a bare announcement `{"did": "..."}` and a rotation
-/// announcement `{"did": "...", "rotated_to": "..."}`. Additional
-/// fields can be added later without breaking the parser.
+/// Wire shape of a DID gossip payload: `{"did": "..."}`. Unknown fields,
+/// including the retired `rotated_to`, are ignored.
 #[derive(serde::Deserialize)]
 struct DidMessage {
     did: String,
-    #[serde(default)]
-    rotated_to: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DidIngest {
-    Stored,
-    UpdatedRegistry,
+    /// The DID's holder announced it; `promoted` credentials waiting on it
+    /// moved into the main table.
+    Announced {
+        promoted: u32,
+    },
     Ignored,
     /// The announcement was well-formed but the envelope signer does not
     /// control the DID it speaks for.
@@ -57,17 +58,8 @@ pub fn handle_did_message(
     let did = Did(parsed.did);
 
     // A DID announcement speaks for exactly one identity, so only the holder
-    // of that identity's key may make one. Without this the handler accepted a
-    // rotation for *any* DID from *any* peer, which is a key-rollback
-    // primitive: forging a rotation closes the victim's current registry row
-    // and opens one with an empty key, so `resolve_issuer_key` falls through to
-    // `did:key` self-resolution — the pre-rotation key. If the rotation
-    // happened because that key was compromised, an attacker holding it can
-    // restore its acceptance across the network.
-    //
-    // It also closed the unauthenticated-insert path into `key_registry`, which
-    // was what let a peer manufacture the "known issuer" precondition the
-    // status-list handler used to rely on.
+    // of that identity's key may make one. That also keeps a peer from
+    // promoting credentials queued under someone else's DID.
     if !envelope_signer_controls(&did, message) {
         log::warn!(
             "vc-did: announcement for {} was not signed by that DID — dropping",
@@ -76,61 +68,14 @@ pub fn handle_did_message(
         return Ok(DidIngest::IgnoredNotTheSubject);
     }
 
-    // Rotation announcement: record the new entry. The envelope is signed by
-    // the DID's own key (checked above), so the subject really is asking for
-    // this.
-    if let Some(rotated_to) = parsed.rotated_to {
-        let now = crate::clock::now_rfc3339();
-        let conn = db.conn();
-        // Close any open entry for this DID.
-        conn.execute(
-            "UPDATE key_registry SET valid_until = ?2, rotated_by = ?3 \
-             WHERE did = ?1 AND valid_until IS NULL",
-            rusqlite::params![did.as_str(), &now, &rotated_to],
-        )
-        .map_err(|e| e.to_string())?;
-        // Insert a new open row for the rotated DID, derivable from
-        // self-resolution at verify time.
-        let key_id: String = conn
-            .query_row(
-                "SELECT 'key-' || (COALESCE(MAX(CAST(substr(key_id, 5) AS INTEGER)), 0) + 1) \
-                 FROM key_registry WHERE did = ?1",
-                rusqlite::params![did.as_str()],
-                |r| r.get(0),
-            )
-            .unwrap_or_else(|_| "key-2".to_string());
-        conn.execute(
-            "INSERT OR IGNORE INTO key_registry \
-             (did, key_id, public_key_hex, valid_from, valid_until, rotated_by) \
-             VALUES (?1, ?2, '', ?3, NULL, NULL)",
-            rusqlite::params![did.as_str(), &key_id, &now],
-        )
-        .map_err(|e| e.to_string())?;
-        return Ok(DidIngest::UpdatedRegistry);
-    }
-
-    // First-sight announcement: record the DID with an empty pubkey
-    // (callers can self-resolve via `did:key`). Idempotent insert.
-    let inserted = db
-        .conn()
-        .execute(
-            "INSERT OR IGNORE INTO key_registry \
-             (did, key_id, public_key_hex, valid_from, valid_until, rotated_by) \
-             VALUES (?1, 'key-1', '', '1970-01-01T00:00:00Z', NULL, NULL)",
-            rusqlite::params![did.as_str()],
-        )
-        .map_err(|e| e.to_string())?;
-
-    // Kick the pending-verification sweeper now that the issuer's
-    // DID is known — credentials from this issuer that landed before
-    // the DID doc can be promoted into the main `credentials` table.
-    let _ = promote_pending_for(db, did.as_str());
-
-    if inserted > 0 {
-        Ok(DidIngest::Stored)
-    } else {
-        Ok(DidIngest::Ignored)
-    }
+    // Credentials from this issuer that landed before its announcement can
+    // now be promoted into the main `credentials` table. A failed sweep is
+    // retried on the next announcement, so it does not fail the message.
+    let promoted = promote_pending_for(db, did.as_str()).unwrap_or_else(|e| {
+        log::warn!("vc-did: promoting credentials for {}: {e}", did.as_str());
+        0
+    });
+    Ok(DidIngest::Announced { promoted })
 }
 
 /// Promote credentials queued in `credentials_pending_verification`
@@ -287,71 +232,67 @@ mod tests {
         db
     }
 
+    fn registry_rows(db: &Database, did: &str) -> i64 {
+        db.conn()
+            .query_row(
+                "SELECT COUNT(*) FROM key_registry WHERE did = ?1",
+                [did],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    fn queue_credential_from(db: &Database, issuer: &str) {
+        let vc = serde_json::json!({
+            "type": ["VerifiableCredential", "FormalCredential"],
+            "issuer": issuer,
+            "validFrom": "2026-04-13T00:00:00Z",
+            "credentialSubject": {"id": "did:key:zSubject", "skillId": "s"},
+        });
+        queue_pending(
+            db,
+            "urn:uuid:queued",
+            issuer,
+            "did:key:zSubject",
+            &vc.to_string(),
+        )
+        .unwrap();
+    }
+
+    /// A `did:key` is its key, so an announcement has nothing to record: it
+    /// only promotes credentials that were waiting on that issuer.
     #[test]
-    fn first_observation_of_unknown_did_is_stored() {
+    fn an_announcement_promotes_waiting_credentials_and_writes_no_registry_row() {
         let db = test_db();
         let sk = SigningKey::from_bytes(&[1u8; 32]);
         let did = alexandria_verify::did::derive_did_key(&sk);
+        queue_credential_from(&db, did.as_str());
+
         let payload = format!(r#"{{"did":"{}"}}"#, did.as_str());
         let outcome = handle_did_message(&db, &msg_from(&sk, payload.as_bytes())).unwrap();
-        assert_eq!(outcome, DidIngest::Stored);
+
+        assert_eq!(outcome, DidIngest::Announced { promoted: 1 });
+        assert_eq!(registry_rows(&db, did.as_str()), 0);
     }
 
+    /// Rotation announcements are retired. A payload that still carries a
+    /// `rotated_to` field is read as a plain announcement: it writes nothing
+    /// and cannot change how the DID resolves.
     #[test]
-    fn second_observation_updates_registry_for_rotation() {
-        // A later message that carries a rotation record must transition
-        // from `Stored` on first sight to `UpdatedRegistry` on the key
-        // rotation — this is what lets historical verification (§5.3)
-        // survive across peers.
+    fn a_rotation_field_writes_no_registry_row() {
         let db = test_db();
         let sk = SigningKey::from_bytes(&[2u8; 32]);
         let did = alexandria_verify::did::derive_did_key(&sk);
-        let first = format!(r#"{{"did":"{}"}}"#, did.as_str());
-        let _ = handle_did_message(&db, &msg_from(&sk, first.as_bytes())).unwrap();
 
         let rotation = format!(r#"{{"did":"{}","rotated_to":"did:key:zA2"}}"#, did.as_str());
         let outcome = handle_did_message(&db, &msg_from(&sk, rotation.as_bytes())).unwrap();
-        assert_eq!(outcome, DidIngest::UpdatedRegistry);
-    }
 
-    /// The finding: any peer could announce a rotation for any DID. That
-    /// closes the victim's open registry row and opens an empty-key one, so
-    /// verification falls back to `did:key` self-resolution — the key the
-    /// rotation was performed to retire.
-    #[test]
-    fn a_rotation_announced_by_someone_else_is_dropped() {
-        let db = test_db();
-        let victim = SigningKey::from_bytes(&[3u8; 32]);
-        let attacker = SigningKey::from_bytes(&[4u8; 32]);
-        let victim_did = alexandria_verify::did::derive_did_key(&victim);
-
-        // The victim publishes their DID normally.
-        let announce = format!(r#"{{"did":"{}"}}"#, victim_did.as_str());
-        assert_eq!(
-            handle_did_message(&db, &msg_from(&victim, announce.as_bytes())).unwrap(),
-            DidIngest::Stored
-        );
-
-        // The attacker tries to rotate it out from under them.
-        let forged = format!(
-            r#"{{"did":"{}","rotated_to":"did:key:zAttacker"}}"#,
-            victim_did.as_str()
-        );
-        assert_eq!(
-            handle_did_message(&db, &msg_from(&attacker, forged.as_bytes())).unwrap(),
-            DidIngest::IgnoredNotTheSubject
-        );
-
-        // And the victim's row is untouched — still open, never rotated.
-        let closed: i64 = db
+        assert_eq!(outcome, DidIngest::Announced { promoted: 0 });
+        let rows: i64 = db
             .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM key_registry WHERE did = ?1 AND valid_until IS NOT NULL",
-                rusqlite::params![victim_did.as_str()],
-                |r| r.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM key_registry", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(closed, 0, "a forged rotation closed the victim's key row");
+        assert_eq!(rows, 0);
     }
 
     /// The same gate stops the unauthenticated insert that let a peer
@@ -370,15 +311,7 @@ mod tests {
             DidIngest::IgnoredNotTheSubject
         );
 
-        let rows: i64 = db
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM key_registry WHERE did = ?1",
-                rusqlite::params![victim_did.as_str()],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(rows, 0);
+        assert_eq!(registry_rows(&db, victim_did.as_str()), 0);
     }
 
     #[test]

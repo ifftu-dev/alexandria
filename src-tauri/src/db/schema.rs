@@ -144,6 +144,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // Backend flags raised before a session's chain starts, committed after
     // the trust profile selection. See `crate::sentinel::snapshots`.
     (40, "integrity_pending_flags", include_str!("integrity_pending_flags.sql")),
+    // Personal key rotation is deleted: the key registry keeps only the key
+    // bound to an identifier that is not self-resolving, with no validity
+    // window or rotated-by link, and refuses a row without a key.
+    (41, "key_registry_lookup_only", include_str!("key_registry_lookup_only.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

@@ -5,7 +5,8 @@
 //! `did:key` resolution.
 //!
 //! The crate performs no I/O. Verification needs to consult persistent state
-//! in five places — the issuer's key at a point in time, a status list's bits,
+//! in five places — the key registered for an issuer whose DID is not
+//! self-resolving, a status list's bits,
 //! a local suspension flag, whether something supersedes the credential, and
 //! an observed ledger anchor of its hash — and each of those arrives through
 //! [`VerificationStore`] rather than a database handle or a chain client. Callers implement the trait over whatever they have:
@@ -37,11 +38,12 @@ pub use did::{Did, DidError, KeyRegistryEntry, VerificationMethodRef};
 /// unavailable lookup. Verification must never turn missing status evidence or
 /// a storage failure into a clean active credential.
 pub trait VerificationStore {
-    /// The issuer's registered key valid at `at`, if the registry holds one.
+    /// The key registered for an issuer whose DID method is not
+    /// self-resolving, if the registry holds one.
     ///
-    /// Preferred over `did:key` self-resolution so that a credential signed
-    /// before a key rotation still verifies afterwards (spec §5.3).
-    fn key_at(&self, did: &Did, at: &str) -> StoreLookup<KeyRegistryEntry>;
+    /// Never consulted for a `did:key`: that resolves to the key in its
+    /// identifier, and no registry state can change it.
+    fn registered_key(&self, did: &Did) -> StoreLookup<KeyRegistryEntry>;
 
     /// Raw bits of a known status list.
     fn status_list_bits(&self, list_id: &str) -> StoreLookup<Vec<u8>>;
@@ -82,7 +84,7 @@ pub enum StoreLookup<T> {
 pub struct NullStore;
 
 impl VerificationStore for NullStore {
-    fn key_at(&self, _did: &Did, _at: &str) -> StoreLookup<KeyRegistryEntry> {
+    fn registered_key(&self, _did: &Did) -> StoreLookup<KeyRegistryEntry> {
         StoreLookup::Missing
     }
     fn status_list_bits(&self, _list_id: &str) -> StoreLookup<Vec<u8>> {

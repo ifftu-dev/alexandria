@@ -13,7 +13,11 @@
 //!
 //! Spec references: Alexandria Credential & Reputation Protocol v1
 //! §4.1 (Subject identified by DID), §5.1 (MUST support at least one
-//! DID method — we ship `did:key`), §5.3 (key rotation).
+//! DID method — we ship `did:key`).
+//!
+//! A `did:key` is its key: it resolves to the key in its identifier, always.
+//! There is no rotation overlay. An identity that needs a new key is a new
+//! `did:key`.
 
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -33,17 +37,13 @@ impl Did {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerificationMethodRef(pub String);
 
-/// A row in the key registry. Captures the (did, verifying_key) binding
-/// along with a validity window so historical signatures can still be
-/// verified after rotation (spec §5.3).
+/// A row in the key registry: the (did, verifying key) binding for an
+/// identifier that is not self-resolving. A `did:key` never consults it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeyRegistryEntry {
     pub did: Did,
     pub key_id: String,
     pub public_key_bytes: Vec<u8>,
-    pub valid_from: String,
-    pub valid_until: Option<String>,
-    pub rotated_by: Option<String>,
 }
 
 /// A minimal DID document. Full DID Core compliance is deferred.

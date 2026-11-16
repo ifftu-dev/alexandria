@@ -858,35 +858,6 @@ mod tests {
     }
 
     #[test]
-    fn a_rotated_issuer_earns_the_credential_for_its_own_did() {
-        let ctx = setup();
-        let rotated = SigningKey::from_bytes(&[10u8; 32]);
-        crate::crypto::key_registry::rotate_key(ctx.db.conn(), &ctx.did, &rotated).unwrap();
-        // A rotation takes effect at the wall clock; finalize after it.
-        let now = now_rfc3339();
-        let issuer = Issuer::rotated(ctx.db.conn(), ctx.did.clone(), rotated, &now).unwrap();
-        let mut step = start(&ctx);
-        while !step.finished {
-            step = answer(&ctx, &step, true);
-        }
-        let result = finalize_adaptive_impl(&ctx.db, &issuer, &step.attempt_id, &now)
-            .expect("a rotated issuer finalizes its own attempt");
-        let json: String = ctx
-            .db
-            .conn()
-            .query_row(
-                "SELECT signed_vc_json FROM credentials WHERE id = ?1",
-                [result.credential_id.unwrap()],
-                |r| r.get(0),
-            )
-            .unwrap();
-        let vc: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let rotated_did = serde_json::json!(ctx.did.as_str());
-        assert_eq!(vc.pointer("/issuer"), Some(&rotated_did));
-        assert_eq!(vc.pointer("/credentialSubject/id"), Some(&rotated_did));
-    }
-
-    #[test]
     fn an_all_wrong_run_fails_and_credentials_nothing() {
         let ctx = setup();
         let mut step = start(&ctx);
@@ -934,11 +905,6 @@ mod tests {
         )
         .unwrap_err()
         .contains("another learner"));
-        // A key that is not the learner's cannot sign as the learner at all.
-        assert!(matches!(
-            Issuer::rotated(ctx.db.conn(), ctx.did.clone(), other_key, NOW),
-            Err(crate::credentials::CredentialError::NotCurrentKey(_))
-        ));
         assert!(
             finalize_adaptive_impl(&ctx.db, &ctx.issuer, &step.attempt_id, NOW)
                 .unwrap()

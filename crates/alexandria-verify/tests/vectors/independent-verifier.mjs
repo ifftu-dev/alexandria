@@ -70,18 +70,16 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
   const pendingReasons = []
   let key
   try {
-    // Key: registry entry covering verificationTime, else did:key self-resolution
-    const rows = (v.store?.keyRegistry ?? []).filter(r =>
-      r.did === vc.issuer && r.validFrom <= v.verificationTime &&
-      (r.validUntil === null || r.validUntil > v.verificationTime))
-    if (rows.length) {
-      rows.sort((a, b) => a.validFrom < b.validFrom ? 1 : -1)
-      const spki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'),
-                                  Buffer.from(rows[0].publicKeyHex, 'hex')])
-      key = createPublicKey({ key: spki, format: 'der', type: 'spki' })
-      issuerResolved = true
-    } else if (vc.issuer.startsWith('did:key:')) {
+    // Key: a did:key is its key, whatever the registry says; any other DID
+    // method is looked up in the registry.
+    const row = (v.store?.keyRegistry ?? []).find(r => r.did === vc.issuer)
+    if (vc.issuer.startsWith('did:key:')) {
       key = pubkeyFromDidKey(vc.issuer)
+      issuerResolved = true
+    } else if (row) {
+      const spki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'),
+                                  Buffer.from(row.publicKeyHex, 'hex')])
+      key = createPublicKey({ key: spki, format: 'der', type: 'spki' })
       issuerResolved = true
     } else {
       pendingReasons.push('issuer_key_missing')

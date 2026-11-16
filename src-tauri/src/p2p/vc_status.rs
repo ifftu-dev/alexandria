@@ -9,8 +9,8 @@
 //! is dropped.
 //!
 //! This used to check only that the issuer DID appeared in the local
-//! `key_registry` — which any peer can arrange, since `TOPIC_VC_DID` inserts
-//! rows — and no signature was ever checked despite the doc comment saying so.
+//! `key_registry` — which any peer could arrange through `TOPIC_VC_DID` — and
+//! no signature was ever checked despite the doc comment saying so.
 //! That let any network participant mass-revoke an issuer's credentials, mass
 //! *un*-revoke them by publishing a higher version with zeroed bits, or lock
 //! the real issuer out permanently by claiming `version = i64::MAX`.
@@ -145,20 +145,11 @@ pub fn handle_status_message(
         Err(_) => return Ok(StatusIngest::IgnoredUnknownIssuer),
     };
 
-    // Issuer must be known via the local key registry. Kept as a cheap
-    // pre-filter — it means we do not spend a signature verification on a DID
-    // nothing here has ever referenced — but it is no longer the authorisation
-    // check. `TOPIC_VC_DID` lets any peer insert a row, so presence in that
-    // table proves only that someone mentioned the DID.
-    let known: i64 = db
-        .conn()
-        .query_row(
-            "SELECT COUNT(*) FROM key_registry WHERE did = ?1",
-            rusqlite::params![&parsed.issuer],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if known == 0 {
+    // The issuer's key must resolve: a status list is checked against the key
+    // its `did:key` embeds, so any other identifier cannot be authorised and
+    // is deferred before any decoding or database work. This is a cheap
+    // pre-filter, not the authorisation check, which is the signature below.
+    if alexandria_verify::did::parse_did_key(&parsed.issuer).is_err() {
         return Ok(StatusIngest::IgnoredUnknownIssuer);
     }
 
@@ -259,20 +250,6 @@ mod tests {
         SigningKey::from_bytes(&[3u8; 32])
     }
 
-    /// Pre-register the issuer in `key_registry` so the handler's cheap
-    /// pre-filter passes. Real propagation gets this from a prior
-    /// `handle_did_message` call.
-    fn register_issuer(db: &Database, did: &str) {
-        db.conn()
-            .execute(
-                "INSERT OR IGNORE INTO key_registry \
-                 (did, key_id, public_key_hex, valid_from, valid_until, rotated_by) \
-                 VALUES (?1, 'key-1', '', '1970-01-01T00:00:00Z', NULL, NULL)",
-                rusqlite::params![did],
-            )
-            .unwrap();
-    }
-
     /// A status document as a real issuer would publish it.
     fn signed_payload(sk: &SigningKey, version: i64, bits_b64: &str) -> Vec<u8> {
         let issuer = alexandria_verify::did::derive_did_key(sk);
@@ -295,10 +272,11 @@ mod tests {
         .unwrap()
     }
 
-    fn db_with_issuer(sk: &SigningKey) -> Database {
+    /// A fresh database. A `did:key` issuer needs no registration: its key
+    /// is in its identifier.
+    fn db_with_issuer(_sk: &SigningKey) -> Database {
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
-        register_issuer(&db, alexandria_verify::did::derive_did_key(sk).as_str());
         db
     }
 
@@ -409,8 +387,8 @@ mod tests {
 
     #[test]
     fn unknown_issuer_is_deferred() {
-        // No registry entry ⇒ nothing here has ever referenced this DID, so
-        // defer rather than spend a signature verification on it.
+        // Not a resolvable did:key ⇒ no key to check a signature against, so
+        // defer rather than decode it.
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
         let msg = stub_msg(br#"{"issuer":"did:key:zUnknown","version":1,"bits":"AQ"}"#);
