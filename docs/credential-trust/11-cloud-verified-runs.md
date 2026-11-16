@@ -42,3 +42,5 @@ An organisation's run record shows what was verified, not only what the candidat
 - Migration `0054` stores the verified assurance level and attestation outcome on the run. A review case opens when the reported status is flagged, or when the credential states `device_attested` and the evidence does not verify credential-bound.
 - The console shows "Verified" only for `device_attested`; session-bound evidence reads "Self-reported" with a note. MCP run results gain the two fields and still carry no scores.
 - `verify_share` in the library takes no trust inputs, so Cloud sets the attestation fields after calling it.
+
+2026-11-16 (review fixes): a share is refused when any status list this deployment hosts for the credential marks it, revocation or suspension; a suspension has its own message. The receipt's `hostedStatus` is now `clear`, `revoked`, `suspended`, `list_missing` or `not_hosted_here` (`set` is gone).
