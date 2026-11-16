@@ -70,10 +70,17 @@ pub fn credential_trust_impl(
 }
 
 /// The domain a stored credential's issuer names, if any.
-fn stored_issuer_domain(conn: &Connection, credential_id: &str) -> Result<Option<String>, String> {
+/// The domain a stored credential's issuer names, with the issuer's key.
+fn stored_issuer_domain(
+    conn: &Connection,
+    credential_id: &str,
+) -> Result<Option<(String, String)>, String> {
     Ok(store::get(conn, credential_id)
         .map_err(|e| e.to_string())?
-        .and_then(|credential| credential.issuer.domain().map(str::to_string)))
+        .and_then(|credential| {
+            let domain = credential.issuer.domain()?.to_string();
+            Some((domain, credential.issuer.as_str().to_string()))
+        }))
 }
 
 #[tauri::command]
@@ -97,8 +104,8 @@ pub async fn get_credential_trust(
         )
         .await?;
     // A domain that cannot be resolved now reads as descriptor_not_supplied.
-    if let Some(domain) = &domain {
-        let _ = crate::org_trust::refresh_descriptor(&state, domain).await;
+    if let Some((domain, key)) = &domain {
+        let _ = crate::org_trust::refresh_descriptor(&state, domain, &[key.as_str()]).await;
     }
     let now = chrono::Utc::now().timestamp();
     state

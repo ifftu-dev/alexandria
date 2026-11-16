@@ -115,18 +115,20 @@ pub(crate) fn fresh_descriptor(
         .map(|(descriptor, _)| descriptor))
 }
 
-/// Make sure the cache holds a fresh descriptor for `domain`, asking DNS only
-/// when the cached copy is missing or stale. Afterwards [`fresh_descriptor`]
-/// reads it.
+/// Make sure the cache holds a fresh descriptor for `domain` that lists each
+/// of `keys`, asking DNS only when the cached copy is missing, stale, or does
+/// not list one of them. Afterwards [`fresh_descriptor`] reads it.
 pub(crate) async fn refresh_descriptor(
     state: &State<'_, AppState>,
     domain: &str,
+    keys: &[&str],
 ) -> Result<OrgDescriptor, String> {
     refresh_descriptor_for(
         &state.db_executor,
         DatabaseWorkload::Learner,
         state.profile_lease(),
         domain,
+        keys,
     )
     .await
 }
@@ -138,25 +140,69 @@ pub(crate) async fn refresh_descriptor_for(
     workload: DatabaseWorkload,
     lease: ProfileLease,
     domain: &str,
+    keys: &[&str],
 ) -> Result<OrgDescriptor, String> {
-    let domain = org::normalise_domain(domain).map_err(|e| e.to_string())?;
     let now = chrono::Utc::now().timestamp();
+    descriptor_listing(
+        executor,
+        workload,
+        lease,
+        domain,
+        keys,
+        now,
+        |domain| async move { fetch_descriptor(&domain).await },
+    )
+    .await
+}
+
+/// The descriptor `domain` publishes: the cached copy while it is fresh and
+/// lists every one of `keys`, else one lookup through `fetch`, cached for
+/// the next caller.
+///
+/// A key the cached copy does not list may be a fresh rotation, so it costs
+/// one refetch rather than an hour of refusals. Every descriptor read goes
+/// through here: [`check`] for an organisation's proof, and
+/// [`refresh_descriptor_for`] for a credential's issuer.
+async fn descriptor_listing<F, Fut>(
+    executor: &DatabaseExecutor,
+    workload: DatabaseWorkload,
+    lease: ProfileLease,
+    domain: &str,
+    keys: &[&str],
+    now: i64,
+    fetch: F,
+) -> Result<OrgDescriptor, String>
+where
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<OrgDescriptor, String>>,
+{
+    let domain = org::normalise_domain(domain).map_err(|e| e.to_string())?;
     let lookup = domain.clone();
     let cached = executor
         .execute(workload, lease.clone(), "org.descriptor.read", move |db| {
             fresh_descriptor(db.conn(), &lookup, now)
         })
-        .await?;
-    if let Some(descriptor) = cached {
+        .await
+        .unwrap_or_else(|error| {
+            log::debug!("org descriptor cache for {domain}: {error}");
+            None
+        });
+    if let Some(descriptor) = cached.filter(|descriptor| {
+        keys.iter()
+            .all(|key| descriptor.keys.iter().any(|listed| listed == key))
+    }) {
         return Ok(descriptor);
     }
-    let descriptor = fetch_descriptor(&domain).await?;
+    let descriptor = fetch(domain.clone()).await?;
     let stored = descriptor.clone();
-    executor
+    if let Err(error) = executor
         .execute(workload, lease, "org.descriptor.store", move |db| {
             store(db.conn(), &stored, now)
         })
-        .await?;
+        .await
+    {
+        log::warn!("org descriptor for {domain} not cached: {error}");
+    }
     Ok(descriptor)
 }
 
@@ -242,46 +288,11 @@ pub(crate) async fn check(
         Ok(d) => d,
         Err(e) => return OrgCheck::refused(None, e.to_string()),
     };
-    let now = chrono::Utc::now().timestamp();
-
-    let lookup = domain.clone();
-    let cached = state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            "org.descriptor.read",
-            move |db| cached(db.conn(), &lookup),
-        )
-        .await
-        .ok()
-        .flatten();
-
-    if let Some((descriptor, fetched_at)) = &cached {
-        if now - fetched_at < DESCRIPTOR_TTL_SECS {
-            match org::verify(payload, proof, descriptor) {
-                Ok(()) => return OrgCheck::verified(descriptor),
-                // A key the cached copy does not list may be a fresh rotation.
-                Err(OrgError::UnlistedKey) => {}
-                Err(e) => return OrgCheck::refused(Some(domain), learner_problem(&e)),
-            }
-        }
-    }
-
-    let descriptor = match fetch_descriptor(&domain).await {
-        Ok(d) => d,
-        Err(e) => return OrgCheck::refused(Some(domain), e),
-    };
-    let stored = descriptor.clone();
-    let _ = state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            "org.descriptor.store",
-            move |db| store(db.conn(), &stored, now),
-        )
-        .await;
+    let descriptor =
+        match refresh_descriptor(state, &domain, &[proof.verification_method.as_str()]).await {
+            Ok(descriptor) => descriptor,
+            Err(e) => return OrgCheck::refused(Some(domain), e),
+        };
     match org::verify(payload, proof, &descriptor) {
         Ok(()) => OrgCheck::verified(&descriptor),
         Err(e) => OrgCheck::refused(Some(domain), learner_problem(&e)),
@@ -341,6 +352,76 @@ mod tests {
         assert_eq!(
             fresh_descriptor(db.conn(), "not a domain", 100).unwrap(),
             None
+        );
+    }
+
+    /// A key the domain lists only since the descriptor was cached is seen:
+    /// the cached copy does not list it, so it is fetched once more, and
+    /// the fresh copy then serves later asks without another lookup.
+    #[tokio::test]
+    async fn a_key_added_to_the_domain_after_caching_is_seen() {
+        use crate::db::executor::DatabaseExecutor;
+        use crate::profile::operations::ProfileOperations;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        store(db.conn(), &descriptor(), 1_000).unwrap();
+        let executor = DatabaseExecutor::new(Arc::new(Mutex::new(Some(db))));
+        let operations = ProfileOperations::default();
+        operations
+            .activate(async { Ok(()) }, async { Ok(()) })
+            .await
+            .unwrap();
+        let lease = operations.admit(&operations.session().unwrap()).unwrap();
+
+        let old_key = descriptor().keys[0].clone();
+        let new_key = alexandria_verify::did::derive_did_key(
+            &ed25519_dalek::SigningKey::from_bytes(&[4; 32]),
+        )
+        .as_str()
+        .to_string();
+        let mut rotated = descriptor();
+        rotated.keys.push(new_key.clone());
+
+        let fetches = Arc::new(AtomicUsize::new(0));
+        let ask = |key: String| {
+            let (fetches, rotated, executor, lease) =
+                (fetches.clone(), rotated.clone(), &executor, lease.clone());
+            async move {
+                descriptor_listing(
+                    executor,
+                    DatabaseWorkload::Learner,
+                    lease,
+                    "alexandria.ifftu.dev",
+                    &[key.as_str()],
+                    1_010,
+                    |_| async move {
+                        fetches.fetch_add(1, Ordering::SeqCst);
+                        Ok(rotated)
+                    },
+                )
+                .await
+                .unwrap()
+            }
+        };
+
+        assert_eq!(
+            ask(old_key.clone()).await,
+            descriptor(),
+            "cached copy lists it"
+        );
+        assert_eq!(fetches.load(Ordering::SeqCst), 0);
+
+        assert!(ask(new_key.clone()).await.keys.contains(&new_key));
+        assert_eq!(fetches.load(Ordering::SeqCst), 1, "one refetch");
+
+        assert!(ask(new_key).await.keys.contains(&old_key));
+        assert_eq!(
+            fetches.load(Ordering::SeqCst),
+            1,
+            "the fresh copy was cached"
         );
     }
 

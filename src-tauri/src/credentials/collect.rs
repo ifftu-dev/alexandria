@@ -147,9 +147,9 @@ pub async fn fetch(
 }
 
 /// One collection pass for the background pull: fetch from `origin`, make
-/// sure each issuing organisation's domain descriptor is freshly cached (one
-/// TXT lookup per domain at most, see [`crate::org_trust`]), then verify and
-/// store under `lease`.
+/// sure each issuing organisation's domain descriptor is freshly cached and
+/// lists the keys that signed (one TXT lookup per domain at most, see
+/// [`crate::org_trust`]), then verify and store under `lease`.
 pub(crate) async fn run(
     executor: &DatabaseExecutor,
     lease: &ProfileLease,
@@ -166,19 +166,23 @@ pub(crate) async fn run(
     if fetched.credentials.is_empty() {
         return Ok(Vec::new());
     }
-    let domains: std::collections::BTreeSet<String> = fetched
-        .credentials
-        .iter()
-        .flatten()
-        .filter_map(|credential| credential.issuer.domain().map(str::to_string))
-        .collect();
-    for domain in domains {
+    let mut domains: std::collections::BTreeMap<&str, Vec<&str>> = Default::default();
+    for credential in fetched.credentials.iter().flatten() {
+        if let Some(domain) = credential.issuer.domain() {
+            domains
+                .entry(domain)
+                .or_default()
+                .push(credential.issuer.as_str());
+        }
+    }
+    for (domain, keys) in &domains {
         // An unresolvable domain reads as descriptor_not_supplied.
         if let Err(error) = crate::org_trust::refresh_descriptor_for(
             executor,
             DatabaseWorkload::Background,
             lease.clone(),
-            &domain,
+            domain,
+            keys,
         )
         .await
         {
