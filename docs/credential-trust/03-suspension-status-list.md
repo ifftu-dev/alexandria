@@ -1,6 +1,6 @@
 # 03 Suspension status list
 
-Triage: ready-for-agent
+Triage: done
 Type: task
 Repos: alexandria
 Part of: alexandria/docs/credential-trust-spec.md
@@ -34,3 +34,16 @@ Suspension is published in a Bitstring Status List of its own, so every verifier
 - Verifier: `crates/alexandria-verify/src/vc/verify.rs` (local suspension lookup), `vc/status.rs`, store trait in `crates/alexandria-verify/src/lib.rs`.
 - Bundles: `src-tauri/src/credentials/bundle.rs`. Gossip: `src-tauri/src/p2p/vc_status.rs`.
 - Cloud list host, for reference only: `alexandria-cloud/src/status_lists.rs`.
+
+## Notes
+
+2026-11-16: built.
+
+- Envelope: `credentialStatus` is `CredentialStatuses` (one entry or a list), written back in the form read so a single-object credential keeps verifying. Issuance writes a list: revocation then suspension, the same index in both.
+- Lists: per issuer per host, list number 1 is revocation and 2 is suspension (`urn:alexandria:status-list:<did>:<n>` without a host). Allocation stays keyed on the revocation list.
+- Lifecycle: suspend sets the suspension bit and reinstate clears it, each bumping the list version only when the bit changes. `lift_expired_suspensions` reinstates due timed suspensions and runs before every publication pass (command and background loop). Suspend refuses a credential that names no suspension list; reinstating one only clears the bookkeeping. Suspend and reinstate now publish lists, as revoke does.
+- Verifier: suspension is read only from the suspension entry's list bit; the store's local suspension lookup is gone. New pending reasons `suspension_list_missing` and `suspension_list_unavailable` replace `suspension_state_unavailable`.
+- Exchange: a holder-issuer's own `IssuerState` reaches the verifier as the suspension entry's bit; an active suspension still rejects when the credential names no list, as revocation already did.
+- Gossip: the status document carries a signed `status_purpose` (canonical bytes now `alexandria-status-list-v2`), so a gossiped suspension list is stored as one.
+- Scoring fingerprint covers every list a credential's entries name, so a suspension list change recomputes scores.
+- Vectors 13 (suspended), 14 (reinstated), 15 (suspension list missing); the runner now compares `suspended`. Vectors 07 and 11 keep the single-object form.
