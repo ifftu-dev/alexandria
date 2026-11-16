@@ -536,6 +536,25 @@ mod tests {
         assert_eq!(count, 1);
     }
 
+    /// A credential already held is reported as held without verifying it
+    /// again: the copy in the store was verified when it arrived, and a
+    /// retry after it expired is still a retry, not a new refusal.
+    #[test]
+    fn a_credential_already_held_is_not_verified_again() {
+        let db = open_db();
+        let vc = signed_vc(
+            &key("issuer"),
+            CredentialType::EntitlementCredential,
+            "urn:test:import:held",
+            entitlement_props(),
+            Some("2026-12-01T00:00:00Z"),
+        );
+        assert!(import_credential_impl(db.conn(), &vc, NOW).unwrap().stored);
+
+        let later = import_credential_impl(db.conn(), &vc, "2027-01-01T00:00:00Z").unwrap();
+        assert!(!later.stored);
+    }
+
     /// The denormalized columns must be recomputed from the signed body, since
     /// readers filter on them. `get_entitlement_snapshot` queries by
     /// `credential_type`, so getting this wrong would make an imported

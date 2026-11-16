@@ -76,7 +76,8 @@ fn claim_kind_of(subject: &CredentialSubject) -> &'static str {
 /// re-checking on every future reader — one of which would eventually forget.
 ///
 /// Idempotent on the envelope `id`: receiving the same credential again is
-/// [`Receipt::AlreadyPresent`]. Delivery channels retry.
+/// [`Receipt::AlreadyPresent`], answered from the store before any
+/// verification. Delivery channels retry.
 ///
 /// Errors are for a credential with no envelope id or class, and for the
 /// database failing; a verification outcome is never an error.
@@ -86,47 +87,8 @@ pub fn receive(conn: &Connection, vc: &VerifiableCredential, now: &str) -> Resul
         .clone()
         .ok_or_else(|| "credential has no envelope id".to_string())?;
 
-    let result = verify_credential_db(conn, vc, now, &policy());
-    if result.acceptance_decision == AcceptanceDecision::Pending {
-        return Ok(Receipt::Pending(
-            crate::credentials::bundle::rejection_reasons(&result),
-        ));
-    }
-    if result.acceptance_decision != AcceptanceDecision::Accept {
-        // Report the failed checks rather than a bare "invalid" — a
-        // credential refused as expired and one refused for a bad signature
-        // call for very different responses from the user.
-        let mut why = Vec::new();
-        if !result.valid_signature {
-            why.push("signature");
-        }
-        if !result.issuer_resolved {
-            why.push("issuer not resolvable");
-        }
-        if !result.subject_bound {
-            why.push("subject not a DID");
-        }
-        if result.revoked {
-            why.push("revoked");
-        }
-        if !result.status_valid {
-            why.push("invalid status reference");
-        }
-        if result.expired {
-            why.push("expired");
-        }
-        if result.suspended {
-            why.push("suspended");
-        }
-        if result.superseded {
-            why.push("superseded");
-        }
-        if why.is_empty() {
-            why.push("rejected by policy");
-        }
-        return Ok(Receipt::Rejected(why));
-    }
-
+    // A credential already held was verified when it arrived; a retry is
+    // answered from the store, not by verifying it again.
     let already: Option<String> = conn
         .query_row(
             "SELECT id FROM credentials WHERE id = ?1",
@@ -137,6 +99,20 @@ pub fn receive(conn: &Connection, vc: &VerifiableCredential, now: &str) -> Resul
         .map_err(|e| e.to_string())?;
     if already.is_some() {
         return Ok(Receipt::AlreadyPresent);
+    }
+
+    let result = verify_credential_db(conn, vc, now, &policy());
+    let reasons = crate::credentials::bundle::rejection_reasons(&result);
+    match result.acceptance_decision {
+        AcceptanceDecision::Accept => {}
+        AcceptanceDecision::Pending => return Ok(Receipt::Pending(reasons)),
+        // Report the failed checks rather than a bare "invalid": a credential
+        // refused as expired and one refused for a bad signature call for
+        // very different responses from the user.
+        AcceptanceDecision::Reject if reasons.is_empty() => {
+            return Ok(Receipt::Rejected(vec!["rejected by policy"]))
+        }
+        AcceptanceDecision::Reject => return Ok(Receipt::Rejected(reasons)),
     }
 
     // Derive the denormalized columns from the credential body. Nothing here

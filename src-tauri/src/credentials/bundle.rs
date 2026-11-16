@@ -289,10 +289,45 @@ pub fn rejection_reasons(result: &VerificationResult) -> Vec<&'static str> {
     if result.superseded {
         reasons.push("superseded");
     }
-    if result.attestation.rejects() {
-        reasons.push("device attestation evidence is invalid");
+    if result.coverage_statement_mismatch {
+        reasons.push("coverage statement does not match the integrity assertion");
+    }
+    if let alexandria_verify::attestation::AttestationOutcome::Invalid { reason } =
+        result.attestation
+    {
+        reasons.push(invalid_attestation_reason(reason));
     }
     reasons
+}
+
+/// The rejection line for invalid attestation evidence, carrying the
+/// library's stable reason code so a reader can look it up.
+fn invalid_attestation_reason(
+    reason: alexandria_verify::attestation::InvalidReason,
+) -> &'static str {
+    use alexandria_verify::attestation::InvalidReason as R;
+    macro_rules! line {
+        ($code:literal) => {
+            concat!("device attestation evidence is invalid (", $code, ")")
+        };
+    }
+    let line = match reason {
+        R::MalformedEvidence => line!("malformed_evidence"),
+        R::DuplicateEvidence => line!("duplicate_evidence"),
+        R::MissingIntegrityAssertion => line!("missing_integrity_assertion"),
+        R::UntrustedChain => line!("untrusted_chain"),
+        R::WrongNonce => line!("wrong_nonce"),
+        R::WrongAppId => line!("wrong_app_id"),
+        R::KeyMismatch => line!("key_mismatch"),
+        R::Counter => line!("counter"),
+        R::EnvironmentNotAccepted => line!("environment_not_accepted"),
+        R::InvalidSignature => line!("invalid_signature"),
+        R::DeviceIntegrity => line!("device_integrity"),
+        R::BindingMismatch => line!("binding_mismatch"),
+        R::CompanionMismatch => line!("companion_mismatch"),
+    };
+    debug_assert!(line.contains(reason.as_str()));
+    line
 }
 
 /// This build's attestation trust inputs, so offline verification checks a
@@ -725,6 +760,41 @@ mod tests {
                 .iter()
                 .any(|r| r.contains("signature does not match")),
             "the signature was never checked: {reasons:?}"
+        );
+    }
+
+    /// Every check that rejects is named: a coverage statement the credential
+    /// misnames, and attestation evidence that fails, with the reason code a
+    /// reader can look up.
+    #[test]
+    fn rejections_name_a_mismatched_statement_and_invalid_attestation() {
+        use alexandria_verify::attestation::{AttestationOutcome, InvalidReason};
+        let (db, issuer_key, _, subject) = setup();
+        let vc = credentials::issue(db.conn(), &issuer_key, &sample_request(subject), NOW).unwrap();
+        let json = serde_json::to_string(&vc).unwrap();
+        // A bare credential's lists travel without it, so its decision may
+        // wait on them; the rejection reasons are read from a decided result.
+        let mut accepted = verify_offline(&json, NOW).unwrap().results[0].clone();
+        accepted.pending_reasons.clear();
+        accepted.acceptance_decision = AcceptanceDecision::Accept;
+        assert!(rejection_reasons(&accepted).is_empty());
+
+        let mut mismatched = accepted.clone();
+        mismatched.coverage_statement_mismatch = true;
+        mismatched.acceptance_decision = AcceptanceDecision::Reject;
+        assert_eq!(
+            rejection_reasons(&mismatched),
+            vec!["coverage statement does not match the integrity assertion"]
+        );
+
+        let mut forged = accepted;
+        forged.attestation = AttestationOutcome::Invalid {
+            reason: InvalidReason::BindingMismatch,
+        };
+        forged.acceptance_decision = AcceptanceDecision::Reject;
+        assert_eq!(
+            rejection_reasons(&forged),
+            vec!["device attestation evidence is invalid (binding_mismatch)"]
         );
     }
 
