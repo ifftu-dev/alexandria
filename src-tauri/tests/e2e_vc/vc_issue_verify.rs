@@ -30,6 +30,7 @@ fn sample_unsigned(subject: app_lib::crypto::did::Did) -> UnsignedCredential {
             terms_of_use: None,
             witness: None,
             integrity: None,
+            related_resource: Vec::new(),
             proof: Proof::unsigned(TEST_NOW), // completed by sign_credential
         },
     }

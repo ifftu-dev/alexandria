@@ -135,6 +135,24 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
   const superseded = (v.store?.superseded ?? []).includes(vc.id)
   const integrityAnchored = false
 
+  // 7: a coverage statement named by relatedResource must be the one the
+  // integrity assertion names by digest. The digest is the address's last
+  // part, so this needs no statement registry and no BLAKE3.
+  const statementDigest = id => {
+    const urn = 'urn:alexandria:coverage-statement:'
+    let digest = null
+    if (id.startsWith(urn)) digest = id.slice(urn.length)
+    else {
+      const at = id.lastIndexOf('/coverage-statements/')
+      if (at >= 0 && id.slice(0, at).includes('://')) digest = id.slice(at + '/coverage-statements/'.length)
+    }
+    return digest && !digest.includes('/') ? digest : null
+  }
+  const namedDigest = vc.integrity?.coverageStatementDigest ?? null
+  const coverageStatementMismatch = (vc.relatedResource ?? [])
+    .map(r => statementDigest(String(r.id)))
+    .some(d => d !== null && d !== namedDigest)
+
   const issuerCanComplete = (validSignature && issuerResolved) ||
     (!issuerResolved && pendingReasons.includes('issuer_key_missing'))
   const passes = issuerCanComplete && statusValid && subjectBound &&
@@ -142,13 +160,16 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
     !(v.policy.reject_expired && expired) &&
     !(v.policy.reject_suspended && suspended) &&
     !(v.policy.reject_superseded && superseded) &&
-    !(v.policy.require_integrity_anchor && !integrityAnchored)
+    !(v.policy.require_integrity_anchor && !integrityAnchored) &&
+    !coverageStatementMismatch
   const acceptanceDecision = !passes ? 'reject' : pendingReasons.length ? 'pending' : 'accept'
 
-  const e = v.expect
+  // coverageStatementMismatch is omitted from a result while false.
+  const e = { coverageStatementMismatch: false, ...v.expect }
   const got = {
     validSignature, issuerResolved, revoked, statusValid, expired, subjectBound,
-    integrityAnchored, suspended, superseded, pendingReasons, acceptanceDecision,
+    integrityAnchored, suspended, superseded, coverageStatementMismatch,
+    pendingReasons, acceptanceDecision,
   }
   const fields = Object.keys(got)
   const ok = fields.every(field => JSON.stringify(got[field]) === JSON.stringify(e[field]))

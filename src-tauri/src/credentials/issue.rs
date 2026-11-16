@@ -419,6 +419,7 @@ pub fn issue(
         terms_of_use: None,
         witness: None,
         integrity,
+        related_resource: Vec::new(),
         proof: Proof::unsigned(now.to_string()),
     };
     let signed = sign_credential(
@@ -672,8 +673,11 @@ mod tests {
         let digest = a.coverage_statement_digest.expect("coverage digest");
         let statement = resolve_coverage_statement(&digest).expect("bundled statement");
         assert_eq!(
-            (statement.profile, statement.rung),
-            (TrustProfile::Core, VerificationRung::Process)
+            (statement.profile.as_str(), statement.rung.as_str()),
+            (
+                TrustProfile::Core.as_str(),
+                VerificationRung::Process.as_str()
+            )
         );
         assert!(statement.certification.is_none());
         assert!(statement

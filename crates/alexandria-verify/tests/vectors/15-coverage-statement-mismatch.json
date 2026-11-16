@@ -1,0 +1,85 @@
+{
+  "description": "The relatedResource names a coverage statement (urn:alexandria:coverage-statement:{digest}) whose digest differs from the integrity assertion's coverageStatementDigest. The signature is valid, but the credential names two statements, so it is rejected with coverageStatementMismatch.",
+  "verificationTime": "2026-06-01T00:00:00Z",
+  "policy": {
+    "reject_expired": true,
+    "require_integrity_anchor": false,
+    "allowed_types": [
+      "FormalCredential",
+      "AssessmentCredential",
+      "AttestationCredential",
+      "RoleCredential",
+      "DerivedCredential",
+      "SelfAssertion"
+    ],
+    "reject_suspended": true,
+    "reject_superseded": true
+  },
+  "credential": {
+    "@context": [
+      "https://www.w3.org/ns/credentials/v2"
+    ],
+    "id": "urn:uuid:vector-credential",
+    "type": [
+      "VerifiableCredential",
+      "FormalCredential"
+    ],
+    "issuer": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
+    "validFrom": "2026-01-01T00:00:00Z",
+    "credentialSubject": {
+      "id": "did:key:z6MknENeHzKx2gvkZPqYvz8B7xCyTeJHfH6FvnHSBJAEeagD",
+      "evidenceRefs": [],
+      "level": 3,
+      "score": 0.9,
+      "skillId": "skill_vector"
+    },
+    "integrity": {
+      "sessionId": "vector-session",
+      "status": "completed",
+      "criticalCount": 0,
+      "warningCount": 0,
+      "assuranceLevel": "local",
+      "generatedAt": "2026-01-01T00:00:00Z",
+      "trustProfile": "core",
+      "verificationRung": "process",
+      "coverageStatementDigest": "blake3:17b6ffedf0cfe387ad935003c549f54fe6a9e28ee1b4fe6813d267235ae6af1f"
+    },
+    "relatedResource": [
+      {
+        "id": "urn:alexandria:coverage-statement:blake3:d68db7778e5b325bc8d074607fbe32ff49f39916c5c6ba82f33fea23546a1992",
+        "digestSRI": "sha256-qy+Qx1nYvHizdPRgXuV2q0zhLjr2cxwDeaGaGdKKzLg=",
+        "mediaType": "application/json"
+      }
+    ],
+    "proof": {
+      "type": "DataIntegrityProof",
+      "cryptosuite": "eddsa-jcs-2022",
+      "created": "2026-01-01T00:00:00Z",
+      "verificationMethod": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT#z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
+      "proofPurpose": "assertionMethod",
+      "proofValue": "z5itbYMDFguSTpq8RRt9vdLeFDkd3BNUB9vzPkvATTaftd7N7S3CnhcJNxSH7UPRpQ3pZcgzjqAWqVc3zB43ufa6E"
+    }
+  },
+  "store": {
+    "keyRegistry": [],
+    "statusLists": {},
+    "suspended": {},
+    "superseded": []
+  },
+  "expect": {
+    "credentialId": "urn:uuid:vector-credential",
+    "validSignature": true,
+    "issuerResolved": true,
+    "revoked": false,
+    "statusValid": true,
+    "expired": false,
+    "subjectBound": true,
+    "integrityAnchored": false,
+    "suspended": false,
+    "superseded": false,
+    "coverageStatementMismatch": true,
+    "verificationTime": "2026-06-01T00:00:00Z",
+    "pendingReasons": [],
+    "acceptanceDecision": "reject"
+  }
+}

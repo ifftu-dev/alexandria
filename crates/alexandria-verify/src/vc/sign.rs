@@ -238,6 +238,7 @@ mod tests {
                 terms_of_use: None,
                 witness: None,
                 integrity: None,
+                related_resource: Vec::new(),
                 proof: Proof::unsigned("2026-04-13T00:00:00Z"),
             },
         }

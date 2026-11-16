@@ -608,6 +608,7 @@ mod tests {
             terms_of_use: None,
             witness: None,
             integrity: None,
+            related_resource: Vec::new(),
             proof: crate::domain::vc::Proof::unsigned(NOW),
         };
         assert_eq!(
