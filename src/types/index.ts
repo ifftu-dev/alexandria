@@ -1990,7 +1990,8 @@ export interface VerifiableCredential {
   /** W3C VC v2 §4.3 — optional. Locally-issued credentials always have one. */
   id?: string | null
   type: string[]
-  issuer: string
+  /** The issuer's DID, or an issuer object whose `id` is the DID (VC 2.0). */
+  issuer: CredentialIssuer
   validFrom: string
   validUntil?: string | null
   credentialSubject: CredentialSubject
@@ -2002,6 +2003,20 @@ export interface VerifiableCredential {
   /** VC 2.0 `relatedResource`; names the coverage statement when `integrity` does. */
   relatedResource?: RelatedResource[]
   proof: Proof
+}
+
+/**
+ * Mirrors `alexandria_verify::vc::CredentialIssuer`. `name` and `domain` are
+ * the issuer's own statement; `OrganisationBacking` says whether the domain
+ * stands behind the key.
+ */
+export type CredentialIssuer =
+  | string
+  | { id: string; name?: string; domain?: string; [extra: string]: unknown }
+
+/** The issuer's DID, whichever form the credential uses. */
+export function issuerDid(issuer: CredentialIssuer): string {
+  return typeof issuer === 'string' ? issuer : issuer.id
 }
 
 /** Mirrors `alexandria_verify::vc::RelatedResource`. */
@@ -2215,6 +2230,14 @@ export type EndorsementMismatch =
   | 'course_document_not_claimed'
   | 'completion_root_not_claimed'
 
+/** Mirrors `alexandria_verify::org::OrganisationBacking`. */
+export type OrganisationBacking =
+  | { outcome: 'verified'; name: string; domain: string }
+  | { outcome: 'key_not_listed' }
+  | { outcome: 'wrong_domain' }
+  | { outcome: 'invalid_descriptor' }
+  | { outcome: 'descriptor_not_supplied' }
+
 /** Mirrors `alexandria_verify::trust::EndorsementOutcome`. */
 export type EndorsementOutcome =
   | { outcome: 'not_supplied' }
@@ -2238,7 +2261,13 @@ export type CredentialTrust =
   | { state: 'invalid'; reasons: TrustInvalidReason[] }
   | { state: 'pending'; reasons: VerificationPendingReason[] }
   | { state: 'verified_self_claim'; endorsement: EndorsementOutcome; attestation: AttestationOutcome }
-  | { state: 'verified_issuer_signed'; issuer: string; attestation: AttestationOutcome }
+  | {
+    state: 'verified_issuer_signed'
+    issuer: string
+    attestation: AttestationOutcome
+    /** Present when the issuer names a domain or a descriptor was supplied. */
+    organisation?: OrganisationBacking
+  }
   | {
     state: 'verified_course_endorsement'
     course_id: string
