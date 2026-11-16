@@ -536,7 +536,7 @@ pub(crate) mod test_support {
             context: vec!["https://www.w3.org/ns/credentials/v2".into()],
             id: Some(spec.id.into()),
             type_: vec!["VerifiableCredential".into(), spec.credential_type.into()],
-            issuer: issuer.clone(),
+            issuer: issuer.clone().into(),
             valid_from: spec.valid_from.into(),
             valid_until: None,
             credential_subject: subject,
