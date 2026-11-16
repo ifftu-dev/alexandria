@@ -1,6 +1,6 @@
 # 14 Collect organisation-issued credentials
 
-Triage: ready-for-agent
+Triage: done
 Type: task
 Repos: alexandria
 Part of: alexandria/docs/credential-trust-spec.md
@@ -15,10 +15,21 @@ Spec sections: *Organisation-issued credentials from the hosted service* (candid
 
 ## Acceptance criteria
 
-- [ ] Tests with a stubbed HTTP response: valid org-issued credential stored; tampered one rejected; repeat fetch is idempotent.
-- [ ] The credential then appears in the credential list with organisation provenance.
+- [x] Tests with a stubbed HTTP response: valid org-issued credential stored; tampered one rejected; repeat fetch is idempotent.
+- [x] The credential then appears in the credential list with organisation provenance.
 
 ## Pointers
 
 - Holder pull: `src-tauri/src/commands/holder_pull.rs`.
 - Received credential storage: `src-tauri/src/p2p/vc_did.rs` (`promote_pending_for`) and `src-tauri/src/credentials/store.rs`.
+
+## Notes
+
+2026-11-16: built.
+
+- `credentials::collect`: `fetch` makes the signed `GET /api/credentials/for/{did}`, decodes each `credential` under the single-credential limits (an unreadable item is reported, not fatal), and fetches the status lists the credentials name. `store` applies those lists, then verifies each credential through `credentials::receive`, the import path's verify-then-store moved out of `commands::import` (which now wraps it). Each credential ends `stored`, `already_present`, `pending` (queued in `credentials_pending_verification`, retried on the next pull, removed once decided) or `rejected`. Verified ones report organisation backing from the descriptor the TXT lookup cached; backing never decides storage.
+- Where it runs: the profile's background pass to Cloud (`notifications::cloud_pull`, also run when a phone returns to the foreground) collects beside its notification lists. `run` refreshes the descriptor cache once per issuing domain first. No new Tauri command.
+- Decision: a collected credential must have the learner as subject; any other is rejected.
+- Decision: status lists are fetched only from the Cloud origin and only at a path naming the credential's own issuer, so a credential cannot send the app to another host or overwrite another issuer's list. A list is applied when `verify_fetched_list` accepts it; its `validFrom` orders versions (an older copy is ignored) and a row held under another issuer is never overwritten. A list that cannot be fetched leaves the credential pending.
+- The Cloud-only `AssessedCredentialEvidence` entry is opaque to the verifier: a credential carrying it verifies, is stored, and reads as issued by the organisation in the trust view. No verifier library change was needed.
+- `p2p::vc_did::queue_pending` takes a connection; `unqueue_pending` added. `org_trust::refresh_descriptor_for` serves callers that hold an executor and a lease.
