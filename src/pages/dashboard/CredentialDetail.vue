@@ -130,6 +130,7 @@ function invalidReasonLabel(reason: TrustInvalidReason): string {
     case 'superseded': return t('credentials.detail.trustReason.superseded')
     case 'integrity_anchor_missing': return t('credentials.detail.trustReason.anchorMissing')
     case 'type_not_allowed': return t('credentials.detail.trustReason.typeNotAllowed')
+    case 'invalid_attestation': return t('credentials.detail.trustReason.invalidAttestation')
   }
 }
 

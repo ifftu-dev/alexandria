@@ -466,7 +466,32 @@ pub struct VerifiableCredential {
     /// monitored assessment session. Signed over by the JWS.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub integrity: Option<IntegrityAssertion>,
+    /// W3C VC Data Model 2.0 `evidence`. Carries the device attestation
+    /// entry ([`crate::attestation::AttestationEvidence`]) when the session
+    /// was attested. Signed over like every other field; absent when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<EvidenceEntry>,
     pub proof: Proof,
+}
+
+/// One entry of a credential's `evidence` (VC Data Model 2.0 §5.6), kept as
+/// the exact JSON object so the signature covers what was signed. Typed views
+/// such as [`crate::attestation::AttestationEvidence::find`] read entries of
+/// the types they know.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct EvidenceEntry(pub serde_json::Map<String, serde_json::Value>);
+
+impl EvidenceEntry {
+    /// Whether the entry's `type` (a string or an array of strings) names
+    /// `type_name`.
+    pub fn has_type(&self, type_name: &str) -> bool {
+        match self.0.get("type") {
+            Some(serde_json::Value::String(t)) => t == type_name,
+            Some(serde_json::Value::Array(ts)) => ts.iter().any(|t| t == type_name),
+            _ => false,
+        }
+    }
 }
 
 /// `proof.type` for every credential this crate signs: W3C Data Integrity.
@@ -576,6 +601,15 @@ pub struct VerificationResult {
     pub verification_time: String,
     #[serde(default)]
     pub pending_reasons: Vec<VerificationPendingReason>,
+    /// What the credential's device attestation evidence proved under the
+    /// verifier's trust inputs. `invalid` rejects; every other outcome is
+    /// left to the other checks.
+    #[serde(default)]
+    pub attestation: crate::attestation::AttestationOutcome,
+    /// `device_attested` only for verified credential-bound evidence, else
+    /// `local`, whatever level the integrity assertion states.
+    #[serde(default)]
+    pub verified_assurance_level: crate::attestation::VerifiedAssuranceLevel,
     pub acceptance_decision: AcceptanceDecision,
 }
 

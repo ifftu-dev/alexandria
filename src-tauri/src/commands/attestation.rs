@@ -256,6 +256,7 @@ mod tests {
             terms_of_use: None,
             witness: None,
             integrity: None,
+            evidence: Vec::new(),
             proof: Proof::unsigned("2026-01-01T00:00:00Z"),
         };
         let credential = sign_credential(
@@ -301,7 +302,10 @@ mod tests {
                 .unwrap()
                 .expect("stored credential")
         };
-        let self_claim = |endorsement| CredentialTrust::VerifiedSelfClaim { endorsement };
+        let self_claim = |endorsement| CredentialTrust::VerifiedSelfClaim {
+            endorsement,
+            attestation: alexandria_verify::attestation::AttestationOutcome::NotSupplied,
+        };
 
         // Not listed by any claim: no completion evidence applies.
         assert_eq!(

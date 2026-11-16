@@ -419,6 +419,7 @@ pub fn issue(
         terms_of_use: None,
         witness: None,
         integrity,
+        evidence: Vec::new(),
         proof: Proof::unsigned(now.to_string()),
     };
     let signed = sign_credential(
@@ -623,6 +624,12 @@ mod tests {
         }
     }
 
+    /// The wire form omits an empty `evidence`, so credentials issued without
+    /// attestation evidence keep the shape they had before it existed.
+    fn json_has_no_evidence(vc: &VerifiableCredential) -> bool {
+        serde_json::to_value(vc).unwrap().get("evidence").is_none()
+    }
+
     fn assertion_for(
         conn: &Connection,
         key: &Issuer,
@@ -655,6 +662,21 @@ mod tests {
         let verified =
             verify_credential_db(db.conn(), &stored, NOW, &VerificationPolicy::default());
         assert!(verified.valid_signature);
+        // No evidence is carried yet: the attestation is not supplied and the
+        // verified level is local, and the credential is accepted as before.
+        assert_eq!(
+            verified.attestation,
+            alexandria_verify::attestation::AttestationOutcome::NotSupplied
+        );
+        assert_eq!(
+            verified.verified_assurance_level,
+            alexandria_verify::attestation::VerifiedAssuranceLevel::Local
+        );
+        assert_eq!(
+            verified.acceptance_decision,
+            crate::domain::vc::AcceptanceDecision::Accept
+        );
+        assert!(json_has_no_evidence(&vc));
         let json = serde_json::to_value(&vc).unwrap();
         assert_eq!(
             json.pointer("/integrity/trustProfile"),

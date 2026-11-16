@@ -760,6 +760,7 @@ mod tests {
             terms_of_use: None,
             witness: None,
             integrity: None,
+            evidence: Vec::new(),
             proof: crate::domain::vc::Proof::unsigned(NOW),
         };
         assert_eq!(

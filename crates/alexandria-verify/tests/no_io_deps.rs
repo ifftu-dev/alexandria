@@ -43,6 +43,17 @@ const FORBIDDEN: &[&str] = &[
 
 #[test]
 fn crate_links_no_io_or_platform_dependencies() {
+    assert_no_io(&[]);
+}
+
+/// Attestation checking adds certificate parsing and ECDSA/AES, and must add
+/// nothing that reaches the outside world.
+#[test]
+fn the_attestation_feature_links_no_io_either() {
+    assert_no_io(&["--features", "attestation"]);
+}
+
+fn assert_no_io(features: &[&str]) {
     let out = std::process::Command::new(env!("CARGO"))
         .args([
             "tree",
@@ -54,6 +65,7 @@ fn crate_links_no_io_or_platform_dependencies() {
             "none",
             "--no-dedupe",
         ])
+        .args(features)
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .expect("run cargo tree");
@@ -74,8 +86,8 @@ fn crate_links_no_io_or_platform_dependencies() {
 
     assert!(
         found.is_empty(),
-        "alexandria-verify must stay I/O-free, but its dependency tree now \
-         contains {found:?}.\n\n\
+        "alexandria-verify must stay I/O-free, but its dependency tree \
+         ({features:?}) now contains {found:?}.\n\n\
          If this is deliberate, the right move is almost certainly to put the \
          new code behind `VerificationStore` in the consuming crate instead — \
          see the module docs in src/lib.rs."

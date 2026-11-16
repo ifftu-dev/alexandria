@@ -1,0 +1,85 @@
+{
+  "description": "A self-issued credential with an integrity assertion and no attestation evidence. It verifies as before; the outcome is not_supplied and the verified level stays local, whatever level the assertion states.",
+  "verificationTime": "2026-06-01T00:00:00Z",
+  "policy": {
+    "reject_expired": true,
+    "require_integrity_anchor": false,
+    "allowed_types": [
+      "FormalCredential",
+      "AssessmentCredential",
+      "AttestationCredential",
+      "RoleCredential",
+      "DerivedCredential",
+      "SelfAssertion"
+    ],
+    "reject_suspended": true,
+    "reject_superseded": true
+  },
+  "trust": {
+    "apple": {
+      "rootPem": "-----BEGIN CERTIFICATE-----\nMIIBdTCCARygAwIBAgIUCyUkOvOR4dkYUrcEasglnnEazOswCgYIKoZIzj0EAwIw\nITEfMB0GA1UEAwwWcmNnZW4gc2VsZiBzaWduZWQgY2VydDAeFw0yNTAxMDEwMDAw\nMDBaFw0zMDAxMDEwMDAwMDBaMCExHzAdBgNVBAMMFnJjZ2VuIHNlbGYgc2lnbmVk\nIGNlcnQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATs17r6Zp87u+PVdS4C9dKw\nM464MxJg7DKf9VAxaKgEmpvZSNhcNcAp25d4lo2NSUw8ogzNSWfwmI+sV8tNpah1\nozIwMDAdBgNVHQ4EFgQUStIisOuiNZXkbSXYsNCqm5a78ZEwDwYDVR0TAQH/BAUw\nAwEB/zAKBggqhkjOPQQDAgNHADBEAiB4MJHW2EC09faQeMErw1kWPFpxHCbRFeEv\nll9NUZmH+QIgPVTALqFQ7ScKpVWQ8fy3pT2RG+mUCF9cydmYGg8JFN4=\n-----END CERTIFICATE-----\n",
+      "appId": "TESTTEAM.org.alexandria.vector",
+      "allowDevelopment": false
+    },
+    "playIntegrity": {
+      "packageName": "org.alexandria.vector",
+      "keys": {
+        "decryption_key_b64": "BQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU=",
+        "verification_key_b64": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEjp7gOL5fREaMJ2+jGDmliJPaaFzNHCDdN+Fv9yc0VDIPVUqMjnnFFUA+MOAskkdrFGgbeGaRAlDfZ8Dit2YF8Q=="
+      }
+    }
+  },
+  "credential": {
+    "@context": [
+      "https://www.w3.org/ns/credentials/v2"
+    ],
+    "id": "urn:uuid:attestation-vector",
+    "type": [
+      "VerifiableCredential",
+      "AssessmentCredential"
+    ],
+    "issuer": "did:key:z6MkweSC48rMA3zYLdjhR2GNytrcgJAb75aWFtbfkBS7AB9o",
+    "validFrom": "2026-05-31T12:00:00Z",
+    "credentialSubject": {
+      "id": "did:key:z6MkweSC48rMA3zYLdjhR2GNytrcgJAb75aWFtbfkBS7AB9o",
+      "evidenceRefs": [],
+      "level": 3,
+      "score": 0.9,
+      "skillId": "skill_vector"
+    },
+    "integrity": {
+      "sessionId": "isess_vector",
+      "status": "completed",
+      "integrityScore": 0.97,
+      "criticalCount": 0,
+      "warningCount": 1,
+      "assuranceLevel": "device_attested",
+      "commitmentRoot": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+      "generatedAt": "2026-05-31T12:00:00Z",
+      "trustProfile": "attested",
+      "verificationRung": "process",
+      "signalsRun": [
+        "core",
+        "device_attestation"
+      ],
+      "signalsNotRun": [
+        "camera"
+      ]
+    },
+    "proof": {
+      "type": "DataIntegrityProof",
+      "cryptosuite": "eddsa-jcs-2022",
+      "created": "2026-05-31T12:00:00Z",
+      "verificationMethod": "did:key:z6MkweSC48rMA3zYLdjhR2GNytrcgJAb75aWFtbfkBS7AB9o#z6MkweSC48rMA3zYLdjhR2GNytrcgJAb75aWFtbfkBS7AB9o",
+      "proofPurpose": "assertionMethod",
+      "proofValue": "z2gL392qTPcmntfcs5XrFcqffZaQqcaoC1oB99Huqa6G7U65LPmn6uxs6bEX3cAzqJxfDYd3UHGs1LvxbjGRMcM8m"
+    }
+  },
+  "expect": {
+    "attestation": {
+      "outcome": "not_supplied"
+    },
+    "verifiedAssuranceLevel": "local",
+    "acceptanceDecision": "accept"
+  }
+}

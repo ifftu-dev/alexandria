@@ -96,15 +96,10 @@ sha2 = "0.10"
 ring = "0.17"
 # Opens the provider sign-in page in the system browser.
 webbrowser = "1"
-# Device attestation verification (Sentinel `device_attested` assurance):
-# App Attest = CBOR attestation object + X.509 chain to Apple's root (ring
-# signature checks via x509-parser's `verify`), ECDSA P-256 assertions;
-# Play Integrity = JWE (A256KW + A256GCM) around an ES256 JWS, decrypted
-# with the developer's response keys from the network profile.
-minicbor = { version = "0.25", default-features = false }
-x509-parser = { version = "0.17", features = ["verify"] }
+# Device attestation verification lives in alexandria-verify (`attestation`
+# feature). P-256 stays here to validate the Play Integrity verification key
+# a network profile carries.
 p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
-aes = "0.8"
 hmac = "0.12"
 subtle = "2"
 hkdf = "0.12"
@@ -147,7 +142,7 @@ url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
-alexandria-verify = { path = "../crates/alexandria-verify" }
+alexandria-verify = { path = "../crates/alexandria-verify", features = ["attestation"] }
 alexandria-decisions = { path = "../crates/alexandria-decisions" }
 alexandria-learning-contracts = { path = "../crates/alexandria-learning-contracts" }
 alexandria-personhood = { path = "../crates/alexandria-personhood", optional = true }
@@ -311,8 +306,9 @@ objc2-core-foundation = { version = "0.3", features = ["objc2"] }
 [dev-dependencies]
 tokio = { version = "1", features = ["test-util"] }
 tempfile = "3"
-# Synthetic App Attest certificate chains for the attestation verifier tests.
-rcgen = "0.13"
+# Synthetic App Attest certificate chains and Play Integrity tokens for the
+# attestation tests.
+alexandria-verify = { path = "../crates/alexandria-verify", features = ["attestation", "test-support"] }
 tauri = { version = "2.10.0", features = ["test"] }
 # Pull in Wasmtime's Pulley interpreter for test builds on every platform, not
 # just iOS. Cargo unions features across dependency kinds only when

@@ -243,6 +243,7 @@ pub fn status_list_credential(
         terms_of_use: None,
         witness: None,
         integrity: None,
+        evidence: Vec::new(),
         proof: Proof::unsigned(created),
     };
     sign_credential(UnsignedCredential { credential }, key, issuer)

@@ -1,0 +1,95 @@
+{
+  "description": "A genuine App Attest attestation from another app. Invalid with wrong_app_id.",
+  "verificationTime": "2026-06-01T00:00:00Z",
+  "policy": {
+    "reject_expired": true,
+    "require_integrity_anchor": false,
+    "allowed_types": [
+      "FormalCredential",
+      "AssessmentCredential",
+      "AttestationCredential",
+      "RoleCredential",
+      "DerivedCredential",
+      "SelfAssertion"
+    ],
+    "reject_suspended": true,
+    "reject_superseded": true
+  },
+  "trust": {
+    "apple": {
+      "rootPem": "-----BEGIN CERTIFICATE-----\nMIIBdjCCARygAwIBAgIULm9CMZpW5Dvk7uc2nFxmSptBJ+UwCgYIKoZIzj0EAwIw\nITEfMB0GA1UEAwwWcmNnZW4gc2VsZiBzaWduZWQgY2VydDAeFw0yNTAxMDEwMDAw\nMDBaFw0zMDAxMDEwMDAwMDBaMCExHzAdBgNVBAMMFnJjZ2VuIHNlbGYgc2lnbmVk\nIGNlcnQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAASgiyUYYeyHf+hOcP5t6/Lc\n/Wdv4k3Bvu38aw2LQMB4r1P1L+Q2S2hvVQsMHMytwNgKQ2yFp7/f8Pj810gMtTO8\nozIwMDAdBgNVHQ4EFgQUVqRD2hDZr1yS+5KY38HTeSlOzkYwDwYDVR0TAQH/BAUw\nAwEB/zAKBggqhkjOPQQDAgNIADBFAiAwevJZ/4IAlr8+Ke/11izWnJ1W9iFIxIiT\nPCaEQ8qMkAIhAN3j1o98j/7+CQdhMq0w30idyW1sRcvsl5Klr40DyPu3\n-----END CERTIFICATE-----\n",
+      "appId": "TESTTEAM.org.alexandria.vector",
+      "allowDevelopment": false
+    }
+  },
+  "credential": {
+    "@context": [
+      "https://www.w3.org/ns/credentials/v2"
+    ],
+    "id": "urn:uuid:attestation-vector",
+    "type": [
+      "VerifiableCredential",
+      "AssessmentCredential"
+    ],
+    "issuer": "did:key:z6MkweSC48rMA3zYLdjhR2GNytrcgJAb75aWFtbfkBS7AB9o",
+    "validFrom": "2026-05-31T12:00:00Z",
+    "credentialSubject": {
+      "id": "did:key:z6MkweSC48rMA3zYLdjhR2GNytrcgJAb75aWFtbfkBS7AB9o",
+      "evidenceRefs": [],
+      "level": 3,
+      "score": 0.9,
+      "skillId": "skill_vector"
+    },
+    "integrity": {
+      "sessionId": "isess_vector",
+      "status": "completed",
+      "integrityScore": 0.97,
+      "criticalCount": 0,
+      "warningCount": 1,
+      "assuranceLevel": "device_attested",
+      "commitmentRoot": "c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff",
+      "generatedAt": "2026-05-31T12:00:00Z",
+      "trustProfile": "attested",
+      "verificationRung": "process",
+      "signalsRun": [
+        "core",
+        "device_attestation"
+      ],
+      "signalsNotRun": [
+        "camera"
+      ]
+    },
+    "evidence": [
+      {
+        "appId": "OTHERTEAM.com.example.other",
+        "binding": "credential",
+        "material": {
+          "attestation": "o2NmbXRvYXBwbGUtYXBwYXR0ZXN0Z2F0dFN0bXSiY3g1Y4JZAX4wggF6MIIBIaADAgECAhRcz98/ovRF7SdzgveKeDsPXF9PkzAKBggqhkjOPQQDAjAhMR8wHQYDVQQDDBZyY2dlbiBzZWxmIHNpZ25lZCBjZXJ0MB4XDTI1MDEwMTAwMDAwMFoXDTMwMDEwMTAwMDAwMFowITEfMB0GA1UEAwwWcmNnZW4gc2VsZiBzaWduZWQgY2VydDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABAKFdtYvfYGC2GuncClaLsh3wIBi/OOXBtv4+R3LQCn9eDHLQ4E/3pN5MjBc9cx5FIydlGLLbB3GpkxCRF64JlyjNzA1MDMGCSqGSIb3Y2QIAgQmMCShIgQgxS35ERyuwX69kPdfqfxwTAY6kq7o31iQwunl8SbVd3cwCgYIKoZIzj0EAwIDRwAwRAIgL8ldpUJPOpOKM8f31dWMtqcso+h1/0mZR28Y2rJpuSsCIGGNxUBRT3sZjiSu7He797BuV3aAJq13YbhI+i5SaZQyWQF8MIIBeDCCAR+gAwIBAgIUM2ssCapzGpl8B5+iKOv7Q3Jo/XUwCgYIKoZIzj0EAwIwITEfMB0GA1UEAwwWcmNnZW4gc2VsZiBzaWduZWQgY2VydDAeFw0yNTAxMDEwMDAwMDBaFw0zMDAxMDEwMDAwMDBaMCExHzAdBgNVBAMMFnJjZ2VuIHNlbGYgc2lnbmVkIGNlcnQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQC4aOBOjSsfBSJ87eAtXS3Lgx/fAIkKDAtQhshTgu+Xg1N4hAlMXeGb7VSL60TANOh9zllz9t27noWjNo2Tp9/ozUwMzAdBgNVHQ4EFgQUO0WIiaitJDGN+oWiBVN6IVKQ8iUwEgYDVR0TAQH/BAgwBgEB/wIBADAKBggqhkjOPQQDAgNHADBEAiAHn4lLDNsTIzLjjeiwiEC7QspGfhlFdoCSOoxPB4nTnAIgb31E2Ni96H5oupedhfKKrRbmEYc/6ulws1hty5+v4VRncmVjZWlwdEBoYXV0aERhdGFYWFEc0GTrChZ7QuLyWZeCcDIvkG+LD2VW5fy7eU0Xt5B7QQAAAABhcHBhdHRlc3QAAAAAAAAAACDcz98/ovRF7SdzgveKeDsPXF9Pk65HyGqeLH923+wDy6A=",
+          "bindingAssertion": "omlzaWduYXR1cmVYRzBFAiBYogTYWW1BSfndsoD7Uc+o/csgW27y1uvXmeWD6FdChgIhAM01ERnyNq7lWlI5lo4ecDBasGKu9uC1CVpd/depz5n7cWF1dGhlbnRpY2F0b3JEYXRhWCVRHNBk6woWe0Li8lmXgnAyL5Bviw9lVuX8u3lNF7eQe0AAAAAC",
+          "keyId": "3M/fP6L0Re0nc4L3ing7D1xfT5OuR8hqnix/dt/sA8s=",
+          "kind": "app_attest",
+          "sessionAssertion": "omlzaWduYXR1cmVYRzBFAiBqCELIkmXC46+7jLowQu/sNDhXVu/tbFF/24Tue9BpJgIhAKSO/djxkMPeZH5vzNWKtJp0eNVsEm4d/POr72tzPEZWcWF1dGhlbnRpY2F0b3JEYXRhWCVRHNBk6woWe0Li8lmXgnAyL5Bviw9lVuX8u3lNF7eQe0AAAAAB"
+        },
+        "platform": "ios",
+        "sessionStartedAt": "2026-05-31T11:00:00Z",
+        "type": "DeviceAttestationEvidence"
+      }
+    ],
+    "proof": {
+      "type": "DataIntegrityProof",
+      "cryptosuite": "eddsa-jcs-2022",
+      "created": "2026-05-31T12:00:00Z",
+      "verificationMethod": "did:key:z6MkweSC48rMA3zYLdjhR2GNytrcgJAb75aWFtbfkBS7AB9o#z6MkweSC48rMA3zYLdjhR2GNytrcgJAb75aWFtbfkBS7AB9o",
+      "proofPurpose": "assertionMethod",
+      "proofValue": "z2uAR8mUNcW2m4CrkUHnbwxz4ng5goTBAiUP86DtpEBVrioX5PFtwRL5MhfPRQtkwwMR3Z6ir1CRyDeSzhSmV48Tu"
+    }
+  },
+  "expect": {
+    "attestation": {
+      "outcome": "invalid",
+      "reason": "wrong_app_id"
+    },
+    "verifiedAssuranceLevel": "local",
+    "acceptanceDecision": "reject"
+  }
+}

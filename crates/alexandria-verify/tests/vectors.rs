@@ -171,6 +171,7 @@ fn skeleton(issuer: Did, subject: Did, valid_until: Option<&str>) -> VerifiableC
         terms_of_use: None,
         witness: None,
         integrity: None,
+        evidence: Vec::new(),
         proof: Proof::unsigned("2026-01-01T00:00:00Z"),
     }
 }

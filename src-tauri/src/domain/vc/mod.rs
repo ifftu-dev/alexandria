@@ -79,21 +79,25 @@ impl VerificationStore for SqliteVerificationStore<'_> {
     }
 }
 
-/// Verify a credential against the local database.
+/// Verify a credential against the local database, checking its device
+/// attestation evidence against this build's trust inputs (Apple's root and
+/// the network profile's Play Integrity keys).
 ///
-/// Thin convenience over [`alexandria_verify::vc::verify::verify_credential`]
-/// for the many call sites that already hold a `&Connection`.
+/// Thin convenience over
+/// [`alexandria_verify::vc::verify::verify_credential_with_attestation`] for
+/// the many call sites that already hold a `&Connection`.
 pub fn verify_credential_db(
     db: &Connection,
     credential: &VerifiableCredential,
     verification_time: &str,
     policy: &VerificationPolicy,
 ) -> VerificationResult {
-    verify::verify_credential(
+    verify::verify_credential_with_attestation(
         &SqliteVerificationStore(db),
         credential,
         verification_time,
         policy,
+        crate::sentinel::attestation::profile_trust_inputs(),
     )
 }
 
