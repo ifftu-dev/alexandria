@@ -59,9 +59,10 @@ pub struct StartedAttempt {
     /// Fixed at the first start; a resumed attempt reports the stored role
     /// regardless of what the retry asked for.
     pub role: Option<AttemptRoleTarget>,
-    /// The role's minimum trust profile judged against the session, before
-    /// the first item. An attempt is only started when it is satisfied;
-    /// issuance judges it again and must agree.
+    /// The role's (or the answered credential request's) minimum trust
+    /// profile judged against the session, before the first item. An
+    /// attempt is only started when it is satisfied; issuance judges it
+    /// again and must agree.
     pub policy_floor: PolicyFloor,
 }
 
@@ -81,9 +82,16 @@ pub struct AttemptRoleTarget {
     pub generated_probes: bool,
 }
 
-/// `(id, question_ids, option_orders, draft_answers_json, role_assessment_id)`
-/// of the one open attempt a retry resumes.
-type OpenAttemptRow = (String, String, String, Option<String>, Option<String>);
+/// `(id, question_ids, option_orders, draft_answers_json, role_assessment_id,
+/// request_policy_json)` of the one open attempt a retry resumes.
+type OpenAttemptRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
 
 struct RoleRow {
     target: AttemptRoleTarget,
@@ -529,6 +537,9 @@ pub async fn assessment_recover(
     assessment_grade(state, id, answers).await.map(Some)
 }
 
+/// [`start_attempt_with_consent_db`] without generated-probe consent. Tests
+/// only: the commands start through the consent-taking or request paths.
+#[cfg(test)]
 pub(crate) fn start_attempt_db(
     db: &crate::db::Database,
     skill_id: String,
@@ -565,6 +576,68 @@ pub(crate) fn start_attempt_with_consent_db(
     now: String,
     llm_probe_consent: bool,
 ) -> Result<StartedAttempt, String> {
+    start_attempt_core(
+        db,
+        skill_id,
+        integrity_session_id,
+        AttemptPolicySource::Role(role_assessment_id),
+        seed,
+        attempt_id,
+        now,
+        llm_probe_consent,
+    )
+}
+
+/// Start (or resume) an attempt answering an organisation's credential
+/// request, under the request's issuance policy as this device verified it
+/// (`commands::exchange`): its trust profile floor is judged before any item,
+/// as a sponsor role's is, and its probe policy runs after submission
+/// ([`crate::assessment::probes::effective_probe_policy`]). The policy is
+/// stored on the attempt. A request carries no model connection, so an
+/// `llm` probe policy is skipped as unavailable and no consent is asked.
+pub(crate) fn start_request_attempt_db(
+    db: &crate::db::Database,
+    skill_id: String,
+    integrity_session_id: Option<String>,
+    request_policy: Option<&crate::credentials::IssuancePolicy>,
+    seed: u64,
+    attempt_id: String,
+    now: String,
+) -> Result<StartedAttempt, String> {
+    start_attempt_core(
+        db,
+        skill_id,
+        integrity_session_id,
+        AttemptPolicySource::Request(request_policy),
+        seed,
+        attempt_id,
+        now,
+        false,
+    )
+}
+
+/// Whose issuance policy governs an attempt: a sponsor role the learner
+/// chose, or the organisation's credential request it answers.
+enum AttemptPolicySource<'a> {
+    Role(Option<String>),
+    Request(Option<&'a crate::credentials::IssuancePolicy>),
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_attempt_core(
+    db: &crate::db::Database,
+    skill_id: String,
+    integrity_session_id: Option<String>,
+    source: AttemptPolicySource<'_>,
+    seed: u64,
+    attempt_id: String,
+    now: String,
+    llm_probe_consent: bool,
+) -> Result<StartedAttempt, String> {
+    let (role_assessment_id, request_policy) = match source {
+        AttemptPolicySource::Role(role) => (role, None),
+        AttemptPolicySource::Request(policy) => (None, policy),
+    };
     if crate::commands::diagnostics::is_enabled() {
         return Err("exit diagnostics before starting an assessment".into());
     }
@@ -697,13 +770,23 @@ pub(crate) fn start_attempt_with_consent_db(
     // learner refresh until they receive a favourable question set.
     let resumed: Option<OpenAttemptRow> = conn
         .query_row(
-            "SELECT id, question_ids, option_orders, draft_answers_json, role_assessment_id \
+            "SELECT id, question_ids, option_orders, draft_answers_json, role_assessment_id, \
+                    request_policy_json \
                FROM assessment_attempts \
               WHERE subject_did = ?1 AND skill_id = ?2 \
                 AND graded_at IS NULL AND ended_at IS NULL \
               ORDER BY started_at DESC LIMIT 1",
             params![subject_did, skill_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
         )
         .optional()
         .map_err(|e| e.to_string())?;
@@ -714,11 +797,30 @@ pub(crate) fn start_attempt_with_consent_db(
         option_orders_json,
         draft_json,
         stored_role_id,
+        stored_request_policy,
     )) = resumed
     {
         let role = stored_role_target(conn, stored_role_id.as_deref())?;
+        // A request's policy stays the one the attempt was started under; an
+        // open attempt a request picks up takes the request's from here on.
+        let request_floor = match (stored_request_policy, request_policy) {
+            (Some(json), _) => parse_request_policy(&json)?.min_trust_profile,
+            (None, Some(policy)) => {
+                conn.execute(
+                    "UPDATE assessment_attempts SET request_policy_json = ?2 WHERE id = ?1",
+                    params![existing_id, request_policy_json(policy)?],
+                )
+                .map_err(|e| e.to_string())?;
+                policy.min_trust_profile
+            }
+            (None, None) => None,
+        };
+        let floor = match &role {
+            Some(role) => trust_profile::role_floor(conn, &role.role_assessment_id)?,
+            None => request_floor,
+        };
         // Judged again: the session may have lost what the floor needs.
-        let policy_floor = require_policy_floor(conn, &integrity_session_id, role.as_ref())?;
+        let policy_floor = require_policy_floor(conn, &integrity_session_id, floor)?;
         (
             existing_id,
             crate::assessment::randomizer::Draw {
@@ -740,8 +842,12 @@ pub(crate) fn start_attempt_with_consent_db(
             .as_deref()
             .map(|id| resolve_role_target(conn, &skill_id, id))
             .transpose()?;
+        let floor = match &role {
+            Some(role) => trust_profile::role_floor(conn, &role.role_assessment_id)?,
+            None => request_policy.and_then(|p| p.min_trust_profile),
+        };
         // Judge the floor before anything is drawn, for the same reason.
-        let policy_floor = require_policy_floor(conn, &integrity_session_id, role.as_ref())?;
+        let policy_floor = require_policy_floor(conn, &integrity_session_id, floor)?;
         let ctx = load_draw_context(conn, &subject_did, &skill_id)?;
         (
             attempt_id,
@@ -789,8 +895,8 @@ pub(crate) fn start_attempt_with_consent_db(
              (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
               integrity_session_id, started_at, attempt_ordinal, role_assessment_id, \
               assessed_bloom_level, pass_threshold_snapshot, item_fingerprints, \
-              llm_probe_consent) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+              llm_probe_consent, request_policy_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 attempt_id,
                 subject_did,
@@ -807,6 +913,7 @@ pub(crate) fn start_attempt_with_consent_db(
                 pass_threshold,
                 serde_json::to_string(&fingerprints).map_err(|e| e.to_string())?,
                 llm_probe_consent,
+                request_policy.map(request_policy_json).transpose()?,
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -823,25 +930,30 @@ pub(crate) fn start_attempt_with_consent_db(
     })
 }
 
-/// Judge the role's policy floor against the monitoring session, record the
-/// judgement on the session for issuance to compare with, and refuse when
-/// the session does not meet it.
+fn request_policy_json(policy: &crate::credentials::IssuancePolicy) -> Result<String, String> {
+    serde_json::to_string(policy).map_err(|e| e.to_string())
+}
+
+/// A stored request policy that does not parse must not become "no floor".
+fn parse_request_policy(json: &str) -> Result<crate::credentials::IssuancePolicy, String> {
+    serde_json::from_str(json).map_err(|e| format!("request policy unreadable: {e}"))
+}
+
+/// Judge the policy floor (a sponsor role's or a credential request's)
+/// against the monitoring session, record the judgement on the session for
+/// issuance to compare with, and refuse when the session does not meet it.
 fn require_policy_floor(
     conn: &rusqlite::Connection,
     integrity_session_id: &str,
-    role: Option<&AttemptRoleTarget>,
+    floor: Option<crate::sentinel::scoring::TrustProfile>,
 ) -> Result<PolicyFloor, String> {
-    let floor = match role {
-        Some(role) => trust_profile::role_floor(conn, &role.role_assessment_id)?,
-        None => None,
-    };
     let judged = trust_profile::record_policy_floor(conn, integrity_session_id, floor)?;
     if judged.satisfied {
         return Ok(judged);
     }
     let missing: Vec<&str> = judged.missing.iter().map(|s| s.as_str()).collect();
     Err(format!(
-        "policy floor not met: the role requires the '{}' trust profile, this session runs '{}' (missing: {})",
+        "policy floor not met: the policy requires the '{}' trust profile, this session runs '{}' (missing: {})",
         judged.required.map_or("none", |p| p.as_str()),
         judged.profile.map_or("none", |p| p.as_str()),
         if missing.is_empty() { "a selected profile".to_string() } else { missing.join(", ") },
@@ -2280,6 +2392,7 @@ mod tests {
             require_new_assessment: true,
             created_at: now,
             expires_at: now + 900,
+            issuance_policy: None,
         };
         let signed = present_credential(
             request.clone(),
@@ -3126,6 +3239,7 @@ mod role_target_tests {
             capabilities: camera,
             consent: camera,
             role_assessment_id: role,
+            exchange_request_id: None,
         }
     }
 
@@ -3268,6 +3382,130 @@ mod role_target_tests {
         assert_eq!(started.policy_floor.required, Some(TrustProfile::Camera));
         // Unattested, so `full` is out and `camera` is the highest permitted.
         assert_eq!(started.policy_floor.profile, Some(TrustProfile::Camera));
+    }
+
+    fn store_request(
+        conn: &rusqlite::Connection,
+        policy: IssuancePolicy,
+    ) -> alexandria_verify::exchange::CredentialRequest {
+        let request = crate::exchange_requests::tests::request("req-1", "skill_rust", Some(policy));
+        crate::exchange_requests::store(conn, "https://cloud.example", &request, 200, NOW).unwrap();
+        request
+    }
+
+    #[test]
+    fn an_attempt_started_from_a_request_with_a_camera_floor_locks_a_camera_profile() {
+        use crate::assessment::probes::{effective_probe_policy, ProbePolicy};
+        let db = setup();
+        let request = store_request(
+            db.conn(),
+            IssuancePolicy {
+                min_trust_profile: Some(TrustProfile::Camera),
+                probe_policy: Some(ProbePolicy::Reseed),
+                ..Default::default()
+            },
+        );
+        let fast = BenchmarkResult {
+            detect_ms: 10.0,
+            liveness_ms: 5.0,
+            track_ms: 1.0,
+        };
+        let chosen = select_for_session(
+            db.conn(),
+            "isess_live",
+            &ProfileRequest {
+                exchange_request_id: Some("req-1".into()),
+                ..camera_request(None)
+            },
+            Some(&fast),
+        )
+        .unwrap();
+        assert_eq!(chosen.record.selection.profile, TrustProfile::Camera);
+        assert_eq!(chosen.policy_floor.required, Some(TrustProfile::Camera));
+        assert!(chosen.policy_floor.satisfied);
+
+        let started = crate::commands::exchange::start_request_attempt(
+            &db,
+            &request,
+            "isess_live".into(),
+            7,
+            "att_1".into(),
+            NOW.into(),
+        )
+        .unwrap();
+        assert!(started.role.is_none());
+        assert!(started.policy_floor.satisfied);
+        assert_eq!(started.policy_floor.required, Some(TrustProfile::Camera));
+        assert_eq!(started.policy_floor.profile, Some(TrustProfile::Camera));
+        // The attempt keeps the request's policy: its probe policy runs.
+        assert_eq!(
+            effective_probe_policy(db.conn(), "att_1").unwrap(),
+            ProbePolicy::Reseed
+        );
+        let binding: String = db
+            .conn()
+            .query_row(
+                "SELECT exchange_binding FROM assessment_attempts WHERE id = 'att_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(binding, "request:req-1:req-1-nonce");
+    }
+
+    #[test]
+    fn a_request_floor_the_session_misses_refuses_the_attempt_before_any_item() {
+        let db = setup();
+        let request = store_request(
+            db.conn(),
+            IssuancePolicy {
+                min_trust_profile: Some(TrustProfile::Camera),
+                ..Default::default()
+            },
+        );
+        // A request this device has not verified sets no floor: refused.
+        let unknown = ProfileRequest {
+            exchange_request_id: Some("unknown".into()),
+            ..Default::default()
+        };
+        assert!(select_for_session(db.conn(), "isess_live", &unknown, None).is_err());
+        // Neither a role and a request together.
+        let both = ProfileRequest {
+            role_assessment_id: Some("role".into()),
+            exchange_request_id: Some("req-1".into()),
+            ..Default::default()
+        };
+        assert!(select_for_session(db.conn(), "isess_live", &both, None).is_err());
+
+        // No camera: the session runs `core`, and the learner is told.
+        let chosen = select_for_session(
+            db.conn(),
+            "isess_live",
+            &ProfileRequest {
+                exchange_request_id: Some("req-1".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(chosen.record.selection.profile, TrustProfile::Core);
+        assert!(!chosen.policy_floor.satisfied);
+
+        let err = crate::commands::exchange::start_request_attempt(
+            &db,
+            &request,
+            "isess_live".into(),
+            7,
+            "att_1".into(),
+            NOW.into(),
+        )
+        .unwrap_err();
+        assert!(err.contains("policy floor"), "{err}");
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM assessment_attempts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "a refused floor costs no attempt");
     }
 
     #[test]

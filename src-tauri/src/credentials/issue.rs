@@ -42,8 +42,28 @@ fn gate(
     let Some(assertion) = &vc.integrity else {
         return Err(CredentialError::PolicyWithoutSession);
     };
-    // A role credential issued on an assessed credential is judged by what
-    // was verified about that credential; any other by its own evidence.
+    judge_shared_rule(policy, assertion, vc, trust)?;
+    if let Some(floor) = policy.min_trust_profile {
+        if !facts.floor_agrees(floor) {
+            return Err(CredentialError::PolicyFloorDisagrees {
+                required: floor.as_str().to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// The shared rule over a credential's integrity `assertion`: a role
+/// credential issued on an assessed credential is judged by what was
+/// verified about that credential ([`alexandria_verify::policy::
+/// evaluate_assessed`]); any other by its own attestation evidence checked
+/// against `trust`. Used at issuance and by the credential exchange's picker.
+pub(crate) fn judge_shared_rule(
+    policy: &IssuancePolicy,
+    assertion: &IntegrityAssertion,
+    vc: &VerifiableCredential,
+    trust: &alexandria_verify::attestation::AttestationTrust,
+) -> Result<(), CredentialError> {
     match alexandria_verify::assessed::AssessedCredentialEvidence::find(vc)
         .map_err(|e| CredentialError::Envelope(e.to_string()))?
     {
@@ -53,13 +73,6 @@ fn gate(
         None => {
             let attestation = alexandria_verify::attestation::verify_evidence(vc, trust);
             alexandria_verify::policy::evaluate(policy, assertion, &attestation)?;
-        }
-    }
-    if let Some(floor) = policy.min_trust_profile {
-        if !facts.floor_agrees(floor) {
-            return Err(CredentialError::PolicyFloorDisagrees {
-                required: floor.as_str().to_string(),
-            });
         }
     }
     Ok(())
@@ -548,6 +561,7 @@ mod tests {
             capabilities: caps,
             consent: caps,
             role_assessment_id: None,
+            exchange_request_id: None,
         };
         let fast = BenchmarkResult {
             detect_ms: 9.0,

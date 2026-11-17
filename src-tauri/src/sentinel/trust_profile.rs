@@ -41,6 +41,11 @@ pub struct ProfileRequest {
     /// The sponsor role the attempt is for, whose policy sets the floor.
     /// Assessments only.
     pub role_assessment_id: Option<String>,
+    /// The organisation's credential request the attempt answers, whose
+    /// issuance policy sets the floor. Read from the request as this device
+    /// verified it ([`crate::exchange_requests`]). Assessments only; never
+    /// together with a role.
+    pub exchange_request_id: Option<String>,
 }
 
 impl ProfileRequest {
@@ -144,10 +149,23 @@ pub(crate) fn select_for_session(
     if root.is_some() {
         return Err("the trust profile is chosen before the first snapshot".into());
     }
-    let floor = match (&req.role_assessment_id, purpose.as_str()) {
-        (Some(_), "interview") => return Err("an interview check has no sponsor role".into()),
-        (Some(role), _) => role_floor(conn, role)?,
-        (None, _) => None,
+    let floor = match (
+        &req.role_assessment_id,
+        &req.exchange_request_id,
+        purpose.as_str(),
+    ) {
+        (Some(_), Some(_), _) => {
+            return Err(
+                "an attempt answers a sponsor role or a credential request, not both".into(),
+            )
+        }
+        (Some(_), None, "interview") => return Err("an interview check has no sponsor role".into()),
+        (None, Some(_), "interview") => {
+            return Err("an interview check answers no credential request".into())
+        }
+        (Some(role), None, _) => role_floor(conn, role)?,
+        (None, Some(request), _) => crate::exchange_requests::floor(conn, request)?,
+        (None, None, _) => None,
     };
     // A paired phone's attestation counts only with companion consent.
     let paired =
@@ -371,6 +389,7 @@ mod tests {
                 ..Default::default()
             },
             role_assessment_id: None,
+            exchange_request_id: None,
         };
         let fast = BenchmarkResult {
             detect_ms: 1.0,
@@ -412,6 +431,7 @@ mod tests {
             capabilities: camera,
             consent: camera,
             role_assessment_id: None,
+            exchange_request_id: None,
         }
     }
 

@@ -106,6 +106,25 @@ pub struct AttestSessionResponse {
     pub unverified: Option<crate::sentinel::attestation::Unverified>,
 }
 
+/// What this device can contribute to a trust profile floor before any
+/// session exists, so a policy's requirements can say up front when this
+/// device cannot meet them. The camera is detected by the frontend.
+#[derive(Debug, Serialize)]
+pub struct DeviceSupport {
+    /// The platform can attest a session here (App Attest, Play Integrity).
+    pub platform_attestation: bool,
+    /// A paired phone can lend its attestation (desktop builds).
+    pub companion_phone: bool,
+}
+
+#[tauri::command]
+pub async fn integrity_device_support() -> Result<DeviceSupport, String> {
+    Ok(DeviceSupport {
+        platform_attestation: crate::sentinel::attestation::native::supported(),
+        companion_phone: cfg!(desktop),
+    })
+}
+
 /// Ask the platform to attest the session nonce and store the result.
 ///
 /// Called by the frontend right after `integrity_start_session`. Blocking

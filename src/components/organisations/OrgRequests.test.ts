@@ -3,12 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import OrgRequests from './OrgRequests.vue'
 import type {
   AccessRequestItem,
+  DeviceSupport,
   HiringRecord,
   OrgCheck,
   OrgCredentialRequest,
   OrgInterview,
   OrgOffer,
   OrgProof,
+  ShareableCredential,
 } from '@/types'
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), push: vi.fn() }))
@@ -92,6 +94,13 @@ interface Inbox {
   offers?: OrgOffer[]
   history?: HiringRecord[]
   problems?: { directory: string; detail: string }[]
+  credentials?: ShareableCredential[]
+  device?: DeviceSupport
+}
+
+const shareable: ShareableCredential = {
+  id: 'cred-1', issuer: 'did:key:z6MkIssuer', issued_at: '2026-10-01T00:00:00Z',
+  meets_policy: true, refusal_code: null, refusal: null,
 }
 
 function arm(inbox: Inbox) {
@@ -105,7 +114,10 @@ function arm(inbox: Inbox) {
       case 'hiring_history': return inbox.history ?? []
       case 'get_skill': return { skill: { name: 'Big-O Analysis' } }
       case 'org_grant': return { grantId: 'g-1', orgName: 'Acme Hiring', orgDomain: 'acme.example' }
-      case 'exchange_credentials': return [{ id: 'cred-1', issuer: 'did:key:z6MkIssuer', issued_at: '2026-10-01T00:00:00Z' }]
+      case 'exchange_credentials': return inbox.credentials ?? [shareable]
+      case 'integrity_device_support':
+        if (inbox.device) return inbox.device
+        throw new Error(command)
       case 'exchange_preview': return { type: ['VerifiablePresentation'] }
       case 'hiring_interview_respond':
       case 'hiring_offer_respond': return { received: true, status: 'accepted' }
@@ -194,6 +206,65 @@ describe('OrgRequests', () => {
     await button(wrapper, 'organisations.requests.assessment.preview').trigger('click'); await flushPromises()
     expect(mocks.invoke).toHaveBeenCalledWith('exchange_preview', { request: item.request, orgProof: proof, credentialId: 'cred-1' })
     expect(wrapper.text()).toContain('organisations.requests.assessment.disclosure')
+  })
+
+  it('lists the request policy in plain words and says when this device has no camera', async () => {
+    const item = assessmentItem()
+    item.request.issuance_policy = {
+      require_clean: true, min_integrity: 0.8, max_critical: 0, max_warning: 2,
+      required_assurance_level: 'local', min_trust_profile: 'full', min_verification_rung: 'process', probe_policy: 'reseed',
+    }
+    arm({ assessments: [item], device: { platform_attestation: false, companion_phone: true } })
+    const enumerateDevices = vi.fn().mockResolvedValue([{ kind: 'audioinput' }])
+    vi.stubGlobal('navigator', { mediaDevices: { enumerateDevices } })
+    try {
+      const wrapper = mount(OrgRequests); await flushPromises()
+      const policy = wrapper.find('[data-testid=request-policy]')
+      expect(policy.findAll('li').map((li) => li.attributes('data-testid'))).toEqual([
+        'requirement-clean', 'requirement-minIntegrity', 'requirement-maxCritical', 'requirement-maxWarning',
+        'requirement-assurance', 'requirement-floor', 'requirement-rung', 'requirement-probes',
+      ])
+      expect(policy.find('[data-testid=requirement-maxCritical]').text()).toBe('organisations.requests.assessment.policy.noCritical')
+      expect(policy.find('[data-testid=floor-blocker-camera]').exists()).toBe(true)
+      // Desktop: a paired phone can lend the attestation.
+      expect(policy.find('[data-testid=floor-blocker-attestation]').text()).toContain('organisations.requests.assessment.policy.pairPhone')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('shows no requirements for a request without a policy and never asks about the device', async () => {
+    arm({ assessments: [assessmentItem()] })
+    const wrapper = mount(OrgRequests); await flushPromises()
+    expect(wrapper.find('[data-testid=request-policy]').exists()).toBe(false)
+    expect(mocks.invoke.mock.calls.map((c) => c[0])).not.toContain('integrity_device_support')
+  })
+
+  it('marks a credential the policy would refuse, with the reason, and still lets it be previewed', async () => {
+    const item = assessmentItem()
+    item.request.issuance_policy = { min_trust_profile: 'camera' }
+    arm({
+      assessments: [item],
+      credentials: [
+        { ...shareable, id: 'cred-core', meets_policy: false, refusal_code: 'trust_profile_below_floor', refusal: "issuance policy: trust profile 'core' does not meet the 'camera' floor" },
+        { ...shareable, id: 'cred-camera' },
+      ],
+    })
+    const wrapper = mount(OrgRequests); await flushPromises()
+    await button(wrapper, 'organisations.requests.assessment.choose').trigger('click'); await flushPromises()
+    const refused = wrapper.find('[data-testid=credential-refused]')
+    expect(refused.attributes('value')).toBe('cred-core')
+    expect(refused.text()).toContain('organisations.requests.assessment.refusedOption')
+    expect(wrapper.find('[data-testid=credential-meets]').attributes('value')).toBe('cred-camera')
+
+    await wrapper.find('[data-testid=credential-picker] select').setValue('cred-core')
+    expect(wrapper.find('[data-testid=credential-refused-note]').text()).toBe('organisations.requests.assessment.refusedNote')
+    await button(wrapper, 'organisations.requests.assessment.preview').trigger('click'); await flushPromises()
+    expect(mocks.invoke).toHaveBeenCalledWith('exchange_preview', { request: item.request, orgProof: proof, credentialId: 'cred-core' })
+
+    await wrapper.find('[data-testid=credential-picker] select').setValue('cred-camera')
+    expect(wrapper.find('[data-testid=credential-refused-note]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid=credential-meets-note]').exists()).toBe(true)
   })
 
   it('opens the requested assessment with the request and Cloud in the query', async () => {

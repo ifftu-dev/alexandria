@@ -937,13 +937,25 @@ describe('Sentinel trust profile', () => {
     const call = mocks.invoke.mock.calls.find(([name]) => name === 'integrity_select_profile')
     expect(call?.[1]).toEqual({
       sessionId: 'session-1',
-      request: { capabilities: caps(true), consent: caps(true), role_assessment_id: 'role-1' },
+      request: { capabilities: caps(true), consent: caps(true), role_assessment_id: 'role-1', exchange_request_id: null },
     })
     expect(order.indexOf('integrity_attest_session')).toBeLessThan(order.indexOf('integrity_select_profile'))
     expect(service.trustProfile.value?.profile).toBe('camera')
     expect(service.cameraOptedIn.value).toBe(true)
     await service.stop()
     expect(service.trustProfile.value).toBeNull()
+  })
+
+  it('names the credential request whose policy floor applies', async () => {
+    withProfile('camera')
+    const service = (await freshService())()
+    await service.start(null, true, 'assessment', { exchangeRequestId: 'request-1' })
+    const call = mocks.invoke.mock.calls.find(([name]) => name === 'integrity_select_profile')
+    expect(call?.[1]).toEqual({
+      sessionId: 'session-1',
+      request: { capabilities: caps(true), consent: caps(true), role_assessment_id: null, exchange_request_id: 'request-1' },
+    })
+    await service.stop()
   })
 
   it('does not run the camera when the chosen profile does not include it', async () => {

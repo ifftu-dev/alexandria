@@ -136,14 +136,16 @@ pub struct ProbeAnswerReceipt {
 // ---- policy ---------------------------------------------------------------
 
 /// The probe policy in force for an attempt: the role's when the attempt is
-/// for a role whose policy is not `none`, otherwise the assessment's.
+/// for a role whose policy is not `none`, or the credential request's when
+/// it answers one (stored on the attempt at start), otherwise the
+/// assessment's.
 pub fn effective_probe_policy(
     conn: &rusqlite::Connection,
     attempt_id: &str,
 ) -> Result<ProbePolicy, String> {
     let (bank_policy, role_policy_json): (String, Option<String>) = conn
         .query_row(
-            "SELECT qb.probe_policy, ra.issuance_policy_json \
+            "SELECT qb.probe_policy, COALESCE(ra.issuance_policy_json, a.request_policy_json) \
                FROM assessment_attempts a \
                JOIN question_banks qb ON qb.id = a.bank_id \
                LEFT JOIN role_assessments ra ON ra.id = a.role_assessment_id \
@@ -157,7 +159,7 @@ pub fn effective_probe_policy(
         })?;
     if let Some(json) = role_policy_json {
         let policy: crate::credentials::IssuancePolicy = serde_json::from_str(&json)
-            .map_err(|e| format!("role issuance policy is unreadable: {e}"))?;
+            .map_err(|e| format!("issuance policy is unreadable: {e}"))?;
         if let Some(p) = policy.probe_policy.filter(|p| *p != ProbePolicy::None) {
             return Ok(p);
         }
