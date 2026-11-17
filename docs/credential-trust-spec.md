@@ -268,6 +268,9 @@ Sub-tickets live in `credential-trust/`; each names its blockers. The Sequence a
 | [14 Collect organisation-issued credentials](credential-trust/14-collect-org-credentials.md) | alexandria | 13 | done |
 | [15 Trust surfaces](credential-trust/15-trust-surfaces.md) | alexandria | 03, 06, 09 | done |
 | [16 Verifier release](credential-trust/16-verifier-release.md) | alexandria, alexandria-cloud | 02, 03, 04, 05, 08, 09 | done |
+| [17 Camera coverage](credential-trust/17-camera-coverage.md) | alexandria | 08 | ready-for-agent |
+| [18 Policy in the request](credential-trust/18-policy-in-request.md) | alexandria | 08 | ready-for-agent |
+| [19 Cloud policy in the request](credential-trust/19-cloud-policy-in-request.md) | alexandria-cloud | 17, 18 | ready-for-agent |
 
 ## Decisions
 
@@ -276,6 +279,13 @@ Owner answers, 2026-11-16:
 - **Test seams confirmed**: verifier interoperability vectors, credential issuance over an in-memory database, hosted assessment exchange over HTTP. No new seam.
 - **Organisation signer**: the hosted service signs with the organisation's hosted key. Sponsor-device issuance gains only the session-to-subject binding.
 - **Personal key rotation**: deleted.
+
+Owner answers, 2026-11-17:
+
+- **Camera floor**: keep the 90% tolerance; the assertion states camera coverage (ticket 17).
+- **Story 28**: build it (tickets 18 and 19).
+- **Docs**: make the proposed doc edits.
+- **Publish** `alexandria-verify` once tickets 17 and 18 are in it.
 
 ## Notes
 
