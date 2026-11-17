@@ -23,6 +23,13 @@ const notNow = moduleRef<Set<string>>(new Set())
  * There is still no decline for an access request. "Not now" hides it here
  * for this session and tells nobody; a request left alone expires. A refusal
  * button would turn consent into a record of who said no to whom.
+ *
+ * An assessment request may carry the organisation's issuance policy. Its
+ * card lists the requirements before the candidate starts (RequestPolicy),
+ * and the credential picker marks each credential the policy would refuse,
+ * with the reason, as the backend judges it by the shared rule. A refused
+ * credential stays selectable: the policy decides whether the organisation
+ * issues its own credential, not whether the candidate may show them a result.
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -30,10 +37,13 @@ import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton } from '@/components/ui'
 import OrgBadge from './OrgBadge.vue'
+import RequestPolicy from './RequestPolicy.vue'
 import { bloomName } from '@/utils/bloom'
+import { floorNeedsDevice, type DeviceAbility } from '@/utils/requestPolicy'
 import type {
   AccessRequestItem,
   CloudPull,
+  DeviceSupport,
   GrantView,
   HiringRecord,
   OrgCheck,
@@ -82,6 +92,51 @@ const credentials = ref<ShareableCredential[]>([])
 const credentialId = ref('')
 const preview = ref<SignedCredentialShare | null>(null)
 const receipts = ref<Record<string, string>>({})
+const chosenCredential = computed(() => credentials.value.find((c) => c.id === credentialId.value) ?? null)
+
+/** What this device can run of a request's trust profile floor; asked only when a floor needs it. */
+const device = ref<DeviceAbility>({ camera: null, support: null })
+let deviceAsked = false
+
+async function detectDevice() {
+  if (deviceAsked) return
+  deviceAsked = true
+  try {
+    device.value = { ...device.value, support: await invoke<DeviceSupport>('integrity_device_support') }
+  } catch {
+    /* unknown: nothing is claimed */
+  }
+  try {
+    const found = await navigator.mediaDevices?.enumerateDevices?.()
+    if (found) device.value = { ...device.value, camera: found.some((d) => d.kind === 'videoinput') }
+  } catch {
+    /* unknown: nothing is claimed */
+  }
+}
+
+function refusalReason(code: string | null, fallback: string | null): string {
+  switch (code) {
+    case 'not_clean': return t('organisations.requests.assessment.refusal.not_clean')
+    case 'integrity_below_minimum': return t('organisations.requests.assessment.refusal.integrity_below_minimum')
+    case 'no_integrity_score': return t('organisations.requests.assessment.refusal.no_integrity_score')
+    case 'too_many_critical': return t('organisations.requests.assessment.refusal.too_many_critical')
+    case 'too_many_warnings': return t('organisations.requests.assessment.refusal.too_many_warnings')
+    case 'assurance_below_required': return t('organisations.requests.assessment.refusal.assurance_below_required')
+    case 'trust_profile_below_floor': return t('organisations.requests.assessment.refusal.trust_profile_below_floor')
+    case 'rung_below_minimum': return t('organisations.requests.assessment.refusal.rung_below_minimum')
+    case 'probe_policy_not_run': return t('organisations.requests.assessment.refusal.probe_policy_not_run')
+    case 'probe_failed': return t('organisations.requests.assessment.refusal.probe_failed')
+    case 'no_integrity_assertion': return t('organisations.requests.assessment.refusal.no_integrity_assertion')
+    case 'unreadable_evidence': return t('organisations.requests.assessment.refusal.unreadable_evidence')
+    default: return fallback ?? code ?? ''
+  }
+}
+
+function credentialLabel(credential: ShareableCredential): string {
+  const base = `${credential.id} · ${whenIso(credential.issued_at)}`
+  if (credential.meets_policy) return base
+  return `${base} · ${t('organisations.requests.assessment.refusedOption', { reason: refusalReason(credential.refusal_code, credential.refusal) })}`
+}
 
 // Interview / offer answers.
 const slot = ref<Record<string, number | ''>>({})
@@ -212,6 +267,9 @@ async function refresh() {
     if (!picked.value[key]) picked.value[key] = item.skills.filter((s) => s.hasEvidence).map((s) => s.skillId)
   }
   void nameSkills()
+  if (assessments.value.some((item) => floorNeedsDevice(item.request.issuance_policy?.min_trust_profile))) {
+    void detectDevice()
+  }
   loading.value = false
 }
 
@@ -490,6 +548,12 @@ onUnmounted(() => {
         <p class="text-sm font-medium text-foreground">{{ entry.item.request.role_label }}</p>
         <p class="text-sm text-foreground">{{ entry.item.request.purpose }}</p>
         <p class="text-xs text-muted-foreground">{{ t('organisations.requests.assessment.skill', { skill: skillName(entry.item.request.skill_id) }) }}</p>
+        <RequestPolicy
+          v-if="entry.item.request.issuance_policy"
+          :policy="entry.item.request.issuance_policy"
+          :org="entry.org.name ?? entry.item.request.organization"
+          :device="device"
+        />
         <div class="flex flex-wrap gap-2">
           <AppButton
             v-if="entry.item.request.require_new_assessment"
@@ -514,8 +578,28 @@ onUnmounted(() => {
             @change="preview = null"
           >
             <option value="">{{ t('organisations.requests.assessment.choose') }}</option>
-            <option v-for="credential in credentials" :key="credential.id" :value="credential.id">{{ credential.id }} · {{ whenIso(credential.issued_at) }}</option>
+            <option
+              v-for="credential in credentials"
+              :key="credential.id"
+              :value="credential.id"
+              :data-testid="credential.meets_policy ? 'credential-meets' : 'credential-refused'"
+            >{{ credentialLabel(credential) }}</option>
           </select>
+          <p
+            v-if="chosenCredential && !chosenCredential.meets_policy"
+            role="status"
+            class="text-xs text-warning"
+            data-testid="credential-refused-note"
+          >
+            {{ t('organisations.requests.assessment.refusedNote', { reason: refusalReason(chosenCredential.refusal_code, chosenCredential.refusal) }) }}
+          </p>
+          <p
+            v-else-if="chosenCredential && entry.item.request.issuance_policy"
+            class="text-xs text-success"
+            data-testid="credential-meets-note"
+          >
+            {{ t('organisations.requests.assessment.meetsPolicy') }}
+          </p>
           <AppButton size="sm" :disabled="!credentialId || !!busy || !entry.org.verified" @click="showPreview(entry)">
             {{ t('organisations.requests.assessment.preview') }}
           </AppButton>

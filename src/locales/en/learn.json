@@ -38,7 +38,10 @@
     "probeSkip": "Skip",
     "generatedProbeConsent": "Let this role's model connection write my follow-up questions",
     "generatedProbeConsentNote": "After you submit, the options you chose and the skill description are sent to the model connection the sponsor set up for this role, which writes up to two short follow-up questions. The assessment questions are not sent. If you leave this off, the follow-ups are skipped and that does not count against you.",
-    "probePreparing": "Preparing follow-up questions…"
+    "probePreparing": "Preparing follow-up questions…",
+    "requestIntro": "{org} asked for this assessment for {role}. Their requirements apply from the first question.",
+    "requestCameraNote": "Their requirements need camera checks. Turn on the camera before you start.",
+    "requestAttestationNote": "Their requirements need a device that proves it runs a genuine app."
   },
   "player": {
     "courseFallback": "Course",

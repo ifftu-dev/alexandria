@@ -18,6 +18,7 @@ pub mod diag;
 pub mod domain;
 pub mod enrollment;
 pub mod evidence;
+pub(crate) mod exchange_requests;
 pub mod goals;
 pub mod interview_panel;
 #[cfg(test)]
@@ -1772,6 +1773,7 @@ pub fn run() {
             commands::skill_bootstrap::bootstrap_extract_text,
             // Dynamic assessments
             commands::exchange::exchange_requests,
+            commands::exchange::exchange_prepare_assessment,
             commands::exchange::exchange_start_assessment,
             commands::exchange::exchange_credentials,
             commands::exchange::exchange_preview,
@@ -1859,6 +1861,7 @@ pub fn run() {
             commands::integrity::integrity_start_session,
             commands::integrity::integrity_attest_session,
             commands::integrity::integrity_select_profile,
+            commands::integrity::integrity_device_support,
             commands::integrity::integrity_coverage_statement,
             commands::integrity::integrity_coverage_statements,
             commands::integrity_companion::integrity_companion_offer,

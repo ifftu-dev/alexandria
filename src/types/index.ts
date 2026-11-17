@@ -843,6 +843,11 @@ export interface ProfileRequest {
   consent: SentinelCapabilities
   /** Assessments only: the sponsor role whose policy sets the floor. */
   role_assessment_id: string | null
+  /**
+   * Assessments only: the credential request whose issuance policy sets the
+   * floor, read from the request as this device verified it. Never with a role.
+   */
+  exchange_request_id?: string | null
 }
 
 export interface ProfileExclusion {
@@ -3046,6 +3051,33 @@ export interface CredentialRequest {
   require_new_assessment: boolean
   created_at: number
   expires_at: number
+  /**
+   * The policy the organisation will judge the answer against before issuing
+   * its own credential. Covered by the organisation's proof; never carries
+   * `probe_connection_id`. Absent when the request names no policy.
+   */
+  issuance_policy?: IssuancePolicy
+}
+
+/**
+ * What an attempt answering a credential request runs under, from the
+ * request as this device verified it (`exchange_prepare_assessment`).
+ */
+export interface RequestAttemptTarget {
+  request_id: string
+  organization: string
+  role_label: string
+  issuance_policy: IssuancePolicy | null
+  /** The policy's minimum trust profile runs the camera. */
+  camera_required: boolean
+  /** The policy's minimum trust profile needs device attestation. */
+  attestation_required: boolean
+}
+
+/** What this device can contribute to a trust profile floor (`integrity_device_support`). */
+export interface DeviceSupport {
+  platform_attestation: boolean
+  companion_phone: boolean
 }
 
 export interface InterviewInvite {
@@ -3221,6 +3253,12 @@ export interface ShareableCredential {
   id: string
   issuer: string
   issued_at: string
+  /** The request's issuance policy, judged by the shared rule, accepts it (true without a policy). */
+  meets_policy: boolean
+  /** The first unmet requirement's stable code, when refused. */
+  refusal_code: string | null
+  /** The refusal in words, when refused. */
+  refusal: string | null
 }
 
 export interface OpinionExample {

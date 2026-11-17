@@ -88,6 +88,17 @@ const PENDING_TRANSLATION = [
   'credentials.detail.trust',
   // Local status-evidence limitation note. English-only pending a translate pass.
   'credentials.detail.statusEvidence',
+  // The organisation's issuance policy shown with an assessment request and
+  // the picker's refusals (credential trust ticket 18). English-only pending
+  // the next learner translation pass; renders via the i18n fallback.
+  'organisations.requests.assessment.policy.',
+  'organisations.requests.assessment.meetsPolicy',
+  'organisations.requests.assessment.refusedOption',
+  'organisations.requests.assessment.refusedNote',
+  'organisations.requests.assessment.refusal.',
+  'learn.assessment.requestIntro',
+  'learn.assessment.requestCameraNote',
+  'learn.assessment.requestAttestationNote',
   // Suspension check in the proof panel (credential trust ticket 15).
   // English-only pending a translate pass.
   'credentials.detail.suspended',

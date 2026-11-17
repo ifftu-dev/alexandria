@@ -153,6 +153,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // is the issuer's counter for lists it holds or gossips. NULL for a list
     // that did not arrive by fetch.
     (42, "status_list_valid_from", "ALTER TABLE credential_status_lists ADD COLUMN valid_from INTEGER;"),
+    // Credential requests as verified when pulled, and the request's issuance
+    // policy on an attempt started from one, so its floor and probe policy
+    // apply the way a sponsor role's do. See `crate::commands::exchange`.
+    (43, "exchange_requests", include_str!("exchange_requests.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"
