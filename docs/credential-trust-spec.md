@@ -1,8 +1,8 @@
 # Credential trust: checkable integrity evidence and organisation-issued credentials
 
-Status: active
-Updated: 2026-11-16
-Triage: ready-for-agent
+Status: implemented
+Updated: 2026-11-17
+Triage: done
 Repos: alexandria, alexandria-cloud
 
 A review of how credentials and Sentinel fit together, against three goals in this order: trust in a credential now and years from now, transparency to anyone who views one, and interoperability with existing standards. The review found that everything Sentinel says about a session reaches the outside world as the holder's own word. This spec makes that word checkable where the platform allows it, says so plainly where it does not, and gives organisations a working way to put their own signature on a result. Background: [sentinel.md](sentinel.md), [skills-and-reputation.md](skills-and-reputation.md), [ADR 0001](adr/0001-vc-first-credentials.md), [ADR 0003](adr/0003-credential-authority.md). Vocabulary: [GLOSSARY.md](../GLOSSARY.md).
@@ -268,9 +268,9 @@ Sub-tickets live in `credential-trust/`; each names its blockers. The Sequence a
 | [14 Collect organisation-issued credentials](credential-trust/14-collect-org-credentials.md) | alexandria | 13 | done |
 | [15 Trust surfaces](credential-trust/15-trust-surfaces.md) | alexandria | 03, 06, 09 | done |
 | [16 Verifier release](credential-trust/16-verifier-release.md) | alexandria, alexandria-cloud | 02, 03, 04, 05, 08, 09 | done |
-| [17 Camera coverage](credential-trust/17-camera-coverage.md) | alexandria | 08 | ready-for-agent |
-| [18 Policy in the request](credential-trust/18-policy-in-request.md) | alexandria | 08 | ready-for-agent |
-| [19 Cloud policy in the request](credential-trust/19-cloud-policy-in-request.md) | alexandria-cloud | 17, 18 | ready-for-agent |
+| [17 Camera coverage](credential-trust/17-camera-coverage.md) | alexandria | 08 | done |
+| [18 Policy in the request](credential-trust/18-policy-in-request.md) | alexandria | 08 | done |
+| [19 Cloud policy in the request](credential-trust/19-cloud-policy-in-request.md) | alexandria-cloud | 17, 18 | done |
 
 ## Decisions
 
@@ -289,10 +289,6 @@ Owner answers, 2026-11-17:
 
 ## Notes
 
-2026-11-16: all sixteen tickets built and merged on `feat/credential-trust` in `alexandria` and `alexandria-cloud`, followed by a code review of each branch and one round of fixes (recorded in the affected tickets' Notes). Status stays `active` until the owner settles the open items:
+2026-11-16: all sixteen tickets built and merged on the integration branches in `alexandria` and `alexandria-cloud`, followed by a code review of each branch and one round of fixes (recorded in the affected tickets' Notes).
 
-- Ticket 08 made the camera floor strict: a degraded camera signal never carries a floor, because a verifier cannot see coverage. Keeping the 90% tolerance needs a verifier-visible coverage field in the integrity assertion.
-- Story 28 (telling a candidate the role's policy before they start) is not built: the exchange request carries no policy.
-- Markdown doc edits proposed by each ticket await approval, including regenerating the generated schema document.
-- `alexandria-verify` 0.7.0 is not published to crates.io.
-
+2026-11-17: the owner's open items are settled. Ticket 17 keeps the 90% camera tolerance through a stated `cameraCoverage`; tickets 18 and 19 build story 28; the proposed doc edits are made, including the regenerated schema document and ADRs 0006 to 0008; `alexandria-verify` 0.7.0 is published.

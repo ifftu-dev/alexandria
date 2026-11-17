@@ -28,5 +28,4 @@ The hosted service issues organisation-signed credentials, and the organisation 
 - A remote candidate holds a credential that is more than their own word, and owns it.
 - The candidate's attestation evidence is not copied: its binding covers the candidate's credential and would not verify on the role credential. The organisation's signature vouches for the outcome it records instead.
 - Organisation backing depends on the domain's key list. Rotating a hosted key withdraws backing from credentials the old key signed, and their status can no longer be changed.
-- Showing the candidate the policy up front needs the service to put it in the request. The app and the verifier contract support it; the hosted service does not send it yet.
 - Delivering a candidate's share to an organisation owner's device is not built; remote candidates' organisation-issued credentials come from the hosted service.
