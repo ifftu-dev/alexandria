@@ -207,6 +207,7 @@ pub(crate) fn build_integrity_assertion(
         signals_run: surface.signals_run,
         signals_degraded: surface.signals_degraded,
         signals_not_run: surface.signals_not_run,
+        camera_coverage: surface.camera_coverage,
         probe: surface.probe.map(|p| ProbeSummary {
             outcome: p.outcome.as_str().to_string(),
             policies: p.policies,
@@ -1023,7 +1024,7 @@ mod tests {
     }
 
     #[test]
-    fn a_degraded_camera_no_longer_carries_a_camera_floor() {
+    fn a_camera_floor_is_judged_from_the_coverage_the_assertion_states() {
         use crate::sentinel::scoring::TrustProfile;
         let (db, key, _, subject) = setup();
         let mut req = sample_request(subject.clone());
@@ -1038,23 +1039,33 @@ mod tests {
             .integrity
             .unwrap();
         assert!(a.signals_degraded.is_empty());
+        assert_eq!(a.camera_coverage, Some(1.0));
 
-        // One window in ten without camera checks: degraded, and said so.
-        // The shared rule judges the floor from the assertion, where a
-        // verifier cannot see how much of the session the camera covered, so
-        // a degraded camera does not carry the floor.
+        // One window in twelve without camera checks: degraded, and said so,
+        // but the stated coverage (11/12) is at or above the minimum, so the
+        // shared rule credits the camera and the credential issues.
         session_on_profile(db.conn(), "brief", false, true, Some(TrustProfile::Camera));
-        camera_windows(db.conn(), "brief", 10, 1);
+        camera_windows(db.conn(), "brief", 12, 1);
         req.integrity_session_id = Some("brief".into());
-        assert!(matches!(
-            issue(db.conn(), &key, &req, NOW).unwrap_err(),
-            CredentialError::Policy(PolicyRefusal::TrustProfileBelowFloor { .. })
-        ));
-        let a = assertion_for(db.conn(), &key, &subject, "brief");
+        let a = issue(db.conn(), &key, &req, NOW)
+            .unwrap()
+            .integrity
+            .unwrap();
         assert_eq!(a.trust_profile.as_deref(), Some("camera"));
         assert_eq!(a.signals_run, vec!["core", "camera"]);
         assert_eq!(a.signals_degraded, vec!["camera"]);
         assert_eq!(a.signals_not_run, vec!["device_attestation"]);
+        assert_eq!(a.camera_coverage, Some(11.0 / 12.0));
+
+        // One window in ten: exactly at the minimum, still met.
+        session_on_profile(db.conn(), "edge", false, true, Some(TrustProfile::Camera));
+        camera_windows(db.conn(), "edge", 10, 1);
+        req.integrity_session_id = Some("edge".into());
+        let a = issue(db.conn(), &key, &req, NOW)
+            .unwrap()
+            .integrity
+            .unwrap();
+        assert_eq!(a.camera_coverage, Some(0.9));
 
         // Half the session without the camera: the floor is not met.
         session_on_profile(
@@ -1070,6 +1081,8 @@ mod tests {
             issue(db.conn(), &key, &req, NOW).unwrap_err(),
             CredentialError::Policy(PolicyRefusal::TrustProfileBelowFloor { .. })
         ));
+        let a = assertion_for(db.conn(), &key, &subject, "covered");
+        assert_eq!(a.camera_coverage, Some(0.5));
 
         // A camera session with no committed windows has no coverage at all.
         session_on_profile(db.conn(), "empty", false, true, Some(TrustProfile::Camera));
@@ -1078,9 +1091,29 @@ mod tests {
             issue(db.conn(), &key, &req, NOW).unwrap_err(),
             CredentialError::Policy(PolicyRefusal::TrustProfileBelowFloor { .. })
         ));
-        // Without a floor it still issues, and the assertion says it degraded.
+        // Without a floor it still issues, and the assertion says it degraded
+        // and states a coverage of 0.
         let a = assertion_for(db.conn(), &key, &subject, "empty");
         assert_eq!(a.signals_degraded, vec!["camera"]);
+        assert_eq!(a.camera_coverage, Some(0.0));
+    }
+
+    #[test]
+    fn an_assertion_without_the_camera_states_no_coverage_and_keeps_its_wire_shape() {
+        let (db, key, _, subject) = setup();
+        // A profile without the camera: the field is left out of the wire
+        // form, so such credentials keep the bytes they had before it existed.
+        session_on_profile(db.conn(), "core", false, false, None);
+        let vc = {
+            let mut req = sample_request(subject);
+            req.integrity_session_id = Some("core".into());
+            issue(db.conn(), &key, &req, NOW).unwrap()
+        };
+        let a = vc.integrity.as_ref().unwrap();
+        assert_eq!(a.trust_profile.as_deref(), Some("core"));
+        assert_eq!(a.camera_coverage, None);
+        let wire = serde_json::to_value(&vc).unwrap();
+        assert!(wire["integrity"].get("cameraCoverage").is_none());
     }
 
     #[test]
