@@ -82,9 +82,12 @@ alexandria credentials verify bundle.json --at 2026-01-01T00:00:00Z
   integrity binding and policy) stays expressible. It unlocks the vault for the
   issuer signing key, so a credential minted here is indistinguishable from one
   the app mints.
-- `verify --at` checks the bundle as of that moment: expiry, open suspension
-  windows, and which issuer key was current (so a credential signed before a
-  key rotation still verifies at a time that key was valid).
+- `verify` prints the failing checks of each rejected credential, then one
+  line per credential: where it came from (issued by a named organisation,
+  device-attested, or self-reported) and its suspension state. The JSON gains
+  `trust`. Suspension is read from the bundle's suspension lists.
+- `verify --at` checks expiry as of that moment. A `did:key` is always its own
+  key, so the time never changes which key a signature is checked against.
 
 ### Presentations
 
