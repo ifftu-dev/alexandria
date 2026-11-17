@@ -91,6 +91,9 @@ const PENDING_TRANSLATION = [
   // Suspension check in the proof panel (credential trust ticket 15).
   // English-only pending a translate pass.
   'credentials.detail.suspended',
+  // Camera coverage on the integrity section (credential trust ticket 17).
+  // English-only pending a translate pass.
+  'credentials.detail.cameraCoverage',
   // Exact course-completion policy and manual endorsement exchange. English
   // fallback is temporary pending the next instructor/learner translation pass.
   'instructor.compose.policy',

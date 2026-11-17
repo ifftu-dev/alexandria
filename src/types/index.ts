@@ -1972,6 +1972,12 @@ export interface IntegrityAssertion {
   signalsDegraded?: string[]
   /** Signals the profile does not include. */
   signalsNotRun?: string[]
+  /**
+   * Fraction of committed windows that carried camera checks, in [0,1]. Set
+   * only when the profile includes the camera; absent from credentials issued
+   * before the field existed.
+   */
+  cameraCoverage?: number | null
   /** Outcome of the follow-up probes, when any probe step ran. */
   probe?: IntegrityProbeSummary | null
 }

@@ -59,6 +59,11 @@ function signalNames(signals: string[]) {
   return signals.map(s => t(`sentinel.trust.signal.${s}`)).join(', ')
 }
 
+/** Whole percent, never rounded up across a threshold such as the 90% the camera needs. */
+function coveragePercent(fraction: number) {
+  return Math.floor(fraction * 100 + 1e-9)
+}
+
 async function reverify() {
   if (!credential.value) return
   verifying.value = true
@@ -537,6 +542,10 @@ const decisionVariant = computed(() => {
           <div v-if="credential.integrity.signalsDegraded?.length" class="flex items-start justify-between gap-3">
             <span class="text-muted-foreground">{{ $t('credentials.detail.signalsDegraded') }}</span>
             <span class="text-end text-warning">{{ signalNames(credential.integrity.signalsDegraded) }}</span>
+          </div>
+          <div v-if="credential.integrity.cameraCoverage != null" class="flex items-center justify-between" data-camera-coverage>
+            <span class="text-muted-foreground">{{ $t('credentials.detail.cameraCoverage') }}</span>
+            <span :class="credential.integrity.cameraCoverage < 1 ? 'text-warning' : 'text-foreground'">{{ $t('credentials.detail.cameraCoverageValue', { percent: coveragePercent(credential.integrity.cameraCoverage) }) }}</span>
           </div>
           <div v-if="credential.integrity.signalsNotRun?.length" class="flex items-start justify-between gap-3">
             <span class="text-muted-foreground">{{ $t('credentials.detail.signalsNotRun') }}</span>

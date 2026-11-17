@@ -735,6 +735,8 @@ export type MessageKey =
   | 'credentials.card.trust'
   | 'credentials.detail.assurance'
   | 'credentials.detail.back'
+  | 'credentials.detail.cameraCoverage'
+  | 'credentials.detail.cameraCoverageValue'
   | 'credentials.detail.commitmentRoot'
   | 'credentials.detail.expired'
   | 'credentials.detail.flags'

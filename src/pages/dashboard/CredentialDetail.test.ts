@@ -186,6 +186,24 @@ describe('CredentialDetail integrity', () => {
     expect(section.text()).toContain('sentinel.trust.rung.probed')
     expect(section.text()).toContain('sentinel.trust.signal.camera')
     expect(section.text()).toContain('credentials.detail.probeValue')
+    expect(section.find('[data-camera-coverage]').exists()).toBe(false)
+  })
+
+  it('states the camera coverage beside the camera signal when the credential carries it', async () => {
+    const section = (await open({
+      ...credential,
+      integrity: {
+        ...integrity,
+        trustProfile: 'camera',
+        signalsRun: ['core', 'camera'],
+        signalsDegraded: ['camera'],
+        signalsNotRun: ['device_attestation'],
+        cameraCoverage: 11 / 12,
+      },
+    })).get('[data-integrity-section]')
+    const row = section.get('[data-camera-coverage]')
+    expect(row.text()).toContain('credentials.detail.cameraCoverage')
+    expect(row.find('.text-warning').exists()).toBe(true)
   })
 })
 
