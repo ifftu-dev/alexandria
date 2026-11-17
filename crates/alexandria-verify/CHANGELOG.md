@@ -36,6 +36,11 @@ signature on a result, and a credential can be suspended as well as revoked.
 - **New envelope fields.** `evidence: Vec<EvidenceEntry>` (VC Data Model 2.0
   `evidence`) and `related_resource: Vec<RelatedResource>`, both omitted from
   JSON when empty. A struct literal of `VerifiableCredential` must set them.
+- **New integrity assertion field.** `IntegrityAssertion::camera_coverage`
+  (`cameraCoverage`, omitted from JSON when absent): the fraction of
+  committed windows that carried camera checks, set only when the profile
+  includes the camera. A struct literal of `IntegrityAssertion` must set it;
+  assertions without it serialize and hash as before.
 - **New result fields.** `VerificationResult` gains `attestation`
   (`AttestationOutcome`), `verified_assurance_level`
   (`VerifiedAssuranceLevel`) and `coverage_statement_mismatch` (omitted from
@@ -79,9 +84,13 @@ signature on a result, and a credential can be suspended as well as revoked.
   `ProbePolicy`, `PolicyRefusal` (with a stable `code()`) and `evaluate`, the
   one rule an issuing app and a hosted service both judge, returning the first
   unmet requirement. A required assurance level is judged against the
-  verified level, never the stated one; a degraded signal never carries a
-  policy floor. `TrustProfile`, `ProfileSignal`, `VerificationRung`,
-  `PolicyFloor` and `evaluate_floor` moved here from the studio crate.
+  verified level, never the stated one. A degraded signal never carries a
+  policy floor, except the camera when the assertion states `cameraCoverage`
+  at or above `MIN_CAMERA_COVERAGE` (0.9, judged by
+  `integrity::camera_coverage_counts`); without the field a degraded camera
+  does not count. `TrustProfile`, `ProfileSignal`, `VerificationRung`,
+  `PolicyFloor`, `evaluate_floor` and `MIN_CAMERA_COVERAGE` moved here from
+  the studio crate.
 - **Assessed credential evidence** (`assessed`): `AssessedCredentialEvidence`
   (`ASSESSED_CREDENTIAL_EVIDENCE_TYPE`), the `evidence` entry a role credential
   carries naming the credential it was issued on by `credentialId` and
@@ -94,7 +103,8 @@ signature on a result, and a credential can be suspended as well as revoked.
 - **Vectors**: credential vectors 13–23 (coverage statements, suspension,
   issuer objects, organisation backing), and separate attestation and
   issuance-policy vector sets with their own runners (policy vectors 20–22
-  judge role credentials from their assessed-credential entry). The independent
+  judge role credentials from their assessed-credential entry; 23–26 judge a
+  camera floor from the stated camera coverage). The independent
   JavaScript verifier runs from any directory.
 
 ### Fixed

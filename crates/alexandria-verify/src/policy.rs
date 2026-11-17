@@ -15,8 +15,13 @@
 //! `device_attested` is met only by credential-bound evidence that verifies.
 //! A floor's device attestation signal counts only when the evidence verifies
 //! (credential- or session-bound: either proves the session was attested).
-//! A signal the assertion lists as degraded never carries a floor: a
-//! verifier cannot see how much of the session it covered.
+//! The camera counts towards a floor when the assertion states its coverage
+//! (`cameraCoverage`) at or above
+//! [`MIN_CAMERA_COVERAGE`](crate::integrity::MIN_CAMERA_COVERAGE), even while
+//! it is listed as degraded: a few windows without camera checks are
+//! tolerated, and every verifier sees how many. An assertion without the
+//! field (issued before it existed) gets the strict reading: a degraded
+//! camera never carries a floor. Any other degraded signal never does.
 //!
 //! A role credential issued on an assessed credential is judged by
 //! [`evaluate_assessed`]: its assurance comes from the
@@ -30,7 +35,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::assessed::AssessedCredentialEvidence;
 use crate::attestation::{AttestationOutcome, VerifiedAssuranceLevel};
-use crate::integrity::{ProfileSignal, TrustProfile, VerificationRung};
+use crate::integrity::{camera_coverage_counts, ProfileSignal, TrustProfile, VerificationRung};
 use crate::vc::IntegrityAssertion;
 
 /// Where an attempt's probes come from. Set per assessment and per role (the
@@ -301,24 +306,31 @@ fn meets_assurance(level: VerifiedAssuranceLevel, required: &str) -> bool {
     }
 }
 
-/// Whether `signal` counts towards a floor: the assertion says it ran and
-/// was not degraded, and a device attestation's evidence verifies.
+/// Whether `signal` counts towards a floor: the assertion says the profile
+/// ran it; a device attestation's evidence verifies and the attestation was
+/// not degraded; the camera's stated coverage meets the minimum or, with no
+/// coverage stated, the camera was not degraded.
 fn credited(
     a: &IntegrityAssertion,
     attestation: &AttestationOutcome,
     signal: ProfileSignal,
 ) -> bool {
     let name = signal.as_str();
-    let ran = a.signals_run.iter().any(|s| s == name)
-        && !a.signals_not_run.iter().any(|s| s == name)
-        && !a.signals_degraded.iter().any(|s| s == name);
-    let verified = match signal {
-        ProfileSignal::DeviceAttestation => matches!(
-            attestation,
-            AttestationOutcome::VerifiedCredentialBound { .. }
-                | AttestationOutcome::VerifiedSessionBound { .. }
-        ),
-        ProfileSignal::Camera => true,
+    let listed = |signals: &[String]| signals.iter().any(|s| s == name);
+    let ran = listed(&a.signals_run) && !listed(&a.signals_not_run);
+    let counts = match signal {
+        ProfileSignal::DeviceAttestation => {
+            !listed(&a.signals_degraded)
+                && matches!(
+                    attestation,
+                    AttestationOutcome::VerifiedCredentialBound { .. }
+                        | AttestationOutcome::VerifiedSessionBound { .. }
+                )
+        }
+        ProfileSignal::Camera => match a.camera_coverage {
+            Some(coverage) => camera_coverage_counts(coverage),
+            None => !listed(&a.signals_degraded),
+        },
     };
-    ran && verified
+    ran && counts
 }

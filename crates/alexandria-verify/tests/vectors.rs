@@ -856,6 +856,7 @@ fn integrity_naming(statement: &CoverageStatement) -> IntegrityAssertion {
         signals_run: Vec::new(),
         signals_degraded: Vec::new(),
         signals_not_run: Vec::new(),
+        camera_coverage: None,
         probe: None,
     }
 }

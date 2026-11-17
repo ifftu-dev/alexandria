@@ -1,5 +1,5 @@
 {
-  "description": "A camera floor and a camera session whose camera was degraded: a verifier cannot tell how much of the session it covered, so a degraded signal does not carry a floor.",
+  "description": "A camera floor and a camera session whose camera was degraded, with no camera coverage stated (issued before `cameraCoverage` existed): a verifier cannot tell how much of the session it covered, so a degraded signal does not carry a floor.",
   "policy": {
     "min_integrity": null,
     "max_critical": null,

@@ -65,7 +65,8 @@ fn vectors_dir() -> PathBuf {
 // ---------------------------------------------------------------------------
 
 /// A clean session on the `camera` profile that reached `probed` under the
-/// `reseed` probe policy.
+/// `reseed` probe policy. It states no camera coverage, as an assertion
+/// issued before `cameraCoverage` existed.
 fn clean() -> IntegrityAssertion {
     IntegrityAssertion {
         session_id: "isess_policy_vector".into(),
@@ -83,6 +84,7 @@ fn clean() -> IntegrityAssertion {
         signals_run: vec!["core".into(), "camera".into()],
         signals_degraded: vec![],
         signals_not_run: vec!["device_attestation".into()],
+        camera_coverage: None,
         probe: Some(ProbeSummary {
             outcome: "satisfied".into(),
             policies: vec!["reseed".into()],
@@ -146,6 +148,10 @@ fn build_all() -> Vec<(&'static str, Vector)> {
             verified_assurance_level: stated,
         }),
         expect: Expect { refusal },
+    };
+    let camera_floor = IssuancePolicy {
+        min_trust_profile: Some(TrustProfile::Camera),
+        ..Default::default()
     };
     let every_bound = IssuancePolicy {
         min_integrity: Some(0.8),
@@ -338,7 +344,8 @@ fn build_all() -> Vec<(&'static str, Vector)> {
         (
             "12-floor-signal-degraded",
             vector(
-                "A camera floor and a camera session whose camera was degraded: a \
+                "A camera floor and a camera session whose camera was degraded, with no \
+                 camera coverage stated (issued before `cameraCoverage` existed): a \
                  verifier cannot tell how much of the session it covered, so a degraded \
                  signal does not carry a floor.",
                 IssuancePolicy {
@@ -519,6 +526,74 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 Some(PolicyRefusal::AssuranceBelowRequired {
                     level: "local".into(),
                     required: "device_attested".into(),
+                }),
+            ),
+        ),
+        (
+            "23-camera-coverage-met-while-degraded",
+            vector(
+                "A camera floor and a camera session that carried camera checks in 95% \
+                 of its committed windows: the camera is listed as degraded, but its \
+                 stated coverage is at or above the 0.9 minimum, so it carries the floor.",
+                camera_floor.clone(),
+                IntegrityAssertion {
+                    signals_degraded: vec!["camera".into()],
+                    camera_coverage: Some(0.95),
+                    ..clean()
+                },
+                none,
+                None,
+            ),
+        ),
+        (
+            "24-camera-coverage-below-minimum",
+            vector(
+                "A camera floor and a camera session that carried camera checks in 85% \
+                 of its committed windows: below the 0.9 minimum, so the camera does not \
+                 carry the floor.",
+                camera_floor.clone(),
+                IntegrityAssertion {
+                    signals_degraded: vec!["camera".into()],
+                    camera_coverage: Some(0.85),
+                    ..clean()
+                },
+                none,
+                Some(PolicyRefusal::TrustProfileBelowFloor {
+                    profile: "camera".into(),
+                    required: "camera".into(),
+                }),
+            ),
+        ),
+        (
+            "25-camera-coverage-at-minimum",
+            vector(
+                "A camera floor and a camera session that carried camera checks in nine \
+                 of its ten committed windows: coverage exactly at the 0.9 minimum \
+                 carries the floor.",
+                camera_floor.clone(),
+                IntegrityAssertion {
+                    signals_degraded: vec!["camera".into()],
+                    camera_coverage: Some(0.9),
+                    ..clean()
+                },
+                none,
+                None,
+            ),
+        ),
+        (
+            "26-camera-coverage-out-of-range",
+            vector(
+                "A camera floor and a stated camera coverage above 1: a fraction of \
+                 windows outside [0,1] is malformed and never carries a floor.",
+                camera_floor,
+                IntegrityAssertion {
+                    camera_coverage: Some(1.5),
+                    ..clean()
+                },
+                none,
+                Some(PolicyRefusal::TrustProfileBelowFloor {
+                    profile: "camera".into(),
+                    required: "camera".into(),
                 }),
             ),
         ),

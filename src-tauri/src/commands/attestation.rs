@@ -709,6 +709,7 @@ mod tests {
                 signals_run: vec!["core".into()],
                 signals_degraded: vec![],
                 signals_not_run: vec![],
+                camera_coverage: None,
                 probe: None,
             }),
             evidence: Vec::new(),

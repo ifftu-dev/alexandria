@@ -472,6 +472,15 @@ pub struct IntegrityAssertion {
     /// Signals the profile does not include.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub signals_not_run: Vec<String>,
+    /// Fraction of committed windows that carried camera checks, in `[0,1]`.
+    /// Set only when the profile includes the camera; a session with no
+    /// committed windows states `0`. The camera stays listed in
+    /// `signalsDegraded` whenever this is below 1, and counts towards a
+    /// policy floor at or above
+    /// [`MIN_CAMERA_COVERAGE`](crate::integrity::MIN_CAMERA_COVERAGE).
+    /// Absent from assertions issued before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera_coverage: Option<f64>,
     /// Outcome of the follow-up probes, when any probe step ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe: Option<ProbeSummary>,

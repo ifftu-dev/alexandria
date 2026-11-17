@@ -23,10 +23,19 @@
 use serde::{Deserialize, Serialize};
 
 /// Camera coverage the `camera` and `full` profiles need for the camera to
-/// count on the issuing device (see [`TrustProfile::min_camera_coverage`]).
-/// A verifier cannot see coverage: it sees only whether the camera was
-/// degraded.
+/// count towards a policy floor: the fraction of committed windows that
+/// carried camera checks (see [`TrustProfile::min_camera_coverage`]). An
+/// assertion states it as `cameraCoverage`, so the issuing device and every
+/// verifier judge it the same way ([`camera_coverage_counts`]).
 pub const MIN_CAMERA_COVERAGE: f64 = 0.9;
+
+/// Whether a session's camera coverage, the fraction of committed windows
+/// that carried camera checks, lets the camera count towards a policy floor:
+/// at least [`MIN_CAMERA_COVERAGE`] and no more than 1. A value outside
+/// `[0,1]` is malformed and never counts.
+pub fn camera_coverage_counts(coverage: f64) -> bool {
+    (MIN_CAMERA_COVERAGE..=1.0).contains(&coverage)
+}
 
 /// A fixed set of signals a session runs, locked at session start.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -82,9 +91,10 @@ impl TrustProfile {
     }
 
     /// The fraction of committed windows that must carry camera checks for
-    /// the camera to count towards a policy floor on the issuing device. A
-    /// property of the camera profiles, not a sponsor knob; an operating
-    /// constant until measured.
+    /// the camera to count towards a policy floor, on the issuing device and
+    /// for any verifier reading the assertion's `cameraCoverage`. A property
+    /// of the camera profiles, not a sponsor knob; an operating constant
+    /// until measured.
     pub fn min_camera_coverage(self) -> Option<f64> {
         self.includes(ProfileSignal::Camera)
             .then_some(MIN_CAMERA_COVERAGE)

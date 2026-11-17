@@ -117,6 +117,7 @@ fn integrity() -> IntegrityAssertion {
         signals_run: vec!["core".into(), "device_attestation".into()],
         signals_degraded: vec![],
         signals_not_run: vec!["camera".into()],
+        camera_coverage: None,
         probe: None,
     }
 }

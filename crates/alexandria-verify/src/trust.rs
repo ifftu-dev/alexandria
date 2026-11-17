@@ -949,6 +949,7 @@ mod tests {
             signals_run: vec![],
             signals_degraded: vec![],
             signals_not_run: vec![],
+            camera_coverage: None,
             probe: None,
         });
         let started = "2025-12-31T23:00:00Z";
