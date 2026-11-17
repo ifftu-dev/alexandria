@@ -1,7 +1,7 @@
 # 0001. Verifiable Credentials replace SkillProofs
 
 Status: implemented
-Date: 2026-04-24 (credential format amended 2026-10-09)
+Date: 2026-04-24 (credential format amended 2026-10-09; identity amended 2026-11-16)
 
 ## Context
 
@@ -21,7 +21,7 @@ Credentials are W3C Verifiable Credentials, and only W3C Verifiable Credentials.
 |---|---|
 | Data model | VC Data Model 2.0 (`https://www.w3.org/ns/credentials/v2`) |
 | Proof | `DataIntegrityProof`, cryptosuite `eddsa-jcs-2022` (Ed25519 over JCS-canonicalised JSON) |
-| Subject and issuer identity | `did:key` (Ed25519), derived from the profile's BIP-39 mnemonic |
+| Subject and issuer identity | `did:key` (Ed25519), derived from the profile's BIP-39 mnemonic. A `did:key` always resolves to the key in its identifier and never rotates ([0007](0007-did-key-never-rotates.md)) |
 | Revocation and suspension | Bitstring Status List v1.0: bit *n* at byte `n / 8`, most significant bit first; lists of at least 131,072 bits, GZIP-compressed and multibase base64url-encoded |
 | Status-list location | Dereferenceable at `{origin}/status-lists/{issuer}/{n}`, served by the identity's configured status host (Alexandria Cloud by default). With no host, the list is named by `urn:` and travels in exported bundles |
 | Verification result | `accept`, `pending` or `reject`. A credential whose status list or issuer key is missing is `pending`, never accepted |
@@ -41,3 +41,4 @@ Deleted: the `skill_proofs`, `skill_proof_evidence`, `evidence_records` and `ski
 - The original 2026-04-24 cutover signed credentials with a JWS. The 2026-10-09 amendment replaced it with Data Integrity `eddsa-jcs-2022` and made status lists dereferenceable. Pre-launch data was disposable, so there was no migration.
 - Anything that used to read SkillProofs or evidence rows (governance and opinion gating, reputation, endorsements) reads credentials instead.
 - Who may change a credential's status is a separate decision: [0003](0003-credential-authority.md).
+- The 2026-11-16 amendment deleted personal key rotation ([0007](0007-did-key-never-rotates.md)) and put suspension in its own published status list, which this decision already named.
