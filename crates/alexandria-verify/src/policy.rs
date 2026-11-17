@@ -105,7 +105,8 @@ pub struct IssuancePolicy {
     pub probe_policy: Option<ProbePolicy>,
     /// The model connection that writes generated probes under the `llm`
     /// policy: a saved model connection on the device that runs the attempt.
-    /// Not judged by [`evaluate`].
+    /// Not judged by [`evaluate`], and never part of a credential request
+    /// ([`IssuancePolicy::for_request`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe_connection_id: Option<String>,
     /// Minimum trust profile (the policy floor).
@@ -114,6 +115,18 @@ pub struct IssuancePolicy {
     /// Minimum verification rung.
     #[serde(default)]
     pub min_verification_rung: Option<VerificationRung>,
+}
+
+impl IssuancePolicy {
+    /// The policy as an organisation sends it in a credential request
+    /// ([`crate::exchange::CredentialRequest`]): everything but the
+    /// device-local `probe_connection_id`, which a request never carries.
+    pub fn for_request(&self) -> Self {
+        Self {
+            probe_connection_id: None,
+            ..self.clone()
+        }
+    }
 }
 
 /// The first requirement of an [`IssuancePolicy`] a credential does not

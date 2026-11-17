@@ -40,6 +40,9 @@ signature on a result, and a credential can be suspended as well as revoked.
   (`AttestationOutcome`), `verified_assurance_level`
   (`VerifiedAssuranceLevel`) and `coverage_statement_mismatch` (omitted from
   JSON while false).
+- **`CredentialRequest` is no longer `Eq`.** It gains a field holding an
+  `IssuancePolicy` (floating-point bounds), so it derives `PartialEq` only.
+  A struct literal must set `issuance_policy`.
 - **Trust classification.** `CredentialTrust::VerifiedSelfClaim` gains
   `attestation`; `VerifiedIssuerSigned` gains `attestation` and
   `organisation`. `TrustInvalidReason::InvalidAttestation` is new, and
@@ -91,6 +94,16 @@ signature on a result, and a credential can be suspended as well as revoked.
   credential's policy from that entry: its verified level, counted only as
   far as its own outcome verifies it, and its outcome for a floor's device
   attestation.
+- **The policy in the request** (`exchange`): `CredentialRequest` gains an
+  optional `issuance_policy`, the policy the organisation will judge the
+  answer against, so the candidate sees it before starting. It is covered by
+  the organisation's request proof and the holder's presentation signature;
+  `verify_share` refuses a presented request whose policy differs from the
+  expected one. Omitted from JSON when absent, so a request without one
+  serialises byte-identically to 0.6.0. A request never carries the
+  device-local `probe_connection_id`: `CredentialRequest::check` refuses one
+  (called by `present_credential` and `verify_share`), and
+  `IssuancePolicy::for_request` builds the policy without it.
 - **Vectors**: credential vectors 13–23 (coverage statements, suspension,
   issuer objects, organisation backing), and separate attestation and
   issuance-policy vector sets with their own runners (policy vectors 20–22
