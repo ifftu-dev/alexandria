@@ -26,7 +26,7 @@ Start with the [project README](../README.md) for what Alexandria is and the qui
 | Doc | What it covers |
 |---|---|
 | [vision.md](vision.md) | Why Alexandria exists |
-| [../GLOSSARY.md](../GLOSSARY.md) | The app's domain vocabulary (trust profiles, verification rungs, coverage statements) |
+| [../GLOSSARY.md](../GLOSSARY.md) | The app's domain vocabulary (trust profiles, verification rungs, coverage statements, credential trust) |
 | [architecture.md](architecture.md) | How the pieces fit together |
 | [protocol-specification.md](protocol-specification.md) | Wire protocols, gossip topics, credential formats |
 | [skills-and-reputation.md](skills-and-reputation.md) | Taxonomy, assessments, credentials, reputation |

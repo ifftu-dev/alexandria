@@ -1,7 +1,7 @@
 # Alexandria app
 
 Status: live
-Updated: 2026-11-12
+Updated: 2026-11-17
 
 The desktop and mobile app: learning, assessment, credentials and the integrity checks behind them. This glossary holds the app's domain vocabulary; terms enter it as they are settled.
 
@@ -26,8 +26,12 @@ A signal the locked trust profile includes that was lost or stopped counting dur
 _Avoid_: Downgrade, fallback
 
 **Assurance level**:
-What the device can prove about the client that produced a session: `local` (self-reported) or `device_attested` (a platform attestation verified at issuance). The device axis of trust.
+What the issuing device established about the client that produced a session: `local` (self-reported) or `device_attested` (a platform attestation verified at issuance). The device axis of trust, as the credential states it; a reader relies on the verified assurance level instead.
 _Avoid_: Trust level, security level
+
+**Camera coverage**:
+The fraction of a camera session's committed windows that carried camera checks, stated in the credential; the camera counts towards a policy floor at 90% or more.
+_Avoid_: Camera uptime, camera score
 
 **Companion phone**:
 The learner's own attested phone joined to a desktop session, which lends the session its platform attestation.
@@ -98,3 +102,49 @@ _Avoid_: Calibration, validation
 **Coverage statement**:
 A fixed, content-addressed text per trust profile and verification rung stating what a session checked, what it did not, the platform ceilings and the certified rates.
 _Avoid_: Integrity summary, disclosure
+
+**Coverage statement registry**:
+Every coverage statement version ever published, held in the verifier library so any digest resolves offline; a text change adds a version and never replaces one.
+_Avoid_: Statement table, statement cache
+
+### Credential trust
+
+**Self-issued credential**:
+A credential whose issuer is its subject: the holder's own word, scored as a self-claim whatever type it declares.
+_Avoid_: Self-signed credential, learner credential
+
+**Organisation-issued credential**:
+A credential signed by a key that an organisation's domain lists, naming the organisation as issuer.
+_Avoid_: Sponsor credential, cloud credential
+
+**Organisation backing**:
+Whether an organisation's domain descriptor lists the key that signed a credential. Removing the key withdraws backing from everything it signed; the signatures still verify.
+_Avoid_: Organisation verification, endorsement
+
+**Attestation evidence**:
+The platform's own signed material for a session (App Attest or Play Integrity), carried in the credential so any verifier can check it.
+_Avoid_: Attestation proof, device proof
+
+**Credential-bound**:
+Attestation evidence over this credential's subject, claim and integrity assertion, so it cannot be moved to another credential. The only evidence that raises the verified assurance level.
+_Avoid_: Fully bound, strong attestation
+
+**Session-bound**:
+Attestation evidence that covers only the session's own attestation, not this credential's content. It never rejects and never raises the verified assurance level.
+_Avoid_: Weak attestation, partial binding
+
+**Verified assurance level**:
+The assurance level a verifier established from the attestation evidence, as opposed to the level the credential states.
+_Avoid_: Real assurance, checked level
+
+**Assessed credential evidence**:
+The entry in a role credential naming the assessment credential it was issued on, with the attestation outcome and verified assurance level the issuer found for it.
+_Avoid_: Source credential, parent credential
+
+**Issuance policy**:
+The bounds a role or a credential request sets on an integrity assertion before a credential is issued, judged by one shared rule that returns the first unmet requirement as a stable refusal code.
+_Avoid_: Integrity gate, role rules
+
+**Suspension list**:
+The issuer's published status list of suspended credentials, read by every verifier; suspension is reversible, revocation is not.
+_Avoid_: Suspension flag, hold list
