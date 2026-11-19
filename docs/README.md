@@ -59,7 +59,9 @@ Open work, tracked as described in [agents/issue-tracker.md](agents/issue-tracke
 | Doc | What it covers |
 |---|---|
 | [ai-chat-spec.md](ai-chat-spec.md) | AI chat and tutoring |
+| [course-access-spec.md](course-access-spec.md) | Private courses for organisations, co-instructors and teaching assistants, and sharing public courses within limits each learner sets |
 | [credential-trust-spec.md](credential-trust-spec.md) | Checkable attestation evidence, provenance-based scoring and organisation-issued credentials |
+| [learning-standards-spec.md](learning-standards-spec.md) | Playing SCORM and cmi5 packages, xAPI learning records and the hosted record store, with [tickets](learning-standards/) |
 | [personhood-trust-proposal.md](personhood-trust-proposal.md) | Personhood issuer trust and account binding |
 | [sentinel-federation.md](sentinel-federation.md) | Federated Sentinel threat model and privacy budget |
 | [sentinel-trust-profiles-spec.md](sentinel-trust-profiles-spec.md) | Sentinel trust profiles, verification rungs and measured signals, with [tickets](sentinel-trust-profiles/) |
