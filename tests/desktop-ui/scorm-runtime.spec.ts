@@ -22,6 +22,8 @@ const served: Record<string, { file: URL, contentType: string }> = {
   [`${LAUNCH}/runtime/scorm12.min.js`]: { file: vendored('scorm12.min.js'), contentType: 'text/javascript' },
   [`${LAUNCH}/content/lesson.html`]: { file: fixture('lesson.html'), contentType: 'text/html' },
   [`${LAUNCH}/content/frameset.html`]: { file: fixture('frameset.html'), contentType: 'text/html' },
+  [`${LAUNCH}/runtime-2004.html`]: { file: fixture('runtime-2004.html'), contentType: 'text/html' },
+  [`${LAUNCH}/runtime/scorm2004.min.js`]: { file: vendored('scorm2004.min.js'), contentType: 'text/javascript' },
 }
 
 interface Launch {
@@ -36,8 +38,8 @@ interface HostMessage {
   cmi: { core: Record<string, unknown>, suspend_data: string }
 }
 
-/** Opens the fake host, which launches the wrapper with `launch`. */
-async function open(page: Page, launch: Launch) {
+/** Answers every request from the files above and keeps a list of the rest. */
+async function serve(page: Page) {
   const refused: string[] = []
   await page.route('**/*', async (route) => {
     const entry = served[route.request().url().split(/[?#]/)[0] ?? '']
@@ -47,6 +49,12 @@ async function open(page: Page, launch: Launch) {
     }
     await route.fulfill({ body: await readFile(entry.file), contentType: entry.contentType })
   })
+  return { refused }
+}
+
+/** Opens the fake host, which launches the wrapper with `launch`. */
+async function open(page: Page, launch: Launch) {
+  const { refused } = await serve(page)
   const config = { wrapper: `${LAUNCH}/wrapper.html`, packageOrigin: PACKAGE, launch }
   await page.goto(`${HOST}/host.html#${encodeURIComponent(JSON.stringify(config))}`)
   return { refused }
@@ -132,6 +140,36 @@ test('a resumed lesson reads the state the host supplied before it started', asy
   expect(calls).toContainEqual(['LMSGetValue(cmi.core.entry)', 'resume'])
   expect(calls).toContainEqual(['LMSGetValue(cmi.core.lesson_location)', 'page-2'])
   expect(calls).toContainEqual(['LMSGetValue(cmi.suspend_data)', 'seen=1,2'])
+})
+
+interface Scorm2004 {
+  Initialize(parameter: string): string
+  SetValue(element: string, value: string): string
+  GetValue(element: string): string
+  Commit(parameter: string): string
+  Terminate(parameter: string): string
+  GetLastError(): string
+}
+
+test('the vendored SCORM 2004 build loads and runs a session', async ({ page }) => {
+  const { refused } = await serve(page)
+  await page.goto(`${LAUNCH}/runtime-2004.html`)
+
+  const calls = await page.evaluate(() => {
+    const Runtime = (window as unknown as { Scorm2004API: new (settings: object) => Scorm2004 }).Scorm2004API
+    const api = new Runtime({})
+    return [
+      api.Initialize(''),
+      api.SetValue('cmi.location', 'page-2'),
+      api.GetValue('cmi.location'),
+      api.Commit(''),
+      api.Terminate(''),
+      api.GetLastError(),
+    ]
+  })
+
+  expect(calls).toEqual(['true', 'true', 'page-2', 'true', 'true', '0'])
+  expect(refused).toEqual([])
 })
 
 test('the vendored runtime and its licence are the pinned files', async () => {
