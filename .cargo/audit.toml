@@ -133,6 +133,27 @@ ignore = [
     "RUSTSEC-2026-0369",
     "RUSTSEC-2026-0429",
 
+    # The same three zip versions, advisories published 2026-11-18, all fixed
+    # only in zip 9 (see the dependency note above):
+    #   - RUSTSEC-2026-0546: `ZipArchive::extract` follows chained or absolute
+    #     symlink targets out of the destination. An `extract` bug, accepted on
+    #     the same extraction boundaries as the four above.
+    #   - RUSTSEC-2026-0545: WinZip AES entries returned without checking their
+    #     authentication code. Needs the `aes-crypto` feature, which none of the
+    #     three builds enables (`cargo tree -e features -i zip@<v>`).
+    #   - RUSTSEC-2026-0547: Shrink/Reduce/Implode decoders preallocate the
+    #     declared size. Needs the `legacy-zip` feature, also not enabled.
+    #   - RUSTSEC-2026-0548: `ZipStreamReader` uses local-header names. Nothing
+    #     here uses `ZipStreamReader` or `read_zipfile_from_stream`; candle, the
+    #     updater and the libsodium build script all open `ZipArchive`.
+    #
+    # Remove these acceptances immediately if any dependency enables
+    # `aes-crypto` or `legacy-zip`, or starts reading archives as a stream.
+    "RUSTSEC-2026-0545",
+    "RUSTSEC-2026-0546",
+    "RUSTSEC-2026-0547",
+    "RUSTSEC-2026-0548",
+
     # crypto-bigint 0.5.5 — timing variability in operations meant to be
     # constant-time (RUSTSEC-2026-0387). The fix is >= 0.7.6, a semver-major
     # move: 0.5 is pinned by elliptic-curve 0.13, which p256 0.13 and k256
