@@ -1352,7 +1352,8 @@ impl App {
                 .signer
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("vault locked"))?;
-            app_lib::credentials::lifecycle::reinstate(&signer.conn, signer.issuer.did(), id)
+            let now = vault::now_rfc3339();
+            app_lib::credentials::lifecycle::reinstate(&signer.conn, signer.issuer.did(), id, &now)
                 .map_err(|e| anyhow::anyhow!(e))?;
             Ok(format!("Reinstated {id}"))
         })();
@@ -1546,6 +1547,16 @@ impl App {
             };
             let reasons = app_lib::credentials::bundle::rejection_reasons(result);
             lines.push((id, reasons.join(", ")));
+        }
+
+        // Each credential's provenance and suspension, in plain words.
+        for (result, view) in report.results.iter().zip(&report.trust) {
+            let id = if result.credential_id.is_empty() {
+                "(no id)".to_string()
+            } else {
+                result.credential_id.clone()
+            };
+            lines.push((id, crate::commands::credentials::trust_summary(view)));
         }
 
         if report.revocation_unknown {

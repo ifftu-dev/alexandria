@@ -7,11 +7,25 @@
 //! credential's current status. Its proof is a holder `DataIntegrityProof`
 //! with purpose `authentication`, `challenge` = the request nonce and `domain`
 //! = the organisation's audience, valid for at most five minutes.
+//!
+//! A request may carry the organisation's [`IssuancePolicy`]: what it will
+//! judge the answer against before issuing its own credential. Being part
+//! of the request, it is covered by the organisation's request proof and by
+//! the holder's presentation signature, so neither side can change it
+//! afterwards. A request without one serialises exactly as before the field
+//! existed.
+//!
+//! A request never carries a device-local model connection
+//! ([`IssuancePolicy::probe_connection_id`]): [`CredentialRequest::check`]
+//! refuses one, and both [`present_credential`] and [`verify_share`] call it.
+//! An organisation builds the request's policy with
+//! [`IssuancePolicy::for_request`].
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::did::{derive_did_key, Did, KeyRegistryEntry};
+use crate::policy::IssuancePolicy;
 use crate::vc::presentation::{
     sign_presentation, verify_presentation_proof, VerifiablePresentation, MAX_LIFETIME_SECS,
 };
@@ -27,7 +41,7 @@ pub const REQUEST_PROPERTY: &str = "request";
 pub const ISSUER_STATE_PROPERTY: &str = "issuerState";
 pub const ASSESSMENT_RUBRIC: &str = "assessment-items-bloom-v1";
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct CredentialRequest {
     pub id: String,
@@ -43,6 +57,33 @@ pub struct CredentialRequest {
     pub require_new_assessment: bool,
     pub created_at: i64,
     pub expires_at: i64,
+    /// The issuance policy the organisation will judge the answer against,
+    /// so the candidate can see it before starting. Omitted from JSON when
+    /// absent, so a request without one is byte-identical to one made before
+    /// the field existed. Never carries `probe_connection_id`
+    /// ([`CredentialRequest::check`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issuance_policy: Option<IssuancePolicy>,
+}
+
+impl CredentialRequest {
+    /// Refuse a request that carries anything only a device may hold: a
+    /// policy naming a model connection (`probe_connection_id`). Rejected
+    /// rather than cleared, since clearing it would change the payload the
+    /// organisation signed.
+    pub fn check(&self) -> Result<(), String> {
+        if self
+            .issuance_policy
+            .as_ref()
+            .is_some_and(|p| p.probe_connection_id.is_some())
+        {
+            return Err(
+                "a credential request cannot name a device's model connection (probe_connection_id)"
+                    .into(),
+            );
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -85,6 +126,7 @@ pub fn present_credential(
     now: i64,
     key: &ed25519_dalek::SigningKey,
 ) -> Result<VerifiablePresentation, String> {
+    request.check()?;
     let holder = derive_did_key(key);
     if holder.as_str() != request.subject_did {
         return Err("the active identity is not the requested candidate".into());
@@ -166,6 +208,7 @@ pub fn verify_share(
     now: i64,
     now_iso: &str,
 ) -> Result<VerificationResult, String> {
+    expected.check()?;
     let shared = shared_credential(presentation)?;
     if &shared.request != expected {
         return Err("credential share does not match this request".into());
@@ -217,56 +260,79 @@ pub fn verify_share(
     if share.issuer_state.is_some() && vc.issuer.as_str() != expected.subject_did {
         return Err("a holder cannot assert another issuer's credential status".into());
     }
-    let store = ShareStore { share };
+    let store = ShareStore {
+        share,
+        now: now_iso,
+    };
     let mut result = verify_credential(&store, vc, now_iso, &VerificationPolicy::default());
-    if share
-        .issuer_state
-        .as_ref()
-        .is_some_and(|state| state.revoked)
-    {
-        result.revoked = true;
-        result.acceptance_decision = crate::vc::AcceptanceDecision::Reject;
+    // The holder-issuer's own word against their credential stands even
+    // when the credential names no list for it.
+    if let Some(state) = &share.issuer_state {
+        if state.revoked {
+            result.revoked = true;
+            result.acceptance_decision = crate::vc::AcceptanceDecision::Reject;
+        }
+        if state.suspended
+            && state
+                .suspended_until
+                .as_deref()
+                .is_none_or(|until| until > now_iso)
+        {
+            result.suspended = true;
+            result.acceptance_decision = crate::vc::AcceptanceDecision::Reject;
+        }
     }
     Ok(result)
 }
 
 struct ShareStore<'a> {
     share: &'a SharedCredential,
+    now: &'a str,
 }
 
 impl VerificationStore for ShareStore<'_> {
-    fn key_at(&self, _: &Did, _: &str) -> StoreLookup<KeyRegistryEntry> {
+    fn registered_key(&self, _: &Did) -> StoreLookup<KeyRegistryEntry> {
         StoreLookup::Missing
     }
 
+    /// The holder-issuer's own status claim, as the one-bit list each of the
+    /// credential's entries names: the revocation entry's bit is `revoked`,
+    /// the suspension entry's bit is a suspension still in force at `now`.
     fn status_list_bits(&self, list_id: &str) -> StoreLookup<Vec<u8>> {
         let Some(state) = &self.share.issuer_state else {
             return StoreLookup::Unavailable;
         };
-        let Some(status) = &self.share.credential.credential_status else {
+        let Some(status) = self
+            .share
+            .credential
+            .status_entries()
+            .iter()
+            .find(|s| s.status_list_credential == list_id)
+        else {
             return StoreLookup::Missing;
         };
-        if status.status_list_credential != list_id {
-            return StoreLookup::Missing;
-        }
         let Ok(index) = status.status_list_index.parse::<usize>() else {
             return StoreLookup::Missing;
         };
         if index >= 8 * 1024 * 1024 {
             return StoreLookup::Missing;
         }
+        let set = match status.status_purpose.as_str() {
+            crate::vc::STATUS_PURPOSE_REVOCATION => state.revoked,
+            crate::vc::STATUS_PURPOSE_SUSPENSION => {
+                state.suspended
+                    && state
+                        .suspended_until
+                        .as_deref()
+                        .is_none_or(|until| until > self.now)
+            }
+            _ => false,
+        };
         let mut bits = vec![0; index / 8 + 1];
-        if state.revoked {
+        if set {
             crate::vc::status::set_bit(&mut bits, index, true).ok();
         }
         StoreLookup::Found(bits)
-    }
-
-    fn suspension(&self, _: &str) -> StoreLookup<(bool, Option<String>)> {
-        match &self.share.issuer_state {
-            Some(state) => StoreLookup::Found((state.suspended, state.suspended_until.clone())),
-            None => StoreLookup::Unavailable,
-        }
     }
 
     fn is_superseded(&self, _: &str) -> StoreLookup<bool> {

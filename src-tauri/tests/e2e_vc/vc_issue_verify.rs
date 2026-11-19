@@ -22,7 +22,7 @@ fn sample_unsigned(subject: app_lib::crypto::did::Did) -> UnsignedCredential {
             context: vec!["https://www.w3.org/ns/credentials/v2".into()],
             id: Some("urn:uuid:test-credential".into()),
             type_: vec!["VerifiableCredential".into(), "FormalCredential".into()],
-            issuer: test_did("issuer"),
+            issuer: test_did("issuer").into(),
             valid_from: TEST_NOW.into(),
             valid_until: None,
             credential_subject: claim.into_subject(subject),
@@ -30,6 +30,8 @@ fn sample_unsigned(subject: app_lib::crypto::did::Did) -> UnsignedCredential {
             terms_of_use: None,
             witness: None,
             integrity: None,
+            evidence: Vec::new(),
+            related_resource: Vec::new(),
             proof: Proof::unsigned(TEST_NOW), // completed by sign_credential
         },
     }

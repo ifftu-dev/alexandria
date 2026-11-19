@@ -6,8 +6,6 @@
 
 use std::fmt;
 
-use crate::crypto::did::Did;
-
 /// A change to an issued credential's standing. Each is issuer-bound.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusChange {
@@ -45,35 +43,9 @@ impl fmt::Display for SupersessionRequires {
     }
 }
 
-/// The first bound of an [`IssuancePolicy`](super::IssuancePolicy) the bound
-/// integrity session broke.
-#[derive(Debug, Clone, PartialEq, thiserror::Error)]
-pub enum PolicyViolation {
-    #[error("issuance policy: session status is '{status}', requires 'completed'")]
-    NotClean { status: String },
-    #[error("issuance policy: integrity score {score:.3} below minimum {min:.3}")]
-    IntegrityBelowMinimum { score: f64, min: f64 },
-    #[error("issuance policy: minimum integrity required but session has no score")]
-    NoIntegrityScore,
-    #[error("issuance policy: {count} critical flags exceed maximum {max}")]
-    TooManyCritical { count: i64, max: i64 },
-    #[error("issuance policy: {count} warning flags exceed maximum {max}")]
-    TooManyWarnings { count: i64, max: i64 },
-    #[error("issuance policy: assurance level '{level}' does not meet required '{required}'")]
-    AssuranceBelowRequired { level: String, required: String },
-    #[error("issuance policy: trust profile '{profile}' does not meet the '{required}' floor")]
-    TrustProfileBelowFloor { profile: String, required: String },
-    #[error(
-        "issuance policy: the '{required}' floor judged before the first item does not match issuance"
-    )]
-    PolicyFloorDisagrees { required: String },
-    #[error("issuance policy: verification rung '{rung}' does not meet the '{required}' minimum")]
-    RungBelowMinimum { rung: String, required: String },
-    #[error("issuance policy: the '{policy}' probe step did not run in the session")]
-    ProbePolicyNotRun { policy: String },
-    #[error("issuance policy: a '{policy}' probe failed")]
-    ProbeFailed { policy: String },
-}
+/// The first requirement of an [`IssuancePolicy`](super::IssuancePolicy) a
+/// credential does not meet, judged by the verifier library's shared rule.
+pub use alexandria_verify::policy::PolicyRefusal;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CredentialError {
@@ -83,9 +55,6 @@ pub enum CredentialError {
     /// The vault or the wallet it holds could not give the issuer key.
     #[error("{0}")]
     Vault(String),
-    /// A rotated DID offered a key that is not its key at issuance time.
-    #[error("the signing key is not this DID's current key: {}", .0.as_str())]
-    NotCurrentKey(Did),
 
     // --- Issuance --------------------------------------------------------
     #[error("subject MUST be a DID (§10 non-transferability)")]
@@ -95,7 +64,14 @@ pub enum CredentialError {
     #[error("integrity session {0} not found")]
     SessionNotFound(String),
     #[error(transparent)]
-    Policy(#[from] PolicyViolation),
+    Policy(#[from] PolicyRefusal),
+    /// The policy floor judged at attempt start does not match the one
+    /// judged from the session at issuance. Needs the session, so the shared
+    /// rule cannot judge it.
+    #[error(
+        "issuance policy: the '{required}' floor judged before the first item does not match issuance"
+    )]
+    PolicyFloorDisagrees { required: String },
     #[error("supersedes target {0} not found locally")]
     SupersededNotFound(String),
     #[error("§11.4: supersession requires {0} as the prior credential")]
@@ -198,14 +174,18 @@ pub enum CredentialError {
     /// Revocation needs the credential and the status list it sits in.
     #[error("credential {0} not found or has no status list")]
     NotRevocable(String),
+    /// Suspension needs the credential to name a suspension list.
+    #[error("credential {0} has no suspension status list")]
+    NotSuspendable(String),
+    /// The credential names a status list this store does not hold.
+    #[error("status list {0} is not held here")]
+    StatusListNotHeld(String),
 
     // --- Failures beneath ------------------------------------------------
     #[error(transparent)]
     Database(#[from] rusqlite::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
-    #[error(transparent)]
-    KeyRegistry(#[from] crate::crypto::key_registry::KeyRegistryError),
     /// A `did:key` did not resolve to a key.
     #[error(transparent)]
     Did(#[from] alexandria_verify::did::DidError),

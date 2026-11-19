@@ -7,7 +7,7 @@ import { useSkillAtlas } from '@/composables/useSkillAtlas'
 import { useGoals } from '@/composables/useGoals'
 import { AppBadge, EmptyState } from '@/components/ui'
 import CourseCard from '@/components/course/CourseCard.vue'
-import { extractSkillClaim, type SkillDetail, type VerifiableCredential, type Course, type OpinionRow } from '@/types'
+import { extractSkillClaim, issuerDid, type SkillDetail, type VerifiableCredential, type Course, type OpinionRow } from '@/types'
 import { BLOOM_ORDER, bloomBadge } from '@/utils/bloom'
 
 const { invoke } = useLocalApi()
@@ -427,7 +427,7 @@ const relationLabels: Record<string, string> = {
         <div v-else class="space-y-3">
           <div
             v-for="vc in myCredentials"
-            :key="vc.id ?? vc.issuer + vc.validFrom"
+            :key="vc.id ?? issuerDid(vc.issuer) + vc.validFrom"
             class="rounded-lg bg-muted/30 p-4"
           >
             <div class="flex items-center justify-between mb-2 gap-3">

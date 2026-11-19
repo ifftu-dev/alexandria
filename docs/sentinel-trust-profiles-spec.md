@@ -1,7 +1,7 @@
 # Sentinel trust profiles and verified credentials
 
 Status: active
-Updated: 2026-11-13
+Updated: 2026-11-17
 Triage: ready-for-agent
 Repos: alexandria
 
@@ -262,3 +262,8 @@ Owner actions, not agent work (ticket 16):
 - **`alexandria-verify` 0.6.0.** The crate is bumped to 0.6.0 for the new assertion fields. Cloud consumes it as a vendored, checksummed source snapshot, which is refreshed to 0.6.0 in the same coordinated change. The website verifier canonicalises the credential's raw JSON rather than a typed copy, so it already accepts the new fields and needs no change; it does not display integrity fields. 0.6.0 is published to crates.io for third-party verifiers.
 - **Interview report rung.** The interview integrity report moves to `alexandria-interview-integrity/2` and gains `assurance_level` (`local` or `device_attested`) and `verification_rung` (`live` or `none`). Cloud accepts only `/2`, refuses any other value, and shows both on its interview page and in the panel's integrity view; the candidate's waiting room shows the rung of what it sent.
 - **`interview-assistant.md`** now covers the live signal feed, live segments, authored follow-ups, the report's new fields and the `review` status.
+
+2026-11-17, superseded in part by [credential-trust-spec.md](credential-trust-spec.md):
+
+- **Camera coverage is stated.** The assertion gained `cameraCoverage` (the fraction of committed windows with camera checks), and every verifier judges the 90% camera rule from it through the shared policy rule. A degraded camera still never reads as clean coverage; a credential without the field never counts it towards a floor.
+- **Attestation is checkable by the reader.** Verification moved from `sentinel::attestation` into `alexandria_verify::attestation`, and a credential carries its attestation evidence in `evidence`. "Verified only at issuance" no longer holds: `device_attested` counts for a reader only through its own verified assurance level.

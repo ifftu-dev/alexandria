@@ -9,17 +9,22 @@
 // the whole claim. It also implements the strict bounded JSON limits by hand
 // and checks them against the exact bytes in `limits/`.
 //
-//   node independent-verifier.mjs
+//   node crates/alexandria-verify/tests/vectors/independent-verifier.mjs
 //
-// Run it from this directory. It is not part of the Rust test suite, but CI runs
-// it on every backend change and fails the build if any vector disagrees: a
-// second implementation that nothing checks proves nothing, and the claim is
-// only worth making if a divergence is caught rather than believed away.
+// It reads the vectors beside it, so it runs from any directory. It is not
+// part of the Rust test suite, but CI runs it on every backend change and
+// fails the build if any vector disagrees: a second implementation that
+// nothing checks proves nothing, and the claim is only worth making if a
+// divergence is caught rather than believed away.
 //
 // Note what is absent: no network, no JSON-LD processor, no DID resolver
 // service, no Alexandria anything. It is intentionally small and auditable.
 import { readFileSync, readdirSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { createHash, createPublicKey, verify } from 'node:crypto'
+
+// Vector paths resolve against this file, not the working directory.
+const here = path => fileURLToPath(new URL(path, import.meta.url))
 
 const ALPHA = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 function b58decode(s) {
@@ -51,9 +56,39 @@ function allowedType(vc, policy) {
   return allowed.length === 0 || vc.type.some(type => allowed.includes(type))
 }
 
+// Organisation identity: a lowercase DNS name of at least two labels.
+function normaliseDomain(domain) {
+  const d = String(domain).trim().toLowerCase()
+  if (d.length > 253 || !d.includes('.')) return null
+  const label = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
+  return d.split('.').every(l => label.test(l)) ? d : null
+}
+
+// The descriptor the caller resolved from the domain's TXT record must pass
+// the same checks a reader of the record applies before it backs anything.
+function descriptorValid(d) {
+  if (d.format !== 'alexandria-org/1' || normaliseDomain(d.domain) !== d.domain) return false
+  const name = String(d.name)
+  if (!name || name.trim() !== name || [...name].length > 120 || /\p{Cc}/u.test(name)) return false
+  if (!Array.isArray(d.keys) || d.keys.length === 0 || d.keys.length > 8) return false
+  return d.keys.every(k => {
+    try { return String(k).startsWith('did:key:') && !!pubkeyFromDidKey(k) } catch { return false }
+  })
+}
+
+function organisationBacking(issuerId, issuerDomain, descriptor) {
+  if (!descriptor) return { outcome: 'descriptor_not_supplied' }
+  if (!descriptorValid(descriptor)) return { outcome: 'invalid_descriptor' }
+  if (typeof issuerDomain === 'string' && normaliseDomain(issuerDomain) !== descriptor.domain) {
+    return { outcome: 'wrong_domain' }
+  }
+  if (!descriptor.keys.includes(issuerId)) return { outcome: 'key_not_listed' }
+  return { outcome: 'verified', name: descriptor.name, domain: descriptor.domain }
+}
+
 let pass = 0, fail = 0
-for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
-  const v = JSON.parse(readFileSync(f, 'utf8'))
+for (const f of readdirSync(here('.')).filter(f => f.endsWith('.json')).sort()) {
+  const v = JSON.parse(readFileSync(here(f), 'utf8'))
   const vc = v.credential
 
   // 1-2: eddsa-jcs-2022 hash data = SHA-256(JCS(proof config)) || SHA-256(JCS(document))
@@ -64,24 +99,24 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
     createHash('sha256').update(Buffer.from(jcs(document), 'utf8')).digest(),
   ])
 
-  // 3-5: the issuer's key, then the multibase proofValue over the hash data
+  // 3-5: the issuer's key, then the multibase proofValue over the hash data.
+  // `issuer` is the DID, or an object whose `id` is the DID (VC 2.0).
+  const issuerId = typeof vc.issuer === 'string' ? vc.issuer : String(vc.issuer?.id)
   let validSignature = false
   let issuerResolved = false
   const pendingReasons = []
   let key
   try {
-    // Key: registry entry covering verificationTime, else did:key self-resolution
-    const rows = (v.store?.keyRegistry ?? []).filter(r =>
-      r.did === vc.issuer && r.validFrom <= v.verificationTime &&
-      (r.validUntil === null || r.validUntil > v.verificationTime))
-    if (rows.length) {
-      rows.sort((a, b) => a.validFrom < b.validFrom ? 1 : -1)
-      const spki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'),
-                                  Buffer.from(rows[0].publicKeyHex, 'hex')])
-      key = createPublicKey({ key: spki, format: 'der', type: 'spki' })
+    // Key: a did:key is its key, whatever the registry says; any other DID
+    // method is looked up in the registry.
+    const row = (v.store?.keyRegistry ?? []).find(r => r.did === issuerId)
+    if (issuerId.startsWith('did:key:')) {
+      key = pubkeyFromDidKey(issuerId)
       issuerResolved = true
-    } else if (vc.issuer.startsWith('did:key:')) {
-      key = pubkeyFromDidKey(vc.issuer)
+    } else if (row) {
+      const spki = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'),
+                                  Buffer.from(row.publicKeyHex, 'hex')])
+      key = createPublicKey({ key: spki, format: 'der', type: 'spki' })
       issuerResolved = true
     } else {
       pendingReasons.push('issuer_key_missing')
@@ -96,7 +131,7 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
           p.proofPurpose !== 'assertionMethod') throw new Error('unsupported proof')
       // The verification method must be the issuer's: `<issuer DID>#<fragment>`.
       const [controller, fragment] = String(p.verificationMethod).split('#')
-      if (controller !== vc.issuer || !fragment) throw new Error('method not controlled by issuer')
+      if (controller !== issuerId || !fragment) throw new Error('method not controlled by issuer')
       if (!String(p.proofValue).startsWith('z')) throw new Error('not multibase base58btc')
       const sig = b58decode(p.proofValue.slice(1))
       if (sig.length !== 64) throw new Error('not an Ed25519 signature')
@@ -107,33 +142,53 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
   // 6: expiry, subject binding, and conclusive status evidence
   const expired = !!(vc.validUntil && vc.validUntil < v.verificationTime)
   const subjectBound = String(vc.credentialSubject.id).startsWith('did:')
-  let revoked = false
+  // `credentialStatus` is one entry or a list of them. Each entry's purpose
+  // says which fact its list's bit decides; other purposes are skipped.
+  const facts = { revocation: false, suspension: false }
+  const missingReason = { revocation: 'status_list_missing', suspension: 'suspension_list_missing' }
   let statusValid = true
-  if (vc.credentialStatus) {
-    const listId = vc.credentialStatus.statusListCredential
+  const entries = vc.credentialStatus == null ? []
+    : Array.isArray(vc.credentialStatus) ? vc.credentialStatus : [vc.credentialStatus]
+  for (const entry of entries) {
+    const purpose = entry.statusPurpose
+    if (!Object.hasOwn(facts, purpose)) continue
+    const indexText = entry.statusListIndex
+    if (!/^\d+$/.test(indexText)) { statusValid = false; continue }
+    const listId = entry.statusListCredential
     const lists = v.store?.statusLists ?? {}
     if (Object.hasOwn(lists, listId)) {
-      const indexText = vc.credentialStatus.statusListIndex
       const bits = Buffer.from(lists[listId], 'hex')
-      if (!/^\d+$/.test(indexText)) {
-        statusValid = false
-      } else {
-        const n = Number(indexText)
-        const byte = Math.floor(n / 8)
-        // Bitstring Status List: bit 0 of each byte is the most significant.
-        if (!Number.isSafeInteger(n) || byte >= bits.length) statusValid = false
-        else revoked = ((bits[byte] >> (7 - (n % 8))) & 1) === 1
-      }
-    } else {
-      pendingReasons.push('status_list_missing')
+      const n = Number(indexText)
+      const byte = Math.floor(n / 8)
+      // Bitstring Status List: bit 0 of each byte is the most significant.
+      if (!Number.isSafeInteger(n) || byte >= bits.length) statusValid = false
+      else if (((bits[byte] >> (7 - (n % 8))) & 1) === 1) facts[purpose] = true
+    } else if (!pendingReasons.includes(missingReason[purpose])) {
+      pendingReasons.push(missingReason[purpose])
     }
   }
-
-  const suspendedUntil = v.store?.suspended?.[vc.id]
-  const suspended = Object.hasOwn(v.store?.suspended ?? {}, vc.id) &&
-    (suspendedUntil === null || suspendedUntil > v.verificationTime)
+  const revoked = facts.revocation
+  const suspended = facts.suspension
   const superseded = (v.store?.superseded ?? []).includes(vc.id)
   const integrityAnchored = false
+
+  // 7: a coverage statement named by relatedResource must be the one the
+  // integrity assertion names by digest. The digest is the address's last
+  // part, so this needs no statement registry and no BLAKE3.
+  const statementDigest = id => {
+    const urn = 'urn:alexandria:coverage-statement:'
+    let digest = null
+    if (id.startsWith(urn)) digest = id.slice(urn.length)
+    else {
+      const at = id.lastIndexOf('/coverage-statements/')
+      if (at >= 0 && id.slice(0, at).includes('://')) digest = id.slice(at + '/coverage-statements/'.length)
+    }
+    return digest && !digest.includes('/') ? digest : null
+  }
+  const namedDigest = vc.integrity?.coverageStatementDigest ?? null
+  const coverageStatementMismatch = (vc.relatedResource ?? [])
+    .map(r => statementDigest(String(r.id)))
+    .some(d => d !== null && d !== namedDigest)
 
   const issuerCanComplete = (validSignature && issuerResolved) ||
     (!issuerResolved && pendingReasons.includes('issuer_key_missing'))
@@ -142,13 +197,21 @@ for (const f of readdirSync('.').filter(f => f.endsWith('.json')).sort()) {
     !(v.policy.reject_expired && expired) &&
     !(v.policy.reject_suspended && suspended) &&
     !(v.policy.reject_superseded && superseded) &&
-    !(v.policy.require_integrity_anchor && !integrityAnchored)
+    !(v.policy.require_integrity_anchor && !integrityAnchored) &&
+    !coverageStatementMismatch
   const acceptanceDecision = !passes ? 'reject' : pendingReasons.length ? 'pending' : 'accept'
 
-  const e = v.expect
+  // coverageStatementMismatch is omitted from a result while false.
+  const e = { coverageStatementMismatch: false, ...v.expect }
   const got = {
     validSignature, issuerResolved, revoked, statusValid, expired, subjectBound,
-    integrityAnchored, suspended, superseded, pendingReasons, acceptanceDecision,
+    integrityAnchored, suspended, superseded, coverageStatementMismatch,
+    pendingReasons, acceptanceDecision,
+  }
+  // Organisation backing: only vectors that state an expectation test it.
+  if (v.expectOrganisationBacking) {
+    got.organisationBacking = organisationBacking(issuerId, vc.issuer?.domain, v.organisationDescriptor)
+    e.organisationBacking = v.expectOrganisationBacking
   }
   const fields = Object.keys(got)
   const ok = fields.every(field => JSON.stringify(got[field]) === JSON.stringify(e[field]))
@@ -286,9 +349,9 @@ function strictParse(bytes, limits) {
   }
 }
 
-const manifest = JSON.parse(readFileSync('limits/manifest.json', 'utf8'))
+const manifest = JSON.parse(readFileSync(here('limits/manifest.json'), 'utf8'))
 for (const c of manifest.cases) {
-  const got = strictParse(readFileSync(`limits/${c.file}`), manifest.limits)
+  const got = strictParse(readFileSync(here(`limits/${c.file}`)), manifest.limits)
   const ok = got === c.expect
   console.log(`${ok ? 'PASS' : 'FAIL'}  limits/${c.file}`)
   if (!ok) {
@@ -344,9 +407,9 @@ function endorsementOutcome(bytes, context) {
     : 'invalid_signature'
 }
 
-const endorsements = JSON.parse(readFileSync('endorsements/manifest.json', 'utf8'))
+const endorsements = JSON.parse(readFileSync(here('endorsements/manifest.json'), 'utf8'))
 for (const c of endorsements.cases) {
-  const got = endorsementOutcome(readFileSync(`endorsements/${c.file}`), endorsements)
+  const got = endorsementOutcome(readFileSync(here(`endorsements/${c.file}`)), endorsements)
   const ok = got === c.expect
   console.log(`${ok ? 'PASS' : 'FAIL'}  endorsements/${c.file}`)
   if (!ok) {
@@ -358,7 +421,7 @@ for (const t of endorsements.thresholds) {
   const counted = new Set()
   let rejected = 0
   for (const file of t.files) {
-    const bytes = readFileSync(`endorsements/${file}`)
+    const bytes = readFileSync(here(`endorsements/${file}`))
     const attestor = JSON.parse(bytes.toString('utf8')).attestor_did
     if (endorsementOutcome(bytes, endorsements) === 'valid' && !counted.has(attestor)) {
       counted.add(attestor)

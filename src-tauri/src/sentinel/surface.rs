@@ -1,7 +1,7 @@
 //! What a credential says about its integrity session, derived from the
 //! profile database at issuance: the locked trust profile, the signals run,
-//! degraded and not run, the verification rung, the probe summary and the
-//! coverage statement for that profile and rung.
+//! degraded and not run, the camera's coverage, the verification rung, the
+//! probe summary and the coverage statement for that profile and rung.
 //!
 //! Nothing here is copied from client text. The rung's evidence is read from
 //! the session and its attempt:
@@ -24,6 +24,7 @@
 //!   `live` with a live segment and `none` without; assessment sessions keep
 //!   the ladder.
 
+use alexandria_verify::integrity::camera_coverage_counts;
 use rusqlite::{params, OptionalExtension};
 
 use crate::sentinel::scoring::{
@@ -62,6 +63,9 @@ pub(crate) struct SessionSurface {
     pub signals_not_run: Vec<String>,
     /// Signals the profile runs that do not count towards a policy floor now.
     pub uncredited: Vec<ProfileSignal>,
+    /// Fraction of committed windows that carried camera checks, when the
+    /// profile includes the camera; `0` for a session with no windows.
+    pub camera_coverage: Option<f64>,
     pub probe: Option<ProbeOutcome>,
     /// `None` when the session never chose a profile, and for an interview.
     pub coverage: Option<CoverageStatement>,
@@ -94,25 +98,31 @@ pub(crate) fn session_surface(
     // Device axis signals.
     let mut uncredited = Vec::new();
     let mut signals_degraded = Vec::new();
+    let mut camera_coverage = None;
     if let Some(p) = profile {
         if p.includes(ProfileSignal::DeviceAttestation) && !attestation_credited {
             uncredited.push(ProfileSignal::DeviceAttestation);
             signals_degraded.push(ProfileSignal::DeviceAttestation.as_str().to_string());
         }
-        if let Some(min) = p.min_camera_coverage() {
-            let degraded = windows
+        if p.includes(ProfileSignal::Camera) {
+            let covered = windows
                 .iter()
-                .filter(|w| w.iter().any(|f| f == CAMERA_DEGRADED))
+                .filter(|w| !w.iter().any(|f| f == CAMERA_DEGRADED))
                 .count();
             // A session with no windows has no camera coverage at all.
-            let coverage =
-                (!windows.is_empty()).then(|| 1.0 - degraded as f64 / windows.len() as f64);
-            if coverage.is_none_or(|c| c < min) {
+            let coverage = if windows.is_empty() {
+                0.0
+            } else {
+                covered as f64 / windows.len() as f64
+            };
+            // The same rule a verifier applies to the assertion's coverage.
+            if !camera_coverage_counts(coverage) {
                 uncredited.push(ProfileSignal::Camera);
             }
-            if coverage != Some(1.0) {
+            if coverage < 1.0 {
                 signals_degraded.push(ProfileSignal::Camera.as_str().to_string());
             }
+            camera_coverage = Some(coverage);
         }
     }
     let (signals_run, signals_not_run) = match profile {
@@ -192,6 +202,7 @@ pub(crate) fn session_surface(
         signals_degraded,
         signals_not_run,
         uncredited,
+        camera_coverage,
         probe,
         coverage: profile
             .filter(|_| !interview)

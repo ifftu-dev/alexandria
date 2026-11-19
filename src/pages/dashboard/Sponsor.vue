@@ -4,7 +4,7 @@
  * (productization P2). A sponsor creates an organization, authors
  * role-specific assessments tied to a job description with an issuance
  * policy + required assurance level, and issues gated RoleCredentials to
- * candidates from a completed integrity session.
+ * candidates from their passed attempt at the role.
  *
  * A role's integrity minimums (trust profile, verification rung, follow-up
  * questions) sit beside the coverage statement they imply, and the issue tab
@@ -134,7 +134,10 @@ async function issue() {
 const publishedRoles = computed(() => sponsor.roleAssessments.value.filter(r => r.status !== 'archived'))
 
 // Attempts learners made for the selected role, so issuance starts from a
-// real attempt rather than a hand-typed session id.
+// real attempt rather than a hand-typed session id. The backend refuses a
+// session that is not the candidate's passed attempt at this role, picked or
+// typed, so a role change clears the pick and defaults to the newest passed
+// attempt.
 const roleAttempts = ref<RoleAttemptSummary[]>([])
 // The same role's finished sessions, most suspicious first.
 const sessionReviews = ref<RoleSessionReview[]>([])
@@ -143,6 +146,8 @@ let roleAttemptsRequest = 0
 watch(() => issueForm.value.role_assessment_id, async id => {
   roleAttempts.value = []
   sessionReviews.value = []
+  issueForm.value.subject = ''
+  issueForm.value.integrity_session_id = ''
   const request = ++roleAttemptsRequest
   if (!id) {
     roleAttemptsBusy.value = false
@@ -153,7 +158,12 @@ watch(() => issueForm.value.role_assessment_id, async id => {
   // Only the newest request may settle the busy flag and the list.
   if (request !== roleAttemptsRequest) return
   roleAttemptsBusy.value = false
-  if (list) roleAttempts.value = list
+  if (list) {
+    roleAttempts.value = list
+    const newest = list.find(issuable)
+    const f = issueForm.value
+    if (newest && !f.subject && !f.integrity_session_id) useAttempt(newest)
+  }
   if (reviews) sessionReviews.value = reviews
 })
 
@@ -171,6 +181,16 @@ function attemptState(a: RoleAttemptSummary): 'passed' | 'failed' | 'open' {
   if (a.passed === true) return 'passed'
   if (a.passed === false) return 'failed'
   return 'open'
+}
+
+/** Only a passed attempt with an integrity session can back a credential. */
+function issuable(a: RoleAttemptSummary): boolean {
+  return attemptState(a) === 'passed' && !!a.integrity_session_id
+}
+
+function isPicked(a: RoleAttemptSummary): boolean {
+  const f = issueForm.value
+  return f.subject === a.subject_did && f.integrity_session_id === a.integrity_session_id
 }
 
 function assuranceTone(level?: string | null): 'success' | 'accent' | 'secondary' {
@@ -279,7 +299,7 @@ onMounted(async () => {
               </AppBadge>
               <span v-if="a.score != null" class="text-muted-foreground">{{ $t('dashboard.sponsor.issue.attemptScore', { value: Math.round(a.score * 100) }) }}</span>
               <span class="text-muted-foreground">{{ a.started_at.slice(0, 10) }}</span>
-              <AppButton v-if="a.integrity_session_id" variant="ghost" size="sm" @click="useAttempt(a)">{{ $t('dashboard.sponsor.issue.attemptUse') }}</AppButton>
+              <AppButton v-if="issuable(a)" :variant="isPicked(a) ? 'primary' : 'ghost'" size="sm" :aria-pressed="isPicked(a)" @click="useAttempt(a)">{{ $t('dashboard.sponsor.issue.attemptUse') }}</AppButton>
             </li>
           </ul>
         </div>

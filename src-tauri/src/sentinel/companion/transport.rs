@@ -4,7 +4,9 @@
 //! message each way. The phone dials the desktop and sends its hello;
 //! after the desktop has stored it, the connection stays open: the phone
 //! sends camera windows on it, and the desktop asks the phone, on the same
-//! connection, to sign the terminal commitment root.
+//! connection, to sign the terminal commitment root and, at issuance, for
+//! evidence over a credential's binding digest ([`CompanionHub::request_binding`],
+//! [`PairedAttester`]).
 //!
 //! [`CompanionHub`] is both ends. The desktop registers an offer and waits
 //! for the join ([`CompanionHub::offer`] / [`CompanionHub::take_join`]);
@@ -57,7 +59,15 @@ enum DesktopReply {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum DesktopRequest {
-    AssertRoot { session_id: String, root: String },
+    AssertRoot {
+        session_id: String,
+        root: String,
+    },
+    /// Evidence over a credential's binding digest (hex).
+    Bind {
+        session_id: String,
+        digest_hex: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -97,6 +107,26 @@ pub type Capture = Box<dyn FnOnce([u8; 32]) -> Result<Option<Captured>, String> 
 /// Phone-side App Attest assertion over a root (blocking):
 /// `native::assert_commitment` in the app.
 pub type Asserter = Arc<dyn Fn(&str, &str) -> Result<Option<String>, String> + Send + Sync>;
+/// Phone-side evidence over a binding digest, given the session's App Attest
+/// key id when there is one (blocking): `native::bind_digest` in the app.
+pub type Binder =
+    Arc<dyn Fn(Option<&str>, &[u8; 32]) -> Result<Option<String>, String> + Send + Sync>;
+
+/// What the phone signs with for as long as its link stays up.
+#[derive(Clone)]
+pub struct PhoneSigner {
+    /// The terminal commitment root, at session end.
+    pub assert_root: Asserter,
+    /// A credential's binding digest, at issuance.
+    pub bind_digest: Binder,
+}
+
+/// How long the desktop waits for the phone's evidence at issuance. Issuance
+/// holds the database while it waits, so this is shorter than a reply to the
+/// learner's own actions.
+const BINDING_TIMEOUT: Duration = Duration::from_secs(15);
+/// The reason issuance gives when no phone is linked to the session.
+const NO_PHONE: &str = "the paired phone is no longer linked to this session";
 
 type TrustSource = Arc<dyn Fn() -> TrustConfig + Send + Sync>;
 type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
@@ -221,6 +251,18 @@ impl CompanionHub {
         }
     }
 
+    /// Forget the session's offer now and close its phone link after
+    /// `delay`, so issuance after the session ends can still ask the phone
+    /// for evidence ([`Self::request_binding`]). Needs a Tokio runtime.
+    pub fn close_after(&self, session_id: &str, delay: Duration) {
+        self.lock().offers.remove(session_id);
+        let (hub, session_id) = (self.clone(), session_id.to_string());
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            hub.close(&session_id);
+        });
+    }
+
     /// The paired phone's role, if a phone is linked to the session.
     pub fn role(&self, session_id: &str) -> Option<CompanionRole> {
         self.lock().links.get(session_id).map(|link| CompanionRole {
@@ -269,6 +311,34 @@ impl CompanionHub {
             .map_err(|_| "the phone did not answer in time".to_string())??;
         match reply {
             PhoneReply::Assertion(assertion) => Ok(assertion),
+            PhoneReply::Refused(why) => Err(why),
+        }
+    }
+
+    /// Ask the session's phone for evidence over a credential's binding
+    /// digest: on an iPhone an assertion from its attested key whose client
+    /// data is the digest, on Android a token with the digest as nonce.
+    pub async fn request_binding(
+        &self,
+        session_id: &str,
+        digest: &[u8; 32],
+    ) -> Result<String, String> {
+        let conn = self
+            .lock()
+            .links
+            .get(session_id)
+            .map(|link| link.conn.clone())
+            .ok_or(NO_PHONE)?;
+        let request = DesktopRequest::Bind {
+            session_id: session_id.into(),
+            digest_hex: hex::encode(digest),
+        };
+        let reply = tokio::time::timeout(BINDING_TIMEOUT, exchange(&conn, &request))
+            .await
+            .map_err(|_| "the paired phone did not answer in time".to_string())??;
+        match reply {
+            PhoneReply::Assertion(Some(proof)) => Ok(proof),
+            PhoneReply::Assertion(None) => Err("the paired phone cannot attest".into()),
             PhoneReply::Refused(why) => Err(why),
         }
     }
@@ -350,16 +420,16 @@ impl CompanionHub {
     // ---- phone ---------------------------------------------------------
 
     /// Join the desktop session in `offer` as the learner whose key is
-    /// `learner_key`. Attests with `capture`; serves end assertions with
-    /// `asserter` for as long as the link stays up. Returns the assurance
-    /// the desktop recorded.
+    /// `learner_key`. Attests with `capture`; serves end assertions and
+    /// binding evidence with `signer` for as long as the link stays up.
+    /// Returns the assurance the desktop recorded.
     pub async fn join(
         &self,
         endpoint: &Endpoint,
         offer: &CompanionOffer,
         learner_key: &SigningKey,
         capture: Capture,
-        asserter: Asserter,
+        signer: PhoneSigner,
         camera_benchmark: Option<BenchmarkResult>,
     ) -> Result<String, String> {
         let phone = endpoint.id().to_string();
@@ -402,7 +472,7 @@ impl CompanionHub {
             conn,
             offer.session_id.clone(),
             key_id,
-            asserter,
+            signer,
         ));
         Ok(assurance_level)
     }
@@ -472,29 +542,83 @@ async fn serve_desktop(
     conn: Connection,
     session_id: String,
     key_id: Option<String>,
-    asserter: Asserter,
+    signer: PhoneSigner,
 ) {
     while let Ok((mut send, mut recv)) = conn.accept_bi().await {
-        let Ok(DesktopRequest::AssertRoot {
-            session_id: asked,
-            root,
-        }) = read_message(&mut recv).await
-        else {
+        let Ok(request) = read_message::<DesktopRequest>(&mut recv).await else {
             continue;
         };
-        let reply = match (&key_id, asked == session_id) {
-            (_, false) => PhoneReply::Refused("not the session this phone joined".into()),
-            (None, true) => PhoneReply::Assertion(None),
-            (Some(key_id), true) => {
-                let (asserter, key_id) = (asserter.clone(), key_id.clone());
-                match tokio::task::spawn_blocking(move || asserter(&key_id, &root)).await {
-                    Ok(Ok(assertion)) => PhoneReply::Assertion(assertion),
-                    Ok(Err(why)) => PhoneReply::Refused(why),
-                    Err(e) => PhoneReply::Refused(format!("assertion worker failed: {e}")),
+        let asked = match &request {
+            DesktopRequest::AssertRoot { session_id, .. }
+            | DesktopRequest::Bind { session_id, .. } => session_id,
+        };
+        let reply = if *asked != session_id {
+            PhoneReply::Refused("not the session this phone joined".into())
+        } else {
+            match request {
+                DesktopRequest::AssertRoot { root, .. } => match &key_id {
+                    None => PhoneReply::Assertion(None),
+                    Some(key_id) => {
+                        let (asserter, key_id) = (signer.assert_root.clone(), key_id.clone());
+                        signed(move || asserter(&key_id, &root)).await
+                    }
+                },
+                DesktopRequest::Bind { digest_hex, .. } => {
+                    match hex::decode(&digest_hex)
+                        .ok()
+                        .and_then(|d| <[u8; 32]>::try_from(d).ok())
+                    {
+                        None => PhoneReply::Refused("the binding digest is malformed".into()),
+                        Some(digest) => {
+                            let (binder, key_id) = (signer.bind_digest.clone(), key_id.clone());
+                            signed(move || binder(key_id.as_deref(), &digest)).await
+                        }
+                    }
                 }
             }
         };
         let _ = write_message(&mut send, &reply).await;
+    }
+}
+
+/// Run a blocking platform signature off the link's task.
+async fn signed(
+    sign: impl FnOnce() -> Result<Option<String>, String> + Send + 'static,
+) -> PhoneReply {
+    match tokio::task::spawn_blocking(sign).await {
+        Ok(Ok(proof)) => PhoneReply::Assertion(proof),
+        Ok(Err(why)) => PhoneReply::Refused(why),
+        Err(e) => PhoneReply::Refused(format!("assertion worker failed: {e}")),
+    }
+}
+
+/// Issuance's evidence port on a desktop: a paired phone's session asks the
+/// phone over the companion link ([`CompanionHub::request_binding`]); any
+/// other session uses this device's own platform. Blocks its caller until
+/// the phone answers or the wait times out, so grading calls it between its
+/// database jobs, never inside one ([`crate::credentials::PreparedEvidence`]).
+pub struct PairedAttester {
+    pub hub: CompanionHub,
+    pub runtime: tokio::runtime::Handle,
+}
+
+impl crate::sentinel::attestation::BindingAttester for PairedAttester {
+    fn bind(
+        &self,
+        session_id: &str,
+        record: &crate::sentinel::attestation::DeviceAttestation,
+        digest: &[u8; 32],
+    ) -> Result<String, String> {
+        if record.companion.is_none() {
+            return crate::sentinel::attestation::NativeAttester.bind(session_id, record, digest);
+        }
+        let (hub, session_id, digest) = (self.hub.clone(), session_id.to_string(), *digest);
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        self.runtime.spawn(async move {
+            let _ = tx.send(hub.request_binding(&session_id, &digest).await);
+        });
+        rx.recv_timeout(BINDING_TIMEOUT + Duration::from_secs(1))
+            .map_err(|_| "the paired phone did not answer in time".to_string())?
     }
 }
 
@@ -558,11 +682,12 @@ async fn read_message<T: DeserializeOwned>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sentinel::attestation::app_attest::{self, tests::build_assertion};
+    use crate::sentinel::attestation::app_attest;
     use crate::sentinel::attestation::{apple_app_id, ASSURANCE_DEVICE_ATTESTED};
     use crate::sentinel::companion::tests::{
         did_of, learner, phone_capture, trust, SESSION, STARTED,
     };
+    use alexandria_verify::attestation::test_support::{build_assertion, World};
     use base64::Engine as _;
     use iroh::address_lookup::MemoryLookup;
     use iroh::protocol::Router;
@@ -610,7 +735,7 @@ mod tests {
         phone_ep: Endpoint,
         offer: CompanionOffer,
         nonce: [u8; 32],
-        world: Arc<app_attest::tests::World>,
+        world: Arc<World>,
         _router: Router,
     }
 
@@ -676,15 +801,28 @@ mod tests {
                     },
                 }
             });
-            let asserter: Asserter = Arc::new(move |_key_id, root| {
-                Ok(Some(
-                    base64::engine::general_purpose::STANDARD.encode(build_assertion(
-                        &signer,
-                        root.as_bytes(),
-                        1,
-                    )),
-                ))
-            });
+            // The attested key's counter moves with every assertion, as
+            // `generateAssertion` does.
+            let counter = Arc::new(std::sync::atomic::AtomicU32::new(0));
+            let next = move || counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+            let (root_signer, root_next) = (signer.clone(), next.clone());
+            let signer = PhoneSigner {
+                assert_root: Arc::new(move |_key_id, root| {
+                    Ok(Some(base64::engine::general_purpose::STANDARD.encode(
+                        build_assertion(&root_signer, root.as_bytes(), root_next()),
+                    )))
+                }),
+                bind_digest: Arc::new(move |key_id, digest| {
+                    assert!(key_id.is_some(), "an iPhone binds with its session key");
+                    Ok(Some(
+                        base64::engine::general_purpose::STANDARD.encode(build_assertion(
+                            &signer,
+                            digest,
+                            next(),
+                        )),
+                    ))
+                }),
+            };
             self.phone
                 .join(
                     &self.phone_ep,
@@ -694,7 +832,7 @@ mod tests {
                         assert_eq!(n, nonce, "the phone attests the companion nonce");
                         Ok(Some(captured))
                     }),
-                    asserter,
+                    signer,
                     benchmark,
                 )
                 .await
@@ -771,6 +909,165 @@ mod tests {
         p.desktop.close(SESSION);
         assert!(p.desktop.role(SESSION).is_none());
         assert!(p.desktop.request_assertion(SESSION, "r").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn the_phone_answers_a_binding_request_with_evidence_over_the_digest() {
+        let p = pair(false).await;
+        let _stored = p.store_with(Ok(()));
+        p.join(None).await.unwrap();
+
+        let digest = [9u8; 32];
+        let proof = p.desktop.request_binding(SESSION, &digest).await.unwrap();
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(proof)
+            .unwrap();
+        let public_key = p
+            .world
+            .leaf_signing_key
+            .verifying_key()
+            .to_encoded_point(false)
+            .as_bytes()
+            .to_vec();
+        let app_id_hash: [u8; 32] = Sha256::digest(apple_app_id().as_bytes()).into();
+        // Client data is the 32 digest bytes, signed by the session's key.
+        app_attest::verify_assertion(&bytes, &digest, &public_key, &app_id_hash, 0).unwrap();
+
+        // Once the link is closed there is no phone to ask.
+        p.desktop.close(SESSION);
+        let err = p
+            .desktop
+            .request_binding(SESSION, &digest)
+            .await
+            .unwrap_err();
+        assert!(err.contains("no longer linked"), "{err}");
+    }
+
+    /// A desktop session paired with `accepted`, its profile chosen with
+    /// companion consent, ended clean.
+    fn finished_paired_session(accepted: &Accepted) -> crate::db::Database {
+        use crate::sentinel::scoring::Capabilities;
+        use crate::sentinel::trust_profile::{select_for_session, ProfileRequest};
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let conn = db.conn();
+        conn.execute(
+            "INSERT INTO integrity_sessions (id, status, purpose, started_at)
+             VALUES (?1, 'active', 'assessment', ?2)",
+            rusqlite::params![SESSION, STARTED],
+        )
+        .unwrap();
+        crate::settings::SettingsStore::set(
+            conn,
+            crate::settings::registry::keys::IDENTITY_LOCAL_DID,
+            did_of(&learner()),
+        )
+        .unwrap();
+        super::super::session::store_pairing(conn, SESSION, accepted).unwrap();
+        let consent = ProfileRequest {
+            consent: Capabilities {
+                companion_phone: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        select_for_session(conn, SESSION, &consent, None).unwrap();
+        conn.execute(
+            "UPDATE integrity_sessions SET status = 'completed', ended_at = ?2 WHERE id = ?1",
+            rusqlite::params![SESSION, crate::credentials::fixtures::NOW],
+        )
+        .unwrap();
+        db
+    }
+
+    /// Issue the learner's credential on `db`'s session, from the database
+    /// thread's side: blocking, outside the async context.
+    async fn issue_paired(
+        db: crate::db::Database,
+        desktop: &CompanionHub,
+        world: &World,
+    ) -> crate::credentials::Issued {
+        use crate::credentials::{fixtures, issue_with, EvidenceSource, Issuer};
+        let attester = PairedAttester {
+            hub: desktop.clone(),
+            runtime: tokio::runtime::Handle::current(),
+        };
+        let trust = trust(world);
+        tokio::task::spawn_blocking(move || {
+            let learner_did = crate::crypto::did::Did(did_of(&learner()));
+            let mut req = fixtures::sample_request(learner_did);
+            req.integrity_session_id = Some(SESSION.into());
+            issue_with(
+                db.conn(),
+                &Issuer::from_key(learner()),
+                &req,
+                fixtures::NOW,
+                &EvidenceSource {
+                    trust,
+                    attester: &attester,
+                },
+            )
+            .unwrap()
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_paired_desktop_issues_a_credential_bound_by_the_phone_over_the_link() {
+        use crate::credentials::EvidenceBinding;
+        use alexandria_verify::attestation::{verify_evidence, AttestationOutcome, Platform};
+        let p = pair(false).await;
+        let stored = p.store_with(Ok(()));
+        p.join(None).await.unwrap();
+        let db = finished_paired_session(&stored.await.unwrap());
+
+        let issued = issue_paired(db, &p.desktop, &p.world).await;
+        assert_eq!(issued.evidence, EvidenceBinding::Credential);
+        assert_eq!(
+            verify_evidence(&issued.credential, &trust(&p.world).inputs()),
+            AttestationOutcome::VerifiedCredentialBound {
+                platform: Platform::Ios
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn once_the_phone_link_closed_a_paired_desktop_issues_session_bound() {
+        use crate::credentials::EvidenceBinding;
+        use alexandria_verify::attestation::{verify_evidence, AttestationOutcome, Platform};
+        let p = pair(false).await;
+        let stored = p.store_with(Ok(()));
+        p.join(None).await.unwrap();
+        let db = finished_paired_session(&stored.await.unwrap());
+        p.desktop.close(SESSION);
+
+        let issued = issue_paired(db, &p.desktop, &p.world).await;
+        assert_eq!(
+            issued.evidence,
+            EvidenceBinding::Session {
+                reason: NO_PHONE.into()
+            }
+        );
+        assert_eq!(
+            verify_evidence(&issued.credential, &trust(&p.world).inputs()),
+            AttestationOutcome::VerifiedSessionBound {
+                platform: Platform::Ios
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_link_kept_for_issuance_answers_until_its_wait_runs_out() {
+        let p = pair(false).await;
+        let _stored = p.store_with(Ok(()));
+        p.join(None).await.unwrap();
+        p.desktop.close_after(SESSION, Duration::from_millis(300));
+        // Monitoring has ended; grading can still ask the phone.
+        assert!(p.desktop.request_binding(SESSION, &[1; 32]).await.is_ok());
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        assert!(p.desktop.role(SESSION).is_none());
+        assert!(p.desktop.request_binding(SESSION, &[1; 32]).await.is_err());
     }
 
     #[tokio::test]

@@ -12,6 +12,9 @@
 //! *trusted* is the page's job, decided with the organisation's proof when
 //! the learner looks; whether it is *new* is all this needs to know.
 //!
+//! The same pass collects the credentials organisations issued to the learner
+//! through Cloud (`crate::credentials::collect`).
+//!
 //! A push from Cloud covers the same events faster when the device is
 //! registered for one. This pass is what covers the desktop, a phone that
 //! declined push, and anything a push missed.
@@ -329,7 +332,20 @@ async fn run_pass<R: Runtime>(
         return Ok(0);
     };
     let (signing_key, did) = super::push::issuer(&state).await?.into_parts();
-    let items = fetch(&origin, &signing_key, did.as_str()).await;
+    // Credentials organisations issued through Cloud are collected on the
+    // same pass, beside the lists: verified and stored like any received
+    // credential.
+    let (collected, items) = futures::join!(
+        crate::credentials::collect::run(&state.db_executor, &lease, &origin, &signing_key, &did),
+        fetch(&origin, &signing_key, did.as_str()),
+    );
+    match collected {
+        Ok(collected) if !collected.is_empty() => {
+            log::info!("collected {} organisation credential(s)", collected.len());
+        }
+        Ok(_) => {}
+        Err(error) => log::debug!("credential collection: {error}"),
+    }
     if items.is_empty() {
         return Ok(0);
     }
@@ -498,7 +514,8 @@ mod tests {
         let (app, _, received, release, server) =
             learner_with_invitation(directory.path(), false).await;
         let state = app.state::<crate::AppState>();
-        let lists = LISTS.len();
+        // Each list, plus the issued credentials the pass collects.
+        let lists = LISTS.len() + 1;
 
         let background = tokio::spawn({
             let app = app.handle().clone();

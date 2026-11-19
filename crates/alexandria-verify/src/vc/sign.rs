@@ -118,10 +118,9 @@ pub fn verify_document(
 }
 
 /// The verification method for `signing_key` under `issuer`: the issuer's
-/// DID with the key's own multibase identifier as the fragment. For an
-/// unrotated `did:key` that is `did:key:z6Mk…#z6Mk…`, the method id its DID
-/// document defines; for a rotated registry key the controller stays the
-/// issuer and the fragment names the new key.
+/// DID with the key's own multibase identifier as the fragment. For a
+/// `did:key` signed by its own key that is `did:key:z6Mk…#z6Mk…`, the method
+/// id its DID document defines.
 pub fn did_key_verification_method(
     issuer: &Did,
     signing_key: &SigningKey,
@@ -134,25 +133,27 @@ pub fn did_key_verification_method(
 /// Sign the unsigned credential with `signing_key`.
 ///
 /// `issuer_did` is embedded as-is: callers are expected to pass the DID
-/// that `signing_key` controls (directly, or through a key-registry rotation
-/// whose `verificationMethod` they set themselves). When the proof's
-/// verification method is blank it is set to the `did:key` method of
-/// `signing_key`; when it is already set it is kept, which is what a rotated
-/// registry key needs.
+/// that `signing_key` controls. An issuer object the caller already set
+/// whose `id` is `issuer_did` is kept, name and domain included; any other
+/// issuer is replaced by the string form. When the proof's verification
+/// method is blank it is set to the `did:key` method of `signing_key`; a
+/// method the caller already set under `issuer_did` is kept.
 pub fn sign_credential(
     mut unsigned: UnsignedCredential,
     signing_key: &SigningKey,
     issuer_did: &Did,
 ) -> Result<VerifiableCredential, VcError> {
     let vc = &mut unsigned.credential;
-    vc.issuer = issuer_did.clone();
+    if vc.issuer.id() != issuer_did {
+        vc.issuer = issuer_did.clone().into();
+    }
     vc.proof.type_ = super::DATA_INTEGRITY_PROOF.into();
     vc.proof.cryptosuite = EDDSA_JCS_2022.into();
     if vc.proof.proof_purpose.is_empty() {
         vc.proof.proof_purpose = "assertionMethod".into();
     }
-    // A preset method is kept only when the issuer controls it (a rotated
-    // registry key); anything else is replaced by the key's own method.
+    // A preset method is kept only when it sits under the issuer's DID;
+    // anything else is replaced by the key's own method.
     let controlled = vc
         .proof
         .verification_method
@@ -230,7 +231,7 @@ mod tests {
                 context: vec!["https://www.w3.org/ns/credentials/v2".into()],
                 id: Some("urn:uuid:sign-unit-test".into()),
                 type_: vec!["VerifiableCredential".into(), "FormalCredential".into()],
-                issuer,
+                issuer: issuer.into(),
                 valid_from: "2026-04-13T00:00:00Z".into(),
                 valid_until: None,
                 credential_subject: claim.into_subject(subject),
@@ -238,6 +239,8 @@ mod tests {
                 terms_of_use: None,
                 witness: None,
                 integrity: None,
+                evidence: Vec::new(),
+                related_resource: Vec::new(),
                 proof: Proof::unsigned("2026-04-13T00:00:00Z"),
             },
         }
@@ -310,15 +313,15 @@ mod tests {
     }
 
     #[test]
-    fn a_preset_verification_method_is_kept_for_rotated_keys() {
+    fn a_preset_verification_method_under_the_issuer_is_kept() {
         let key = test_signing_key("issuer");
         let issuer = derive_did_key(&key);
         let subject = derive_did_key(&test_signing_key("subject"));
         let mut unsigned = unsigned_skeleton(issuer.clone(), subject);
         unsigned.credential.proof.verification_method =
-            VerificationMethodRef(format!("{}#rotated-2", issuer.as_str()));
+            VerificationMethodRef(format!("{}#key-2", issuer.as_str()));
         let signed = sign_credential(unsigned, &key, &issuer).unwrap();
-        assert!(signed.proof.verification_method.0.ends_with("#rotated-2"));
+        assert!(signed.proof.verification_method.0.ends_with("#key-2"));
     }
 
     #[test]

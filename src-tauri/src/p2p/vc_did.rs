@@ -1,27 +1,29 @@
-//! `TOPIC_VC_DID` handler — issuers broadcast their DID document and
-//! key rotations. Receivers reflect the broadcast into their local
-//! `key_registry` so historical verification (§5.3) survives across
-//! peers.
+//! `TOPIC_VC_DID` handler — issuers announce their DID.
+//!
+//! A `did:key` is its key, so an announcement records nothing: no registry
+//! row is written and nothing can change how the DID resolves. Its one effect
+//! is to retry, through full verification, the credentials from that issuer
+//! still waiting in the pending queue. Rotation announcements are retired; a
+//! `rotated_to` field is ignored.
 
 use crate::crypto::did::Did;
 use crate::db::Database;
 use crate::p2p::types::SignedGossipMessage;
 
-/// Wire shape of a DID gossip payload. The unit tests pin two
-/// shapes: a bare announcement `{"did": "..."}` and a rotation
-/// announcement `{"did": "...", "rotated_to": "..."}`. Additional
-/// fields can be added later without breaking the parser.
+/// Wire shape of a DID gossip payload: `{"did": "..."}`. Unknown fields,
+/// including the retired `rotated_to`, are ignored.
 #[derive(serde::Deserialize)]
 struct DidMessage {
     did: String,
-    #[serde(default)]
-    rotated_to: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DidIngest {
-    Stored,
-    UpdatedRegistry,
+    /// The DID's holder announced it; `promoted` credentials waiting on it
+    /// verified and moved into the main table.
+    Announced {
+        promoted: u32,
+    },
     Ignored,
     /// The announcement was well-formed but the envelope signer does not
     /// control the DID it speaks for.
@@ -57,17 +59,8 @@ pub fn handle_did_message(
     let did = Did(parsed.did);
 
     // A DID announcement speaks for exactly one identity, so only the holder
-    // of that identity's key may make one. Without this the handler accepted a
-    // rotation for *any* DID from *any* peer, which is a key-rollback
-    // primitive: forging a rotation closes the victim's current registry row
-    // and opens one with an empty key, so `resolve_issuer_key` falls through to
-    // `did:key` self-resolution — the pre-rotation key. If the rotation
-    // happened because that key was compromised, an attacker holding it can
-    // restore its acceptance across the network.
-    //
-    // It also closed the unauthenticated-insert path into `key_registry`, which
-    // was what let a peer manufacture the "known issuer" precondition the
-    // status-list handler used to rely on.
+    // of that identity's key may make one. That also keeps a peer from
+    // promoting credentials queued under someone else's DID.
     if !envelope_signer_controls(&did, message) {
         log::warn!(
             "vc-did: announcement for {} was not signed by that DID — dropping",
@@ -76,187 +69,104 @@ pub fn handle_did_message(
         return Ok(DidIngest::IgnoredNotTheSubject);
     }
 
-    // Rotation announcement: record the new entry. The envelope is signed by
-    // the DID's own key (checked above), so the subject really is asking for
-    // this.
-    if let Some(rotated_to) = parsed.rotated_to {
-        let now = crate::clock::now_rfc3339();
-        let conn = db.conn();
-        // Close any open entry for this DID.
-        conn.execute(
-            "UPDATE key_registry SET valid_until = ?2, rotated_by = ?3 \
-             WHERE did = ?1 AND valid_until IS NULL",
-            rusqlite::params![did.as_str(), &now, &rotated_to],
-        )
-        .map_err(|e| e.to_string())?;
-        // Insert a new open row for the rotated DID, derivable from
-        // self-resolution at verify time.
-        let key_id: String = conn
-            .query_row(
-                "SELECT 'key-' || (COALESCE(MAX(CAST(substr(key_id, 5) AS INTEGER)), 0) + 1) \
-                 FROM key_registry WHERE did = ?1",
-                rusqlite::params![did.as_str()],
-                |r| r.get(0),
-            )
-            .unwrap_or_else(|_| "key-2".to_string());
-        conn.execute(
-            "INSERT OR IGNORE INTO key_registry \
-             (did, key_id, public_key_hex, valid_from, valid_until, rotated_by) \
-             VALUES (?1, ?2, '', ?3, NULL, NULL)",
-            rusqlite::params![did.as_str(), &key_id, &now],
-        )
-        .map_err(|e| e.to_string())?;
-        return Ok(DidIngest::UpdatedRegistry);
-    }
-
-    // First-sight announcement: record the DID with an empty pubkey
-    // (callers can self-resolve via `did:key`). Idempotent insert.
-    let inserted = db
-        .conn()
-        .execute(
-            "INSERT OR IGNORE INTO key_registry \
-             (did, key_id, public_key_hex, valid_from, valid_until, rotated_by) \
-             VALUES (?1, 'key-1', '', '1970-01-01T00:00:00Z', NULL, NULL)",
-            rusqlite::params![did.as_str()],
-        )
-        .map_err(|e| e.to_string())?;
-
-    // Kick the pending-verification sweeper now that the issuer's
-    // DID is known — credentials from this issuer that landed before
-    // the DID doc can be promoted into the main `credentials` table.
-    let _ = promote_pending_for(db, did.as_str());
-
-    if inserted > 0 {
-        Ok(DidIngest::Stored)
-    } else {
-        Ok(DidIngest::Ignored)
-    }
+    // Credentials from this issuer that landed before its announcement can
+    // now be promoted into the main `credentials` table. A failed sweep is
+    // retried on the next announcement, so it does not fail the message.
+    let promoted = promote_pending_for(db, did.as_str()).unwrap_or_else(|e| {
+        log::warn!("vc-did: promoting credentials for {}: {e}", did.as_str());
+        0
+    });
+    Ok(DidIngest::Announced { promoted })
 }
 
-/// Promote credentials queued in `credentials_pending_verification`
-/// that match `issuer_did` into the main `credentials` table.
-/// Called by the DID-doc gossip handler whenever an issuer becomes
-/// resolvable. Returns the number of rows promoted.
+/// Retry the credentials queued in `credentials_pending_verification` under
+/// `issuer_did`, each through [`crate::credentials::receive::receive`], the
+/// same full verification every received credential gets.
+///
+/// An accepted credential is stored and leaves the queue; a refused one, or
+/// one that does not parse, leaves the queue unstored; one still pending (a
+/// status list not yet held, say) stays queued. Nothing reaches `credentials`
+/// without verifying. Returns the number stored.
 pub fn promote_pending_for(db: &Database, issuer_did: &str) -> Result<u32, String> {
+    use crate::credentials::receive::{receive, Receipt};
+
     let conn = db.conn();
-    let rows: Vec<(String, String, String)> = {
+    let rows: Vec<(String, String)> = {
         let mut stmt = conn
             .prepare(
-                "SELECT id, subject_did, signed_vc_json \
-                 FROM credentials_pending_verification \
+                "SELECT id, signed_vc_json FROM credentials_pending_verification \
                  WHERE issuer_did = ?1",
             )
             .map_err(|e| e.to_string())?;
-        let iter = stmt
+        let rows = stmt
             .query_map(rusqlite::params![issuer_did], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, String>(2)?,
-                ))
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
             })
             .map_err(|e| e.to_string())?;
-        let mut out = Vec::new();
-        for r in iter {
-            out.push(r.map_err(|e| e.to_string())?);
-        }
-        out
+        rows.collect::<Result<_, _>>().map_err(|e| e.to_string())?
     };
 
+    let now = crate::clock::now_rfc3339();
     let mut promoted = 0u32;
-    for (id, subject_did, json) in rows {
-        // Parse + extract minimal fields for the hoisted columns.
-        // If parsing fails, leave the row in pending — a future DID
-        // doc version might fix it, or an operator can clean up.
-        let vc: Result<serde_json::Value, _> = serde_json::from_str(&json);
-        let vc = match vc {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-        let type_str = vc
-            .get("type")
-            .and_then(|v| v.as_array())
-            .and_then(|a| {
-                a.iter()
-                    .find_map(|x| x.as_str().filter(|s| *s != "VerifiableCredential"))
-            })
-            .unwrap_or("Credential")
-            .to_string();
-        let issuance_date = vc
-            .get("validFrom")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        // W3C VC v2: claim properties are inline on credentialSubject
-        // rather than nested under a `claim` discriminator. We classify
-        // by marker property: `skillId` ⇒ skill, `role` ⇒ role, else
-        // custom.
-        let subject = vc.pointer("/credentialSubject");
-        let skill_id = subject
-            .and_then(|s| s.get("skillId"))
-            .and_then(|v| v.as_str())
-            .map(str::to_string);
-        let claim_kind = if skill_id.is_some() {
-            "skill"
-        } else if subject
-            .and_then(|s| s.get("role"))
-            .and_then(|v| v.as_str())
-            .is_some()
-        {
-            "role"
-        } else {
-            "custom"
-        }
-        .to_string();
-
-        let inserted = conn.execute(
-            "INSERT OR IGNORE INTO credentials \
-             (id, issuer_did, subject_did, credential_type, claim_kind, skill_id, \
-              issuance_date, signed_vc_json, integrity_hash) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '')",
-            rusqlite::params![
-                id,
-                issuer_did,
-                subject_did,
-                type_str,
-                claim_kind,
-                skill_id,
-                issuance_date,
-                json,
-            ],
-        );
-        if let Ok(n) = inserted {
-            if n > 0 {
-                conn.execute(
-                    "DELETE FROM credentials_pending_verification WHERE id = ?1",
-                    rusqlite::params![id],
-                )
-                .map_err(|e| e.to_string())?;
-                promoted += 1;
+    for (id, json) in rows {
+        let decided = match alexandria_verify::vc::decode_credential(json.as_bytes()) {
+            Err(error) => {
+                log::warn!("vc-did: queued credential {id} does not parse: {error}");
+                true
             }
+            Ok(vc) => match receive(conn, &vc, &now) {
+                Ok(Receipt::Stored) => {
+                    promoted += 1;
+                    true
+                }
+                Ok(Receipt::AlreadyPresent) => true,
+                Ok(Receipt::Rejected(why)) => {
+                    log::info!("vc-did: queued credential {id} refused: {}", why.join(", "));
+                    true
+                }
+                Ok(Receipt::Pending(_)) => false,
+                Err(error) => {
+                    log::warn!("vc-did: queued credential {id}: {error}");
+                    false
+                }
+            },
+        };
+        if decided {
+            unqueue_pending(conn, &id)?;
         }
     }
     Ok(promoted)
 }
 
-/// Queue a signed VC whose issuer DID isn't yet known. Callers are
-/// typically the credential gossip handler (a future PR) — for now
-/// tests drive this directly.
+/// Queue a signed VC whose verification is pending. Queuing the same id
+/// again keeps the first copy. `credentials::collect` queues an
+/// organisation-issued credential whose status lists could not be read yet
+/// and retries it on the next pull.
 pub fn queue_pending(
-    db: &Database,
+    conn: &rusqlite::Connection,
     id: &str,
     issuer_did: &str,
     subject_did: &str,
     signed_vc_json: &str,
 ) -> Result<(), String> {
-    db.conn()
-        .execute(
-            "INSERT OR IGNORE INTO credentials_pending_verification \
-             (id, issuer_did, subject_did, signed_vc_json) \
-             VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![id, issuer_did, subject_did, signed_vc_json],
-        )
-        .map_err(|e| format!("queue_pending: {e}"))?;
+    conn.execute(
+        "INSERT OR IGNORE INTO credentials_pending_verification \
+         (id, issuer_did, subject_did, signed_vc_json) \
+         VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![id, issuer_did, subject_did, signed_vc_json],
+    )
+    .map_err(|e| format!("queue_pending: {e}"))?;
+    Ok(())
+}
+
+/// Take a credential out of the pending queue once a decision on it is no
+/// longer pending, accepted or refused.
+pub fn unqueue_pending(conn: &rusqlite::Connection, id: &str) -> Result<(), String> {
+    conn.execute(
+        "DELETE FROM credentials_pending_verification WHERE id = ?1",
+        rusqlite::params![id],
+    )
+    .map_err(|e| format!("unqueue_pending: {e}"))?;
     Ok(())
 }
 
@@ -287,71 +197,172 @@ mod tests {
         db
     }
 
+    fn registry_rows(db: &Database, did: &str) -> i64 {
+        db.conn()
+            .query_row(
+                "SELECT COUNT(*) FROM key_registry WHERE did = ?1",
+                [did],
+                |r| r.get(0),
+            )
+            .unwrap()
+    }
+
+    const QUEUED_ID: &str = "urn:uuid:queued";
+
+    /// Queue a credential `sk` signed, with `status` as its status entries.
+    fn queue_credential_from(
+        db: &Database,
+        sk: &SigningKey,
+        status: Option<crate::domain::vc::CredentialStatuses>,
+    ) {
+        use crate::domain::vc::sign::{sign_credential, UnsignedCredential};
+        use crate::domain::vc::{CredentialSubject, Proof, VerifiableCredential};
+        let issuer = alexandria_verify::did::derive_did_key(sk);
+        let mut properties = serde_json::Map::new();
+        properties.insert("skillId".into(), serde_json::json!("s"));
+        let vc = VerifiableCredential {
+            context: vec!["https://www.w3.org/ns/credentials/v2".into()],
+            id: Some(QUEUED_ID.into()),
+            type_: vec!["VerifiableCredential".into(), "FormalCredential".into()],
+            issuer: issuer.clone().into(),
+            valid_from: "2026-04-13T00:00:00Z".into(),
+            valid_until: None,
+            credential_subject: CredentialSubject {
+                id: Did("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK".into()),
+                properties,
+            },
+            credential_status: status,
+            terms_of_use: None,
+            witness: None,
+            integrity: None,
+            evidence: Vec::new(),
+            related_resource: Vec::new(),
+            proof: Proof::unsigned("2026-04-13T00:00:00Z"),
+        };
+        let vc = sign_credential(UnsignedCredential { credential: vc }, sk, &issuer).unwrap();
+        queue_pending(
+            db.conn(),
+            QUEUED_ID,
+            issuer.as_str(),
+            vc.credential_subject.id.as_str(),
+            &serde_json::to_string(&vc).unwrap(),
+        )
+        .unwrap();
+    }
+
+    /// A revocation entry at slot 0 of `list_id`.
+    fn revocation_entry(list_id: &str) -> crate::domain::vc::CredentialStatuses {
+        crate::domain::vc::CredentialStatus {
+            id: format!("{list_id}#0"),
+            type_: "BitstringStatusListEntry".into(),
+            status_purpose: "revocation".into(),
+            status_list_index: "0".into(),
+            status_list_credential: list_id.into(),
+        }
+        .into()
+    }
+
+    fn count(db: &Database, table: &str) -> i64 {
+        db.conn()
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap()
+    }
+
+    fn announce(db: &Database, sk: &SigningKey) -> DidIngest {
+        let did = alexandria_verify::did::derive_did_key(sk);
+        let payload = format!(r#"{{"did":"{}"}}"#, did.as_str());
+        handle_did_message(db, &msg_from(sk, payload.as_bytes())).unwrap()
+    }
+
+    /// An announcement retries the queue through full verification: a
+    /// credential whose list is not held stays queued, unstored.
     #[test]
-    fn first_observation_of_unknown_did_is_stored() {
+    fn a_credential_with_an_unfetchable_list_is_not_promoted() {
+        let db = test_db();
+        let sk = SigningKey::from_bytes(&[3u8; 32]);
+        queue_credential_from(&db, &sk, Some(revocation_entry("urn:test:never-fetched")));
+
+        assert_eq!(announce(&db, &sk), DidIngest::Announced { promoted: 0 });
+        assert_eq!(count(&db, "credentials"), 0);
+        assert_eq!(count(&db, "credentials_pending_verification"), 1);
+    }
+
+    /// A credential its issuer revoked is refused and leaves the queue.
+    #[test]
+    fn a_revoked_credential_is_not_promoted() {
+        let db = test_db();
+        let sk = SigningKey::from_bytes(&[4u8; 32]);
+        let issuer = alexandria_verify::did::derive_did_key(&sk);
+        let list_id = format!("urn:alexandria:status-list:{}:1", issuer.as_str());
+        let mut bits = vec![0u8; alexandria_verify::vc::status::MIN_BITS / 8];
+        bits[0] = 0x80;
+        db.conn()
+            .execute(
+                "INSERT INTO credential_status_lists \
+                 (list_id, issuer_did, version, status_purpose, bits, bit_length) \
+                 VALUES (?1, ?2, 1, 'revocation', ?3, ?4)",
+                rusqlite::params![list_id, issuer.as_str(), bits, bits.len() as i64 * 8],
+            )
+            .unwrap();
+        queue_credential_from(&db, &sk, Some(revocation_entry(&list_id)));
+
+        assert_eq!(announce(&db, &sk), DidIngest::Announced { promoted: 0 });
+        assert_eq!(count(&db, "credentials"), 0);
+        assert_eq!(count(&db, "credentials_pending_verification"), 0);
+    }
+
+    /// A queued credential that was never signed by its issuer is dropped.
+    #[test]
+    fn a_forged_queued_credential_is_not_promoted() {
+        let db = test_db();
+        let sk = SigningKey::from_bytes(&[8u8; 32]);
+        queue_credential_from(&db, &sk, None);
+        db.conn()
+            .execute(
+                "UPDATE credentials_pending_verification \
+                 SET signed_vc_json = replace(signed_vc_json, '\"skillId\":\"s\"', '\"skillId\":\"t\"')",
+                [],
+            )
+            .unwrap();
+
+        assert_eq!(announce(&db, &sk), DidIngest::Announced { promoted: 0 });
+        assert_eq!(count(&db, "credentials"), 0);
+        assert_eq!(count(&db, "credentials_pending_verification"), 0);
+    }
+
+    /// A `did:key` is its key, so an announcement has nothing to record: it
+    /// only promotes credentials that were waiting on that issuer.
+    #[test]
+    fn an_announcement_promotes_waiting_credentials_and_writes_no_registry_row() {
         let db = test_db();
         let sk = SigningKey::from_bytes(&[1u8; 32]);
         let did = alexandria_verify::did::derive_did_key(&sk);
-        let payload = format!(r#"{{"did":"{}"}}"#, did.as_str());
-        let outcome = handle_did_message(&db, &msg_from(&sk, payload.as_bytes())).unwrap();
-        assert_eq!(outcome, DidIngest::Stored);
+        queue_credential_from(&db, &sk, None);
+
+        assert_eq!(announce(&db, &sk), DidIngest::Announced { promoted: 1 });
+        assert_eq!(count(&db, "credentials"), 1);
+        assert_eq!(count(&db, "credentials_pending_verification"), 0);
+        assert_eq!(registry_rows(&db, did.as_str()), 0);
     }
 
+    /// Rotation announcements are retired. A payload that still carries a
+    /// `rotated_to` field is read as a plain announcement: it writes nothing
+    /// and cannot change how the DID resolves.
     #[test]
-    fn second_observation_updates_registry_for_rotation() {
-        // A later message that carries a rotation record must transition
-        // from `Stored` on first sight to `UpdatedRegistry` on the key
-        // rotation — this is what lets historical verification (§5.3)
-        // survive across peers.
+    fn a_rotation_field_writes_no_registry_row() {
         let db = test_db();
         let sk = SigningKey::from_bytes(&[2u8; 32]);
         let did = alexandria_verify::did::derive_did_key(&sk);
-        let first = format!(r#"{{"did":"{}"}}"#, did.as_str());
-        let _ = handle_did_message(&db, &msg_from(&sk, first.as_bytes())).unwrap();
 
         let rotation = format!(r#"{{"did":"{}","rotated_to":"did:key:zA2"}}"#, did.as_str());
         let outcome = handle_did_message(&db, &msg_from(&sk, rotation.as_bytes())).unwrap();
-        assert_eq!(outcome, DidIngest::UpdatedRegistry);
-    }
 
-    /// The finding: any peer could announce a rotation for any DID. That
-    /// closes the victim's open registry row and opens an empty-key one, so
-    /// verification falls back to `did:key` self-resolution — the key the
-    /// rotation was performed to retire.
-    #[test]
-    fn a_rotation_announced_by_someone_else_is_dropped() {
-        let db = test_db();
-        let victim = SigningKey::from_bytes(&[3u8; 32]);
-        let attacker = SigningKey::from_bytes(&[4u8; 32]);
-        let victim_did = alexandria_verify::did::derive_did_key(&victim);
-
-        // The victim publishes their DID normally.
-        let announce = format!(r#"{{"did":"{}"}}"#, victim_did.as_str());
-        assert_eq!(
-            handle_did_message(&db, &msg_from(&victim, announce.as_bytes())).unwrap(),
-            DidIngest::Stored
-        );
-
-        // The attacker tries to rotate it out from under them.
-        let forged = format!(
-            r#"{{"did":"{}","rotated_to":"did:key:zAttacker"}}"#,
-            victim_did.as_str()
-        );
-        assert_eq!(
-            handle_did_message(&db, &msg_from(&attacker, forged.as_bytes())).unwrap(),
-            DidIngest::IgnoredNotTheSubject
-        );
-
-        // And the victim's row is untouched — still open, never rotated.
-        let closed: i64 = db
+        assert_eq!(outcome, DidIngest::Announced { promoted: 0 });
+        let rows: i64 = db
             .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM key_registry WHERE did = ?1 AND valid_until IS NOT NULL",
-                rusqlite::params![victim_did.as_str()],
-                |r| r.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM key_registry", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(closed, 0, "a forged rotation closed the victim's key row");
+        assert_eq!(rows, 0);
     }
 
     /// The same gate stops the unauthenticated insert that let a peer
@@ -370,15 +381,7 @@ mod tests {
             DidIngest::IgnoredNotTheSubject
         );
 
-        let rows: i64 = db
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM key_registry WHERE did = ?1",
-                rusqlite::params![victim_did.as_str()],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(rows, 0);
+        assert_eq!(registry_rows(&db, victim_did.as_str()), 0);
     }
 
     #[test]

@@ -1,7 +1,7 @@
 # Sentinel Model Runbook
 
 Status: live
-Updated: 2026-11-12
+Updated: 2026-11-17
 
 > Operational playbook for the bundled Sentinel paste classifier.
 > Audience: maintainers who retrain or roll back the model.
@@ -176,10 +176,12 @@ The script prints the softmax for an all-zero and an all-128 input; paste both i
 1. Sign in as the same learner on the desktop and the phone, both online.
 2. Desktop: in the assessment runner tick **Pair my phone first**, then start. A one-time code appears (5-minute expiry).
 3. Phone: Sentinel dashboard → **Join from phone**, paste the code, join.
-4. Expect the Sentinel Dev panel's attestation row to read `device_attested (phone)` and the trust profile `attested`; after grading the credential carries `assuranceLevel: device_attested`. `integrity_sessions.attestation_json` holds a `companion` binding and, after an iOS phone signs the end, its assertion.
+4. Expect the Sentinel Dev panel's attestation row to read `device_attested (phone)` and the trust profile `attested`; after grading, with the phone still joined, the credential carries `assuranceLevel: device_attested` and a credential-bound `DeviceAttestationEvidence` entry. `integrity_sessions.attestation_json` holds a `companion` binding and, after an iOS phone signs the end, its assertion.
 5. Negative checks: a phone signed in as another learner is refused; an expired code is refused; skipping the pairing leaves the session `core` / `local`. Try the desktop and phone on different networks as well as one Wi-Fi.
 
 An Android phone without the response keys pairs but stays `local`. The phone does not yet act as the session's camera. Results go in ticket 16 of the trust-profiles spec.
+
+**Check the credential, not only the panel.** The evidence is verified by the verifier library (`alexandria_verify::attestation`), so any verifier can check it. On each platform, verify the graded credential with the released library and the real trust inputs: the result should read `attestation.outcome: verified_credential_bound` and `verifiedAssuranceLevel: device_attested`. A session-bound outcome means the binding step failed (the grading screen says so); Android reads `unverifiable` until the Play keys are in the network profile.
 
 ## Threat-model checklist
 

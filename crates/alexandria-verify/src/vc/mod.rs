@@ -7,7 +7,8 @@
 //!
 //! The envelope is a W3C VC Data Model 2.0 credential secured with a Data
 //! Integrity proof (`DataIntegrityProof`, cryptosuite `eddsa-jcs-2022`) and,
-//! when revocable, a Bitstring Status List entry.
+//! when its status can change, Bitstring Status List entries: one for
+//! revocation and one for suspension.
 
 pub mod anchor;
 pub mod canonicalize;
@@ -322,6 +323,51 @@ pub struct CredentialStatus {
     pub status_list_credential: String,
 }
 
+/// `credentialStatus.statusPurpose` of the entry that revokes, permanently.
+pub const STATUS_PURPOSE_REVOCATION: &str = "revocation";
+/// `credentialStatus.statusPurpose` of the entry that suspends, reversibly.
+pub const STATUS_PURPOSE_SUSPENSION: &str = "suspension";
+
+/// The envelope's `credentialStatus`: one entry or several (VC Data Model
+/// 2.0 §4.10 allows either).
+///
+/// The form read is the form written back. A credential signed with a
+/// single object keeps it, so its proof still covers the bytes a verifier
+/// recomputes. Credentials issued here carry a list: one entry per purpose.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CredentialStatuses {
+    One(CredentialStatus),
+    Many(Vec<CredentialStatus>),
+}
+
+impl CredentialStatuses {
+    /// Every entry, in document order.
+    pub fn entries(&self) -> &[CredentialStatus] {
+        match self {
+            Self::One(entry) => std::slice::from_ref(entry),
+            Self::Many(entries) => entries,
+        }
+    }
+
+    /// The first entry of `purpose`, if any.
+    pub fn of_purpose(&self, purpose: &str) -> Option<&CredentialStatus> {
+        self.entries().iter().find(|e| e.status_purpose == purpose)
+    }
+}
+
+impl From<CredentialStatus> for CredentialStatuses {
+    fn from(entry: CredentialStatus) -> Self {
+        Self::One(entry)
+    }
+}
+
+impl From<Vec<CredentialStatus>> for CredentialStatuses {
+    fn from(entries: Vec<CredentialStatus>) -> Self {
+        Self::Many(entries)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TermsOfUse {
@@ -336,7 +382,7 @@ pub struct TermsOfUse {
 /// the observer auto-issues a self-signed VC referencing that tx.
 /// The witness block is part of the signed envelope — the learner
 /// asserts *"this credential is authorised by on-chain tx X under
-/// validator script Y"* and the JWS covers that assertion.
+/// validator script Y"* and the proof covers that assertion.
 ///
 /// Verifiers resolve the `tx_hash` on Cardano and check that it locks
 /// at `validator_script_hash`; if it does not, the credential MUST be
@@ -357,17 +403,21 @@ pub struct Witness {
 /// at issuance time (§ Integrity→VC bridge). It records the terminal
 /// state of the integrity session that backed the assessment so a
 /// verifier can see *how the credential was earned*, not just that it
-/// was issued. Part of the signed envelope — the JWS covers it, so the
+/// was issued. Part of the signed envelope — the proof covers it, so the
 /// issuer attests to these numbers and they cannot be altered after the
-/// fact.
+/// fact. Every figure is still the issuer's word: on a self-issued
+/// credential, the holder's.
 ///
-/// `assurance_level` is `"local"` by default: the figures are
-/// device-reported and a determined attacker could suppress flags, so
-/// downstream verifiers should weight it accordingly. `"device_attested"`
-/// means the issuing device re-verified a platform attestation (Apple App
-/// Attest or Google Play Integrity) bound to the session nonce and, on
-/// iOS, to the terminal commitment root: the platform vouched that an
-/// unmodified build of the app on a genuine device produced this session.
+/// `assurance_level` is the level the issuer states, `"local"` by default:
+/// the figures are device-reported and a determined attacker could suppress
+/// flags, so downstream verifiers should weight them accordingly. An issuer
+/// states `"device_attested"` when the session's platform attestation (Apple
+/// App Attest or Google Play Integrity) verified on the issuing device, and
+/// carries that attestation in the credential's `evidence`. A verifier never
+/// takes the stated level on trust: it reports
+/// `device_attested` as the result's `verifiedAssuranceLevel` only when that
+/// evidence verifies and is bound to this credential (see
+/// [`crate::attestation`]), and `local` otherwise, whatever this field says.
 /// `"anchored"` and `"high_assurance"` are reserved ladder values with no
 /// verified production path; the value alone is not evidence of either.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -375,7 +425,10 @@ pub struct Witness {
 pub struct IntegrityAssertion {
     /// The `integrity_sessions.id` this attestation summarises.
     pub session_id: String,
-    /// Terminal session status: `completed` / `flagged` / `suspended`.
+    /// Terminal session status: `completed` (clean), `review` (sent for a
+    /// human decision, for example when the measured answers diverge from
+    /// the learner's practice), `flagged` or `suspended`. Readers should treat
+    /// an unrecognised value as not clean.
     pub status: String,
     /// Final weighted integrity score in `[0,1]`, if the session
     /// recorded one.
@@ -383,8 +436,9 @@ pub struct IntegrityAssertion {
     pub integrity_score: Option<f64>,
     pub critical_count: i64,
     pub warning_count: i64,
-    /// Achieved assurance: `"local"` or `"device_attested"`. `"anchored"`
-    /// and `"high_assurance"` are reserved ladder values.
+    /// Stated assurance: `"local"` or `"device_attested"`. `"anchored"` and
+    /// `"high_assurance"` are reserved ladder values. Only the verifier's
+    /// `verifiedAssuranceLevel`, established from `evidence`, is checked.
     pub assurance_level: String,
     /// Terminal commitment root of the device's snapshot stream.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -404,7 +458,8 @@ pub struct IntegrityAssertion {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verification_rung: Option<String>,
     /// Digest of the coverage statement for this profile and rung: what was
-    /// checked, what was not, and the certified error rates.
+    /// checked, what was not, and the certified error rates. Any published
+    /// version resolves offline with [`crate::coverage::resolve`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_statement_digest: Option<String>,
     /// Signal sets the profile ran (`core`, `device_attestation`, `camera`).
@@ -417,6 +472,15 @@ pub struct IntegrityAssertion {
     /// Signals the profile does not include.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub signals_not_run: Vec<String>,
+    /// Fraction of committed windows that carried camera checks, in `[0,1]`.
+    /// Set only when the profile includes the camera; a session with no
+    /// committed windows states `0`. The camera stays listed in
+    /// `signalsDegraded` whenever this is below 1, and counts towards a
+    /// policy floor at or above
+    /// [`MIN_CAMERA_COVERAGE`](crate::integrity::MIN_CAMERA_COVERAGE).
+    /// Absent from assertions issued before the field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camera_coverage: Option<f64>,
     /// Outcome of the follow-up probes, when any probe step ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe: Option<ProbeSummary>,
@@ -448,25 +512,178 @@ pub struct VerifiableCredential {
     pub id: Option<String>,
     #[serde(rename = "type")]
     pub type_: Vec<String>,
-    pub issuer: Did,
+    /// The issuer: a DID string, or an object whose `id` is the DID (VC Data
+    /// Model 2.0 §4.7). The proof is checked against [`CredentialIssuer::id`].
+    pub issuer: CredentialIssuer,
     pub valid_from: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub valid_until: Option<String>,
     pub credential_subject: CredentialSubject,
+    /// Status entries: a revocation entry and a suspension entry on
+    /// credentials issued here, each into a Bitstring Status List of that
+    /// purpose.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub credential_status: Option<CredentialStatus>,
+    pub credential_status: Option<CredentialStatuses>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terms_of_use: Option<TermsOfUse>,
     /// On-chain witness for auto-earned credentials (§14.7). Signed
-    /// over by the JWS when present.
+    /// over by the proof when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub witness: Option<Witness>,
     /// Sentinel assessment-integrity attestation (§ Integrity→VC
     /// bridge). Present when the credential was issued against a
-    /// monitored assessment session. Signed over by the JWS.
+    /// monitored assessment session. Signed over by the proof.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub integrity: Option<IntegrityAssertion>,
+    /// W3C VC Data Model 2.0 `evidence`. Carries the device attestation
+    /// entry ([`crate::attestation::AttestationEvidence`]) when the session
+    /// was attested. Signed over like every other field; absent when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<EvidenceEntry>,
+    /// Resources the credential names with a digest of their bytes (VC Data
+    /// Model 2.0 `relatedResource`). A credential with an integrity assertion
+    /// names its coverage statement here (see [`crate::coverage`]); the
+    /// verifier rejects one whose named statement is not the assertion's
+    /// `coverageStatementDigest`. Signed over by the proof.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related_resource: Vec<RelatedResource>,
     pub proof: Proof,
+}
+
+/// A credential's `issuer` (VC Data Model 2.0 §4.7): the issuer's DID as a
+/// string, or an object whose `id` is that DID.
+///
+/// Credentials issued by learners use the string form. An organisation's
+/// hosted service uses the object form to state its `name` and `domain`
+/// beside the signing key's DID. Those two are the issuer's own words: only
+/// [`crate::org::organisation_backing`], given the domain's descriptor, says
+/// whether the domain stands behind the key. The object is kept as received,
+/// so the proof covers every property the issuer signed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum CredentialIssuer {
+    Did(Did),
+    Object(IssuerObject),
+}
+
+/// The object form of [`CredentialIssuer`]: an `id` and whatever other
+/// properties the issuer stated.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IssuerObject {
+    pub id: Did,
+    #[serde(flatten)]
+    pub properties: serde_json::Map<String, serde_json::Value>,
+}
+
+impl CredentialIssuer {
+    /// An issuer object naming an organisation by `name` and `domain`.
+    pub fn organisation(id: Did, name: &str, domain: &str) -> Self {
+        let mut properties = serde_json::Map::new();
+        properties.insert("name".into(), name.into());
+        properties.insert("domain".into(), domain.into());
+        Self::Object(IssuerObject { id, properties })
+    }
+
+    /// The issuer's DID, whichever form the credential uses.
+    pub fn id(&self) -> &Did {
+        match self {
+            Self::Did(did) => did,
+            Self::Object(object) => &object.id,
+        }
+    }
+
+    /// The issuer's DID as a string.
+    pub fn as_str(&self) -> &str {
+        self.id().as_str()
+    }
+
+    /// The `name` an issuer object states, when it is a string.
+    pub fn name(&self) -> Option<&str> {
+        self.property("name")
+    }
+
+    /// The `domain` an issuer object states, when it is a string.
+    pub fn domain(&self) -> Option<&str> {
+        self.property("domain")
+    }
+
+    fn property(&self, key: &str) -> Option<&str> {
+        match self {
+            Self::Did(_) => None,
+            Self::Object(object) => object.properties.get(key)?.as_str(),
+        }
+    }
+}
+
+impl From<Did> for CredentialIssuer {
+    fn from(did: Did) -> Self {
+        Self::Did(did)
+    }
+}
+
+impl PartialEq<Did> for CredentialIssuer {
+    fn eq(&self, other: &Did) -> bool {
+        self.id() == other
+    }
+}
+
+impl PartialEq<CredentialIssuer> for Did {
+    fn eq(&self, other: &CredentialIssuer) -> bool {
+        self == other.id()
+    }
+}
+
+/// One entry of a credential's `evidence` (VC Data Model 2.0 §5.6), kept as
+/// the exact JSON object so the signature covers what was signed. Typed views
+/// such as [`crate::attestation::AttestationEvidence::find`] read entries of
+/// the types they know.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct EvidenceEntry(pub serde_json::Map<String, serde_json::Value>);
+
+impl EvidenceEntry {
+    /// Whether the entry's `type` (a string or an array of strings) names
+    /// `type_name`.
+    pub fn has_type(&self, type_name: &str) -> bool {
+        match self.0.get("type") {
+            Some(serde_json::Value::String(t)) => t == type_name,
+            Some(serde_json::Value::Array(ts)) => ts.iter().any(|t| t == type_name),
+            _ => false,
+        }
+    }
+}
+
+/// One `relatedResource` entry (VC Data Model 2.0 §5.3): a resource's `id`
+/// and a digest of its exact bytes, so a reader who fetches it can tell it
+/// is the resource the issuer signed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RelatedResource {
+    pub id: String,
+    /// Subresource Integrity digest of the resource's bytes, e.g.
+    /// `sha256-<base64>`.
+    #[serde(rename = "digestSRI", default, skip_serializing_if = "Option::is_none")]
+    pub digest_sri: Option<String>,
+    /// Multibase-encoded multihash of the resource's bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub digest_multibase: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+}
+
+impl VerifiableCredential {
+    /// The `credentialStatus` entries, empty when there are none.
+    pub fn status_entries(&self) -> &[CredentialStatus] {
+        self.credential_status
+            .as_ref()
+            .map(CredentialStatuses::entries)
+            .unwrap_or_default()
+    }
+
+    /// The first `credentialStatus` entry of `purpose`, if any.
+    pub fn status_entry(&self, purpose: &str) -> Option<&CredentialStatus> {
+        self.credential_status.as_ref()?.of_purpose(purpose)
+    }
 }
 
 /// `proof.type` for every credential this crate signs: W3C Data Integrity.
@@ -510,7 +727,7 @@ pub struct Proof {
 impl Proof {
     /// Proof options for a credential about to be signed. The verification
     /// method is filled by `sign_credential` from the signing key unless the
-    /// caller sets one (a rotated registry key, for instance).
+    /// caller sets one under the issuer's DID.
     pub fn unsigned(created: impl Into<String>) -> Self {
         Proof {
             type_: DATA_INTEGRITY_PROOF.into(),
@@ -565,17 +782,33 @@ pub struct VerificationResult {
     pub expired: bool,
     pub subject_bound: bool,
     pub integrity_anchored: bool,
-    /// True if the credential is currently within an active
-    /// suspension window (§11.3).
+    /// True if the credential's bit is set in its suspension list (§11.3).
+    /// Read from the published list only; an issuer's own bookkeeping is
+    /// never consulted.
     #[serde(default)]
     pub suspended: bool,
     /// True if any newer credential claims to supersede this one
     /// via `supersedes` (§11.4).
     #[serde(default)]
     pub superseded: bool,
+    /// True when a `relatedResource` names a coverage statement other than
+    /// the one the integrity assertion's `coverageStatementDigest` names (or
+    /// names one when the assertion names none). Always a rejection.
+    /// Omitted while false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub coverage_statement_mismatch: bool,
     pub verification_time: String,
     #[serde(default)]
     pub pending_reasons: Vec<VerificationPendingReason>,
+    /// What the credential's device attestation evidence proved under the
+    /// verifier's trust inputs. `invalid` rejects; every other outcome is
+    /// left to the other checks.
+    #[serde(default)]
+    pub attestation: crate::attestation::AttestationOutcome,
+    /// `device_attested` only for verified credential-bound evidence, else
+    /// `local`, whatever level the integrity assertion states.
+    #[serde(default)]
+    pub verified_assurance_level: crate::attestation::VerifiedAssuranceLevel,
     pub acceptance_decision: AcceptanceDecision,
 }
 
@@ -584,9 +817,13 @@ pub struct VerificationResult {
 pub enum VerificationPendingReason {
     IssuerKeyMissing,
     IssuerKeyUnavailable,
+    /// The revocation list a status entry names was not supplied.
     StatusListMissing,
     StatusListUnavailable,
-    SuspensionStateUnavailable,
+    /// The suspension list a status entry names was not supplied. Absence is
+    /// never read as "not suspended".
+    SuspensionListMissing,
+    SuspensionListUnavailable,
     SupersessionStateUnavailable,
     /// The policy requires an integrity anchor and the anchor lookup failed.
     /// A missing anchor is not pending: it is `integrityAnchored: false`.

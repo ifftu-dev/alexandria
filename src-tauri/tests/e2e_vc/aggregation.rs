@@ -20,6 +20,8 @@ fn spec_26_evidence() -> Vec<AggregationInput> {
             proctoring_reliability: 0.90,
             evidence_traceability: 0.95,
             self_issued: false,
+            attestation: Default::default(),
+            session_status: None,
         },
         AggregationInput {
             credential_id: "ev2".into(),
@@ -32,6 +34,8 @@ fn spec_26_evidence() -> Vec<AggregationInput> {
             proctoring_reliability: 0.85,
             evidence_traceability: 0.90,
             self_issued: false,
+            attestation: Default::default(),
+            session_status: None,
         },
         AggregationInput {
             credential_id: "ev3".into(),
@@ -44,6 +48,8 @@ fn spec_26_evidence() -> Vec<AggregationInput> {
             proctoring_reliability: 0.50,
             evidence_traceability: 0.80,
             self_issued: false,
+            attestation: Default::default(),
+            session_status: None,
         },
     ]
 }
@@ -91,11 +97,14 @@ async fn worked_example_26_yields_level_5() {
     );
     assert_eq!(state.level, 5);
     // Config version 1.1 added provenance-weighted quality; 1.2 stopped
-    // self-issued claims counting as independent issuer clusters (a rule
-    // change requires a new calculation_version). The worked example is
-    // unaffected: its evidence carries no provenance and no self-issued
-    // claims, so quality resolves to (1,1,1) and the derived level holds.
-    assert_eq!(state.calculation_version, "1.2");
+    // self-issued claims counting as independent issuer clusters; 1.3 gave
+    // self-issued claims the self-claim weight whatever type they declare
+    // (a rule change requires a new calculation_version); 1.4 added the
+    // attested weight and the session-status rule. The worked example is
+    // unaffected: its evidence carries no provenance, no self-issued claims
+    // and no session status, so quality resolves to (1,1,1) and the derived
+    // level holds.
+    assert_eq!(state.calculation_version, "1.4");
 }
 
 #[tokio::test]

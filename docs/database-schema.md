@@ -9,8 +9,8 @@ Status: live
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 40 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 138 tables, 134 indexes, 1 view, 6 triggers.
+**Schema**: 43 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 139 tables, 132 indexes, 1 view, 6 triggers.
 
 ---
 
@@ -63,6 +63,9 @@ and requires a database's history to be an exact prefix of this list:
 38. `llm_probes`
 39. `integrity_observed_items`
 40. `integrity_pending_flags`
+41. `key_registry_lookup_only`
+42. `status_list_valid_from`
+43. `exchange_requests`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -409,6 +412,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `pass_threshold_snapshot` REAL
 - `role_assessment_id` TEXT → `role_assessments.id`
 - `llm_probe_consent` INTEGER NOT NULL default `0`
+- `request_policy_json` TEXT
 
 #### `assessment_item_probes`
 
@@ -625,7 +629,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `granted_at` TEXT NOT NULL default `datetime('now')`
 - `granted_until` TEXT — NULL for 'always'
 
-### Verifiable credentials (11)
+### Verifiable credentials (12)
 
 #### `anchor_batches`
 
@@ -687,6 +691,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `signature` TEXT — issuer signature over (list_id, version, bits)
 - `updated_at` TEXT NOT NULL default `datetime('now')`
 - `published_version` INTEGER NOT NULL default `0`
+- `valid_from` INTEGER
 
 #### `credentials`
 
@@ -725,14 +730,19 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `signed_vc_json` TEXT NOT NULL
 - `received_at` TEXT NOT NULL default `datetime('now')`
 
+#### `exchange_requests`
+
+- `id` TEXT PK
+- `directory_url` TEXT NOT NULL
+- `request_json` TEXT NOT NULL
+- `expires_at` INTEGER NOT NULL
+- `verified_at` TEXT NOT NULL
+
 #### `key_registry`
 
 - `did` TEXT PK
-- `key_id` TEXT PK — '<did>#key-N' fragment
-- `public_key_hex` TEXT NOT NULL — raw 32-byte Ed25519 pubkey, hex
-- `valid_from` TEXT NOT NULL — ISO 8601 UTC
-- `valid_until` TEXT — NULL while active
-- `rotated_by` TEXT — DID of successor, if rotated
+- `key_id` TEXT PK
+- `public_key_hex` TEXT NOT NULL
 
 #### `pinboard_observations`
 

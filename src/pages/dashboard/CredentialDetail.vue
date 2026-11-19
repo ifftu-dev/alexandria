@@ -8,9 +8,9 @@ import { anchorBadge } from '@/components/credential/anchorStatus'
 import { explorerTxUrl } from '@/utils/cardanoExplorer'
 import CoverageStatementView from '@/components/integrity/CoverageStatementView.vue'
 import type {
-  CoverageStatement,
+  AttestationPlatform,
   CredentialAnchorState,
-  CredentialTrust,
+  CredentialTrustView,
   EndorsementMismatch,
   EndorsementOutcome,
   TrustInvalidReason,
@@ -28,7 +28,9 @@ const credentialId = computed(() => route.params.id as string)
 
 const credential = ref<VerifiableCredential | null>(null)
 const verification = ref<VerificationResult | null>(null)
-const trust = ref<CredentialTrust | null>(null)
+/** What the trust command states; the page renders it and judges nothing. */
+const view = ref<CredentialTrustView | null>(null)
+const trust = computed(() => view.value?.trust ?? null)
 const anchor = ref<CredentialAnchorState | null>(null)
 const retryingAnchor = ref(false)
 const loading = ref(true)
@@ -38,8 +40,6 @@ const statusPublish = ref<{ variant: 'success' | 'warning'; message: string } | 
 const revokeReason = ref('')
 const showRevoke = ref(false)
 const error = ref<string | null>(null)
-/** The coverage statement the integrity assertion names; null when unresolved. */
-const coverage = ref<CoverageStatement | null>(null)
 
 onMounted(async () => {
   loading.value = true
@@ -49,8 +49,6 @@ onMounted(async () => {
     // Auto-verify on load — gives the user immediate signal.
     verification.value = (await api.verify(c)) ?? null
     await loadTrust()
-    const digest = c.integrity?.coverageStatementDigest
-    if (digest) coverage.value = (await api.coverageStatement(digest)) ?? null
   } else {
     error.value = api.error.value ?? t('credentials.detail.notFound')
   }
@@ -59,6 +57,11 @@ onMounted(async () => {
 
 function signalNames(signals: string[]) {
   return signals.map(s => t(`sentinel.trust.signal.${s}`)).join(', ')
+}
+
+/** Whole percent, never rounded up across a threshold such as the 90% the camera needs. */
+function coveragePercent(fraction: number) {
+  return Math.floor(fraction * 100 + 1e-9)
 }
 
 async function reverify() {
@@ -70,7 +73,7 @@ async function reverify() {
 }
 
 async function loadTrust() {
-  trust.value = (await api.trust(credentialId.value)) ?? null
+  view.value = (await api.trust(credentialId.value)) ?? null
   anchor.value = (await api.anchor(credentialId.value)) ?? null
 }
 
@@ -130,6 +133,7 @@ function invalidReasonLabel(reason: TrustInvalidReason): string {
     case 'superseded': return t('credentials.detail.trustReason.superseded')
     case 'integrity_anchor_missing': return t('credentials.detail.trustReason.anchorMissing')
     case 'type_not_allowed': return t('credentials.detail.trustReason.typeNotAllowed')
+    case 'invalid_attestation': return t('credentials.detail.trustReason.invalidAttestation')
   }
 }
 
@@ -139,7 +143,8 @@ function pendingReasonLabel(reason: VerificationPendingReason): string {
     case 'issuer_key_unavailable': return t('credentials.detail.trustPending.issuerKeyUnavailable')
     case 'status_list_missing': return t('credentials.detail.trustPending.statusListMissing')
     case 'status_list_unavailable': return t('credentials.detail.trustPending.statusListUnavailable')
-    case 'suspension_state_unavailable': return t('credentials.detail.trustPending.suspensionUnavailable')
+    case 'suspension_list_missing': return t('credentials.detail.trustPending.suspensionListMissing')
+    case 'suspension_list_unavailable': return t('credentials.detail.trustPending.suspensionListUnavailable')
     case 'supersession_state_unavailable': return t('credentials.detail.trustPending.supersessionUnavailable')
     case 'integrity_anchor_unavailable': return t('credentials.detail.trustPending.anchorUnavailable')
   }
@@ -169,30 +174,96 @@ function endorsementLabel(outcome: EndorsementOutcome): string {
   }
 }
 
+/** Shown only when no provenance can be stated: invalid or pending. */
 const trustLabel = computed((): string => {
   switch (trust.value?.state) {
     case 'invalid': return t('credentials.detail.trustState.invalid')
     case 'pending': return t('credentials.detail.trustState.pending')
-    case 'verified_self_claim': return t('credentials.detail.trustState.selfClaim')
-    case 'verified_issuer_signed': return t('credentials.detail.trustState.issuerSigned')
-    case 'verified_course_endorsement': return t('credentials.detail.trustState.courseEndorsement')
     default: return t('credentials.detail.notVerified')
   }
 })
 
-const trustVariant = computed(() => {
-  switch (trust.value?.state) {
-    case 'invalid': return 'error'
-    case 'pending': return 'warning'
-    case 'verified_course_endorsement': return 'success'
-    case 'verified_issuer_signed': return 'primary'
-    default: return 'secondary'
+function platformLabel(platform: AttestationPlatform): string {
+  return platform === 'ios'
+    ? t('credentials.detail.trustPlatform.ios')
+    : t('credentials.detail.trustPlatform.android')
+}
+
+/** The one plain-words provenance, as a headline. */
+const provenanceLabel = computed((): string | null => {
+  const provenance = view.value?.provenance
+  if (!provenance) return null
+  switch (provenance.kind) {
+    case 'organisation':
+      return t('credentials.detail.trustProvenance.organisation', { name: provenance.name, domain: provenance.domain })
+    case 'device_attested': return t('credentials.detail.trustProvenance.deviceAttested')
+    case 'self_reported': return t('credentials.detail.trustProvenance.selfReported')
   }
 })
 
+const provenanceVariant = computed(() => {
+  switch (view.value?.provenance?.kind) {
+    case 'organisation': return 'success'
+    case 'device_attested': return 'primary'
+    case 'self_reported': return 'secondary'
+    default: return trust.value?.state === 'invalid' ? 'error' : 'warning'
+  }
+})
+
+/** What the provenance means and, as plainly, what it does not. */
+const provenanceLines = computed((): string[] => {
+  const value = view.value
+  const provenance = value?.provenance
+  if (!value || !provenance) return []
+  const lines: string[] = []
+  switch (provenance.kind) {
+    case 'organisation':
+      lines.push(t('credentials.detail.trustProvenance.organisationBody', { name: provenance.name, domain: provenance.domain }))
+      break
+    case 'device_attested':
+      lines.push(t('credentials.detail.trustProvenance.deviceAttestedBody', { platform: platformLabel(provenance.platform) }))
+      lines.push(t('credentials.detail.trustProvenance.deviceAttestedLimits'))
+      break
+    case 'self_reported': {
+      lines.push(t('credentials.detail.trustProvenance.selfReportedBody'))
+      const attestation = provenance.attestation
+      if (attestation.outcome === 'verified_session_bound') {
+        lines.push(t('credentials.detail.trustProvenance.sessionBound', { platform: platformLabel(attestation.platform) }))
+      } else if (attestation.outcome === 'unverifiable') {
+        lines.push(t('credentials.detail.trustProvenance.unverifiable', { platform: platformLabel(attestation.platform) }))
+      }
+      break
+    }
+  }
+  if (value.issuer && provenance.kind !== 'organisation') {
+    lines.push(t('credentials.detail.trustProvenance.signedBy', { issuer: value.issuer }))
+  }
+  switch (value.organisation?.outcome) {
+    case 'key_not_listed':
+      lines.push(t('credentials.detail.trustProvenance.keyNotListed'))
+      break
+    case 'wrong_domain':
+    case 'invalid_descriptor':
+    case 'descriptor_not_supplied':
+      lines.push(t('credentials.detail.trustProvenance.organisationUnchecked'))
+      break
+  }
+  const classified = value.trust
+  if (classified.state === 'verified_course_endorsement') {
+    lines.push(t('credentials.detail.trustDetail.courseEndorsement', {
+      count: classified.attestors.length,
+      version: classified.course_document_version,
+    }))
+  } else if (classified.state === 'verified_self_claim' && classified.endorsement.outcome !== 'not_supplied') {
+    lines.push(endorsementLabel(classified.endorsement))
+  }
+  return lines
+})
+
+/** Why no provenance can be stated, for an invalid or pending credential. */
 const trustDetail = computed((): string => {
   const value = trust.value
-  if (!value) return ''
+  if (!value || view.value?.provenance) return ''
   switch (value.state) {
     case 'invalid':
       return t('credentials.detail.trustDetail.invalid', {
@@ -202,14 +273,36 @@ const trustDetail = computed((): string => {
       return t('credentials.detail.trustDetail.pending', {
         reasons: value.reasons.map(pendingReasonLabel).join(', '),
       })
-    case 'verified_self_claim': return endorsementLabel(value.endorsement)
-    case 'verified_issuer_signed':
-      return t('credentials.detail.trustDetail.issuerSigned', { issuer: value.issuer })
-    case 'verified_course_endorsement':
-      return t('credentials.detail.trustDetail.courseEndorsement', {
-        count: value.attestors.length,
-        version: value.course_document_version,
-      })
+    default: return ''
+  }
+})
+
+const suspensionLabel = computed((): string => {
+  switch (view.value?.suspension.state) {
+    case 'suspended': return t('credentials.detail.trustSuspension.suspended')
+    case 'unknown': return t('credentials.detail.trustSuspension.unknown')
+    case 'no_list': return t('credentials.detail.trustSuspension.noList')
+    default: return t('credentials.detail.trustSuspension.notSuspended')
+  }
+})
+
+const suspensionVariant = computed(() => {
+  switch (view.value?.suspension.state) {
+    case 'suspended': return 'error'
+    case 'unknown': return 'warning'
+    case 'no_list': return 'secondary'
+    default: return 'success'
+  }
+})
+
+const suspensionDetail = computed((): string => {
+  const suspension = view.value?.suspension
+  switch (suspension?.state) {
+    case 'suspended': return t('credentials.detail.trustSuspension.suspendedBody')
+    case 'unknown':
+      return t('credentials.detail.trustSuspension.unknownBody', { reason: pendingReasonLabel(suspension.reason) })
+    case 'no_list': return t('credentials.detail.trustSuspension.noListBody')
+    default: return ''
   }
 })
 
@@ -225,6 +318,13 @@ function back() {
 const statusEvidencePending = computed(() =>
   (verification.value?.pendingReasons ?? []).some(
     (reason) => reason === 'status_list_missing' || reason === 'status_list_unavailable',
+  ),
+)
+
+// Likewise a missing or unreadable suspension list: suspension is unknown.
+const suspensionEvidencePending = computed(() =>
+  (verification.value?.pendingReasons ?? []).some(
+    (reason) => reason === 'suspension_list_missing' || reason === 'suspension_list_unavailable',
   ),
 )
 
@@ -271,13 +371,26 @@ const decisionVariant = computed(() => {
 
       <AppAlert v-if="statusPublish" class="mb-6" :variant="statusPublish.variant" :message="statusPublish.message" />
 
-      <!-- Provenance: typed trust classification, never a privilege grant -->
-      <section v-if="trust" class="mb-6 rounded-xl bg-card shadow-sm p-6">
+      <!-- Provenance: what the trust command states, never a privilege grant -->
+      <section v-if="view" class="mb-6 rounded-xl bg-card shadow-sm p-6" data-trust-section>
         <div class="mb-2 flex items-center justify-between gap-3">
           <h2 class="text-base font-semibold">{{ $t('credentials.detail.trustTitle') }}</h2>
-          <AppBadge :variant="trustVariant">{{ trustLabel }}</AppBadge>
+          <AppBadge :variant="provenanceVariant">
+            <span v-if="provenanceLabel" data-provenance>{{ provenanceLabel }}</span>
+            <span v-else>{{ trustLabel }}</span>
+          </AppBadge>
         </div>
-        <p class="break-all text-sm text-foreground">{{ trustDetail }}</p>
+        <p v-for="line in provenanceLines" :key="line" class="mt-1 break-words text-sm text-foreground">{{ line }}</p>
+        <p v-if="trustDetail" class="break-all text-sm text-foreground">{{ trustDetail }}</p>
+        <div class="mt-4 flex items-center justify-between gap-3 text-sm">
+          <span class="text-muted-foreground">{{ $t('credentials.detail.trustSuspension.title') }}</span>
+          <AppBadge :variant="suspensionVariant"><span data-suspension>{{ suspensionLabel }}</span></AppBadge>
+        </div>
+        <p v-if="suspensionDetail" class="mt-1 text-xs text-muted-foreground">{{ suspensionDetail }}</p>
+        <details v-if="credential.integrity?.coverageStatementDigest" class="mt-4 text-sm" open>
+          <summary class="cursor-pointer text-muted-foreground">{{ $t('sentinel.trust.coverage.title') }}</summary>
+          <CoverageStatementView class="mt-2" :statement="view.coverage_statement" :digest="credential.integrity.coverageStatementDigest" />
+        </details>
         <p class="mt-3 text-xs text-muted-foreground">{{ $t('credentials.detail.trustNote') }}</p>
       </section>
 
@@ -317,6 +430,17 @@ const decisionVariant = computed(() => {
               </AppBadge>
               <AppBadge v-else :variant="verification.revoked ? 'error' : 'success'">
                 {{ verification.revoked ? $t('credentials.value.yes') : $t('credentials.value.no') }}
+              </AppBadge>
+            </dd>
+          </div>
+          <div data-suspended-check>
+            <dt class="text-xs text-muted-foreground">{{ $t('credentials.detail.suspended') }}</dt>
+            <dd>
+              <AppBadge v-if="suspensionEvidencePending && !verification.suspended" variant="warning">
+                {{ $t('credentials.value.pending') }}
+              </AppBadge>
+              <AppBadge v-else :variant="verification.suspended ? 'error' : 'success'">
+                {{ verification.suspended ? $t('credentials.value.yes') : $t('credentials.value.no') }}
               </AppBadge>
             </dd>
           </div>
@@ -419,6 +543,10 @@ const decisionVariant = computed(() => {
             <span class="text-muted-foreground">{{ $t('credentials.detail.signalsDegraded') }}</span>
             <span class="text-end text-warning">{{ signalNames(credential.integrity.signalsDegraded) }}</span>
           </div>
+          <div v-if="credential.integrity.cameraCoverage != null" class="flex items-center justify-between" data-camera-coverage>
+            <span class="text-muted-foreground">{{ $t('credentials.detail.cameraCoverage') }}</span>
+            <span :class="credential.integrity.cameraCoverage < 1 ? 'text-warning' : 'text-foreground'">{{ $t('credentials.detail.cameraCoverageValue', { percent: coveragePercent(credential.integrity.cameraCoverage) }) }}</span>
+          </div>
           <div v-if="credential.integrity.signalsNotRun?.length" class="flex items-start justify-between gap-3">
             <span class="text-muted-foreground">{{ $t('credentials.detail.signalsNotRun') }}</span>
             <span class="text-end text-muted-foreground">{{ signalNames(credential.integrity.signalsNotRun) }}</span>
@@ -431,10 +559,6 @@ const decisionVariant = computed(() => {
               skipped: credential.integrity.probe.skipped,
             }) }}</span>
           </div>
-          <details v-if="credential.integrity.coverageStatementDigest" open>
-            <summary class="cursor-pointer text-muted-foreground">{{ $t('sentinel.trust.coverage.title') }}</summary>
-            <CoverageStatementView class="mt-2" :statement="coverage" :digest="credential.integrity.coverageStatementDigest" />
-          </details>
           <details v-if="credential.integrity.commitmentRoot || credential.integrity.anchorRef">
             <summary class="cursor-pointer text-muted-foreground">{{ $t('common.advanced.toggle') }}</summary>
             <div class="mt-2 grid gap-2">

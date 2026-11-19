@@ -36,8 +36,9 @@ by the signature like any other field, and nothing expands or dereferences it.
    `eddsa-jcs-2022`, `proofPurpose` is `assertionMethod`, and
    `verificationMethod` is `<issuer DID>#<fragment>` — a method the issuer
    controls. For `did:key` the fragment is the key's own multibase identifier.
-6. Apply the remaining checks: expiry, subject binding, status list, local
-   suspension, supersession, and the supplied verification policy.
+6. Apply the remaining checks: expiry, subject binding, the revocation and
+   suspension status lists, supersession, the coverage statement cross-check,
+   and the supplied verification policy.
 7. Return `accept`, `pending`, or `reject`. Missing issuer-key or referenced
    status-list evidence is pending. A failed cryptographic/policy check or an
    invalid status reference is rejected.
@@ -60,27 +61,24 @@ lookup is required in the common case. Decode the multibase (`z`, base58btc),
 strip the `0xed 0x01` multicodec prefix, and the remaining 32 bytes are the
 Ed25519 public key.
 
-If the vector supplies `store.keyRegistry`, prefer an entry whose
-`[validFrom, validUntil)` window contains the verification time. That is what
-makes a credential signed before a key rotation still verify afterwards — see
-`08-rotated-issuer-key.json`, where self-resolution alone gives the wrong key
-and fails.
+A `did:key` always resolves to the key in its identifier. `store.keyRegistry`
+is consulted only for a DID method that is not self-resolving, and an entry
+for a `did:key` is ignored: `08-did-key-ignores-registry.json` supplies one
+naming another key and still accepts.
+
+The issuer is either the DID string or an object whose `id` is the DID, with
+other properties (an organisation's `name` and `domain`) covered by the proof
+like any other field. Resolve the key and check the verification method
+against `id`.
 
 ## What a bare credential cannot tell you
 
-`did:key` is self-resolving, so most credentials verify with nothing but the
-document in front of you. Two cases need more, and both are inherent rather than
-defects:
-
-- **A rotated issuer key** — self-resolution returns the pre-rotation key, so a
-  credential signed after a rotation needs the registry entry covering the
-  verification time. An identifier that embeds one key cannot embed its
-  successors. See `08-rotated-issuer-key.json`.
-- **Revocation** — a credential names its status list; it does not carry it.
-
-Neither requires contacting Alexandria. Both require having been given the data,
-which is what a credential *bundle* is for: it carries the key registry and the
-status lists next to the credentials, and verifies entirely offline. A status
+`did:key` is self-resolving, so the signature verifies with nothing but the
+document in front of you. Status does not: a credential names its revocation
+and suspension lists; it does not carry them. That needs no contact with
+Alexandria, only having been given the lists, which is what a credential
+*bundle* is for: it carries the status lists next to the credentials, and
+verifies entirely offline. A status
 list named by an `https` URL (`{origin}/status-lists/{issuer}/{n}`) can also be
 fetched from that URL: the document served there is the signed
 `BitstringStatusListCredential` whose `id` is the URL. A verifier that fetches
@@ -91,8 +89,11 @@ The vectors themselves stay offline: their lists are supplied in `store`.
 
 ## Status lists
 
-`credentialStatus` is a [Bitstring Status List](https://www.w3.org/TR/vc-bitstring-status-list/)
-entry (`BitstringStatusListEntry`). `statusListIndex` is a bit index into the
+`credentialStatus` is one [Bitstring Status List](https://www.w3.org/TR/vc-bitstring-status-list/)
+entry (`BitstringStatusListEntry`) or a list of them. Alexandria issues two at
+the same index: `statusPurpose` `revocation` (list number 1) and `suspension`
+(list number 2). Each entry's bit decides only its own purpose; an entry of
+another purpose is skipped. `statusListIndex` is a bit index into the
 list named by `statusListCredential`. Bit *n* is byte `n / 8`, bit `n % 8`
 counted **from the most significant bit** — so index 9 is byte 1, mask `0x40`.
 Getting this backwards is the single most common interoperability bug, which
@@ -101,10 +102,38 @@ is why `07-revoked.json` exists. The published list is a
 and multibase base64url encoded (`u…`); the vectors supply the decoded bytes as hex.
 
 A status list the verifier does not have is not evidence of revocation or active
-status. The verifier returns `pending` with `status_list_missing`; it does not
-accept the credential or label it revoked. A storage failure is separately
-reported as `status_list_unavailable`. A malformed or out-of-range bit index
+status. The verifier returns `pending` with `status_list_missing` (or
+`suspension_list_missing` for the suspension entry); it does not accept the
+credential or label it revoked. A storage failure is separately reported as
+`status_list_unavailable` (`suspension_list_unavailable`). A malformed or out-of-range bit index
 sets `statusValid` to false and rejects the credential.
+
+## Coverage statements
+
+An integrity assertion names the coverage statement it was issued under by
+`coverageStatementDigest` (`blake3:` + 64 hex). A credential may name it again
+in `relatedResource` as `{ id, digestSRI, mediaType }`, where `id` is
+`urn:alexandria:coverage-statement:{digest}` or a URL ending in
+`/coverage-statements/{digest}`. When the digest in any such `id` differs from
+`coverageStatementDigest`, the credential names two statements: set
+`coverageStatementMismatch` and reject. The check needs no registry and no
+BLAKE3. `digestSRI` is for readers who fetch the statement bytes; the
+statement texts themselves are in the crate's `coverage` registry.
+
+## Organisation backing
+
+A vector may supply `organisationDescriptor`, the `alexandria-org/1` record an
+organisation publishes in its domain's DNS TXT record (`domain`, `name`,
+`keys`: one to eight `did:key` identifiers), and `expectOrganisationBacking`.
+Backing is judged apart from the verification result, which it never changes:
+
+| Outcome | When |
+|---|---|
+| `descriptor_not_supplied` | No descriptor was given |
+| `invalid_descriptor` | The descriptor fails its own checks (format, normalised domain, name, key list) |
+| `wrong_domain` | The issuer object names a different `domain` |
+| `key_not_listed` | The descriptor does not list the issuer key. The signature still verifies |
+| `verified` | Listed: report the descriptor's `name` and `domain`, not the issuer object's |
 
 ## File format
 
@@ -115,17 +144,21 @@ sets `statusValid` to false and rejects the credential.
   "policy": { ... },                            // acceptance rules
   "credential": { ... },                        // the signed credential
   "store": {                                    // optional; empty = no local context
-    "keyRegistry":  [ { "did", "keyId", "publicKeyHex", "validFrom", "validUntil" } ],
-    "statusLists":  { "<list id>": "<hex bytes>" },
-    "suspended":    { "<credential id>": "<until>|null" },
+    "keyRegistry":  [ { "did", "keyId", "publicKeyHex" } ],  // non-did:key issuers only
+    "statusLists":  { "<list id>": "<hex bytes>" },  // revocation and suspension lists
     "superseded":   [ "<credential id>" ]
   },
+  "organisationDescriptor": { ... },            // optional, see above
+  "expectOrganisationBacking": { "outcome": ... },  // optional
   "expect": { ... }                             // the required result
 }
 ```
 
 Compare at least `validSignature`, `issuerResolved`, `statusValid`, `expired`,
-`revoked`, `subjectBound`, `pendingReasons`, and `acceptanceDecision`. The
+`revoked`, `suspended`, `subjectBound`, `coverageStatementMismatch` (omitted
+from `expect` while false), `pendingReasons`, and `acceptanceDecision`. Every
+`expect` here also carries `attestation` (`not_supplied`) and
+`verifiedAssuranceLevel` (`local`); the attestation set below exercises them. The
 booleans matter independently of the decision: policy changes the decision,
 never the facts. `09` and `05` are the same expired credential, and differ only
 in what the policy does about it.
@@ -141,15 +174,59 @@ in what the policy does about it.
 | `05-expired` | `validUntil` precedes the verification time |
 | `06-non-did-subject` | Subject id is not a DID, so nothing is bound |
 | `07-revoked` | Status-list bit set. Pins the bit-order convention |
-| `08-rotated-issuer-key` | Signed with a rotated key; only the registry resolves it |
+| `08-did-key-ignores-registry` | Registry state names another key for a `did:key` issuer; it is ignored and the credential accepted |
 | `09-expired-permissive-policy` | Same expired credential, policy does not reject. `expired` stays true |
 | `10-type-not-allowed` | Every cryptographic check passes; policy still rejects |
 | `11-missing-status-list` | Signature verifies, but the referenced status list is absent; decision is pending |
 | `12-missing-issuer-key` | A non-self-resolving issuer has no supplied key binding; decision is pending |
+| `13-coverage-statement-v1` | A version-1 statement named by digest alone; accepted |
+| `14-coverage-statement-v2` | A version-2 statement named by digest and by a `relatedResource` URL; accepted |
+| `15-coverage-statement-mismatch` | `relatedResource` names a different statement; rejected with `coverageStatementMismatch` |
+| `16-suspended` | Revocation and suspension entries; the suspension bit is set, so rejected and not revoked |
+| `17-reinstated` | The same credential with the suspension bit cleared; accepted |
+| `18-suspension-list-missing` | Suspension list absent; pending with `suspension_list_missing` |
+| `19-object-issuer` | Issuer object with `name` and `domain`; accepted, backing `descriptor_not_supplied` |
+| `20-organisation-backing-verified` | The descriptor lists the key; backing `verified` with the descriptor's name |
+| `21-organisation-key-not-listed` | The key was removed from the descriptor; backing `key_not_listed`, still accepted |
+| `22-organisation-wrong-domain` | A descriptor for another domain; backing `wrong_domain` |
+| `23-organisation-invalid-descriptor` | A descriptor that fails its checks; backing `invalid_descriptor` |
 
 The suite contains accepted, rejected, and pending cases, including independent
-signature, expiry, subject-binding, revocation, type-policy, key-registry, and
-missing-evidence outcomes.
+signature, expiry, subject-binding, revocation, suspension, type-policy,
+coverage-statement, organisation-backing and missing-evidence outcomes.
+
+## Attestation vectors
+
+`attestation/` holds credentials with and without a `DeviceAttestationEvidence`
+entry in `evidence`. Each file adds `trust`, the inputs a verifier is given:
+`apple` (`rootPem`, `appId`, `allowDevelopment`) and `playIntegrity`
+(`packageName`, response `keys`). The roots and keys are synthetic stand-ins for
+Apple's and Google's. `expect` holds `attestation` (`outcome`, plus `platform`
+or the invalid `reason`), `verifiedAssuranceLevel` and `acceptanceDecision`.
+
+The cases cover not supplied, credential-bound on iOS, Android and a companion
+phone, session-bound, unverifiable without Play Integrity keys, and invalid
+evidence (untrusted chain, wrong nonce, wrong app id, evidence lifted from
+another credential, a companion binding for another learner, duplicate
+entries). Only verified credential-bound evidence reads `device_attested`;
+invalid evidence rejects; every other outcome leaves the decision to the rest
+of verification. The binding digest, the per-platform proofs and the outcome
+rules are documented in the crate's `attestation` module and in
+`tests/attestation_vectors.rs`. The independent verifier below does not check
+this set.
+
+## Issuance policy vectors
+
+`issuance-policy/` holds the shared issuance rule that an issuing app and a
+hosted service both apply. Each file is a `policy`, the `integrity` assertion,
+the `attestation` outcome a verifier established and, for a role credential,
+the `assessed` entry naming the credential it was issued on. `expect.refusal`
+is `null` or the first unmet requirement with its stable `code`, in the order
+status, score, flags, assurance, floor, rung, probes. A required assurance
+level is met only by the verified level. A degraded signal never carries a
+floor, except the camera when the assertion states a `cameraCoverage` from 0.9
+to 1 (vectors 23–26). `tests/policy_vectors.rs` documents the format.
+
 
 ## Untrusted input limits
 
@@ -222,10 +299,12 @@ satisfied when the count reaches `required_attestors`.
 
 `independent-verifier.mjs` in this directory is a complete verifier written from
 this document alone — no Alexandria library, nothing but Node's standard crypto,
-JCS implemented by hand. It passes all twelve vectors.
+JCS implemented by hand. It passes every credential vector in this directory
+(including organisation backing), the limit vectors and the endorsement
+vectors, and runs from any directory.
 
 ```sh
-node independent-verifier.mjs
+node crates/alexandria-verify/tests/vectors/independent-verifier.mjs
 ```
 
 It is here as evidence, not as shipped code. If it stops passing, either this
@@ -236,6 +315,10 @@ being updated — and both are bugs in the promise that anyone can verify.
 
 ```sh
 ALEXANDRIA_REGENERATE_VECTORS=1 cargo test -p alexandria-verify --test vectors
+ALEXANDRIA_REGENERATE_VECTORS=1 cargo test -p alexandria-verify --test limit_vectors
+ALEXANDRIA_REGENERATE_VECTORS=1 cargo test -p alexandria-verify --test endorsement_vectors
+ALEXANDRIA_REGENERATE_VECTORS=1 cargo test -p alexandria-verify --test policy_vectors
+ALEXANDRIA_REGENERATE_VECTORS=1 cargo test -p alexandria-verify --features attestation --test attestation_vectors
 ```
 
 Signing keys derive from fixed byte patterns, so regeneration is deterministic

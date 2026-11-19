@@ -18,7 +18,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 use super::{aggregate_skill_state, AggregationConfig, AggregationInput, DerivedSkillState};
 use crate::clock::now_rfc3339;
 use crate::crypto::did::Did;
-use crate::db::scoring_inputs::{scoring_input_fingerprint, verified_skill_inputs};
+use crate::db::scoring_inputs::{
+    scoring_input_fingerprint, verified_skill_inputs, VerifiedSkillInput,
+};
 use crate::domain::vc::{CredentialType, VerifiableCredential};
 use crate::network_profile::{embedded_preprod, NetworkProfileError};
 
@@ -209,7 +211,9 @@ fn recompute_all_in_transaction(conn: &Connection, now: &str) -> Result<u32, Agg
 /// `db::scoring_inputs`). The quality factors (rubric / proctoring /
 /// traceability) are derived from the claim's provenance tier via
 /// `config.quality_triple`; a claim with no provenance resolves to
-/// `(1.0, 1.0, 1.0)`.
+/// `(1.0, 1.0, 1.0)`. Inputs the session-status rule rules out are left out
+/// here, the one place derived states apply it (see
+/// [`super::weights::session_status_counts`]).
 fn load_evidence_for(
     conn: &Connection,
     subject: &Did,
@@ -227,7 +231,10 @@ fn load_evidence_for(
         verification_time,
         network_id,
     )
-    .map_err(AggregationError::Inputs)?;
+    .map_err(AggregationError::Inputs)?
+    .into_iter()
+    .filter(VerifiedSkillInput::counts)
+    .collect::<Vec<_>>();
     let dominant_provenance = inputs
         .iter()
         .filter_map(|input| input.claim.provenance.as_ref())
@@ -237,11 +244,13 @@ fn load_evidence_for(
         .into_iter()
         .map(|input| {
             let self_issued = input.self_issued();
+            let attestation = input.attestation();
+            let session_status = input.session_status().map(str::to_string);
             let credential_type = parse_credential_type(&input.credential);
             let (rubric, proctoring, traceability) = config.quality_triple(input.claim.provenance);
             AggregationInput {
                 credential_id: input.credential_id,
-                issuer: input.credential.issuer,
+                issuer: input.credential.issuer.id().clone(),
                 credential_type,
                 raw_score: input.claim.score.clamp(0.0, 1.0),
                 issuance_time: input.credential.valid_from,
@@ -250,6 +259,8 @@ fn load_evidence_for(
                 proctoring_reliability: proctoring,
                 evidence_traceability: traceability,
                 self_issued,
+                attestation,
+                session_status,
             }
         })
         .collect();
@@ -379,6 +390,9 @@ mod tests {
     use super::*;
     use crate::credentials::{self, IssueCredentialRequest};
     use crate::crypto::did::derive_did_key;
+    use crate::db::scoring_inputs::test_support::{
+        store_attested_credential, with_test_trust, Evidence, TestCredential,
+    };
     use crate::db::Database;
     use crate::domain::vc::{Claim, CredentialType, SkillClaim, VerifiableCredential};
     use ed25519_dalek::SigningKey;
@@ -420,6 +434,364 @@ mod tests {
         };
         credentials::issue(db.conn(), &issuer, &req, NOW).unwrap();
         (db, subject, skill.to_string())
+    }
+
+    /// Every declared type a scoring input can carry. `EntitlementCredential`
+    /// is absent because the default verification policy never accepts it as
+    /// a scoring input, whoever signs it.
+    const SCORED_TYPES: [CredentialType; 6] = [
+        CredentialType::FormalCredential,
+        CredentialType::AssessmentCredential,
+        CredentialType::AttestationCredential,
+        CredentialType::RoleCredential,
+        CredentialType::DerivedCredential,
+        CredentialType::SelfAssertion,
+    ];
+
+    fn skill_request(
+        credential_type: CredentialType,
+        subject: &Did,
+        score: f64,
+    ) -> IssueCredentialRequest {
+        IssueCredentialRequest {
+            credential_type,
+            subject: subject.clone(),
+            claim: Claim::Skill(SkillClaim {
+                skill_id: "skill_provenance".into(),
+                level: 3,
+                score,
+                evidence_refs: vec![],
+                rubric_version: None,
+                assessment_method: None,
+                provenance: None,
+            }),
+            evidence_refs: vec![],
+            expiration_date: None,
+            supersedes: None,
+            integrity_session_id: None,
+            integrity_policy: None,
+        }
+    }
+
+    /// The derived state for a learner holding the given credentials, each
+    /// `(signing key, declared type, score)`, all about the learner.
+    fn state_for(credentials: &[(&SigningKey, CredentialType, f64)]) -> DerivedSkillState {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let subject = derive_did_key(&key("subject"));
+        for (signer, credential_type, score) in credentials {
+            let issuer = crate::credentials::Issuer::from_key((*signer).clone());
+            credentials::issue(
+                db.conn(),
+                &issuer,
+                &skill_request(*credential_type, &subject, *score),
+                NOW,
+            )
+            .unwrap();
+        }
+        get_derived_skill_state_impl(db.conn(), &subject, "skill_provenance", NOW)
+            .unwrap()
+            .expect("derived state")
+    }
+
+    #[test]
+    fn a_self_issued_credential_of_any_type_scores_as_a_self_assertion() {
+        // Weight follows who signed, not the declared type: a learner who
+        // signs their own `AssessmentCredential` must not outweigh an
+        // organisation-signed `RoleCredential`.
+        let learner = key("subject");
+        let organisation = key("organisation");
+        let with_own = |declared: CredentialType| {
+            state_for(&[
+                (&organisation, CredentialType::RoleCredential, 0.5),
+                (&learner, declared, 1.0),
+            ])
+        };
+        let baseline = with_own(CredentialType::SelfAssertion);
+        for declared in SCORED_TYPES {
+            let state = with_own(declared);
+            assert!(
+                (state.raw_score - baseline.raw_score).abs() < 1e-12
+                    && (state.evidence_mass - baseline.evidence_mass).abs() < 1e-12
+                    && (state.trust_score - baseline.trust_score).abs() < 1e-12
+                    && state.unique_issuer_clusters == baseline.unique_issuer_clusters,
+                "self-issued {declared:?} scored {state:?}, a self-assertion {baseline:?}"
+            );
+        }
+        // Worked example (§25.1 weights, default issuer prior 0.8, fresh,
+        // full quality): Role 0.8·0.60 = 0.48 at 0.5, self-claim
+        // 0.8·0.25 = 0.20 at 1.0 ⇒ Q = (0.24 + 0.20) / 0.68.
+        assert!((baseline.evidence_mass - 0.68).abs() < 1e-9);
+        assert!((baseline.raw_score - 0.44 / 0.68).abs() < 1e-9);
+        assert_eq!(baseline.unique_issuer_clusters, 1);
+    }
+
+    #[test]
+    fn an_issuer_signed_credential_keeps_its_declared_type_weight() {
+        // §25.1 class weights under the default issuer prior 0.8, fresh and
+        // at full quality, so the evidence mass is 0.8 · w_type.
+        let organisation = key("organisation");
+        let expected = [
+            (CredentialType::FormalCredential, 1.00),
+            (CredentialType::AssessmentCredential, 0.90),
+            (CredentialType::AttestationCredential, 0.35),
+            (CredentialType::RoleCredential, 0.60),
+            (CredentialType::DerivedCredential, 0.00),
+            (CredentialType::SelfAssertion, 0.25),
+        ];
+        for (declared, class_weight) in expected {
+            let state = state_for(&[(&organisation, declared, 0.7)]);
+            assert!(
+                (state.evidence_mass - 0.8 * class_weight).abs() < 1e-9,
+                "issuer-signed {declared:?} has mass {}",
+                state.evidence_mass
+            );
+        }
+    }
+
+    #[test]
+    fn a_state_cached_under_the_type_weight_rule_is_recomputed_on_read() {
+        // Calculation version 1.2 weighted a self-issued credential by its
+        // declared type. A state it cached, with a fingerprint that still
+        // matches its inputs, must not outlive the provenance rule.
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let learner = key("subject");
+        let subject = derive_did_key(&learner);
+        let issuer = crate::credentials::Issuer::from_key(learner);
+        let request = skill_request(CredentialType::AssessmentCredential, &subject, 1.0);
+        credentials::issue(db.conn(), &issuer, &request, NOW).unwrap();
+
+        let old_version = "1.2";
+        let mut stale = get_derived_skill_state_impl(db.conn(), &subject, "skill_provenance", NOW)
+            .unwrap()
+            .expect("derived state");
+        stale.calculation_version = old_version.into();
+        stale.evidence_mass = 0.8 * 0.90;
+        db.conn()
+            .execute("DELETE FROM derived_skill_states", [])
+            .unwrap();
+        let fingerprint =
+            scoring_input_fingerprint(db.conn(), subject.as_str(), "skill_provenance", old_version)
+                .unwrap();
+        upsert_cached(db.conn(), &stale, &fingerprint, None).unwrap();
+
+        let read = get_derived_skill_state_impl(db.conn(), &subject, "skill_provenance", NOW)
+            .unwrap()
+            .expect("derived state");
+
+        assert_ne!(read.calculation_version, old_version);
+        assert!(
+            (read.evidence_mass - 0.8 * 0.25).abs() < 1e-9,
+            "expected the self-claim weight, got mass {}",
+            read.evidence_mass
+        );
+    }
+
+    /// One credential about the learner for [`attested_state`]: who signs
+    /// it, the session status its integrity assertion states and the
+    /// attestation evidence it carries.
+    struct Held<'a> {
+        signer: &'a SigningKey,
+        session_status: &'a str,
+        evidence: Evidence,
+        score: f64,
+    }
+
+    /// The learner's derived state from credentials carrying integrity
+    /// assertions, read with the synthetic attestation trust inputs, or `None`
+    /// when nothing counts.
+    fn attested_state(held: &[Held<'_>]) -> Option<DerivedSkillState> {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let subject = derive_did_key(&key("subject"));
+        for (index, credential) in held.iter().enumerate() {
+            store_attested_credential(
+                &db,
+                &TestCredential {
+                    id: &format!("held-{index}"),
+                    signer: credential.signer,
+                    subject: &subject,
+                    credential_type: "AssessmentCredential",
+                    skill_id: "skill_attested",
+                    level: 3,
+                    score: credential.score,
+                    valid_from: NOW,
+                    session_status: credential.session_status,
+                    evidence: credential.evidence,
+                },
+            );
+        }
+        with_test_trust(|| {
+            get_derived_skill_state_impl(db.conn(), &subject, "skill_attested", NOW).unwrap()
+        })
+    }
+
+    fn own(session_status: &str, evidence: Evidence) -> Held<'_> {
+        static LEARNER: std::sync::OnceLock<SigningKey> = std::sync::OnceLock::new();
+        Held {
+            signer: LEARNER.get_or_init(|| key("subject")),
+            session_status,
+            evidence,
+            score: 0.9,
+        }
+    }
+
+    #[test]
+    fn credential_bound_evidence_raises_a_self_claim_to_the_attested_weight() {
+        // Default issuer prior 0.8, fresh, full quality: the mass is
+        // 0.8 · w. The attested weight 0.30 sits above the self-claim
+        // weight (0.25) and below the lowest issuer-signed evidence class,
+        // AttestationCredential (0.35).
+        let state = attested_state(&[own("completed", Evidence::CredentialBound)]).unwrap();
+        assert!(
+            (state.evidence_mass - 0.8 * 0.30).abs() < 1e-9,
+            "mass {}",
+            state.evidence_mass
+        );
+        assert_eq!(state.unique_issuer_clusters, 0, "still no issuer cluster");
+    }
+
+    fn organisation(session_status: &str) -> Held<'_> {
+        static ORGANISATION: std::sync::OnceLock<SigningKey> = std::sync::OnceLock::new();
+        Held {
+            signer: ORGANISATION.get_or_init(|| key("organisation")),
+            session_status,
+            evidence: Evidence::NotSupplied,
+            score: 0.5,
+        }
+    }
+
+    /// Two states score identically: same score, mass, confidence and
+    /// active evidence.
+    fn assert_same_score(left: &DerivedSkillState, right: &DerivedSkillState, context: &str) {
+        assert!(
+            (left.raw_score - right.raw_score).abs() < 1e-12
+                && (left.evidence_mass - right.evidence_mass).abs() < 1e-12
+                && (left.trust_score - right.trust_score).abs() < 1e-12
+                && left.unique_issuer_clusters == right.unique_issuer_clusters
+                && left.active_evidence_count == right.active_evidence_count,
+            "{context}: {left:?} vs {right:?}"
+        );
+    }
+
+    #[test]
+    fn a_credential_bound_self_claim_in_a_suspended_or_flagged_session_contributes_nothing() {
+        let baseline = attested_state(&[organisation("completed")]).unwrap();
+        for status in ["suspended", "flagged"] {
+            let state = attested_state(&[
+                organisation("completed"),
+                own(status, Evidence::CredentialBound),
+            ])
+            .unwrap();
+            assert_same_score(&state, &baseline, status);
+        }
+        // Alone, nothing counts: no derived state at all.
+        assert!(attested_state(&[own("flagged", Evidence::CredentialBound)]).is_none());
+        // A session under review counts in full.
+        let review = attested_state(&[own("review", Evidence::CredentialBound)]).unwrap();
+        assert!(
+            (review.evidence_mass - 0.8 * 0.30).abs() < 1e-9,
+            "review mass {}",
+            review.evidence_mass
+        );
+    }
+
+    #[test]
+    fn a_self_claim_nobody_vouches_for_ignores_its_session_status() {
+        // Without credential-bound evidence the status is the holder's word:
+        // a suspended session scores exactly as a completed one, at the
+        // self-claim weight (mass 0.8 · 0.25).
+        for evidence in [Evidence::NotSupplied, Evidence::SessionBound] {
+            let completed = attested_state(&[own("completed", evidence)]).unwrap();
+            assert!(
+                (completed.evidence_mass - 0.8 * 0.25).abs() < 1e-9,
+                "{evidence:?} mass {}",
+                completed.evidence_mass
+            );
+            for status in ["suspended", "flagged", "review"] {
+                let state = attested_state(&[own(status, evidence)]).unwrap();
+                assert_same_score(&state, &completed, &format!("{evidence:?} {status}"));
+            }
+        }
+    }
+
+    #[test]
+    fn an_issuer_signed_credential_from_a_suspended_or_flagged_session_contributes_nothing() {
+        let baseline = attested_state(&[own("completed", Evidence::NotSupplied)]).unwrap();
+        for status in ["flagged", "suspended"] {
+            let state = attested_state(&[
+                own("completed", Evidence::NotSupplied),
+                organisation(status),
+            ])
+            .unwrap();
+            assert_same_score(&state, &baseline, status);
+        }
+        let review = attested_state(&[organisation("review")]).unwrap();
+        assert!(
+            (review.evidence_mass - 0.8 * 0.90).abs() < 1e-9,
+            "review mass {}",
+            review.evidence_mass
+        );
+        assert_eq!(review.unique_issuer_clusters, 1);
+    }
+
+    #[test]
+    fn a_state_cached_before_the_attested_weight_is_recomputed_on_read() {
+        // Calculation version 1.3 weighed a credential-bound self-claim as a
+        // plain self-claim and ignored session status. A state it cached,
+        // with a fingerprint that still matches its inputs, must not outlive
+        // the attested rule.
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let learner = key("subject");
+        let subject = derive_did_key(&learner);
+        store_attested_credential(
+            &db,
+            &TestCredential {
+                id: "attested",
+                signer: &learner,
+                subject: &subject,
+                credential_type: "AssessmentCredential",
+                skill_id: "skill_attested",
+                level: 3,
+                score: 0.9,
+                valid_from: NOW,
+                session_status: "completed",
+                evidence: Evidence::CredentialBound,
+            },
+        );
+        with_test_trust(|| {
+            let old_version = "1.3";
+            let mut stale =
+                get_derived_skill_state_impl(db.conn(), &subject, "skill_attested", NOW)
+                    .unwrap()
+                    .expect("derived state");
+            stale.calculation_version = old_version.into();
+            stale.evidence_mass = 0.8 * 0.25;
+            db.conn()
+                .execute("DELETE FROM derived_skill_states", [])
+                .unwrap();
+            let fingerprint = scoring_input_fingerprint(
+                db.conn(),
+                subject.as_str(),
+                "skill_attested",
+                old_version,
+            )
+            .unwrap();
+            upsert_cached(db.conn(), &stale, &fingerprint, None).unwrap();
+
+            let read = get_derived_skill_state_impl(db.conn(), &subject, "skill_attested", NOW)
+                .unwrap()
+                .expect("derived state");
+
+            assert_ne!(read.calculation_version, old_version);
+            assert!(
+                (read.evidence_mass - 0.8 * 0.30).abs() < 1e-9,
+                "expected the attested weight, got mass {}",
+                read.evidence_mass
+            );
+        });
     }
 
     #[test]
@@ -600,7 +972,7 @@ mod tests {
                 "VerifiableCredential".into(),
                 "AttestationCredential".into(),
             ],
-            issuer: Did("did:key:zI".into()),
+            issuer: Did("did:key:zI".into()).into(),
             valid_from: NOW.into(),
             valid_until: None,
             credential_subject: claim.into_subject(Did("did:key:zS".into())),
@@ -608,6 +980,8 @@ mod tests {
             terms_of_use: None,
             witness: None,
             integrity: None,
+            evidence: Vec::new(),
+            related_resource: Vec::new(),
             proof: crate::domain::vc::Proof::unsigned(NOW),
         };
         assert_eq!(

@@ -2,15 +2,15 @@
 //! and deltas for revocation/suspension.
 //!
 //! A status list decides whether every credential an issuer ever signed reads
-//! as revoked, so the only thing that may write one is the issuer. The payload
-//! carries a detached Ed25519 signature over the canonical
-//! `(list_id, issuer, version, bits)` tuple, verified against the key the
-//! issuer's `did:key` self-resolves to. An unsigned or wrongly-signed document
-//! is dropped.
+//! as revoked (or suspended, by the list's purpose), so the only thing that may
+//! write one is the issuer. The payload carries a detached Ed25519 signature
+//! over the canonical `(list_id, issuer, purpose, version, bits)` tuple,
+//! verified against the key the issuer's `did:key` self-resolves to. An
+//! unsigned or wrongly-signed document is dropped.
 //!
 //! This used to check only that the issuer DID appeared in the local
-//! `key_registry` — which any peer can arrange, since `TOPIC_VC_DID` inserts
-//! rows — and no signature was ever checked despite the doc comment saying so.
+//! `key_registry` — which any peer could arrange through `TOPIC_VC_DID` — and
+//! no signature was ever checked despite the doc comment saying so.
 //! That let any network participant mass-revoke an issuer's credentials, mass
 //! *un*-revoke them by publishing a higher version with zeroed bits, or lock
 //! the real issuer out permanently by claiming `version = i64::MAX`.
@@ -34,16 +34,24 @@ pub enum StatusIngest {
     IgnoredUnknownIssuer,
     /// Parsed and attributed, but the issuer signature is absent or wrong.
     IgnoredBadSignature,
+    /// The list id does not name the signing issuer, or the row under that
+    /// id belongs to another issuer. A signer speaks only for its own lists.
+    IgnoredForeignList,
 }
 
 #[derive(serde::Deserialize)]
 struct StatusMessage {
     issuer: String,
     /// Optional explicit list_id — if absent we derive
-    /// `urn:alexandria:status-list:<issuer>:1` so this matches the
-    /// list_id format `credentials::status_list` uses for local issuance.
+    /// `urn:alexandria:status-list:<issuer>:<n>`, `n` the purpose's list
+    /// number, so this matches the list_id format `credentials::status_list`
+    /// uses for local issuance.
     #[serde(default)]
     list_id: Option<String>,
+    /// `revocation` (the default) or `suspension`. Signed, so a list cannot
+    /// be relabelled in flight.
+    #[serde(default = "revocation")]
+    status_purpose: String,
     version: i64,
     /// Base64-encoded bitmap.
     bits: String,
@@ -53,18 +61,67 @@ struct StatusMessage {
     proof: Option<String>,
 }
 
+fn revocation() -> String {
+    crate::domain::vc::STATUS_PURPOSE_REVOCATION.to_string()
+}
+
+/// The list id a document without one names: the issuer's URN-named list of
+/// `status_purpose`, as `credentials::status_list` would name it.
+fn default_list_id(issuer: &str, status_purpose: &str) -> String {
+    use crate::credentials::status_list::{REVOCATION_LIST_NUMBER, SUSPENSION_LIST_NUMBER};
+    let number = if status_purpose == crate::domain::vc::STATUS_PURPOSE_SUSPENSION {
+        SUSPENSION_LIST_NUMBER
+    } else {
+        REVOCATION_LIST_NUMBER
+    };
+    format!("urn:alexandria:status-list:{issuer}:{number}")
+}
+
+/// Whether `list_id` names `issuer`'s own list: the hosted URL form
+/// `{host}/status-lists/{issuer}/{n}` or the URN form
+/// `urn:alexandria:status-list:{issuer}:{n}`.
+///
+/// A signature only proves who wrote a document; this is what stops a peer
+/// signing for its own DID from writing its bits over someone else's list.
+pub(crate) fn list_names_issuer(list_id: &str, issuer: &str) -> bool {
+    if let Some(location) = alexandria_verify::vc::status::parse_list_url(list_id) {
+        return location.issuer.as_str() == issuer;
+    }
+    list_id
+        .strip_prefix("urn:alexandria:status-list:")
+        .and_then(|rest| rest.rsplit_once(':'))
+        .is_some_and(|(named, number)| {
+            named == issuer
+                && !number.is_empty()
+                && !number.starts_with('0')
+                && number.len() <= 9
+                && number.chars().all(|c| c.is_ascii_digit())
+        })
+}
+
 /// The bytes an issuer signs to authorise a status list.
 ///
 /// Every field that changes the meaning of the document is covered:
 /// `list_id` so a signature cannot be moved onto a different list, `issuer` so
-/// it cannot be re-attributed, `version` so the rollback guard cannot be
-/// weaponised by replaying an old signature at a new number, and `bits` so the
-/// revocation state itself is authenticated. Length-prefixed so no two
+/// it cannot be re-attributed, `status_purpose` so a suspension list cannot be
+/// passed off as a revocation list or the reverse, `version` so the rollback
+/// guard cannot be weaponised by replaying an old signature at a new number,
+/// and `bits` so the status itself is authenticated. Length-prefixed so no two
 /// different tuples can produce the same byte string.
-pub fn canonical_status_bytes(list_id: &str, issuer: &str, version: i64, bits: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(list_id.len() + issuer.len() + bits.len() + 32);
-    out.extend_from_slice(b"alexandria-status-list-v1");
-    for field in [list_id.as_bytes(), issuer.as_bytes()] {
+pub fn canonical_status_bytes(
+    list_id: &str,
+    issuer: &str,
+    status_purpose: &str,
+    version: i64,
+    bits: &[u8],
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(list_id.len() + issuer.len() + bits.len() + 48);
+    out.extend_from_slice(b"alexandria-status-list-v2");
+    for field in [
+        list_id.as_bytes(),
+        issuer.as_bytes(),
+        status_purpose.as_bytes(),
+    ] {
         out.extend_from_slice(&(field.len() as u64).to_be_bytes());
         out.extend_from_slice(field);
     }
@@ -87,6 +144,7 @@ pub fn canonical_status_bytes(list_id: &str, issuer: &str, version: i64, bits: &
 pub fn build_signed_status_document(
     signing_key: &ed25519_dalek::SigningKey,
     list_id: Option<&str>,
+    status_purpose: &str,
     version: i64,
     bits: &[u8],
 ) -> Result<Vec<u8>, String> {
@@ -101,16 +159,18 @@ pub fn build_signed_status_document(
     let issuer = alexandria_verify::did::derive_did_key(signing_key);
     let list_id = list_id
         .map(str::to_string)
-        .unwrap_or_else(|| format!("urn:alexandria:status-list:{}:1", issuer.as_str()));
+        .unwrap_or_else(|| default_list_id(issuer.as_str(), status_purpose));
     let sig = signing_key.sign(&canonical_status_bytes(
         &list_id,
         issuer.as_str(),
+        status_purpose,
         version,
         bits,
     ));
     serde_json::to_vec(&serde_json::json!({
         "issuer": issuer.as_str(),
         "list_id": list_id,
+        "status_purpose": status_purpose,
         "version": version,
         "bits": base64::engine::general_purpose::STANDARD.encode(bits),
         "proof": base64::engine::general_purpose::STANDARD.encode(sig.to_bytes()),
@@ -145,39 +205,48 @@ pub fn handle_status_message(
         Err(_) => return Ok(StatusIngest::IgnoredUnknownIssuer),
     };
 
-    // Issuer must be known via the local key registry. Kept as a cheap
-    // pre-filter — it means we do not spend a signature verification on a DID
-    // nothing here has ever referenced — but it is no longer the authorisation
-    // check. `TOPIC_VC_DID` lets any peer insert a row, so presence in that
-    // table proves only that someone mentioned the DID.
-    let known: i64 = db
-        .conn()
-        .query_row(
-            "SELECT COUNT(*) FROM key_registry WHERE did = ?1",
-            rusqlite::params![&parsed.issuer],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if known == 0 {
+    // The issuer's key must resolve: a status list is checked against the key
+    // its `did:key` embeds, so any other identifier cannot be authorised and
+    // is deferred before any decoding or database work. This is a cheap
+    // pre-filter, not the authorisation check, which is the signature below.
+    if alexandria_verify::did::parse_did_key(&parsed.issuer).is_err() {
         return Ok(StatusIngest::IgnoredUnknownIssuer);
     }
 
+    if ![
+        crate::domain::vc::STATUS_PURPOSE_REVOCATION,
+        crate::domain::vc::STATUS_PURPOSE_SUSPENSION,
+    ]
+    .contains(&parsed.status_purpose.as_str())
+    {
+        return Err(format!(
+            "status purpose {:?} is not one a status list may carry",
+            parsed.status_purpose
+        ));
+    }
     let list_id = parsed
         .list_id
         .clone()
-        .unwrap_or_else(|| format!("urn:alexandria:status-list:{}:1", parsed.issuer));
+        .unwrap_or_else(|| default_list_id(&parsed.issuer, &parsed.status_purpose));
+    if !list_names_issuer(&list_id, &parsed.issuer) {
+        return Ok(StatusIngest::IgnoredForeignList);
+    }
 
-    // Refuse older versions to prevent rollback (§11.2). Checked before the
-    // signature so a replayed old document costs nothing.
-    let existing: Option<i64> = db
+    // Refuse older versions to prevent rollback (§11.2), and never touch a
+    // row held under another issuer. Checked before the signature so a
+    // replayed old document costs nothing.
+    let existing: Option<(String, i64)> = db
         .conn()
         .query_row(
-            "SELECT version FROM credential_status_lists WHERE list_id = ?1",
+            "SELECT issuer_did, version FROM credential_status_lists WHERE list_id = ?1",
             rusqlite::params![&list_id],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .ok();
-    if let Some(prev) = existing {
+    if let Some((holder, prev)) = existing {
+        if holder != parsed.issuer {
+            return Ok(StatusIngest::IgnoredForeignList);
+        }
         if parsed.version <= prev {
             return Ok(StatusIngest::IgnoredNewer);
         }
@@ -203,7 +272,13 @@ pub fn handle_status_message(
         );
         return Ok(StatusIngest::IgnoredBadSignature);
     };
-    let signed = canonical_status_bytes(&list_id, &parsed.issuer, parsed.version, &bits);
+    let signed = canonical_status_bytes(
+        &list_id,
+        &parsed.issuer,
+        &parsed.status_purpose,
+        parsed.version,
+        &bits,
+    );
     if !issuer_signed(&parsed.issuer, proof, &signed) {
         log::warn!(
             "vc-status: status list for {} does not verify against that DID — dropping",
@@ -218,19 +293,23 @@ pub fn handle_status_message(
         .execute(
             "INSERT INTO credential_status_lists \
              (list_id, issuer_did, version, status_purpose, bits, bit_length, updated_at) \
-             VALUES (?1, ?2, ?3, 'revocation', ?4, ?5, ?6) \
+             VALUES (?1, ?2, ?3, ?7, ?4, ?5, ?6) \
              ON CONFLICT(list_id) DO UPDATE SET \
                 version = excluded.version, \
+                status_purpose = excluded.status_purpose, \
                 bits = excluded.bits, \
                 bit_length = excluded.bit_length, \
-                updated_at = excluded.updated_at",
+                updated_at = excluded.updated_at \
+             WHERE credential_status_lists.issuer_did = excluded.issuer_did \
+               AND excluded.version > credential_status_lists.version",
             rusqlite::params![
                 &list_id,
                 &parsed.issuer,
                 parsed.version,
                 bits,
                 bit_length,
-                &now
+                &now,
+                &parsed.status_purpose
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -259,20 +338,6 @@ mod tests {
         SigningKey::from_bytes(&[3u8; 32])
     }
 
-    /// Pre-register the issuer in `key_registry` so the handler's cheap
-    /// pre-filter passes. Real propagation gets this from a prior
-    /// `handle_did_message` call.
-    fn register_issuer(db: &Database, did: &str) {
-        db.conn()
-            .execute(
-                "INSERT OR IGNORE INTO key_registry \
-                 (did, key_id, public_key_hex, valid_from, valid_until, rotated_by) \
-                 VALUES (?1, 'key-1', '', '1970-01-01T00:00:00Z', NULL, NULL)",
-                rusqlite::params![did],
-            )
-            .unwrap();
-    }
-
     /// A status document as a real issuer would publish it.
     fn signed_payload(sk: &SigningKey, version: i64, bits_b64: &str) -> Vec<u8> {
         let issuer = alexandria_verify::did::derive_did_key(sk);
@@ -283,6 +348,7 @@ mod tests {
         let sig = sk.sign(&canonical_status_bytes(
             &list_id,
             issuer.as_str(),
+            "revocation",
             version,
             &bits,
         ));
@@ -295,10 +361,11 @@ mod tests {
         .unwrap()
     }
 
-    fn db_with_issuer(sk: &SigningKey) -> Database {
+    /// A fresh database. A `did:key` issuer needs no registration: its key
+    /// is in its identifier.
+    fn db_with_issuer(_sk: &SigningKey) -> Database {
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
-        register_issuer(&db, alexandria_verify::did::derive_did_key(sk).as_str());
         db
     }
 
@@ -343,7 +410,13 @@ mod tests {
         let issuer = alexandria_verify::did::derive_did_key(&real);
         let list_id = format!("urn:alexandria:status-list:{}:1", issuer.as_str());
         let bits = vec![0xffu8; 4];
-        let sig = impostor.sign(&canonical_status_bytes(&list_id, issuer.as_str(), 1, &bits));
+        let sig = impostor.sign(&canonical_status_bytes(
+            &list_id,
+            issuer.as_str(),
+            "revocation",
+            1,
+            &bits,
+        ));
         let payload = serde_json::to_vec(&serde_json::json!({
             "issuer": issuer.as_str(),
             "version": 1,
@@ -409,8 +482,8 @@ mod tests {
 
     #[test]
     fn unknown_issuer_is_deferred() {
-        // No registry entry ⇒ nothing here has ever referenced this DID, so
-        // defer rather than spend a signature verification on it.
+        // Not a resolvable did:key ⇒ no key to check a signature against, so
+        // defer rather than decode it.
         let db = Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();
         let msg = stub_msg(br#"{"issuer":"did:key:zUnknown","version":1,"bits":"AQ"}"#);
@@ -426,11 +499,160 @@ mod tests {
     fn the_builder_produces_a_document_the_handler_accepts() {
         let sk = issuer_key();
         let db = db_with_issuer(&sk);
-        let doc = build_signed_status_document(&sk, None, 1, &[0x01, 0x02, 0x03]).unwrap();
+        let doc =
+            build_signed_status_document(&sk, None, "revocation", 1, &[0x01, 0x02, 0x03]).unwrap();
         assert_eq!(
             handle_status_message(&db, &stub_msg(&doc)).unwrap(),
             StatusIngest::Applied
         );
+    }
+
+    /// A gossiped suspension list lands as one: its own list id and purpose,
+    /// so a receiver reads the suspension bit from it, and relabelling it in
+    /// flight breaks the signature.
+    #[test]
+    fn a_suspension_list_arrives_as_a_suspension_list() {
+        let sk = issuer_key();
+        let db = db_with_issuer(&sk);
+        let issuer = alexandria_verify::did::derive_did_key(&sk);
+        let doc = build_signed_status_document(&sk, None, "suspension", 1, &[0x80]).unwrap();
+
+        let mut relabelled: serde_json::Value = serde_json::from_slice(&doc).unwrap();
+        relabelled["status_purpose"] = serde_json::json!("revocation");
+        let relabelled = serde_json::to_vec(&relabelled).unwrap();
+        assert_eq!(
+            handle_status_message(&db, &stub_msg(&relabelled)).unwrap(),
+            StatusIngest::IgnoredBadSignature
+        );
+
+        assert_eq!(
+            handle_status_message(&db, &stub_msg(&doc)).unwrap(),
+            StatusIngest::Applied
+        );
+        let (purpose, bits): (String, Vec<u8>) = db
+            .conn()
+            .query_row(
+                "SELECT status_purpose, bits FROM credential_status_lists WHERE list_id = ?1",
+                rusqlite::params![format!("urn:alexandria:status-list:{}:2", issuer.as_str())],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(purpose, "suspension");
+        assert_eq!(bits, vec![0x80]);
+    }
+
+    /// Hold `bits` as `issuer_did`'s list `list_id`, as local issuance or an
+    /// earlier pull would.
+    fn hold_list(db: &Database, list_id: &str, issuer_did: &str, version: i64, bits: &[u8]) {
+        db.conn()
+            .execute(
+                "INSERT INTO credential_status_lists \
+                 (list_id, issuer_did, version, status_purpose, bits, bit_length) \
+                 VALUES (?1, ?2, ?3, 'revocation', ?4, ?5)",
+                rusqlite::params![list_id, issuer_did, version, bits, bits.len() as i64 * 8],
+            )
+            .unwrap();
+    }
+
+    fn held(db: &Database, list_id: &str) -> (String, Vec<u8>) {
+        db.conn()
+            .query_row(
+                "SELECT issuer_did, bits FROM credential_status_lists WHERE list_id = ?1",
+                rusqlite::params![list_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap()
+    }
+
+    /// A peer signing honestly for its own DID still cannot name another
+    /// issuer's list: the list id must name the signer, in either form.
+    #[test]
+    fn a_peer_cannot_replace_another_issuers_list() {
+        let victim = alexandria_verify::did::derive_did_key(&issuer_key());
+        let attacker = SigningKey::from_bytes(&[9u8; 32]);
+        for list_id in [
+            format!("urn:alexandria:status-list:{}:1", victim.as_str()),
+            format!(
+                "https://status.example.org/status-lists/{}/1",
+                victim.as_str()
+            ),
+        ] {
+            let db = Database::open_in_memory().unwrap();
+            db.run_migrations().unwrap();
+            hold_list(&db, &list_id, victim.as_str(), 3, &[0x80]);
+
+            let doc =
+                build_signed_status_document(&attacker, Some(&list_id), "revocation", 99, &[0x00])
+                    .unwrap();
+            assert_eq!(
+                handle_status_message(&db, &stub_msg(&doc)).unwrap(),
+                StatusIngest::IgnoredForeignList,
+                "{list_id}"
+            );
+            assert_eq!(
+                held(&db, &list_id),
+                (victim.as_str().to_string(), vec![0x80])
+            );
+        }
+    }
+
+    /// The local issuer's own list is no different: a peer cannot zero the
+    /// bits of credentials this profile revoked.
+    #[test]
+    fn a_peer_cannot_replace_the_local_issuers_list() {
+        let local = SigningKey::from_bytes(&[5u8; 32]);
+        let local_did = alexandria_verify::did::derive_did_key(&local);
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let list_id = format!("urn:alexandria:status-list:{}:1", local_did.as_str());
+        hold_list(&db, &list_id, local_did.as_str(), 1, &[0xff]);
+
+        let attacker = SigningKey::from_bytes(&[9u8; 32]);
+        let doc =
+            build_signed_status_document(&attacker, Some(&list_id), "revocation", 2, &[0]).unwrap();
+        assert_eq!(
+            handle_status_message(&db, &stub_msg(&doc)).unwrap(),
+            StatusIngest::IgnoredForeignList
+        );
+        assert_eq!(held(&db, &list_id).1, vec![0xff]);
+    }
+
+    /// A row already held under another issuer is never relabelled, even
+    /// when its id is one the signer's own list could carry (a row written
+    /// before the name check existed, or under an id the check accepts).
+    #[test]
+    fn a_row_held_under_another_issuer_is_never_relabelled() {
+        let signer = issuer_key();
+        let signer_did = alexandria_verify::did::derive_did_key(&signer);
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let list_id = format!("urn:alexandria:status-list:{}:1", signer_did.as_str());
+        let other = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+        hold_list(&db, &list_id, other, 1, &[0x80]);
+
+        let doc =
+            build_signed_status_document(&signer, Some(&list_id), "revocation", 2, &[0]).unwrap();
+        assert_eq!(
+            handle_status_message(&db, &stub_msg(&doc)).unwrap(),
+            StatusIngest::IgnoredForeignList
+        );
+        assert_eq!(held(&db, &list_id), (other.to_string(), vec![0x80]));
+    }
+
+    /// The issuer's own list under its hosted URL is still accepted.
+    #[test]
+    fn an_issuer_may_publish_its_own_hosted_list() {
+        let sk = issuer_key();
+        let did = alexandria_verify::did::derive_did_key(&sk);
+        let db = db_with_issuer(&sk);
+        let list_id = format!("https://status.example.org/status-lists/{}/2", did.as_str());
+        let doc =
+            build_signed_status_document(&sk, Some(&list_id), "suspension", 1, &[0x40]).unwrap();
+        assert_eq!(
+            handle_status_message(&db, &stub_msg(&doc)).unwrap(),
+            StatusIngest::Applied
+        );
+        assert_eq!(held(&db, &list_id), (did.as_str().to_string(), vec![0x40]));
     }
 
     #[test]

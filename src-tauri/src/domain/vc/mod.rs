@@ -20,14 +20,17 @@ use rusqlite::{Connection, OptionalExtension};
 pub struct SqliteVerificationStore<'a>(pub &'a Connection);
 
 impl VerificationStore for SqliteVerificationStore<'_> {
-    fn key_at(&self, did: &Did, at: &str) -> StoreLookup<KeyRegistryEntry> {
-        match crate::crypto::key_registry::resolve_key_at(self.0, did, at) {
+    fn registered_key(&self, did: &Did) -> StoreLookup<KeyRegistryEntry> {
+        match crate::crypto::key_registry::registered_key(self.0, did) {
             Ok(Some(entry)) => StoreLookup::Found(entry),
             Ok(None) => StoreLookup::Missing,
             Err(_) => StoreLookup::Unavailable,
         }
     }
 
+    /// Any list held locally: this node's own, or one received by gossip
+    /// or in a bundle. Suspension is read from here too; the issuer's
+    /// `credentials.suspended` bookkeeping is never consulted.
     fn status_list_bits(&self, list_id: &str) -> StoreLookup<Vec<u8>> {
         match self
             .0
@@ -39,22 +42,6 @@ impl VerificationStore for SqliteVerificationStore<'_> {
             .optional()
         {
             Ok(Some(bits)) => StoreLookup::Found(bits),
-            Ok(None) => StoreLookup::Missing,
-            Err(_) => StoreLookup::Unavailable,
-        }
-    }
-
-    fn suspension(&self, credential_id: &str) -> StoreLookup<(bool, Option<String>)> {
-        match self
-            .0
-            .query_row(
-                "SELECT suspended, suspended_until FROM credentials WHERE id = ?1",
-                rusqlite::params![credential_id],
-                |r| Ok((r.get::<_, i64>(0)? != 0, r.get::<_, Option<String>>(1)?)),
-            )
-            .optional()
-        {
-            Ok(Some(state)) => StoreLookup::Found(state),
             Ok(None) => StoreLookup::Missing,
             Err(_) => StoreLookup::Unavailable,
         }
@@ -79,21 +66,25 @@ impl VerificationStore for SqliteVerificationStore<'_> {
     }
 }
 
-/// Verify a credential against the local database.
+/// Verify a credential against the local database, checking its device
+/// attestation evidence against this build's trust inputs (Apple's root and
+/// the network profile's Play Integrity keys).
 ///
-/// Thin convenience over [`alexandria_verify::vc::verify::verify_credential`]
-/// for the many call sites that already hold a `&Connection`.
+/// Thin convenience over
+/// [`alexandria_verify::vc::verify::verify_credential_with_attestation`] for
+/// the many call sites that already hold a `&Connection`.
 pub fn verify_credential_db(
     db: &Connection,
     credential: &VerifiableCredential,
     verification_time: &str,
     policy: &VerificationPolicy,
 ) -> VerificationResult {
-    verify::verify_credential(
+    verify::verify_credential_with_attestation(
         &SqliteVerificationStore(db),
         credential,
         verification_time,
         policy,
+        crate::sentinel::attestation::profile_trust_inputs(),
     )
 }
 
@@ -114,14 +105,13 @@ mod tests {
         let unavailable = Connection::open_in_memory().unwrap();
         let unavailable = SqliteVerificationStore(&unavailable);
         assert!(matches!(
-            unavailable.key_at(&did, "2026-01-01T00:00:00Z"),
+            unavailable.registered_key(&did),
             StoreLookup::Unavailable
         ));
         assert_eq!(
             unavailable.status_list_bits("missing"),
             StoreLookup::Unavailable
         );
-        assert_eq!(unavailable.suspension("missing"), StoreLookup::Unavailable);
         assert_eq!(
             unavailable.is_superseded("missing"),
             StoreLookup::Unavailable
@@ -131,11 +121,10 @@ mod tests {
         db.run_migrations().unwrap();
         let available = SqliteVerificationStore(db.conn());
         assert!(matches!(
-            available.key_at(&did, "2026-01-01T00:00:00Z"),
+            available.registered_key(&did),
             StoreLookup::Missing
         ));
         assert_eq!(available.status_list_bits("missing"), StoreLookup::Missing);
-        assert_eq!(available.suspension("missing"), StoreLookup::Missing);
         assert_eq!(
             available.is_superseded("missing"),
             StoreLookup::Found(false)

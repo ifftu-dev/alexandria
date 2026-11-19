@@ -49,6 +49,9 @@ const PENDING_TRANSLATION = [
   // Sentinel probes after an attempt (trust profiles ticket 07): English-only
   // until the next learner translation pass; renders via the i18n fallback.
   'learn.assessment.probe',
+  // Session-bound attestation note on the assessment result (credential
+  // trust ticket 06): English-only until the next learner translation pass.
+  'learn.assessment.sessionBoundEvidence',
   // Jev goal entry: English fallback pending the next learner translation pass.
   'goals.picker.learningGoal',
   'goals.picker.goalPlaceholder',
@@ -85,6 +88,23 @@ const PENDING_TRANSLATION = [
   'credentials.detail.trust',
   // Local status-evidence limitation note. English-only pending a translate pass.
   'credentials.detail.statusEvidence',
+  // The organisation's issuance policy shown with an assessment request and
+  // the picker's refusals (credential trust ticket 18). English-only pending
+  // the next learner translation pass; renders via the i18n fallback.
+  'organisations.requests.assessment.policy.',
+  'organisations.requests.assessment.meetsPolicy',
+  'organisations.requests.assessment.refusedOption',
+  'organisations.requests.assessment.refusedNote',
+  'organisations.requests.assessment.refusal.',
+  'learn.assessment.requestIntro',
+  'learn.assessment.requestCameraNote',
+  'learn.assessment.requestAttestationNote',
+  // Suspension check in the proof panel (credential trust ticket 15).
+  // English-only pending a translate pass.
+  'credentials.detail.suspended',
+  // Camera coverage on the integrity section (credential trust ticket 17).
+  // English-only pending a translate pass.
+  'credentials.detail.cameraCoverage',
   // Exact course-completion policy and manual endorsement exchange. English
   // fallback is temporary pending the next instructor/learner translation pass.
   'instructor.compose.policy',

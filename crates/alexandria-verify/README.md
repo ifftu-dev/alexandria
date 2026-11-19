@@ -3,7 +3,12 @@
 Verify [Alexandria](https://github.com/ifftu-dev/alexandria) credentials: W3C
 Verifiable Credentials Data Model 2.0 secured with Data Integrity proofs
 (`DataIntegrityProof`, cryptosuite `eddsa-jcs-2022`), Bitstring Status List
-revocation, `did:key` resolution, and JCS canonicalization (RFC 8785).
+revocation and suspension, `did:key` resolution, and JCS canonicalization
+(RFC 8785).
+
+New in 0.7.0: suspension lists, device attestation evidence, organisation
+backing, the coverage statement registry and the shared issuance policy. It
+breaks the 0.6 API; see [CHANGELOG.md](CHANGELOG.md).
 
 `MIT OR Apache-2.0`, while the Alexandria application itself is
 AGPL-3.0-or-later. That split is deliberate. Alexandria promises that checking a
@@ -15,11 +20,14 @@ ability to check a signature has to be everywhere to be worth anything.
 ## No I/O
 
 The crate does not open a socket, a file, or a database. Verification needs
-persistent state in five places — the issuer's key at a point in time, a status
-list's bits, a local suspension flag, whether something supersedes the
+persistent state in four places — the registered key of an issuer whose DID is
+not self-resolving (a `did:key` is always its own key and never asks), the bits
+of the revocation and suspension status lists, whether something supersedes the
 credential, and the credential's anchor receipt with the caller's observation of
 the Cardano transaction it names — and each arrives through the
-`VerificationStore` trait. The anchor lookup has a default that knows no
+`VerificationStore` trait. Inputs that are not per-credential state are plain
+arguments: attestation trust inputs (`AttestationTrust`) and an organisation's
+domain descriptor, which the caller resolves. The anchor lookup has a default that knows no
 anchors. Otherwise the verifier recomputes the credential's hash, folds the
 receipt's Merkle path up to the anchored root (RFC 9162 tree, BLAKE3), and
 checks the root, the issuer and that the issuer's `did:key` key signed the
@@ -48,6 +56,36 @@ Implement `VerificationStore` over whatever you actually have — SQLite, a
 credential bundle, Postgres — and the same verification logic runs against it.
 `tests/no_io_deps.rs` fails the build if a dependency that reaches the outside
 world is ever added.
+
+## Attestation, organisation backing and policy
+
+- **Device attestation** (`attestation`). A credential may carry one
+  `DeviceAttestationEvidence` entry in `evidence`: App Attest or Play Integrity
+  material that is credential-bound (over the credential's binding digest) or
+  session-bound. `verify_credential_with_attestation` takes the trust inputs
+  and sets `attestation` and `verifiedAssuranceLevel` on the result. Only
+  verified credential-bound evidence reads `device_attested`; the
+  assertion's own `assuranceLevel` is the issuer's word. Invalid evidence
+  rejects. The certificate and token checks are behind the `attestation`
+  feature; without it evidence verifies as `unverifiable`. `test-support`
+  adds synthetic chains and tokens for tests.
+- **Organisation backing** (`org`). The issuer may be an object with the
+  signing key's DID as `id` and the organisation's `name` and `domain`.
+  `organisation_backing` checks the key against the domain's descriptor and
+  never changes the verification result.
+  `trust::classify_credential_with_organisation` carries it into the
+  classification.
+- **Coverage statements** (`coverage`). Every published statement text, by
+  digest, resolvable offline. A credential that names a statement in
+  `relatedResource` other than its assertion's `coverageStatementDigest` is
+  rejected.
+- **Issuance policy** (`policy`, `integrity`). `policy::evaluate` is the one
+  rule an issuing app and a hosted service apply to a credential's integrity
+  assertion and attestation outcome, returning the first unmet requirement
+  with a stable code. `evaluate_assessed` judges a role credential from its
+  `AssessedCredentialEvidence` entry (`assessed`). A policy floor counts the
+  camera despite degraded windows only when the assertion states
+  `cameraCoverage` of at least `MIN_CAMERA_COVERAGE` (0.9).
 
 ## Untrusted input
 
@@ -94,11 +132,13 @@ carry no privilege; policy qualification is a separate decision.
 `tests/vectors/` holds signed credentials with known-good and known-bad
 outcomes, plus `independent-verifier.mjs` — a small Node implementation
 written against the specification rather than against this code. It passes all
-twelve credential vectors, the exact-byte limit vectors in
+23 credential vectors, the exact-byte limit vectors in
 `tests/vectors/limits/`, and the course completion endorsement vectors in
 `tests/vectors/endorsements/`. `tests/limit_vectors.rs` and
 `tests/endorsement_vectors.rs` check those against this crate, and the app's
-endorsement import consumes the same endorsement bytes. If you are writing your own verifier in another language, start there:
+endorsement import consumes the same endorsement bytes. The attestation
+(`tests/vectors/attestation/`) and issuance policy
+(`tests/vectors/issuance-policy/`) sets have their own Rust runners. If you are writing your own verifier in another language, start there:
 the vectors are the contract, and this crate is one implementation of it.
 
 Presentations (`vc::presentation`) are W3C Verifiable Presentations with a
@@ -127,12 +167,22 @@ MIT OR Apache-2.0, at your option.
 
 ## Holder-authorized credential exchange
 
-`exchange` defines `alexandria-credential-exchange/1`: an organization request
-and a holder-signed disclosure of one complete credential. The signature covers
-a domain prefix, a zero byte, and JCS-canonical share bytes. It binds the exact
-request, audience, nonce, subject, skill, network, taxonomy digest, and validity
-window. Shares expire within five minutes. Receiving applications must load the
-expected request from their own store and enforce atomic replay handling.
+`exchange` defines `alexandria-credential-exchange/1`: an organisation request
+and the holder's answer, a Verifiable Presentation carrying one complete
+credential and the exact request it answers. The holder's proof binds the
+request, audience (`domain`), nonce (`challenge`), subject, skill, network,
+taxonomy digest, and validity window. Shares expire within five minutes.
+Receiving applications must load the expected request from their own store and
+enforce atomic replay handling.
+
+A request may carry `issuance_policy`, the policy the organisation will judge
+the answer against before issuing its own credential. It is part of the
+request, so the organisation's request proof and the holder's presentation
+signature both cover it, and `verify_share` refuses a share whose request
+differs from the expected one. A request never names a device's model
+connection: `CredentialRequest::check` refuses one carrying
+`probe_connection_id`, and `IssuancePolicy::for_request` builds a policy
+without it.
 
 A new-assessment request additionally requires an `AssessmentCredential` with
 `assessment-items-bloom-v1`, terminal integrity, and an evidence reference

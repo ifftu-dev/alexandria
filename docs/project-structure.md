@@ -1,7 +1,7 @@
 # Project Structure
 
 Status: live
-Updated: 2026-11-12
+Updated: 2026-11-17
 
 > Alexandria — Tauri v2 desktop and mobile application (macOS, iOS, Android)
 
@@ -150,7 +150,7 @@ src-tauri/
     │   ├── governance.rs   # Governance topic handler
     │   ├── opinions.rs     # Opinions topic handler
     │   ├── sync.rs         # Cross-device sync
-    │   ├── vc_did.rs       # DID doc + key rotation gossip
+    │   ├── vc_did.rs       # DID announcement gossip
     │   ├── vc_status.rs    # Status-list snapshots/deltas
     │   ├── vc_fetch.rs     # `/alexandria/vc-fetch/1.0` pull protocol
     │   ├── graph_fetch.rs  # Public skill-graph fetch protocol
@@ -189,7 +189,7 @@ src-tauri/
     │   ├── voice_activity.rs # Voice onsets and second voice (DSP, no model)
     │   ├── corpus_capture.rs # Opt-in measurement-corpus capture
     │   ├── companion/      # Companion phone pairing over iroh
-    │   └── attestation/    # device_attested: App Attest + Play Integrity capture and verification
+    │   └── attestation/    # device_attested: platform capture and trust inputs; checks live in alexandria-verify
     │
     ├── tutoring/           # `live` crate integration (MoQ rooms/sessions)
     │   ├── mod.rs

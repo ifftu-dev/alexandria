@@ -55,9 +55,8 @@ pub const TOPIC_OPINIONS: &str = "/alexandria/opinions/1.0";
 pub const TOPIC_PEER_EXCHANGE: &str = "/alexandria/peer-exchange/1.0";
 
 // ---- VC-first migration (PRs 2–13) --------------------------------------
-/// DID document announcements + key rotation records (spec §5.3).
-/// Receivers reflect the DID registry into their local `key_registry`
-/// so historical verification survives across peers.
+/// DID announcements. A `did:key` is its key, so receivers record nothing;
+/// an announcement only promotes credentials waiting on that issuer.
 pub const TOPIC_VC_DID: &str = "/alexandria/vc-did/1.0";
 /// Bitstring Status List snapshots / deltas (§11.2).
 /// Versioned — receivers refuse older versions to prevent rollback.

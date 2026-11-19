@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import AssessmentRunner from './AssessmentRunner.vue'
-import type { AttemptRoleTarget, GradeResult, SelectedProfile, ServedProbe, StartedAttempt, SubmittedAnswer } from '@/types'
+import type { AttemptRoleTarget, GradeResult, RequestAttemptTarget, SelectedProfile, ServedProbe, StartedAttempt, SubmittedAnswer } from '@/types'
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   trustProfile: { value: null as SelectedProfile | null },
   push: vi.fn(),
   go: vi.fn(),
+  query: {} as Record<string, string>,
   present: vi.fn<(item: string, meta: { chars: number; difficulty: number | null; input: string }) => void>(),
   input: vi.fn<(item: string, event: { changesAnswer: boolean }) => void>(),
 }))
@@ -30,7 +31,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/composables/useLocalApi', () => ({ useLocalApi: () => ({ invoke: mocks.invoke }) }))
 
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { skillId: 'skill_test' }, query: {} }),
+  useRoute: () => ({ params: { skillId: 'skill_test' }, query: mocks.query }),
   useRouter: () => ({ push: mocks.push, go: mocks.go }),
 }))
 vi.mock('@/composables/useSentinel', () => ({
@@ -86,6 +87,7 @@ function render() {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.invoke.mockReset().mockResolvedValue(null)
+  mocks.query = {}
   mocks.active.value = false
   mocks.suspended.value = false
   mocks.trustProfile.value = null
@@ -479,6 +481,65 @@ describe('role targeting', () => {
   })
 })
 
+describe('answering a credential request', () => {
+  const CLOUD = 'https://cloud.example'
+  function target(overrides: Partial<RequestAttemptTarget> = {}): RequestAttemptTarget {
+    return {
+      request_id: 'req-1', organization: 'Acme', role_label: 'Engineer',
+      issuance_policy: { min_trust_profile: 'core' }, camera_required: false, attestation_required: false,
+      ...overrides,
+    }
+  }
+  function armRequest(prepared: RequestAttemptTarget) {
+    mocks.query = { request: 'req-1', directory: CLOUD }
+    mocks.invoke.mockImplementation(async (command: string) => {
+      switch (command) {
+        case 'exchange_prepare_assessment': return prepared
+        case 'exchange_start_assessment': return attempt
+        default: return null
+      }
+    })
+  }
+
+  it('verifies the request first and names it when the trust profile is chosen', async () => {
+    armRequest(target())
+    const wrapper = render()
+    await flushPromises()
+    expect(mocks.invoke).toHaveBeenCalledWith('exchange_prepare_assessment', { directoryUrl: CLOUD, requestId: 'req-1' })
+    expect(mocks.openRoles).not.toHaveBeenCalled()
+    expect(mocks.start).toHaveBeenCalledExactlyOnceWith(null, false, 'assessment', {
+      roleAssessmentId: null, companionPhone: false, exchangeRequestId: 'req-1',
+    })
+    expect(mocks.invoke).toHaveBeenCalledWith('exchange_start_assessment', {
+      directoryUrl: CLOUD, requestId: 'req-1', integritySessionId: 'session-1',
+    })
+    expect(wrapper.find('[data-testid="role-banner"]').text()).toContain('learn.assessment.roleBanner')
+  })
+
+  it('stops at the camera gate when the request floor needs the camera', async () => {
+    armRequest(target({ issuance_policy: { min_trust_profile: 'camera' }, camera_required: true }))
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="request-intro"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="camera-gate"]').text()).toContain('learn.assessment.requestCameraNote')
+    expect(wrapper.find('[data-testid="role-none"]').exists()).toBe(false)
+    expect((wrapper.get('[data-testid="start-attempt"]').element as HTMLButtonElement).disabled).toBe(true)
+    expect(mocks.start).not.toHaveBeenCalled()
+  })
+
+  it('shows why when the request cannot be verified, and starts nothing', async () => {
+    mocks.query = { request: 'req-1', directory: CLOUD }
+    mocks.invoke.mockImplementation(async (command: string) => {
+      if (command === 'exchange_prepare_assessment') throw new Error('this organisation could not be verified')
+      return null
+    })
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.text()).toContain('this organisation could not be verified')
+    expect(mocks.start).not.toHaveBeenCalled()
+  })
+})
+
 describe('question rendering', () => {
   it('keeps one selection for a single-answer question', async () => {
     mocks.startAttempt.mockResolvedValue({
@@ -535,5 +596,31 @@ describe('question rendering', () => {
     const wrapper = render()
     await flushPromises()
     expect(wrapper.get('[data-testid="result-skill"]').text()).toBe('Big-O Analysis')
+  })
+
+  it('tells the learner when the credential could only carry session-bound evidence', async () => {
+    const graded: GradeResult = {
+      score: 1,
+      passed: true,
+      credential_id: 'credential-1',
+      attestation_evidence: { binding: 'session', reason: 'the paired phone is no longer linked to this session' },
+    }
+    mocks.invoke.mockImplementation(async (command: string) => (command === 'assessment_recover' ? graded : null))
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="session-bound-evidence"]').exists()).toBe(true)
+  })
+
+  it('says nothing about evidence when the credential is bound to it', async () => {
+    const graded: GradeResult = {
+      score: 1,
+      passed: true,
+      credential_id: 'credential-1',
+      attestation_evidence: { binding: 'credential' },
+    }
+    mocks.invoke.mockImplementation(async (command: string) => (command === 'assessment_recover' ? graded : null))
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="session-bound-evidence"]').exists()).toBe(false)
   })
 })

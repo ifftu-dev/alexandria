@@ -1,0 +1,50 @@
+{
+  "description": "A camera floor and a camera session that carried camera checks in nine of its ten committed windows: coverage exactly at the 0.9 minimum carries the floor.",
+  "policy": {
+    "min_integrity": null,
+    "max_critical": null,
+    "max_warning": null,
+    "require_clean": false,
+    "required_assurance_level": null,
+    "probe_policy": null,
+    "min_trust_profile": "camera",
+    "min_verification_rung": null
+  },
+  "integrity": {
+    "sessionId": "isess_policy_vector",
+    "status": "completed",
+    "integrityScore": 0.91,
+    "criticalCount": 0,
+    "warningCount": 1,
+    "assuranceLevel": "local",
+    "generatedAt": "2026-06-01T00:00:00Z",
+    "trustProfile": "camera",
+    "verificationRung": "probed",
+    "signalsRun": [
+      "core",
+      "camera"
+    ],
+    "signalsDegraded": [
+      "camera"
+    ],
+    "signalsNotRun": [
+      "device_attestation"
+    ],
+    "cameraCoverage": 0.9,
+    "probe": {
+      "outcome": "satisfied",
+      "policies": [
+        "reseed"
+      ],
+      "satisfied": 2,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "attestation": {
+    "outcome": "not_supplied"
+  },
+  "expect": {
+    "refusal": null
+  }
+}

@@ -106,6 +106,25 @@ pub struct AttestSessionResponse {
     pub unverified: Option<crate::sentinel::attestation::Unverified>,
 }
 
+/// What this device can contribute to a trust profile floor before any
+/// session exists, so a policy's requirements can say up front when this
+/// device cannot meet them. The camera is detected by the frontend.
+#[derive(Debug, Serialize)]
+pub struct DeviceSupport {
+    /// The platform can attest a session here (App Attest, Play Integrity).
+    pub platform_attestation: bool,
+    /// A paired phone can lend its attestation (desktop builds).
+    pub companion_phone: bool,
+}
+
+#[tauri::command]
+pub async fn integrity_device_support() -> Result<DeviceSupport, String> {
+    Ok(DeviceSupport {
+        platform_attestation: crate::sentinel::attestation::native::supported(),
+        companion_phone: cfg!(desktop),
+    })
+}
+
 /// Ask the platform to attest the session nonce and store the result.
 ///
 /// Called by the frontend right after `integrity_start_session`. Blocking
@@ -256,9 +275,9 @@ pub async fn integrity_select_profile(
 }
 
 /// The coverage statement a credential's integrity assertion names by
-/// digest, resolved offline from the statements bundled with the app.
-/// `None` when no bundled statement has that digest (another version, or a
-/// certification this build does not carry).
+/// digest, resolved offline from the verifier library's registry of every
+/// published statement version. `None` when no statement has that digest (a
+/// version newer than this build, or a certification it does not carry).
 #[tauri::command]
 pub async fn integrity_coverage_statement(
     digest: String,
@@ -268,7 +287,7 @@ pub async fn integrity_coverage_statement(
     ))
 }
 
-/// Every coverage statement bundled with the app under the certification in
+/// Every current-version coverage statement under the certification in
 /// force, one per trust profile and verification rung, so a sponsor reads
 /// what a policy's minimums cover before choosing them.
 #[tauri::command]
@@ -441,7 +460,7 @@ pub async fn integrity_end_session(
         None => None,
     };
     let closing = session_id.clone();
-    state
+    let (session, purpose) = state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
@@ -457,12 +476,33 @@ pub async fn integrity_end_session(
                         )
                         .map_err(|e| e.to_string())?;
                 }
-                finish_session(db.conn(), &session_id)
+                let session = finish_session(db.conn(), &session_id)?;
+                let purpose: String = db
+                    .conn()
+                    .query_row(
+                        "SELECT purpose FROM integrity_sessions WHERE id = ?1",
+                        params![session_id],
+                        |r| r.get(0),
+                    )
+                    .map_err(|e| e.to_string())?;
+                Ok((session, purpose))
             },
         )
-        .await
-        .inspect(|_| companion.close(&closing))
+        .await?;
+    // An assessment is graded after monitoring ends, and grading asks a
+    // paired phone for evidence over the credential: its link stays up for
+    // that, within a bound.
+    if purpose == "assessment" {
+        companion.close_after(&closing, COMPANION_ISSUANCE_WAIT);
+    } else {
+        companion.close(&closing);
+    }
+    Ok(session)
 }
+
+/// How long a paired phone's link outlives the end of an assessment session,
+/// for grading to ask it for evidence over the credential.
+const COMPANION_ISSUANCE_WAIT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 
 fn finish_session(
     connection: &rusqlite::Connection,

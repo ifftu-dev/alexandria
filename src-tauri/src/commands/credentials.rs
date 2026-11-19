@@ -151,11 +151,10 @@ pub async fn suspend_credential(
     until: Option<String>,
     reason: Option<String>,
 ) -> Result<(), String> {
-    let issuer_did = Issuer::from_keystore(&state.keystore)
+    let issuer = Issuer::from_keystore(&state.keystore)
         .await
-        .map_err(|e| e.to_string())?
-        .did()
-        .clone();
+        .map_err(|e| e.to_string())?;
+    let issuer_did = issuer.did().clone();
     let now = now_rfc3339();
     state
         .db_executor
@@ -175,7 +174,10 @@ pub async fn suspend_credential(
                 .map_err(|e| e.to_string())
             },
         )
-        .await
+        .await?;
+    // Suspension is a bit in the published suspension list.
+    publish_status_lists_quietly(&state, &issuer, "after suspend").await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -183,11 +185,11 @@ pub async fn reinstate_credential(
     state: State<'_, AppState>,
     credential_id: String,
 ) -> Result<(), String> {
-    let issuer_did = Issuer::from_keystore(&state.keystore)
+    let issuer = Issuer::from_keystore(&state.keystore)
         .await
-        .map_err(|e| e.to_string())?
-        .did()
-        .clone();
+        .map_err(|e| e.to_string())?;
+    let issuer_did = issuer.did().clone();
+    let now = now_rfc3339();
     state
         .db_executor
         .execute(
@@ -195,11 +197,13 @@ pub async fn reinstate_credential(
             state.profile_lease(),
             "credentials.reinstate",
             move |db| {
-                lifecycle::reinstate(db.conn(), &issuer_did, &credential_id)
+                lifecycle::reinstate(db.conn(), &issuer_did, &credential_id, &now)
                     .map_err(|e| e.to_string())
             },
         )
-        .await
+        .await?;
+    publish_status_lists_quietly(&state, &issuer, "after reinstate").await;
+    Ok(())
 }
 
 /// Add a (credential_id, requestor_did) entry to the per-credential

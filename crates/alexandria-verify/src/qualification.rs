@@ -322,7 +322,7 @@ impl QualificationPolicySet {
         let accepted = |did: &Did| policy.accepted_issuers.iter().any(|issuer| issuer == did);
         let permits = |route| policy.routes.contains(&route);
         let (route, qualifying_issuers) = match trust {
-            CredentialTrust::VerifiedIssuerSigned { issuer }
+            CredentialTrust::VerifiedIssuerSigned { issuer, .. }
                 if permits(QualificationRoute::AcceptedIssuer) && accepted(&issuer) =>
             {
                 (QualificationRoute::AcceptedIssuer, vec![issuer])
@@ -515,7 +515,7 @@ mod tests {
             context: vec!["https://www.w3.org/ns/credentials/v2".into()],
             id: Some("urn:uuid:qualification-test".into()),
             type_: vec!["VerifiableCredential".into(), class.into()],
-            issuer: issuer_did.clone(),
+            issuer: issuer_did.clone().into(),
             valid_from: "2026-01-01T00:00:00Z".into(),
             valid_until: None,
             credential_subject: claim.into_subject(subject.clone()),
@@ -523,6 +523,8 @@ mod tests {
             terms_of_use: None,
             witness: None,
             integrity: None,
+            evidence: Vec::new(),
+            related_resource: Vec::new(),
             proof: Proof::unsigned("2026-01-01T00:00:00Z"),
         };
         sign_credential(
@@ -1031,13 +1033,16 @@ mod tests {
         );
 
         let mut with_status = skill_credential(&instructor, &learner, 3, vec![]);
-        with_status.credential_status = Some(CredentialStatus {
-            id: "urn:status:1#0".into(),
-            type_: "BitstringStatusListEntry".into(),
-            status_purpose: "revocation".into(),
-            status_list_index: "0".into(),
-            status_list_credential: "urn:status:1".into(),
-        });
+        with_status.credential_status = Some(
+            CredentialStatus {
+                id: "urn:status:1#0".into(),
+                type_: "BitstringStatusListEntry".into(),
+                status_purpose: "revocation".into(),
+                status_list_index: "0".into(),
+                status_list_credential: "urn:status:1".into(),
+            }
+            .into(),
+        );
         let issuer = derive_did_key(&instructor);
         let with_status = sign_credential(
             UnsignedCredential {

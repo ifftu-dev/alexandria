@@ -45,7 +45,6 @@
   "store": {
     "keyRegistry": [],
     "statusLists": {},
-    "suspended": {},
     "superseded": []
   },
   "expect": {
@@ -63,6 +62,10 @@
     "pendingReasons": [
       "issuer_key_missing"
     ],
+    "attestation": {
+      "outcome": "not_supplied"
+    },
+    "verifiedAssuranceLevel": "local",
     "acceptanceDecision": "pending"
   }
 }

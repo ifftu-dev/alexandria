@@ -843,6 +843,11 @@ export interface ProfileRequest {
   consent: SentinelCapabilities
   /** Assessments only: the sponsor role whose policy sets the floor. */
   role_assessment_id: string | null
+  /**
+   * Assessments only: the credential request whose issuance policy sets the
+   * floor, read from the request as this device verified it. Never with a role.
+   */
+  exchange_request_id?: string | null
 }
 
 export interface ProfileExclusion {
@@ -1821,7 +1826,8 @@ export type VerificationPendingReason =
   | 'issuer_key_unavailable'
   | 'status_list_missing'
   | 'status_list_unavailable'
-  | 'suspension_state_unavailable'
+  | 'suspension_list_missing'
+  | 'suspension_list_unavailable'
   | 'supersession_state_unavailable'
   | 'integrity_anchor_unavailable'
 
@@ -1971,6 +1977,12 @@ export interface IntegrityAssertion {
   signalsDegraded?: string[]
   /** Signals the profile does not include. */
   signalsNotRun?: string[]
+  /**
+   * Fraction of committed windows that carried camera checks, in [0,1]. Set
+   * only when the profile includes the camera; absent from credentials issued
+   * before the field existed.
+   */
+  cameraCoverage?: number | null
   /** Outcome of the follow-up probes, when any probe step ran. */
   probe?: IntegrityProbeSummary | null
 }
@@ -1989,15 +2001,41 @@ export interface VerifiableCredential {
   /** W3C VC v2 §4.3 — optional. Locally-issued credentials always have one. */
   id?: string | null
   type: string[]
-  issuer: string
+  /** The issuer's DID, or an issuer object whose `id` is the DID (VC 2.0). */
+  issuer: CredentialIssuer
   validFrom: string
   validUntil?: string | null
   credentialSubject: CredentialSubject
-  credentialStatus?: CredentialStatus | null
+  /** One entry or several (VC 2.0); issued credentials carry a revocation and a suspension entry. */
+  credentialStatus?: CredentialStatus | CredentialStatus[] | null
   termsOfUse?: TermsOfUse | null
   witness?: Witness | null
   integrity?: IntegrityAssertion | null
+  /** VC 2.0 `relatedResource`; names the coverage statement when `integrity` does. */
+  relatedResource?: RelatedResource[]
   proof: Proof
+}
+
+/**
+ * Mirrors `alexandria_verify::vc::CredentialIssuer`. `name` and `domain` are
+ * the issuer's own statement; `OrganisationBacking` says whether the domain
+ * stands behind the key.
+ */
+export type CredentialIssuer =
+  | string
+  | { id: string; name?: string; domain?: string; [extra: string]: unknown }
+
+/** The issuer's DID, whichever form the credential uses. */
+export function issuerDid(issuer: CredentialIssuer): string {
+  return typeof issuer === 'string' ? issuer : issuer.id
+}
+
+/** Mirrors `alexandria_verify::vc::RelatedResource`. */
+export interface RelatedResource {
+  id: string
+  digestSRI?: string
+  digestMultibase?: string
+  mediaType?: string
 }
 
 // Issuance-time integrity gate (§ Integrity→VC bridge). Evaluated
@@ -2139,10 +2177,46 @@ export interface VerificationResult {
   suspended: boolean
   /** §11.4: a newer credential supersedes this one. */
   superseded: boolean
+  /** A `relatedResource` names a coverage statement other than the assertion's; omitted while false. */
+  coverageStatementMismatch?: boolean
   verificationTime: string
   pendingReasons: VerificationPendingReason[]
+  /** What the credential's device attestation evidence proved. */
+  attestation: AttestationOutcome
+  /** `device_attested` only for verified credential-bound evidence. */
+  verifiedAssuranceLevel: VerifiedAssuranceLevel
   acceptanceDecision: AcceptanceDecision
 }
+
+/** Mirrors `alexandria_verify::attestation::Platform`. */
+export type AttestationPlatform = 'ios' | 'android'
+
+/** Mirrors `alexandria_verify::attestation::InvalidReason`. */
+export type AttestationInvalidReason =
+  | 'malformed_evidence'
+  | 'duplicate_evidence'
+  | 'missing_integrity_assertion'
+  | 'untrusted_chain'
+  | 'wrong_nonce'
+  | 'wrong_app_id'
+  | 'key_mismatch'
+  | 'counter'
+  | 'environment_not_accepted'
+  | 'invalid_signature'
+  | 'device_integrity'
+  | 'binding_mismatch'
+  | 'companion_mismatch'
+
+/** Mirrors `alexandria_verify::attestation::AttestationOutcome`. */
+export type AttestationOutcome =
+  | { outcome: 'not_supplied' }
+  | { outcome: 'verified_credential_bound'; platform: AttestationPlatform }
+  | { outcome: 'verified_session_bound'; platform: AttestationPlatform }
+  | { outcome: 'unverifiable'; platform: AttestationPlatform }
+  | { outcome: 'invalid'; reason: AttestationInvalidReason }
+
+/** Mirrors `alexandria_verify::attestation::VerifiedAssuranceLevel`. */
+export type VerifiedAssuranceLevel = 'local' | 'device_attested'
 
 /** Mirrors `alexandria_verify::trust::TrustInvalidReason`. */
 export type TrustInvalidReason =
@@ -2157,6 +2231,7 @@ export type TrustInvalidReason =
   | 'superseded'
   | 'integrity_anchor_missing'
   | 'type_not_allowed'
+  | 'invalid_attestation'
 
 /** Mirrors `alexandria_verify::trust::EndorsementMismatch`. */
 export type EndorsementMismatch =
@@ -2165,6 +2240,14 @@ export type EndorsementMismatch =
   | 'not_skill_claim'
   | 'course_document_not_claimed'
   | 'completion_root_not_claimed'
+
+/** Mirrors `alexandria_verify::org::OrganisationBacking`. */
+export type OrganisationBacking =
+  | { outcome: 'verified'; name: string; domain: string }
+  | { outcome: 'key_not_listed' }
+  | { outcome: 'wrong_domain' }
+  | { outcome: 'invalid_descriptor' }
+  | { outcome: 'descriptor_not_supplied' }
 
 /** Mirrors `alexandria_verify::trust::EndorsementOutcome`. */
 export type EndorsementOutcome =
@@ -2188,26 +2271,59 @@ export interface StatusPublishReport {
 export type CredentialTrust =
   | { state: 'invalid'; reasons: TrustInvalidReason[] }
   | { state: 'pending'; reasons: VerificationPendingReason[] }
-  | { state: 'verified_self_claim'; endorsement: EndorsementOutcome }
-  | { state: 'verified_issuer_signed'; issuer: string }
+  | { state: 'verified_self_claim'; endorsement: EndorsementOutcome; attestation: AttestationOutcome }
+  | {
+    state: 'verified_issuer_signed'
+    issuer: string
+    attestation: AttestationOutcome
+    /** Present when the issuer names a domain or a descriptor was supplied. */
+    organisation?: OrganisationBacking
+  }
   | {
     state: 'verified_course_endorsement'
     course_id: string
     course_document_cid: string
     course_document_version: number
     attestors: string[]
+    attestation: AttestationOutcome
   }
 
-// --- Survivability bundle (§20.4) ----------------------------------------
+/**
+ * Mirrors `domain::credential_trust::Provenance`: exactly one of the three
+ * things a reader can rely on for a verified credential, strongest first.
+ */
+export type Provenance =
+  | { kind: 'organisation'; name: string; domain: string }
+  | { kind: 'device_attested'; platform: AttestationPlatform }
+  /** `attestation` says what the credential's evidence, if any, did prove. */
+  | { kind: 'self_reported'; attestation: AttestationOutcome }
 
-export interface KeyRegistryRow {
-  did: string
-  key_id: string
-  public_key_hex: string
-  valid_from: string
-  valid_until: string | null
-  rotated_by: string | null
+/** Mirrors `domain::credential_trust::SuspensionState`, read from the suspension list. */
+export type SuspensionState =
+  | { state: 'not_suspended' }
+  | { state: 'suspended' }
+  | { state: 'unknown'; reason: VerificationPendingReason }
+  | { state: 'no_list' }
+
+/**
+ * Mirrors `domain::credential_trust::CredentialTrustView`, what
+ * `get_credential_trust` returns: what a credential view states about trust.
+ */
+export interface CredentialTrustView {
+  /** Classification under the default policy, which rejects a suspended credential. */
+  trust: CredentialTrust
+  /** Judged with suspension set aside; `null` while invalid for another reason or pending. */
+  provenance: Provenance | null
+  /** Who signed the credential, when that is not its subject. */
+  issuer: string | null
+  /** Organisation backing of the issuer key, when it was judged. */
+  organisation: OrganisationBacking | null
+  suspension: SuspensionState
+  /** The coverage statement the integrity assertion names, when this build resolves it. */
+  coverage_statement: CoverageStatement | null
 }
+
+// --- Survivability bundle (§20.4) ----------------------------------------
 
 export interface StatusListRow {
   list_id: string
@@ -2221,7 +2337,6 @@ export interface StatusListRow {
 export interface CredentialBundle {
   format_version: string
   credentials: VerifiableCredential[]
-  key_registry: KeyRegistryRow[]
   status_lists: StatusListRow[]
   status_list_credentials?: VerifiableCredential[]
   /** The coverage statements the credentials' integrity assertions name. */
@@ -2638,7 +2753,18 @@ export interface GradeResult {
   score: number
   passed: boolean
   credential_id: string | null
+  /** What attestation evidence the credential issued by this grading
+   *  carries. Absent when nothing was issued. */
+  attestation_evidence?: AttestationEvidenceBinding
 }
+
+/** Device attestation evidence in an issued credential: none, bound to this
+ *  credential, or only the session's evidence (and why it could not be
+ *  bound). */
+export type AttestationEvidenceBinding =
+  | { binding: 'none' }
+  | { binding: 'credential' }
+  | { binding: 'session'; reason: string }
 
 /** Where an attempt's follow-up probes come from (assessment or role policy). */
 export type ProbePolicy = 'none' | 'reseed' | 'authored' | 'plugin' | 'llm'
@@ -2925,6 +3051,33 @@ export interface CredentialRequest {
   require_new_assessment: boolean
   created_at: number
   expires_at: number
+  /**
+   * The policy the organisation will judge the answer against before issuing
+   * its own credential. Covered by the organisation's proof; never carries
+   * `probe_connection_id`. Absent when the request names no policy.
+   */
+  issuance_policy?: IssuancePolicy
+}
+
+/**
+ * What an attempt answering a credential request runs under, from the
+ * request as this device verified it (`exchange_prepare_assessment`).
+ */
+export interface RequestAttemptTarget {
+  request_id: string
+  organization: string
+  role_label: string
+  issuance_policy: IssuancePolicy | null
+  /** The policy's minimum trust profile runs the camera. */
+  camera_required: boolean
+  /** The policy's minimum trust profile needs device attestation. */
+  attestation_required: boolean
+}
+
+/** What this device can contribute to a trust profile floor (`integrity_device_support`). */
+export interface DeviceSupport {
+  platform_attestation: boolean
+  companion_phone: boolean
 }
 
 export interface InterviewInvite {
@@ -3100,6 +3253,12 @@ export interface ShareableCredential {
   id: string
   issuer: string
   issued_at: string
+  /** The request's issuance policy, judged by the shared rule, accepts it (true without a policy). */
+  meets_policy: boolean
+  /** The first unmet requirement's stable code, when refused. */
+  refusal_code: string | null
+  /** The refusal in words, when refused. */
+  refusal: string | null
 }
 
 export interface OpinionExample {

@@ -14,7 +14,7 @@
 //
 // <file.json> may be: a bare credential, an array of credentials, or the
 // bundle the app exports from Credentials → Export (which also carries the
-// issuer key registry and status lists, so revocation can be checked offline).
+// status lists, so revocation can be checked offline).
 //
 // A credential whose `statusListCredential` is an https URL names a list the
 // issuer publishes; this fetches it (plain GET, one request per list), checks
@@ -77,6 +77,12 @@ export function didKeyToPublicKey(did) {
   return decoded.slice(2)
 }
 
+/** The issuer's DID: `issuer` itself, or the `id` of an issuer object (VC 2.0). */
+export function issuerId(vc) {
+  const issuer = vc?.issuer
+  return issuer && typeof issuer === 'object' ? issuer.id ?? null : issuer ?? null
+}
+
 function b64urlDecode(s) {
   return new Uint8Array(Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64'))
 }
@@ -92,13 +98,14 @@ function ed25519Verify(publicKey, message, signature) {
 /**
  * Verify one credential.
  * @param {object} vc the signed credential
- * @param {object} [context] { now: Date, keyRegistry: [{did,key_id,public_key_hex,valid_from,valid_until}], statusLists: { [listId]: Uint8Array } }
+ * @param {object} [context] { now: Date, keyRegistry: [{did,key_id,public_key_hex}], statusLists: { [listId]: Uint8Array } }
  */
 export function verifyCredential(vc, context = {}) {
   const now = context.now ?? new Date()
+  const issuer = issuerId(vc)
   const result = {
     id: vc.id ?? null,
-    issuer: vc.issuer ?? null,
+    issuer,
     subject: vc.credentialSubject?.id ?? null,
     claim: vc.credentialSubject ? {
       skillId: vc.credentialSubject.skillId ?? null,
@@ -111,13 +118,13 @@ export function verifyCredential(vc, context = {}) {
     reasons: [],
   }
 
-  // 1. Issuer key: a registry entry covering `now`, else did:key self-resolution.
+  // 1. Issuer key: a did:key is its key, whatever the registry says; any
+  // other DID method is looked up in the registry.
   let publicKey = null
-  const registry = (context.keyRegistry ?? []).filter((k) => k.did === vc.issuer)
-  const covering = registry.find((k) => new Date(k.valid_from) <= now && (!k.valid_until || now < new Date(k.valid_until)))
-  if (covering) publicKey = Buffer.from(covering.public_key_hex, 'hex')
+  const registered = (context.keyRegistry ?? []).find((k) => k.did === issuer)
+  if (registered && !String(issuer).startsWith('did:key:')) publicKey = Buffer.from(registered.public_key_hex, 'hex')
   else {
-    try { publicKey = didKeyToPublicKey(vc.issuer) } catch (e) {
+    try { publicKey = didKeyToPublicKey(issuer) } catch (e) {
       // Not self-resolving and no registry entry: the signature cannot be
       // judged either way. That is pending, not a forgery.
       result.signature = 'unverified: issuer key not available'
@@ -132,7 +139,7 @@ export function verifyCredential(vc, context = {}) {
   else if (proof.type !== 'DataIntegrityProof' || proof.cryptosuite !== 'eddsa-jcs-2022') {
     result.reasons.push(`unsupported proof: ${proof.type} / ${proof.cryptosuite ?? 'no cryptosuite'}`)
   } else if (proof.proofPurpose !== 'assertionMethod') result.reasons.push('proofPurpose is not assertionMethod')
-  else if (typeof proof.verificationMethod !== 'string' || proof.verificationMethod.split('#')[0] !== vc.issuer || !proof.verificationMethod.split('#')[1]) {
+  else if (typeof proof.verificationMethod !== 'string' || proof.verificationMethod.split('#')[0] !== issuer || !proof.verificationMethod.split('#')[1]) {
     result.reasons.push('verificationMethod is not controlled by the issuer')
   } else if (publicKey) {
     try {
@@ -160,25 +167,66 @@ export function verifyCredential(vc, context = {}) {
   const subjectBound = typeof result.subject === 'string' && result.subject.startsWith('did:')
   if (!subjectBound) result.reasons.push('credentialSubject.id is not a DID, so the credential is not bound to a holder')
 
-  // Bitstring Status List, if the bundle carries it. Bit n = byte n/8, bit n%8 from the most significant bit.
-  const status = vc.credentialStatus
-  if (!status) result.status = 'no status list named'
+  // Bitstring Status Lists, if the bundle carries them: a revocation entry and
+  // a suspension entry, each into its own list. Bit n = byte n/8, bit n%8 from
+  // the most significant bit. A list not at hand is pending, never "clear".
+  const entries = statusEntries(vc).filter((e) => e.statusPurpose === 'revocation' || e.statusPurpose === 'suspension')
+  if (!entries.length) result.status = 'no status list named'
   else {
-    const list = context.statusLists?.[status.statusListCredential]
-    const index = Number.parseInt(status.statusListIndex, 10)
-    if (!list) result.status = isListUrl(status.statusListCredential)
-      ? 'pending: status list not fetched (run without --offline, or export a bundle)'
-      : 'pending: status list not supplied (export a bundle to include it)'
-    else if (!Number.isInteger(index) || index < 0 || index >= list.length * 8) { result.status = 'invalid status reference'; result.reasons.push('statusListIndex is out of range') }
-    else result.status = (list[index >> 3] >> (7 - (index & 7))) & 1 ? 'revoked' : 'active'
+    const read = (entry) => {
+      const list = context.statusLists?.[entry.statusListCredential]
+      const index = Number.parseInt(entry.statusListIndex, 10)
+      const what = entry.statusPurpose === 'suspension' ? 'suspension list' : 'status list'
+      if (!list) return isListUrl(entry.statusListCredential)
+        ? `pending: ${what} not fetched (run without --offline, or export a bundle)`
+        : `pending: ${what} not supplied (export a bundle to include it)`
+      if (!Number.isInteger(index) || index < 0 || index >= list.length * 8) return 'invalid'
+      return (list[index >> 3] >> (7 - (index & 7))) & 1 ? 'set' : 'clear'
+    }
+    const outcome = Object.fromEntries(entries.map((e) => [e.statusPurpose, read(e)]))
+    const pending = Object.values(outcome).find((o) => o.startsWith('pending'))
+    if (Object.values(outcome).includes('invalid')) { result.status = 'invalid status reference'; result.reasons.push('statusListIndex is out of range') }
+    else if (outcome.revocation === 'set') result.status = 'revoked'
+    else if (pending) result.status = pending
+    else if (outcome.suspension === 'set') { result.status = 'suspended'; result.reasons.push('suspended by its issuer') }
+    else result.status = 'active'
   }
+
+  // 7. A coverage statement named by `relatedResource` must be the one the
+  // integrity assertion names by digest. The digest is the address's last
+  // part (URN, or a URL path ending `/coverage-statements/{digest}`), so this
+  // needs no statement registry.
+  const namedDigest = vc.integrity?.coverageStatementDigest ?? null
+  const coverageMismatch = (Array.isArray(vc.relatedResource) ? vc.relatedResource : [])
+    .map((r) => coverageStatementDigest(String(r?.id ?? '')))
+    .some((d) => d !== null && d !== namedDigest)
+  if (coverageMismatch) result.reasons.push('relatedResource names a coverage statement other than the integrity assertion’s')
 
   const rejected =
     result.signature === 'invalid' || !subjectBound || result.validity === 'expired' || result.validity === 'not yet valid'
-    || result.status === 'revoked' || result.status === 'invalid status reference'
+    || result.status === 'revoked' || result.status === 'suspended' || result.status === 'invalid status reference'
+    || coverageMismatch
   const pending = result.signature.startsWith('unverified') || result.status.startsWith('pending')
   result.decision = rejected ? 'reject' : pending ? 'pending' : 'accept'
   return result
+}
+
+/** The digest a coverage statement address embeds, or null if `id` is not one. */
+export function coverageStatementDigest(id) {
+  const urn = 'urn:alexandria:coverage-statement:'
+  let digest = null
+  if (id.startsWith(urn)) digest = id.slice(urn.length)
+  else {
+    const at = id.lastIndexOf('/coverage-statements/')
+    if (at >= 0 && id.slice(0, at).includes('://')) digest = id.slice(at + '/coverage-statements/'.length)
+  }
+  return digest && !digest.includes('/') ? digest : null
+}
+
+/** `credentialStatus` as a list: VC 2.0 allows one entry or several. */
+export function statusEntries(vc) {
+  const status = vc?.credentialStatus
+  return status == null ? [] : Array.isArray(status) ? status : [status]
 }
 
 /** Is this status list reference one a verifier can fetch? https, or http on loopback for development. */
@@ -216,9 +264,10 @@ export async function resolveStatusLists(credentials, statusLists, options = {})
   const problems = []
   const wanted = new Map()
   for (const vc of credentials) {
-    const reference = vc?.credentialStatus
-    if (reference && isListUrl(reference.statusListCredential)) {
-      wanted.set(reference.statusListCredential, { issuer: vc.issuer, purpose: reference.statusPurpose })
+    for (const reference of statusEntries(vc)) {
+      if (isListUrl(reference.statusListCredential)) {
+        wanted.set(reference.statusListCredential, { issuer: issuerId(vc), purpose: reference.statusPurpose })
+      }
     }
   }
   for (const [url, { issuer, purpose }] of wanted) {
@@ -229,7 +278,7 @@ export async function resolveStatusLists(credentials, statusLists, options = {})
       if (text.length > 1 << 20) throw new Error('response larger than 1 MiB')
       const listVc = JSON.parse(text)
       if (listVc.id !== url) throw new Error(`document id ${listVc.id} is not the URL fetched`)
-      if (listVc.issuer !== issuer) throw new Error('list is not issued by the credential issuer')
+      if (issuerId(listVc) !== issuer) throw new Error('list is not issued by the credential issuer')
       if (!(listVc.type ?? []).includes('BitstringStatusListCredential')) throw new Error('not a BitstringStatusListCredential')
       const subject = listVc.credentialSubject ?? {}
       if (subject.type !== 'BitstringStatusList') throw new Error('subject is not a BitstringStatusList')
@@ -284,7 +333,9 @@ export function loadInput(json) {
   if (json && typeof json.format_version === 'string' && Array.isArray(json.credentials)) {
     const statusLists = {}
     const listInfo = {}
-    const keyRegistry = json.key_registry ?? []
+    // A `key_registry` field in an older bundle is ignored: issuer keys come
+    // from the issuers' did:key identifiers.
+    const keyRegistry = []
     for (const listVc of json.status_list_credentials ?? []) {
       const checked = verifyCredential(listVc, { keyRegistry })
       const subject = listVc.credentialSubject ?? {}
@@ -326,7 +377,7 @@ async function main(argv) {
     if (r.claim) console.log(`  claim      ${r.claim.skillId}  level ${r.claim.level}  score ${r.claim.score}`)
     console.log(`  signature  ${r.signature}`)
     console.log(`  validity   ${r.validity}`)
-    const listId = vc.credentialStatus?.statusListCredential
+    const listId = statusEntries(vc).find((e) => e.statusPurpose === 'revocation')?.statusListCredential
     console.log(`  status     ${r.status}${listId && statusLists[listId] ? describeListSource(listId, listInfo[listId]) : ''}`)
     console.log(`  decision   ${r.decision.toUpperCase()}`)
     for (const reason of r.reasons) console.log(`             - ${reason}`)

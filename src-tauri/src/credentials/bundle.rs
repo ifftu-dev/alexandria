@@ -3,8 +3,9 @@
 //!
 //! The export bundle is a single JSON document carrying everything a
 //! third-party verifier needs to re-check the credentials without any
-//! Alexandria infrastructure: the signed VCs themselves, the historical
-//! key registry, and the revocation status lists.
+//! Alexandria infrastructure: the signed VCs themselves and the revocation
+//! and suspension status lists. Issuer keys need no carrying: a `did:key` is
+//! its key. A `key_registry` field in an older bundle is ignored on import.
 //!
 //! Determinism comes from JCS canonicalization — same inputs ⇒
 //! byte-identical bundle, which is what the survivability tests assert
@@ -14,6 +15,7 @@ use rusqlite::Connection;
 
 use super::{store, CredentialError, Issuer};
 use crate::clock::now_rfc3339;
+use crate::domain::credential_trust::CredentialTrustView;
 use crate::domain::vc::{VerifiableCredential, VerificationPendingReason, VerificationResult};
 
 /// Bundle wire shape. Keys sort under JCS so the canonical bytes are
@@ -22,7 +24,6 @@ use crate::domain::vc::{VerifiableCredential, VerificationPendingReason, Verific
 pub struct CredentialBundle {
     pub format_version: String,
     pub credentials: Vec<VerifiableCredential>,
-    pub key_registry: Vec<KeyRegistryRow>,
     pub status_lists: Vec<StatusListRow>,
     /// The same lists as signed `BitstringStatusListCredential` documents,
     /// for the lists this node issues. A verifier that trusts nothing about
@@ -39,16 +40,6 @@ pub struct CredentialBundle {
     /// statement's digest is over its own bytes, so it checks itself.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub coverage_statements: Vec<crate::sentinel::scoring::CoverageStatement>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct KeyRegistryRow {
-    pub did: String,
-    pub key_id: String,
-    pub public_key_hex: String,
-    pub valid_from: String,
-    pub valid_until: Option<String>,
-    pub rotated_by: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -101,8 +92,8 @@ fn bundle_from_payload(
     Ok(Some(bundle))
 }
 
-/// Build a JCS-canonical export bundle of every credential, key
-/// registry row, and status list known to this node.
+/// Build a JCS-canonical export bundle of every credential and status list
+/// known to this node.
 pub fn export(conn: &Connection) -> Result<String, CredentialError> {
     export_signed(conn, None)
 }
@@ -133,22 +124,6 @@ pub fn export_signed(
             anchor_receipts.push(receipt);
         }
     }
-
-    let mut stmt = conn.prepare(
-        "SELECT did, key_id, public_key_hex, valid_from, valid_until, rotated_by \
-         FROM key_registry ORDER BY did, key_id",
-    )?;
-    let key_rows = stmt.query_map([], |r| {
-        Ok(KeyRegistryRow {
-            did: r.get(0)?,
-            key_id: r.get(1)?,
-            public_key_hex: r.get(2)?,
-            valid_from: r.get(3)?,
-            valid_until: r.get(4)?,
-            rotated_by: r.get(5)?,
-        })
-    })?;
-    let key_registry = key_rows.collect::<Result<Vec<_>, _>>()?;
 
     let mut stmt = conn.prepare(
         "SELECT list_id, issuer_did, version, status_purpose, bits, bit_length \
@@ -204,7 +179,6 @@ pub fn export_signed(
     let bundle = CredentialBundle {
         format_version: BUNDLE_FORMAT_VERSION.into(),
         credentials,
-        key_registry,
         status_lists,
         status_list_credentials,
         anchor_receipts,
@@ -247,6 +221,12 @@ pub struct OfflineVerification {
     /// carries no status list, so "not revoked" means "not known to be
     /// revoked". A bundle carries its own, and is therefore conclusive.
     pub revocation_unknown: bool,
+    /// What the bundle view states about each credential, in the order of
+    /// `results`: provenance, suspension and coverage statement
+    /// ([`super::trust::trust_view`]). Offline there is no completion
+    /// endorsement evidence and no organisation descriptor, so an
+    /// organisation-named issuer reads as not checked.
+    pub trust: Vec<CredentialTrustView>,
 }
 
 /// Why a credential was rejected, in terms a reader can act on.
@@ -270,8 +250,9 @@ pub fn rejection_reasons(result: &VerificationResult) -> Vec<&'static str> {
                 VerificationPendingReason::StatusListUnavailable => {
                     "status list lookup is unavailable"
                 }
-                VerificationPendingReason::SuspensionStateUnavailable => {
-                    "suspension lookup is unavailable"
+                VerificationPendingReason::SuspensionListMissing => "suspension list is missing",
+                VerificationPendingReason::SuspensionListUnavailable => {
+                    "suspension list lookup is unavailable"
                 }
                 VerificationPendingReason::SupersessionStateUnavailable => {
                     "supersession lookup is unavailable"
@@ -308,7 +289,51 @@ pub fn rejection_reasons(result: &VerificationResult) -> Vec<&'static str> {
     if result.superseded {
         reasons.push("superseded");
     }
+    if result.coverage_statement_mismatch {
+        reasons.push("coverage statement does not match the integrity assertion");
+    }
+    if let alexandria_verify::attestation::AttestationOutcome::Invalid { reason } =
+        result.attestation
+    {
+        reasons.push(invalid_attestation_reason(reason));
+    }
     reasons
+}
+
+/// The rejection line for invalid attestation evidence, carrying the
+/// library's stable reason code so a reader can look it up.
+fn invalid_attestation_reason(
+    reason: alexandria_verify::attestation::InvalidReason,
+) -> &'static str {
+    use alexandria_verify::attestation::InvalidReason as R;
+    macro_rules! line {
+        ($code:literal) => {
+            concat!("device attestation evidence is invalid (", $code, ")")
+        };
+    }
+    let line = match reason {
+        R::MalformedEvidence => line!("malformed_evidence"),
+        R::DuplicateEvidence => line!("duplicate_evidence"),
+        R::MissingIntegrityAssertion => line!("missing_integrity_assertion"),
+        R::UntrustedChain => line!("untrusted_chain"),
+        R::WrongNonce => line!("wrong_nonce"),
+        R::WrongAppId => line!("wrong_app_id"),
+        R::KeyMismatch => line!("key_mismatch"),
+        R::Counter => line!("counter"),
+        R::EnvironmentNotAccepted => line!("environment_not_accepted"),
+        R::InvalidSignature => line!("invalid_signature"),
+        R::DeviceIntegrity => line!("device_integrity"),
+        R::BindingMismatch => line!("binding_mismatch"),
+        R::CompanionMismatch => line!("companion_mismatch"),
+    };
+    debug_assert!(line.contains(reason.as_str()));
+    line
+}
+
+/// This build's attestation trust inputs, so offline verification checks a
+/// credential's device evidence exactly as the app does everywhere else.
+fn attestation_trust() -> &'static alexandria_verify::attestation::AttestationTrust {
+    crate::sentinel::attestation::profile_trust_inputs()
 }
 
 /// Verify a bundle, a single credential, or an array of credentials.
@@ -324,10 +349,21 @@ pub fn rejection_reasons(result: &VerificationResult) -> Vec<&'static str> {
 /// "not known", and `revocation_unknown` says so rather than letting a caller
 /// read the result as a clean bill of health.
 pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, CredentialError> {
-    use crate::domain::vc::{verify, AcceptanceDecision, NullStore, VerificationPolicy};
+    use crate::domain::vc::{
+        verify, AcceptanceDecision, NullStore, VerificationPolicy, VerificationStore,
+    };
 
     let policy = VerificationPolicy::default();
-    let tally = |results: Vec<VerificationResult>, source, revocation_unknown| {
+    let network_id = crate::network_profile::embedded_preprod()
+        .map(|profile| profile.network_id.clone())
+        .unwrap_or_default();
+    let view = |store: &dyn VerificationStore, vc: &VerifiableCredential| {
+        super::trust::trust_view(store, attestation_trust(), vc, now, &network_id, None, None)
+    };
+    let tally = |results: Vec<VerificationResult>,
+                 trust: Vec<CredentialTrustView>,
+                 source,
+                 revocation_unknown| {
         let total = results.len() as u32;
         let accepted = results
             .iter()
@@ -339,6 +375,7 @@ pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, Cred
             accepted,
             results,
             revocation_unknown,
+            trust,
         }
     };
 
@@ -353,9 +390,22 @@ pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, Cred
         let results = bundle
             .credentials
             .iter()
-            .map(|vc| verify::verify_credential(&store, vc, now, &policy))
+            .map(|vc| {
+                verify::verify_credential_with_attestation(
+                    &store,
+                    vc,
+                    now,
+                    &policy,
+                    attestation_trust(),
+                )
+            })
             .collect();
-        return Ok(tally(results, OfflineSource::Bundle, false));
+        let trust = bundle
+            .credentials
+            .iter()
+            .map(|vc| view(&store, vc))
+            .collect();
+        return Ok(tally(results, trust, OfflineSource::Bundle, false));
     }
 
     if serde_json::from_value::<VerifiableCredential>(value.clone()).is_ok() {
@@ -364,8 +414,15 @@ pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, Cred
                 index: None,
                 source,
             })?;
-        let results = vec![verify::verify_credential(&NullStore, &vc, now, &policy)];
-        return Ok(tally(results, OfflineSource::Credential, true));
+        let results = vec![verify::verify_credential_with_attestation(
+            &NullStore,
+            &vc,
+            now,
+            &policy,
+            attestation_trust(),
+        )];
+        let trust = vec![view(&NullStore, &vc)];
+        return Ok(tally(results, trust, OfflineSource::Credential, true));
     }
 
     if let Some(entries) = value
@@ -375,9 +432,18 @@ pub fn verify_offline(json: &str, now: &str) -> Result<OfflineVerification, Cred
         let list = bounded_credentials(entries)?;
         let results = list
             .iter()
-            .map(|vc| verify::verify_credential(&NullStore, vc, now, &policy))
+            .map(|vc| {
+                verify::verify_credential_with_attestation(
+                    &NullStore,
+                    vc,
+                    now,
+                    &policy,
+                    attestation_trust(),
+                )
+            })
             .collect();
-        return Ok(tally(results, OfflineSource::Credentials, true));
+        let trust = list.iter().map(|vc| view(&NullStore, vc)).collect();
+        return Ok(tally(results, trust, OfflineSource::Credentials, true));
     }
 
     // Say what was expected rather than echoing whichever parse failed last —
@@ -401,7 +467,13 @@ pub fn verify_bundle_offline(
     let mut accepted = 0u32;
     let policy = VerificationPolicy::default();
     for vc in &bundle.credentials {
-        let result = verify::verify_credential(&store, vc, verification_time, &policy);
+        let result = verify::verify_credential_with_attestation(
+            &store,
+            vc,
+            verification_time,
+            &policy,
+            attestation_trust(),
+        );
         if result.acceptance_decision == AcceptanceDecision::Accept {
             accepted += 1;
         }
@@ -411,17 +483,18 @@ pub fn verify_bundle_offline(
 
 /// A [`VerificationStore`] over a credential bundle's own contents.
 ///
-/// A bundle is self-contained: it carries the key registry entries and status
-/// lists needed to check the credentials inside it, and nothing else. So the
-/// answer to "is this suspended?" or "is this superseded?" is always no — those
-/// are facts about a local collection, and a bundle is not one.
+/// A bundle is self-contained: it carries the status lists needed to check the
+/// credentials inside it — revocation and suspension lists alike — and nothing
+/// else. Issuer keys come from the issuers' `did:key` identifiers, so no
+/// registry key is ever found here. The answer to "is this superseded?" is
+/// always "not known": that is a fact about a local collection, and a bundle
+/// is not one.
 ///
 /// This used to be done by opening an in-memory SQLite database, running the
 /// entire application migration suite against it, and INSERTing the bundle's
 /// rows — solely because `verify_credential` demanded a `&Connection`. It never
 /// needed a database; it needed four lookups.
 struct BundleStore {
-    keys: Vec<KeyRegistryRow>,
     status_lists: Vec<(String, Vec<u8>)>,
     anchor_receipts: Vec<alexandria_verify::vc::anchor::AnchorReceipt>,
 }
@@ -439,7 +512,7 @@ impl BundleStore {
             let Some(id) = list_vc.id.as_deref() else {
                 return Err(CredentialError::StatusListWithoutId);
             };
-            let key = alexandria_verify::did::resolve_did_key(&list_vc.issuer)
+            let key = alexandria_verify::did::resolve_did_key(list_vc.issuer.id())
                 .map_err(CredentialError::StatusListIssuer)?;
             let bits = alexandria_verify::vc::status::verify_status_list_credential(list_vc, &key)
                 .map_err(|source| CredentialError::StatusListInvalid {
@@ -457,7 +530,6 @@ impl BundleStore {
             status_lists.push((list.list_id.clone(), bits));
         }
         Ok(Self {
-            keys: bundle.key_registry.clone(),
             status_lists,
             anchor_receipts: bundle.anchor_receipts.clone(),
         })
@@ -465,34 +537,11 @@ impl BundleStore {
 }
 
 impl crate::domain::vc::VerificationStore for BundleStore {
-    /// Mirrors the registry query in `crypto::key_registry::resolve_key_at`:
-    /// the entry whose `[valid_from, valid_until)` window contains `at`, latest
-    /// `valid_from` first.
-    fn key_at(
+    fn registered_key(
         &self,
-        did: &alexandria_verify::did::Did,
-        at: &str,
+        _did: &alexandria_verify::did::Did,
     ) -> crate::domain::vc::StoreLookup<alexandria_verify::did::KeyRegistryEntry> {
-        self.keys
-            .iter()
-            .filter(|e| {
-                e.did == did.as_str()
-                    && e.valid_from.as_str() <= at
-                    && e.valid_until.as_deref().is_none_or(|u| u > at)
-            })
-            .max_by(|a, b| a.valid_from.cmp(&b.valid_from))
-            .and_then(|e| {
-                Some(alexandria_verify::did::KeyRegistryEntry {
-                    did: did.clone(),
-                    key_id: e.key_id.clone(),
-                    public_key_bytes: hex::decode(&e.public_key_hex).ok()?,
-                    valid_from: e.valid_from.clone(),
-                    valid_until: e.valid_until.clone(),
-                    rotated_by: e.rotated_by.clone(),
-                })
-            })
-            .map(crate::domain::vc::StoreLookup::Found)
-            .unwrap_or(crate::domain::vc::StoreLookup::Missing)
+        crate::domain::vc::StoreLookup::Missing
     }
 
     fn status_list_bits(&self, list_id: &str) -> crate::domain::vc::StoreLookup<Vec<u8>> {
@@ -502,13 +551,6 @@ impl crate::domain::vc::VerificationStore for BundleStore {
             .map(|(_, bits)| bits.clone())
             .map(crate::domain::vc::StoreLookup::Found)
             .unwrap_or(crate::domain::vc::StoreLookup::Missing)
-    }
-
-    fn suspension(
-        &self,
-        _credential_id: &str,
-    ) -> crate::domain::vc::StoreLookup<(bool, Option<String>)> {
-        crate::domain::vc::StoreLookup::Missing
     }
 
     /// A bundle can carry a credential's receipt but not the ledger's word
@@ -566,7 +608,10 @@ mod tests {
         );
         assert_eq!(
             report.results[0].pending_reasons,
-            vec![VerificationPendingReason::StatusListMissing]
+            vec![
+                VerificationPendingReason::StatusListMissing,
+                VerificationPendingReason::SuspensionListMissing
+            ]
         );
         // A bare credential carries no status list, so this must not read as
         // a clean bill of health.
@@ -718,6 +763,41 @@ mod tests {
         );
     }
 
+    /// Every check that rejects is named: a coverage statement the credential
+    /// misnames, and attestation evidence that fails, with the reason code a
+    /// reader can look up.
+    #[test]
+    fn rejections_name_a_mismatched_statement_and_invalid_attestation() {
+        use alexandria_verify::attestation::{AttestationOutcome, InvalidReason};
+        let (db, issuer_key, _, subject) = setup();
+        let vc = credentials::issue(db.conn(), &issuer_key, &sample_request(subject), NOW).unwrap();
+        let json = serde_json::to_string(&vc).unwrap();
+        // A bare credential's lists travel without it, so its decision may
+        // wait on them; the rejection reasons are read from a decided result.
+        let mut accepted = verify_offline(&json, NOW).unwrap().results[0].clone();
+        accepted.pending_reasons.clear();
+        accepted.acceptance_decision = AcceptanceDecision::Accept;
+        assert!(rejection_reasons(&accepted).is_empty());
+
+        let mut mismatched = accepted.clone();
+        mismatched.coverage_statement_mismatch = true;
+        mismatched.acceptance_decision = AcceptanceDecision::Reject;
+        assert_eq!(
+            rejection_reasons(&mismatched),
+            vec!["coverage statement does not match the integrity assertion"]
+        );
+
+        let mut forged = accepted;
+        forged.attestation = AttestationOutcome::Invalid {
+            reason: InvalidReason::BindingMismatch,
+        };
+        forged.acceptance_decision = AcceptanceDecision::Reject;
+        assert_eq!(
+            rejection_reasons(&forged),
+            vec!["device attestation evidence is invalid (binding_mismatch)"]
+        );
+    }
+
     #[test]
     fn a_resolvable_issuer_with_a_broken_signature_says_so() {
         // The other side of the same coin: when the DID does resolve, a
@@ -805,14 +885,27 @@ mod tests {
             alexandria_verify::vc::status::get_bit(&bits, 1),
             Some(false)
         );
+        let suspension = &on_disk.status_list_credentials[1];
+        let suspension_id = suspension.id.clone().unwrap();
+        assert_eq!(
+            suspension_id,
+            alexandria_verify::vc::status::list_url("https://cloud.example", &issuer, 2)
+        );
+        alexandria_verify::vc::status::verify_fetched_list(
+            suspension,
+            &suspension_id,
+            &issuer,
+            "suspension",
+        )
+        .unwrap();
         for credential in &on_disk.credentials {
-            assert_eq!(
+            let named = |purpose| {
                 credential
-                    .credential_status
-                    .as_ref()
-                    .map(|s| s.status_list_credential.as_str()),
-                Some(list_id.as_str())
-            );
+                    .status_entry(purpose)
+                    .map(|s| s.status_list_credential.as_str())
+            };
+            assert_eq!(named("revocation"), Some(list_id.as_str()));
+            assert_eq!(named("suspension"), Some(suspension_id.as_str()));
         }
     }
 
@@ -827,12 +920,12 @@ mod tests {
             credentials::issue(db.conn(), &key, &sample_request(subject.clone()), NOW).unwrap();
         let json = export_signed(db.conn(), Some(&key)).unwrap();
         let bundle: CredentialBundle = serde_json::from_str(&json).unwrap();
-        assert_eq!(bundle.status_list_credentials.len(), 1);
+        // Both of the issuer's lists: revocation and suspension.
+        assert_eq!(bundle.status_list_credentials.len(), 2);
         let list = &bundle.status_list_credentials[0];
         assert_eq!(
             list.id.as_deref(),
-            vc.credential_status
-                .as_ref()
+            vc.status_entry("revocation")
                 .map(|s| s.status_list_credential.as_str())
         );
         assert!(list
@@ -864,6 +957,96 @@ mod tests {
             "a revoked credential must not verify from the signed list"
         );
         assert_eq!(total, 1);
+    }
+
+    #[test]
+    fn a_suspension_travels_in_the_signed_export_and_reads_from_the_list_alone() {
+        // A receiver of the bundle has no issuer database: the suspension
+        // reaches them as a bit in the signed suspension list.
+        let (db, key, issuer, subject) = setup();
+        let vc = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
+        lifecycle::suspend(
+            db.conn(),
+            &issuer,
+            vc.id.as_deref().unwrap(),
+            None,
+            None,
+            NOW,
+        )
+        .unwrap();
+        let mut bundle: CredentialBundle =
+            serde_json::from_str(&export_signed(db.conn(), Some(&key)).unwrap()).unwrap();
+        bundle.status_lists.clear();
+        let json = serde_json_canonicalizer::to_string(&bundle).unwrap();
+        let report = verify_offline(&json, NOW).unwrap();
+        assert!(report.results[0].suspended);
+        assert!(!report.results[0].revoked);
+        assert_eq!(report.accepted, 0);
+
+        // Without the suspension list the receiver cannot say "not
+        // suspended": the decision waits.
+        let suspension_list = vc
+            .status_entry("suspension")
+            .unwrap()
+            .status_list_credential
+            .clone();
+        bundle
+            .status_list_credentials
+            .retain(|list| list.id.as_deref() != Some(suspension_list.as_str()));
+        let json = serde_json_canonicalizer::to_string(&bundle).unwrap();
+        let report = verify_offline(&json, NOW).unwrap();
+        assert_eq!(
+            report.results[0].pending_reasons,
+            vec![VerificationPendingReason::SuspensionListMissing]
+        );
+        assert_eq!(
+            rejection_reasons(&report.results[0]),
+            vec!["suspension list is missing"]
+        );
+    }
+
+    #[test]
+    fn the_bundle_view_states_each_credentials_provenance_and_suspension() {
+        use crate::domain::credential_trust::{Provenance, SuspensionState};
+        use alexandria_verify::attestation::AttestationOutcome;
+        let (db, key, issuer, subject) = setup();
+        let kept =
+            credentials::issue(db.conn(), &key, &sample_request(subject.clone()), NOW).unwrap();
+        let suspended = credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
+        lifecycle::suspend(
+            db.conn(),
+            &issuer,
+            suspended.id.as_deref().unwrap(),
+            None,
+            None,
+            NOW,
+        )
+        .unwrap();
+        let mut bundle: CredentialBundle =
+            serde_json::from_str(&export_signed(db.conn(), Some(&key)).unwrap()).unwrap();
+        bundle.status_lists.clear();
+        let json = serde_json_canonicalizer::to_string(&bundle).unwrap();
+
+        let report = verify_offline(&json, NOW).unwrap();
+        assert_eq!(report.trust.len(), 2, "one view per credential");
+        let view_of = |id: Option<&str>| {
+            let index = report
+                .results
+                .iter()
+                .position(|result| Some(result.credential_id.as_str()) == id)
+                .unwrap();
+            &report.trust[index]
+        };
+        let signed_by_issuer = Some(Provenance::SelfReported {
+            attestation: AttestationOutcome::NotSupplied,
+        });
+        let kept = view_of(kept.id.as_deref());
+        assert_eq!(kept.provenance, signed_by_issuer);
+        assert_eq!(kept.issuer.as_ref(), Some(&issuer));
+        assert_eq!(kept.suspension, SuspensionState::NotSuspended);
+        let suspended = view_of(suspended.id.as_deref());
+        assert_eq!(suspended.provenance, signed_by_issuer);
+        assert_eq!(suspended.suspension, SuspensionState::Suspended);
     }
 
     #[test]
@@ -961,8 +1144,17 @@ mod tests {
         assert_eq!(bundle.format_version, BUNDLE_FORMAT_VERSION);
         assert_eq!(bundle.credentials.len(), 1);
         assert_eq!(bundle.credentials[0].id, vc.id);
-        assert_eq!(bundle.status_lists.len(), 1);
-        assert_eq!(bundle.status_lists[0].issuer_did, issuer.as_str());
+        assert_eq!(bundle.status_lists.len(), 2, "revocation and suspension");
+        assert!(bundle
+            .status_lists
+            .iter()
+            .all(|list| list.issuer_did == issuer.as_str()));
+        let purposes: Vec<_> = bundle
+            .status_lists
+            .iter()
+            .map(|list| list.status_purpose.as_str())
+            .collect();
+        assert_eq!(purposes, ["revocation", "suspension"]);
         // No integrity assertion, no coverage statement.
         assert!(bundle.coverage_statements.is_empty());
         assert!(!json.contains("coverage_statements"));
@@ -1006,6 +1198,37 @@ mod tests {
         let (accepted, total) = verify_bundle_offline(&json, NOW).unwrap();
         assert_eq!(total, 1);
         assert_eq!(accepted, 1, "round-tripped credential must verify");
+    }
+
+    /// A `did:key` is its key, so a bundle has no key history to carry.
+    #[test]
+    fn an_exported_bundle_carries_no_key_registry() {
+        let (db, key, _, subject) = setup();
+        credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&export(db.conn()).unwrap()).unwrap();
+        assert!(bundle.get("key_registry").is_none(), "{bundle}");
+    }
+
+    /// A bundle written while rotation existed may still carry registry rows.
+    /// Import ignores them: a row naming another key for the issuer's
+    /// `did:key` changes nothing.
+    #[test]
+    fn a_bundle_carrying_rotation_history_verifies_under_the_embedded_key() {
+        let (db, key, issuer, subject) = setup();
+        credentials::issue(db.conn(), &key, &sample_request(subject), NOW).unwrap();
+        let mut bundle: serde_json::Value =
+            serde_json::from_str(&export(db.conn()).unwrap()).unwrap();
+        let other = ed25519_dalek::SigningKey::from_bytes(&[42u8; 32]);
+        bundle["key_registry"] = serde_json::json!([{
+            "did": issuer.as_str(),
+            "key_id": "key-2",
+            "public_key_hex": hex::encode(other.verifying_key().as_bytes()),
+            "valid_from": "1970-01-01T00:00:00Z",
+            "valid_until": null,
+            "rotated_by": null,
+        }]);
+        let (accepted, total) = verify_bundle_offline(&bundle.to_string(), NOW).unwrap();
+        assert_eq!((accepted, total), (1, 1));
     }
 
     #[test]

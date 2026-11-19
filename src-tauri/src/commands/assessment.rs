@@ -59,9 +59,10 @@ pub struct StartedAttempt {
     /// Fixed at the first start; a resumed attempt reports the stored role
     /// regardless of what the retry asked for.
     pub role: Option<AttemptRoleTarget>,
-    /// The role's minimum trust profile judged against the session, before
-    /// the first item. An attempt is only started when it is satisfied;
-    /// issuance judges it again and must agree.
+    /// The role's (or the answered credential request's) minimum trust
+    /// profile judged against the session, before the first item. An
+    /// attempt is only started when it is satisfied; issuance judges it
+    /// again and must agree.
     pub policy_floor: PolicyFloor,
 }
 
@@ -81,9 +82,16 @@ pub struct AttemptRoleTarget {
     pub generated_probes: bool,
 }
 
-/// `(id, question_ids, option_orders, draft_answers_json, role_assessment_id)`
-/// of the one open attempt a retry resumes.
-type OpenAttemptRow = (String, String, String, Option<String>, Option<String>);
+/// `(id, question_ids, option_orders, draft_answers_json, role_assessment_id,
+/// request_policy_json)` of the one open attempt a retry resumes.
+type OpenAttemptRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
 
 struct RoleRow {
     target: AttemptRoleTarget,
@@ -209,6 +217,28 @@ pub struct GradeResult {
     pub score: f64,
     pub passed: bool,
     pub credential_id: Option<String>,
+    /// What attestation evidence the credential issued by this grading
+    /// carries, and why it is only session-bound when it is. Absent when
+    /// nothing was issued in this call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attestation_evidence: Option<crate::credentials::EvidenceBinding>,
+}
+
+/// What grading issues with: the ratio manifest that scores the attempt's
+/// consistency, and where the credential's attestation evidence comes from.
+pub(crate) struct GradeIssuance<'a> {
+    pub manifest: crate::sentinel::scoring::RatioManifest,
+    pub evidence: crate::credentials::EvidenceSource<'a>,
+}
+
+impl GradeIssuance<'static> {
+    /// The active manifest and this device's own platform.
+    pub(crate) fn native() -> Self {
+        Self {
+            manifest: crate::sentinel::scoring::active_manifest(),
+            evidence: crate::credentials::EvidenceSource::native(),
+        }
+    }
 }
 
 fn parse_json_vec<T: serde::de::DeserializeOwned>(s: &str) -> Vec<T> {
@@ -507,6 +537,9 @@ pub async fn assessment_recover(
     assessment_grade(state, id, answers).await.map(Some)
 }
 
+/// [`start_attempt_with_consent_db`] without generated-probe consent. Tests
+/// only: the commands start through the consent-taking or request paths.
+#[cfg(test)]
 pub(crate) fn start_attempt_db(
     db: &crate::db::Database,
     skill_id: String,
@@ -543,6 +576,68 @@ pub(crate) fn start_attempt_with_consent_db(
     now: String,
     llm_probe_consent: bool,
 ) -> Result<StartedAttempt, String> {
+    start_attempt_core(
+        db,
+        skill_id,
+        integrity_session_id,
+        AttemptPolicySource::Role(role_assessment_id),
+        seed,
+        attempt_id,
+        now,
+        llm_probe_consent,
+    )
+}
+
+/// Start (or resume) an attempt answering an organisation's credential
+/// request, under the request's issuance policy as this device verified it
+/// (`commands::exchange`): its trust profile floor is judged before any item,
+/// as a sponsor role's is, and its probe policy runs after submission
+/// ([`crate::assessment::probes::effective_probe_policy`]). The policy is
+/// stored on the attempt. A request carries no model connection, so an
+/// `llm` probe policy is skipped as unavailable and no consent is asked.
+pub(crate) fn start_request_attempt_db(
+    db: &crate::db::Database,
+    skill_id: String,
+    integrity_session_id: Option<String>,
+    request_policy: Option<&crate::credentials::IssuancePolicy>,
+    seed: u64,
+    attempt_id: String,
+    now: String,
+) -> Result<StartedAttempt, String> {
+    start_attempt_core(
+        db,
+        skill_id,
+        integrity_session_id,
+        AttemptPolicySource::Request(request_policy),
+        seed,
+        attempt_id,
+        now,
+        false,
+    )
+}
+
+/// Whose issuance policy governs an attempt: a sponsor role the learner
+/// chose, or the organisation's credential request it answers.
+enum AttemptPolicySource<'a> {
+    Role(Option<String>),
+    Request(Option<&'a crate::credentials::IssuancePolicy>),
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_attempt_core(
+    db: &crate::db::Database,
+    skill_id: String,
+    integrity_session_id: Option<String>,
+    source: AttemptPolicySource<'_>,
+    seed: u64,
+    attempt_id: String,
+    now: String,
+    llm_probe_consent: bool,
+) -> Result<StartedAttempt, String> {
+    let (role_assessment_id, request_policy) = match source {
+        AttemptPolicySource::Role(role) => (role, None),
+        AttemptPolicySource::Request(policy) => (None, policy),
+    };
     if crate::commands::diagnostics::is_enabled() {
         return Err("exit diagnostics before starting an assessment".into());
     }
@@ -675,13 +770,23 @@ pub(crate) fn start_attempt_with_consent_db(
     // learner refresh until they receive a favourable question set.
     let resumed: Option<OpenAttemptRow> = conn
         .query_row(
-            "SELECT id, question_ids, option_orders, draft_answers_json, role_assessment_id \
+            "SELECT id, question_ids, option_orders, draft_answers_json, role_assessment_id, \
+                    request_policy_json \
                FROM assessment_attempts \
               WHERE subject_did = ?1 AND skill_id = ?2 \
                 AND graded_at IS NULL AND ended_at IS NULL \
               ORDER BY started_at DESC LIMIT 1",
             params![subject_did, skill_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                ))
+            },
         )
         .optional()
         .map_err(|e| e.to_string())?;
@@ -692,11 +797,30 @@ pub(crate) fn start_attempt_with_consent_db(
         option_orders_json,
         draft_json,
         stored_role_id,
+        stored_request_policy,
     )) = resumed
     {
         let role = stored_role_target(conn, stored_role_id.as_deref())?;
+        // A request's policy stays the one the attempt was started under; an
+        // open attempt a request picks up takes the request's from here on.
+        let request_floor = match (stored_request_policy, request_policy) {
+            (Some(json), _) => parse_request_policy(&json)?.min_trust_profile,
+            (None, Some(policy)) => {
+                conn.execute(
+                    "UPDATE assessment_attempts SET request_policy_json = ?2 WHERE id = ?1",
+                    params![existing_id, request_policy_json(policy)?],
+                )
+                .map_err(|e| e.to_string())?;
+                policy.min_trust_profile
+            }
+            (None, None) => None,
+        };
+        let floor = match &role {
+            Some(role) => trust_profile::role_floor(conn, &role.role_assessment_id)?,
+            None => request_floor,
+        };
         // Judged again: the session may have lost what the floor needs.
-        let policy_floor = require_policy_floor(conn, &integrity_session_id, role.as_ref())?;
+        let policy_floor = require_policy_floor(conn, &integrity_session_id, floor)?;
         (
             existing_id,
             crate::assessment::randomizer::Draw {
@@ -718,8 +842,12 @@ pub(crate) fn start_attempt_with_consent_db(
             .as_deref()
             .map(|id| resolve_role_target(conn, &skill_id, id))
             .transpose()?;
+        let floor = match &role {
+            Some(role) => trust_profile::role_floor(conn, &role.role_assessment_id)?,
+            None => request_policy.and_then(|p| p.min_trust_profile),
+        };
         // Judge the floor before anything is drawn, for the same reason.
-        let policy_floor = require_policy_floor(conn, &integrity_session_id, role.as_ref())?;
+        let policy_floor = require_policy_floor(conn, &integrity_session_id, floor)?;
         let ctx = load_draw_context(conn, &subject_did, &skill_id)?;
         (
             attempt_id,
@@ -767,8 +895,8 @@ pub(crate) fn start_attempt_with_consent_db(
              (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
               integrity_session_id, started_at, attempt_ordinal, role_assessment_id, \
               assessed_bloom_level, pass_threshold_snapshot, item_fingerprints, \
-              llm_probe_consent) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+              llm_probe_consent, request_policy_json) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 attempt_id,
                 subject_did,
@@ -785,6 +913,7 @@ pub(crate) fn start_attempt_with_consent_db(
                 pass_threshold,
                 serde_json::to_string(&fingerprints).map_err(|e| e.to_string())?,
                 llm_probe_consent,
+                request_policy.map(request_policy_json).transpose()?,
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -801,25 +930,30 @@ pub(crate) fn start_attempt_with_consent_db(
     })
 }
 
-/// Judge the role's policy floor against the monitoring session, record the
-/// judgement on the session for issuance to compare with, and refuse when
-/// the session does not meet it.
+fn request_policy_json(policy: &crate::credentials::IssuancePolicy) -> Result<String, String> {
+    serde_json::to_string(policy).map_err(|e| e.to_string())
+}
+
+/// A stored request policy that does not parse must not become "no floor".
+fn parse_request_policy(json: &str) -> Result<crate::credentials::IssuancePolicy, String> {
+    serde_json::from_str(json).map_err(|e| format!("request policy unreadable: {e}"))
+}
+
+/// Judge the policy floor (a sponsor role's or a credential request's)
+/// against the monitoring session, record the judgement on the session for
+/// issuance to compare with, and refuse when the session does not meet it.
 fn require_policy_floor(
     conn: &rusqlite::Connection,
     integrity_session_id: &str,
-    role: Option<&AttemptRoleTarget>,
+    floor: Option<crate::sentinel::scoring::TrustProfile>,
 ) -> Result<PolicyFloor, String> {
-    let floor = match role {
-        Some(role) => trust_profile::role_floor(conn, &role.role_assessment_id)?,
-        None => None,
-    };
     let judged = trust_profile::record_policy_floor(conn, integrity_session_id, floor)?;
     if judged.satisfied {
         return Ok(judged);
     }
     let missing: Vec<&str> = judged.missing.iter().map(|s| s.as_str()).collect();
     Err(format!(
-        "policy floor not met: the role requires the '{}' trust profile, this session runs '{}' (missing: {})",
+        "policy floor not met: the policy requires the '{}' trust profile, this session runs '{}' (missing: {})",
         judged.required.map_or("none", |p| p.as_str()),
         judged.profile.map_or("none", |p| p.as_str()),
         if missing.is_empty() { "a selected profile".to_string() } else { missing.join(", ") },
@@ -1081,6 +1215,61 @@ pub async fn assessment_grade(
     let now = crate::clock::now_rfc3339();
     #[cfg(desktop)]
     let grader_runtime = state.grader_runtime.clone();
+    // A paired phone is asked for evidence over the credential before its
+    // link closes; any other session uses this device's own platform.
+    let attester = crate::sentinel::companion::transport::PairedAttester {
+        hub: state.content_node.companion(),
+        runtime: tokio::runtime::Handle::current(),
+    };
+    let manifest = crate::sentinel::scoring::active_manifest();
+    let trust = crate::sentinel::attestation::TrustConfig::from_profile();
+    // Grading runs in two database jobs with the evidence wait between them,
+    // so no write transaction (and no database thread) is held while the
+    // phone answers: a rehearsal learns what the credential will ask for,
+    // then the committed pass uses the answer.
+    let request = {
+        #[cfg(desktop)]
+        let grader_runtime = grader_runtime.clone();
+        let (signer, attempt_id, answers, now) = (
+            signer.clone(),
+            attempt_id.clone(),
+            answers.clone(),
+            now.clone(),
+        );
+        let (manifest, trust) = (manifest.clone(), trust.clone());
+        state
+            .db_executor
+            .execute(
+                DatabaseWorkload::Learner,
+                state.profile_lease(),
+                "assessment.grade.rehearse",
+                move |db| {
+                    #[cfg(desktop)]
+                    let engine = GradeEngine {
+                        runtime: &grader_runtime,
+                        budgets: Default::default(),
+                    };
+                    #[cfg(not(desktop))]
+                    let engine = GradeEngine::default();
+                    grading_evidence_request(
+                        db,
+                        &engine,
+                        &signer,
+                        &attempt_id,
+                        &answers,
+                        &now,
+                        &manifest,
+                        &trust,
+                    )
+                },
+            )
+            .await?
+    };
+    let prepared = tokio::task::spawn_blocking(move || {
+        crate::credentials::PreparedEvidence::obtain(request, &attester)
+    })
+    .await
+    .map_err(|e| format!("evidence worker failed: {e}"))?;
     let graded = state
         .db_executor
         .execute(
@@ -1095,7 +1284,17 @@ pub async fn assessment_grade(
                 };
                 #[cfg(not(desktop))]
                 let engine = GradeEngine::default();
-                grade_attempt_impl(db, &engine, &signer, &attempt_id, &answers, &now)
+                grade_with_prepared(
+                    db,
+                    &engine,
+                    &signer,
+                    &attempt_id,
+                    &answers,
+                    &now,
+                    &manifest,
+                    &trust,
+                    &prepared,
+                )
             },
         )
         .await?;
@@ -1121,20 +1320,66 @@ pub fn grade_attempt_impl(
     answers: &[SubmittedAnswer],
     now: &str,
 ) -> Result<GradeResult, String> {
-    grade_attempt_with_manifest(
+    grade_attempt_with(
         db,
         engine,
         issuer,
         attempt_id,
         answers,
         now,
-        &crate::sentinel::scoring::active_manifest(),
+        &GradeIssuance::native(),
     )
 }
 
 /// [`grade_attempt_impl`] against an explicit ratio manifest, which scores
-/// the attempt's longitudinal consistency before a credential is issued.
-pub(crate) fn grade_attempt_with_manifest(
+/// the attempt's longitudinal consistency before a credential is issued,
+/// and an explicit source of attestation evidence. A failure to obtain
+/// evidence never fails grading.
+///
+/// Evidence is obtained with no transaction open
+/// ([`crate::credentials::PreparedEvidence`]): a rehearsal learns what the
+/// credential will ask for, the attester answers, and the committed pass
+/// uses the answer.
+pub(crate) fn grade_attempt_with(
+    db: &crate::db::Database,
+    engine: &GradeEngine<'_>,
+    issuer: &Issuer,
+    attempt_id: &str,
+    answers: &[SubmittedAnswer],
+    now: &str,
+    issuance: &GradeIssuance<'_>,
+) -> Result<GradeResult, String> {
+    let request = grading_evidence_request(
+        db,
+        engine,
+        issuer,
+        attempt_id,
+        answers,
+        now,
+        &issuance.manifest,
+        &issuance.evidence.trust,
+    )?;
+    let prepared =
+        crate::credentials::PreparedEvidence::obtain(request, issuance.evidence.attester);
+    grade_with_prepared(
+        db,
+        engine,
+        issuer,
+        attempt_id,
+        answers,
+        now,
+        &issuance.manifest,
+        &issuance.evidence.trust,
+        &prepared,
+    )
+}
+
+/// The evidence a passing grade's credential will ask its attester for,
+/// learned from a grading pass that is rolled back. `None` when the
+/// attempt's session carries no stored attestation (no rehearsal is run) or
+/// the rehearsal asked for nothing. Errors are the ones grading would give.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn grading_evidence_request(
     db: &crate::db::Database,
     engine: &GradeEngine<'_>,
     issuer: &Issuer,
@@ -1142,7 +1387,83 @@ pub(crate) fn grade_attempt_with_manifest(
     answers: &[SubmittedAnswer],
     now: &str,
     manifest: &crate::sentinel::scoring::RatioManifest,
+    trust: &crate::sentinel::attestation::TrustConfig,
+) -> Result<Option<crate::credentials::BindRequest>, String> {
+    if !attempt_session_attested(db.conn(), attempt_id)? {
+        return Ok(None);
+    }
+    let recorder = crate::credentials::RecordingAttester::default();
+    let rehearsal = GradeIssuance {
+        manifest: manifest.clone(),
+        evidence: crate::credentials::EvidenceSource {
+            trust: trust.clone(),
+            attester: &recorder,
+        },
+    };
+    grade_pass(
+        db, engine, issuer, attempt_id, answers, now, &rehearsal, false,
+    )?;
+    Ok(recorder.take())
+}
+
+/// Grade and commit, answering the credential's evidence request from
+/// `prepared`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn grade_with_prepared(
+    db: &crate::db::Database,
+    engine: &GradeEngine<'_>,
+    issuer: &Issuer,
+    attempt_id: &str,
+    answers: &[SubmittedAnswer],
+    now: &str,
+    manifest: &crate::sentinel::scoring::RatioManifest,
+    trust: &crate::sentinel::attestation::TrustConfig,
+    prepared: &crate::credentials::PreparedEvidence,
 ) -> Result<GradeResult, String> {
+    let issuance = GradeIssuance {
+        manifest: manifest.clone(),
+        evidence: crate::credentials::EvidenceSource {
+            trust: trust.clone(),
+            attester: prepared,
+        },
+    };
+    grade_pass(
+        db, engine, issuer, attempt_id, answers, now, &issuance, true,
+    )
+}
+
+/// Whether the attempt's integrity session carries a stored attestation,
+/// the only case in which issuance asks an attester for anything.
+pub(crate) fn attempt_session_attested(
+    conn: &rusqlite::Connection,
+    attempt_id: &str,
+) -> Result<bool, String> {
+    Ok(conn
+        .query_row(
+            "SELECT s.attestation_json IS NOT NULL FROM assessment_attempts a \
+             JOIN integrity_sessions s ON s.id = a.integrity_session_id WHERE a.id = ?1",
+            params![attempt_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .unwrap_or(false))
+}
+
+/// One grading pass in a write transaction, committed only when `commit`
+/// is set; a rehearsal's writes are rolled back.
+#[allow(clippy::too_many_arguments)]
+fn grade_pass(
+    db: &crate::db::Database,
+    engine: &GradeEngine<'_>,
+    issuer: &Issuer,
+    attempt_id: &str,
+    answers: &[SubmittedAnswer],
+    now: &str,
+    issuance: &GradeIssuance<'_>,
+    commit: bool,
+) -> Result<GradeResult, String> {
+    let manifest = &issuance.manifest;
     let issuer_did = issuer.did();
     let conn = db.conn();
     let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
@@ -1151,7 +1472,7 @@ pub(crate) fn grade_attempt_with_manifest(
 
     let completed = conn.query_row(
         "SELECT score, passed, credential_id FROM assessment_attempts WHERE id=?1 AND graded_at IS NOT NULL",
-        [attempt_id], |r| Ok(GradeResult { score:r.get(0)?, passed:r.get(1)?, credential_id:r.get(2)? }))
+        [attempt_id], |r| Ok(GradeResult { score:r.get(0)?, passed:r.get(1)?, credential_id:r.get(2)?, attestation_evidence: None }))
         .optional().map_err(|e|e.to_string())?;
     if let Some(result) = completed {
         return Ok(result);
@@ -1322,6 +1643,7 @@ pub(crate) fn grade_attempt_with_manifest(
 
     // Issue an AssessmentCredential on pass, bound to the integrity session.
     let mut credential_id = None;
+    let mut attestation_evidence = None;
     if passed {
         // Carry each item's reproducibility triple into the credential, so a
         // verifier holding only the VC can re-run the graders and confirm the
@@ -1371,8 +1693,15 @@ pub(crate) fn grade_attempt_with_manifest(
             integrity_session_id: integrity_session_id.clone(),
             integrity_policy: None,
         };
-        let vc = crate::credentials::issue(conn, issuer, &req, now).map_err(|e| e.to_string())?;
-        credential_id = Some(vc.id.ok_or("issued assessment credential has no ID")?);
+        let issued = crate::credentials::issue_with(conn, issuer, &req, now, &issuance.evidence)
+            .map_err(|e| e.to_string())?;
+        credential_id = Some(
+            issued
+                .credential
+                .id
+                .ok_or("issued assessment credential has no ID")?,
+        );
+        attestation_evidence = Some(issued.evidence);
     }
 
     conn.execute(
@@ -1382,6 +1711,16 @@ pub(crate) fn grade_attempt_with_manifest(
     )
     .map_err(|e| e.to_string())?;
 
+    if !commit {
+        // A rehearsal: everything above is rolled back with the transaction.
+        drop(tx);
+        return Ok(GradeResult {
+            score,
+            passed,
+            credential_id,
+            attestation_evidence,
+        });
+    }
     if passed {
         crate::aggregation::store::recompute_all_impl(conn, now).map_err(|e| e.to_string())?;
     }
@@ -1391,6 +1730,7 @@ pub(crate) fn grade_attempt_with_manifest(
         score,
         passed,
         credential_id,
+        attestation_evidence,
     })
 }
 
@@ -1649,6 +1989,206 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_pass_issues_even_when_evidence_over_the_credential_cannot_be_obtained() {
+        use crate::credentials::{EvidenceBinding, EvidenceSource};
+        use crate::sentinel::attestation::{
+            apple_app_id, session_nonce, AttestationPayload, BindingAttester, DeviceAttestation,
+            Platform, TrustConfig,
+        };
+        use alexandria_verify::attestation::test_support::{build_world, AAGUID_PROD};
+        use alexandria_verify::attestation::{verify_evidence, AttestationOutcome};
+
+        struct PhoneGone;
+        impl BindingAttester for PhoneGone {
+            fn bind(&self, _: &str, _: &DeviceAttestation, _: &[u8; 32]) -> Result<String, String> {
+                Err("the paired phone is no longer linked to this session".into())
+            }
+        }
+
+        let ctx = setup();
+        // The session ran on an iPhone whose App Attest key attested it.
+        let started = "2026-07-21T23:00:00Z";
+        let w = build_world(
+            &apple_app_id(),
+            session_nonce("test-session", started),
+            AAGUID_PROD,
+            0,
+        );
+        let record = DeviceAttestation {
+            platform: Platform::Ios,
+            nonce_hex: hex::encode(session_nonce("test-session", started)),
+            app_id: apple_app_id(),
+            payload: AttestationPayload::AppAttest {
+                key_id_b64: w.key_id_b64(),
+                attestation_b64: w.attestation_b64(),
+                assertion_b64: None,
+                asserted_root: None,
+            },
+            captured_at: started.into(),
+            companion: None,
+        };
+        ctx.db
+            .conn()
+            .execute(
+                "UPDATE integrity_sessions SET started_at = ?1, attestation_json = ?2,
+                        assurance_level = 'device_attested' WHERE id = 'test-session'",
+                params![started, serde_json::to_string(&record).unwrap()],
+            )
+            .unwrap();
+        let answers = [answer("q1", &[0]), answer("q2", &[1])];
+        prepare(&ctx, &answers);
+        let trust = TrustConfig {
+            apple_root_pem: w.root_pem.clone(),
+            ..TrustConfig::default()
+        };
+        let result = grade_attempt_with(
+            &ctx.db,
+            &ctx.engine(),
+            &ctx.issuer,
+            "att_1",
+            &answers,
+            NOW,
+            &GradeIssuance {
+                manifest: crate::sentinel::scoring::active_manifest(),
+                evidence: EvidenceSource {
+                    trust: trust.clone(),
+                    attester: &PhoneGone,
+                },
+            },
+        )
+        .expect("grading commits");
+        assert!(result.passed);
+        // The learner is told the credential could only be session-bound.
+        assert_eq!(
+            result.attestation_evidence,
+            Some(EvidenceBinding::Session {
+                reason: "the paired phone is no longer linked to this session".into()
+            })
+        );
+        let stored =
+            crate::credentials::store::get(ctx.db.conn(), result.credential_id.as_deref().unwrap())
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            verify_evidence(&stored, &trust.inputs()),
+            AttestationOutcome::VerifiedSessionBound {
+                platform: Platform::Ios
+            }
+        );
+    }
+
+    /// Evidence over the credential is obtained with no write transaction
+    /// open: a paired phone can take seconds to answer, and a grade's write
+    /// transaction would hold the profile's only database thread meanwhile.
+    /// The proof obtained outside still binds the committed credential.
+    #[test]
+    fn evidence_over_the_credential_is_obtained_outside_the_write_transaction() {
+        use crate::credentials::{EvidenceBinding, EvidenceSource};
+        use crate::sentinel::attestation::{
+            apple_app_id, session_nonce, AttestationPayload, BindingAttester, DeviceAttestation,
+            Platform, TrustConfig,
+        };
+        use alexandria_verify::attestation::test_support::{
+            b64, build_assertion, build_world, World, AAGUID_PROD,
+        };
+        use alexandria_verify::attestation::{verify_evidence, AttestationOutcome};
+
+        /// Signs what issuance asks for, noting whether a transaction was
+        /// open on the profile's connection when it was asked.
+        struct Watcher<'a> {
+            world: &'a World,
+            conn: &'a rusqlite::Connection,
+            in_transaction: std::cell::RefCell<Vec<bool>>,
+        }
+        impl BindingAttester for Watcher<'_> {
+            fn bind(
+                &self,
+                _: &str,
+                _: &DeviceAttestation,
+                digest: &[u8; 32],
+            ) -> Result<String, String> {
+                self.in_transaction
+                    .borrow_mut()
+                    .push(!self.conn.is_autocommit());
+                Ok(b64(&build_assertion(self.world, digest, 2)))
+            }
+        }
+
+        let ctx = setup();
+        let started = "2026-07-21T23:00:00Z";
+        let w = build_world(
+            &apple_app_id(),
+            session_nonce("test-session", started),
+            AAGUID_PROD,
+            0,
+        );
+        let record = DeviceAttestation {
+            platform: Platform::Ios,
+            nonce_hex: hex::encode(session_nonce("test-session", started)),
+            app_id: apple_app_id(),
+            payload: AttestationPayload::AppAttest {
+                key_id_b64: w.key_id_b64(),
+                attestation_b64: w.attestation_b64(),
+                assertion_b64: None,
+                asserted_root: None,
+            },
+            captured_at: started.into(),
+            companion: None,
+        };
+        ctx.db
+            .conn()
+            .execute(
+                "UPDATE integrity_sessions SET started_at = ?1, attestation_json = ?2,
+                        assurance_level = 'device_attested' WHERE id = 'test-session'",
+                params![started, serde_json::to_string(&record).unwrap()],
+            )
+            .unwrap();
+        let answers = [answer("q1", &[0]), answer("q2", &[1])];
+        prepare(&ctx, &answers);
+        let trust = TrustConfig {
+            apple_root_pem: w.root_pem.clone(),
+            ..TrustConfig::default()
+        };
+        let watcher = Watcher {
+            world: &w,
+            conn: ctx.db.conn(),
+            in_transaction: Default::default(),
+        };
+        let result = grade_attempt_with(
+            &ctx.db,
+            &ctx.engine(),
+            &ctx.issuer,
+            "att_1",
+            &answers,
+            NOW,
+            &GradeIssuance {
+                manifest: crate::sentinel::scoring::active_manifest(),
+                evidence: EvidenceSource {
+                    trust: trust.clone(),
+                    attester: &watcher,
+                },
+            },
+        )
+        .expect("grading commits");
+
+        assert_eq!(*watcher.in_transaction.borrow(), vec![false]);
+        assert_eq!(
+            result.attestation_evidence,
+            Some(EvidenceBinding::Credential)
+        );
+        let stored =
+            crate::credentials::store::get(ctx.db.conn(), result.credential_id.as_deref().unwrap())
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            verify_evidence(&stored, &trust.inputs()),
+            AttestationOutcome::VerifiedCredentialBound {
+                platform: Platform::Ios
+            }
+        );
+    }
+
     /// An earlier attempt on the skill, the day before, with every item wrong.
     fn failed_earlier_attempt(ctx: &Ctx) {
         let conn = ctx.db.conn();
@@ -1701,14 +2241,17 @@ mod tests {
         );
         let answers = [answer("q1", &[0]), answer("q2", &[1])];
         prepare(&ctx, &answers);
-        let result = grade_attempt_with_manifest(
+        let result = grade_attempt_with(
             &ctx.db,
             &ctx.engine(),
             &ctx.issuer,
             "att_1",
             &answers,
             NOW,
-            &measured,
+            &GradeIssuance {
+                manifest: measured,
+                ..GradeIssuance::native()
+            },
         )
         .unwrap();
         assert!(result.passed, "review is not a verdict");
@@ -1849,6 +2392,7 @@ mod tests {
             require_new_assessment: true,
             created_at: now,
             expires_at: now + 900,
+            issuance_policy: None,
         };
         let signed = present_credential(
             request.clone(),
@@ -1868,34 +2412,6 @@ mod tests {
             verdict.acceptance_decision,
             alexandria_verify::vc::AcceptanceDecision::Accept
         );
-    }
-
-    #[test]
-    fn a_rotated_issuer_earns_the_credential_for_its_own_did() {
-        let ctx = setup();
-        let rotated = SigningKey::from_bytes(&[9u8; 32]);
-        crate::crypto::key_registry::rotate_key(ctx.db.conn(), &ctx.did, &rotated).unwrap();
-        // A rotation takes effect at the wall clock; grade after it.
-        let now = crate::clock::now_rfc3339();
-        let issuer =
-            Issuer::rotated(ctx.db.conn(), ctx.did.clone(), rotated.clone(), &now).unwrap();
-        let answers = [answer("q1", &[0]), answer("q2", &[1])];
-        prepare(&ctx, &answers);
-        let result = grade_attempt_impl(&ctx.db, &ctx.engine(), &issuer, "att_1", &answers, &now)
-            .expect("a rotated issuer grades its own attempt");
-        let json: String = ctx
-            .db
-            .conn()
-            .query_row(
-                "SELECT signed_vc_json FROM credentials WHERE id=?1",
-                [result.credential_id.unwrap()],
-                |r| r.get(0),
-            )
-            .unwrap();
-        let vc: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let rotated_did = serde_json::json!(ctx.did.as_str());
-        assert_eq!(vc.pointer("/issuer"), Some(&rotated_did));
-        assert_eq!(vc.pointer("/credentialSubject/id"), Some(&rotated_did));
     }
 
     #[test]
@@ -1934,11 +2450,6 @@ mod tests {
             NOW
         )
         .is_err());
-        // A key that is not the learner's cannot sign as the learner at all.
-        assert!(matches!(
-            Issuer::rotated(ctx.db.conn(), ctx.did.clone(), other_key, NOW),
-            Err(crate::credentials::CredentialError::NotCurrentKey(_))
-        ));
         let rows: i64 = ctx
             .db
             .conn()
@@ -2728,6 +3239,7 @@ mod role_target_tests {
             capabilities: camera,
             consent: camera,
             role_assessment_id: role,
+            exchange_request_id: None,
         }
     }
 
@@ -2870,6 +3382,130 @@ mod role_target_tests {
         assert_eq!(started.policy_floor.required, Some(TrustProfile::Camera));
         // Unattested, so `full` is out and `camera` is the highest permitted.
         assert_eq!(started.policy_floor.profile, Some(TrustProfile::Camera));
+    }
+
+    fn store_request(
+        conn: &rusqlite::Connection,
+        policy: IssuancePolicy,
+    ) -> alexandria_verify::exchange::CredentialRequest {
+        let request = crate::exchange_requests::tests::request("req-1", "skill_rust", Some(policy));
+        crate::exchange_requests::store(conn, "https://cloud.example", &request, 200, NOW).unwrap();
+        request
+    }
+
+    #[test]
+    fn an_attempt_started_from_a_request_with_a_camera_floor_locks_a_camera_profile() {
+        use crate::assessment::probes::{effective_probe_policy, ProbePolicy};
+        let db = setup();
+        let request = store_request(
+            db.conn(),
+            IssuancePolicy {
+                min_trust_profile: Some(TrustProfile::Camera),
+                probe_policy: Some(ProbePolicy::Reseed),
+                ..Default::default()
+            },
+        );
+        let fast = BenchmarkResult {
+            detect_ms: 10.0,
+            liveness_ms: 5.0,
+            track_ms: 1.0,
+        };
+        let chosen = select_for_session(
+            db.conn(),
+            "isess_live",
+            &ProfileRequest {
+                exchange_request_id: Some("req-1".into()),
+                ..camera_request(None)
+            },
+            Some(&fast),
+        )
+        .unwrap();
+        assert_eq!(chosen.record.selection.profile, TrustProfile::Camera);
+        assert_eq!(chosen.policy_floor.required, Some(TrustProfile::Camera));
+        assert!(chosen.policy_floor.satisfied);
+
+        let started = crate::commands::exchange::start_request_attempt(
+            &db,
+            &request,
+            "isess_live".into(),
+            7,
+            "att_1".into(),
+            NOW.into(),
+        )
+        .unwrap();
+        assert!(started.role.is_none());
+        assert!(started.policy_floor.satisfied);
+        assert_eq!(started.policy_floor.required, Some(TrustProfile::Camera));
+        assert_eq!(started.policy_floor.profile, Some(TrustProfile::Camera));
+        // The attempt keeps the request's policy: its probe policy runs.
+        assert_eq!(
+            effective_probe_policy(db.conn(), "att_1").unwrap(),
+            ProbePolicy::Reseed
+        );
+        let binding: String = db
+            .conn()
+            .query_row(
+                "SELECT exchange_binding FROM assessment_attempts WHERE id = 'att_1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(binding, "request:req-1:req-1-nonce");
+    }
+
+    #[test]
+    fn a_request_floor_the_session_misses_refuses_the_attempt_before_any_item() {
+        let db = setup();
+        let request = store_request(
+            db.conn(),
+            IssuancePolicy {
+                min_trust_profile: Some(TrustProfile::Camera),
+                ..Default::default()
+            },
+        );
+        // A request this device has not verified sets no floor: refused.
+        let unknown = ProfileRequest {
+            exchange_request_id: Some("unknown".into()),
+            ..Default::default()
+        };
+        assert!(select_for_session(db.conn(), "isess_live", &unknown, None).is_err());
+        // Neither a role and a request together.
+        let both = ProfileRequest {
+            role_assessment_id: Some("role".into()),
+            exchange_request_id: Some("req-1".into()),
+            ..Default::default()
+        };
+        assert!(select_for_session(db.conn(), "isess_live", &both, None).is_err());
+
+        // No camera: the session runs `core`, and the learner is told.
+        let chosen = select_for_session(
+            db.conn(),
+            "isess_live",
+            &ProfileRequest {
+                exchange_request_id: Some("req-1".into()),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(chosen.record.selection.profile, TrustProfile::Core);
+        assert!(!chosen.policy_floor.satisfied);
+
+        let err = crate::commands::exchange::start_request_attempt(
+            &db,
+            &request,
+            "isess_live".into(),
+            7,
+            "att_1".into(),
+            NOW.into(),
+        )
+        .unwrap_err();
+        assert!(err.contains("policy floor"), "{err}");
+        let count: i64 = db
+            .conn()
+            .query_row("SELECT COUNT(*) FROM assessment_attempts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "a refused floor costs no attempt");
     }
 
     #[test]

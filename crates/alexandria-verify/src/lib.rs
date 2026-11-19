@@ -1,13 +1,21 @@
 //! Alexandria credential verification.
 //!
 //! Everything needed to decide whether an Alexandria credential is genuine:
-//! the VC envelope types, JCS canonicalization, detached Ed25519 JWS, and
-//! `did:key` resolution.
+//! the VC envelope types, JCS canonicalization, the Data Integrity proof
+//! (`DataIntegrityProof`, cryptosuite `eddsa-jcs-2022`), `did:key`
+//! resolution, and Bitstring Status List revocation and suspension. Around
+//! them sit the checks a reader makes of what a credential says: device
+//! attestation evidence ([`attestation`]), organisation backing ([`org`]),
+//! the coverage statement registry ([`coverage`]), the issuance policy
+//! rule an issuer and a hosted service share ([`policy`]), and the evidence
+//! entry naming the credential a role credential was issued on
+//! ([`assessed`]).
 //!
 //! The crate performs no I/O. Verification needs to consult persistent state
-//! in five places — the issuer's key at a point in time, a status list's bits,
-//! a local suspension flag, whether something supersedes the credential, and
-//! an observed ledger anchor of its hash — and each of those arrives through
+//! in four places — the key registered for an issuer whose DID is not
+//! self-resolving, a status list's bits (revocation and suspension alike),
+//! whether something supersedes the credential, and an observed ledger anchor
+//! of its hash — and each of those arrives through
 //! [`VerificationStore`] rather than a database handle or a chain client. Callers implement the trait over whatever they have:
 //! SQLite in the app, a credential bundle in the CLI, Postgres on a server.
 //!
@@ -15,13 +23,18 @@
 //! not an application.
 
 pub mod access;
+pub mod assessed;
+pub mod attestation;
 pub mod course;
+pub mod coverage;
 pub mod did;
 pub mod exchange;
 pub mod governance;
 pub mod hash;
+pub mod integrity;
 pub mod json;
 pub mod org;
+pub mod policy;
 pub mod qualification;
 pub mod talent;
 pub mod trust;
@@ -35,18 +48,18 @@ pub use did::{Did, DidError, KeyRegistryEntry, VerificationMethodRef};
 /// unavailable lookup. Verification must never turn missing status evidence or
 /// a storage failure into a clean active credential.
 pub trait VerificationStore {
-    /// The issuer's registered key valid at `at`, if the registry holds one.
+    /// The key registered for an issuer whose DID method is not
+    /// self-resolving, if the registry holds one.
     ///
-    /// Preferred over `did:key` self-resolution so that a credential signed
-    /// before a key rotation still verifies afterwards (spec §5.3).
-    fn key_at(&self, did: &Did, at: &str) -> StoreLookup<KeyRegistryEntry>;
+    /// Never consulted for a `did:key`: that resolves to the key in its
+    /// identifier, and no registry state can change it.
+    fn registered_key(&self, did: &Did) -> StoreLookup<KeyRegistryEntry>;
 
-    /// Raw bits of a known status list.
+    /// Raw bits of a known status list, whatever its purpose. Suspension is
+    /// read from here too: a credential's suspension entry names a list of
+    /// purpose `suspension`, and its bit is the only suspension state
+    /// verification reads.
     fn status_list_bits(&self, list_id: &str) -> StoreLookup<Vec<u8>>;
-
-    /// Local suspension state: `(suspended, suspended_until)`. A `None` inner
-    /// value means suspended indefinitely.
-    fn suspension(&self, credential_id: &str) -> StoreLookup<(bool, Option<String>)>;
 
     /// Whether a locally-held credential supersedes this one.
     fn is_superseded(&self, credential_id: &str) -> StoreLookup<bool>;
@@ -80,13 +93,10 @@ pub enum StoreLookup<T> {
 pub struct NullStore;
 
 impl VerificationStore for NullStore {
-    fn key_at(&self, _did: &Did, _at: &str) -> StoreLookup<KeyRegistryEntry> {
+    fn registered_key(&self, _did: &Did) -> StoreLookup<KeyRegistryEntry> {
         StoreLookup::Missing
     }
     fn status_list_bits(&self, _list_id: &str) -> StoreLookup<Vec<u8>> {
-        StoreLookup::Missing
-    }
-    fn suspension(&self, _credential_id: &str) -> StoreLookup<(bool, Option<String>)> {
         StoreLookup::Missing
     }
     fn is_superseded(&self, _credential_id: &str) -> StoreLookup<bool> {

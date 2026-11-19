@@ -213,6 +213,12 @@ export interface SentinelStartOptions {
   /** Assessments only: the sponsor role whose policy floor applies. */
   roleAssessmentId?: string | null
   /**
+   * Assessments only: the organisation's credential request whose issuance
+   * policy floor applies. The backend reads the policy from the request as
+   * it verified it (`exchange_prepare_assessment`), not from here.
+   */
+  exchangeRequestId?: string | null
+  /**
    * The learner allowed voice checks on the microphone for this session
    * (interviews held in Alexandria). Recorded as the session's microphone
    * consent; voice checks refuse to listen without it.
@@ -1723,6 +1729,7 @@ function createSentinelService() {
       capabilities,
       consent: capabilities,
       role_assessment_id: options.roleAssessmentId ?? null,
+      exchange_request_id: options.exchangeRequestId ?? null,
     }
     try {
       return (await invoke<SelectedProfile | null>('integrity_select_profile', { sessionId: id, request })) ?? null

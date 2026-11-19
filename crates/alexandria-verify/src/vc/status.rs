@@ -232,7 +232,7 @@ pub fn status_list_credential(
             "VerifiableCredential".into(),
             BITSTRING_STATUS_LIST_CREDENTIAL.into(),
         ],
-        issuer: issuer.clone(),
+        issuer: issuer.clone().into(),
         valid_from: created.to_string(),
         valid_until: None,
         credential_subject: CredentialSubject {
@@ -243,6 +243,8 @@ pub fn status_list_credential(
         terms_of_use: None,
         witness: None,
         integrity: None,
+        evidence: Vec::new(),
+        related_resource: Vec::new(),
         proof: Proof::unsigned(created),
     };
     sign_credential(UnsignedCredential { credential }, key, issuer)

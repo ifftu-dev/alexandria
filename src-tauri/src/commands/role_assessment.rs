@@ -378,11 +378,100 @@ fn map_role_assessment(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleAssessment
 // Keystone — issue a role credential gated by the role's policy
 // ============================================================================
 
+/// Why a sponsor's device refuses to bind an integrity session to a role
+/// credential: the session must be the named subject's passed attempt at
+/// that role assessment.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+enum AttemptBindingRefusal {
+    #[error("integrity session {0} is unknown on this device")]
+    UnknownSession(String),
+    #[error("integrity session {0} is not an attempt for this role assessment")]
+    NotRoleAttempt(String),
+    #[error("integrity session {0} belongs to another subject's attempt")]
+    OtherSubject(String),
+    #[error("the attempt for integrity session {0} has not been graded")]
+    NotGraded(String),
+    #[error("the attempt for integrity session {0} did not pass")]
+    NotPassed(String),
+}
+
+/// Check that `integrity_session_id` belongs to an attempt `subject` made
+/// for `role_assessment_id`, and that the attempt was graded as passed.
+/// Returns the passed attempt's assessment credential id, when grading
+/// issued one.
+fn check_attempt_binding(
+    conn: &Connection,
+    role_assessment_id: &str,
+    subject: &Did,
+    integrity_session_id: &str,
+) -> Result<Option<String>, String> {
+    let known: bool = conn
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM integrity_sessions WHERE id = ?1)",
+            params![integrity_session_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if !known {
+        return Err(AttemptBindingRefusal::UnknownSession(integrity_session_id.into()).to_string());
+    }
+    let mut stmt = conn
+        .prepare(
+            "SELECT subject_did, passed, graded_at, credential_id FROM assessment_attempts \
+              WHERE role_assessment_id = ?1 AND integrity_session_id = ?2",
+        )
+        .map_err(|e| e.to_string())?;
+    let attempts = stmt
+        .query_map(params![role_assessment_id, integrity_session_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Option<i64>>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, Option<String>>(3)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    if attempts.is_empty() {
+        return Err(AttemptBindingRefusal::NotRoleAttempt(integrity_session_id.into()).to_string());
+    }
+    let mut own = attempts
+        .iter()
+        .filter(|(attempt_subject, ..)| *attempt_subject == subject.0)
+        .peekable();
+    if own.peek().is_none() {
+        return Err(AttemptBindingRefusal::OtherSubject(integrity_session_id.into()).to_string());
+    }
+    // An attempt is graded once it has both a grade time and a pass bit.
+    let mut graded = false;
+    for (_, passed, graded_at, credential_id) in own {
+        if let (Some(passed), Some(_)) = (passed, graded_at) {
+            if *passed != 0 {
+                return Ok(credential_id.clone());
+            }
+            graded = true;
+        }
+    }
+    let session = integrity_session_id.to_string();
+    Err(if graded {
+        AttemptBindingRefusal::NotPassed(session)
+    } else {
+        AttemptBindingRefusal::NotGraded(session)
+    }
+    .to_string())
+}
+
 /// Issue a `RoleCredential` for `subject` against `role_assessment_id`,
 /// bound to `integrity_session_id` and gated by the role's policy +
 /// required assurance level. Reuses the P0 issuance pipeline, so the
 /// resulting VC carries the integrity attestation and is refused if the
 /// session doesn't satisfy the role's bounds.
+///
+/// Before anything is written, the session must be an attempt `subject`
+/// made for this role and passed (`AttemptBindingRefusal`), so a sponsor
+/// cannot sign the wrong person's session. The role's policy is then judged
+/// by the shared rule inside `credentials::issue`.
 pub fn issue_role_credential_impl(
     conn: &Connection,
     signer: &Issuer,
@@ -391,10 +480,98 @@ pub fn issue_role_credential_impl(
     integrity_session_id: &str,
     now: &str,
 ) -> Result<VerifiableCredential, String> {
+    issue_role_credential_with(
+        conn,
+        signer,
+        role_assessment_id,
+        subject,
+        integrity_session_id,
+        now,
+        &credentials::EvidenceSource::native(),
+    )
+}
+
+/// The `AssessedCredentialEvidence` entry naming the assessment credential
+/// grading issued for the attempt, verified with `trust`, or `None` when
+/// grading issued none (the role's own evidence is judged then).
+///
+/// The sponsor's device usually cannot bind fresh evidence for a
+/// candidate's session; the attempt's credential carries the evidence the
+/// candidate's device bound at grading. It must be the subject's, for this
+/// session, and verify: a credential that does not refuses issuance.
+fn assessed_entry(
+    conn: &Connection,
+    credential_id: Option<&str>,
+    subject: &Did,
+    integrity_session_id: &str,
+    now: &str,
+    trust: &alexandria_verify::attestation::AttestationTrust,
+) -> Result<Option<alexandria_verify::vc::EvidenceEntry>, String> {
+    use alexandria_verify::assessed::AssessedCredentialEvidence;
+    let Some(credential_id) = credential_id else {
+        return Ok(None);
+    };
+    let assessed = credentials::store::get(conn, credential_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| {
+            format!("the attempt's assessment credential {credential_id} is not on this device")
+        })?;
+    let session = assessed.integrity.as_ref().map(|a| a.session_id.as_str());
+    if assessed.credential_subject.id != *subject || session != Some(integrity_session_id) {
+        return Err(format!(
+            "the attempt's assessment credential {credential_id} is not the subject's for \
+             integrity session {integrity_session_id}"
+        ));
+    }
+    let result = alexandria_verify::vc::verify::verify_credential_with_attestation(
+        &crate::domain::vc::SqliteVerificationStore(conn),
+        &assessed,
+        now,
+        &crate::domain::vc::VerificationPolicy::default(),
+        trust,
+    );
+    if result.acceptance_decision != crate::domain::vc::AcceptanceDecision::Accept {
+        return Err(format!(
+            "the attempt's assessment credential {credential_id} does not verify: {}",
+            credentials::bundle::rejection_reasons(&result).join(", ")
+        ));
+    }
+    let entry = AssessedCredentialEvidence::new(&assessed, result.attestation)
+        .map_err(|e| e.to_string())?;
+    Ok(Some(entry.into_entry()))
+}
+
+/// [`issue_role_credential_impl`] with an explicit evidence source: the
+/// trust inputs the attempt's credential is verified with, and the attester
+/// the role credential's own attestation evidence is asked of.
+///
+/// The role's assurance is judged from the attempt's assessment credential
+/// when grading issued one: the role credential carries an
+/// `AssessedCredentialEvidence` entry naming it by id and integrity hash
+/// with the attestation outcome and verified level found, and the shared
+/// rule takes the verified level from that entry.
+pub fn issue_role_credential_with(
+    conn: &Connection,
+    signer: &Issuer,
+    role_assessment_id: &str,
+    subject: &Did,
+    integrity_session_id: &str,
+    now: &str,
+    source: &credentials::EvidenceSource<'_>,
+) -> Result<VerifiableCredential, String> {
     let ra = get_role_assessment_impl(conn, role_assessment_id)?
         .ok_or_else(|| format!("role assessment {role_assessment_id} not found"))?;
     let org = get_organization_impl(conn, &ra.org_id)?
         .ok_or_else(|| format!("organization {} not found", ra.org_id))?;
+    let attempt_credential = check_attempt_binding(conn, &ra.id, subject, integrity_session_id)?;
+    let assessed = assessed_entry(
+        conn,
+        attempt_credential.as_deref(),
+        subject,
+        integrity_session_id,
+        now,
+        &source.trust.inputs(),
+    )?;
 
     // Issue under the organisation's own DID, not the caller's personal one.
     //
@@ -461,7 +638,16 @@ pub fn issue_role_credential_impl(
         integrity_policy: Some(policy),
     };
     // The org's DID is the signer's own (checked above), so the signer issues.
-    credentials::issue(conn, signer, &req, now).map_err(|e| e.to_string())
+    credentials::issue_with_evidence(
+        conn,
+        signer,
+        &req,
+        now,
+        source,
+        assessed.into_iter().collect(),
+    )
+    .map(|issued| issued.credential)
+    .map_err(|e| e.to_string())
 }
 
 fn issue_role_credential_transactional(
@@ -1029,6 +1215,7 @@ mod tests {
         )
         .unwrap();
         seed_session(conn, "sess_ok", "completed", 0.9, 0);
+        seed_attempt(conn, "att_ok", &ra.id, &subject.0, "sess_ok", Some(true));
 
         let vc = issue_role_credential_impl(
             conn,
@@ -1071,6 +1258,7 @@ mod tests {
         )
         .unwrap();
         seed_session(conn, "sess_bad", "suspended", 0.3, 2);
+        seed_attempt(conn, "att_bad", &ra.id, &subject.0, "sess_bad", Some(true));
         let err = issue_role_credential_impl(
             conn,
             &Issuer::from_key(key.clone()),
@@ -1083,15 +1271,24 @@ mod tests {
         assert!(err.contains("issuance policy"), "got: {err}");
     }
 
-    /// Helper: a completed org + role assessment + clean session, ready to
-    /// issue. `org_did` seeds the organization's DID column (None to adopt).
-    fn ready_to_issue(conn: &Connection, org_did: Option<&str>) -> String {
+    /// `org_did` seeds the organization's DID column (None to adopt).
+    /// Helper: an org + role assessment + clean session `sess_ok` that
+    /// `subject` passed for the role, ready to issue.
+    fn ready_to_issue(conn: &Connection, org_did: Option<&str>, subject: &Did) -> String {
+        let ra = ready_to_issue_role(conn, org_did, "SRE L4");
+        seed_session(conn, "sess_ok", "completed", 0.95, 0);
+        seed_attempt(conn, "att_ok", &ra, &subject.0, "sess_ok", Some(true));
+        ra
+    }
+
+    /// An org + role assessment titled `title`, with no session.
+    fn ready_to_issue_role(conn: &Connection, org_did: Option<&str>, title: &str) -> String {
         let org = create_organization_impl(conn, "Acme", "stake_owner", org_did, NOW).unwrap();
-        let ra = create_role_assessment_impl(
+        create_role_assessment_impl(
             conn,
             &CreateRoleAssessmentRequest {
                 org_id: org.id,
-                role_title: "SRE L4".into(),
+                role_title: title.into(),
                 job_description: None,
                 course_id: None,
                 skill_ids: vec![],
@@ -1100,9 +1297,8 @@ mod tests {
             },
             NOW,
         )
-        .unwrap();
-        seed_session(conn, "sess_ok", "completed", 0.95, 0);
-        ra.id
+        .unwrap()
+        .id
     }
 
     #[test]
@@ -1112,7 +1308,7 @@ mod tests {
         // personal identity.
         let (db, key, owner, subject) = setup();
         let conn = db.conn();
-        let ra = ready_to_issue(conn, Some(&owner.0)); // org DID == owner DID
+        let ra = ready_to_issue(conn, Some(&owner.0), &subject); // org DID == owner DID
         let vc = issue_role_credential_impl(
             conn,
             &Issuer::from_key(key.clone()),
@@ -1124,7 +1320,8 @@ mod tests {
         .unwrap();
         assert_eq!(vc.issuer, owner, "issued under the org's DID");
         assert_ne!(
-            vc.issuer.0, subject.0,
+            vc.issuer.as_str(),
+            subject.0,
             "issuer is independent of the subject"
         );
     }
@@ -1133,7 +1330,7 @@ mod tests {
     fn an_org_without_a_did_adopts_the_owners_on_first_issuance() {
         let (db, key, owner, subject) = setup();
         let conn = db.conn();
-        let ra = ready_to_issue(conn, None);
+        let ra = ready_to_issue(conn, None, &subject);
         issue_role_credential_impl(
             conn,
             &Issuer::from_key(key.clone()),
@@ -1160,7 +1357,7 @@ mod tests {
     fn failed_credential_insert_rolls_back_org_did_adoption() {
         let (db, key, _, subject) = setup();
         let conn = db.conn();
-        let role_assessment_id = ready_to_issue(conn, None);
+        let role_assessment_id = ready_to_issue(conn, None, &subject);
         conn.execute_batch(
             "CREATE TRIGGER fail_role_credential_insert BEFORE INSERT ON credentials \
              BEGIN SELECT RAISE(ABORT, 'injected credential failure'); END;",
@@ -1214,7 +1411,7 @@ mod tests {
         let (db, key, _, subject) = setup();
         let conn = db.conn();
         let other_org_did = derive_did_key(&SigningKey::from_bytes(&[9u8; 32])).0;
-        let ra = ready_to_issue(conn, Some(&other_org_did));
+        let ra = ready_to_issue(conn, Some(&other_org_did), &subject);
         let err = issue_role_credential_impl(
             conn,
             &Issuer::from_key(key.clone()),
@@ -1236,7 +1433,7 @@ mod tests {
         // must not count as an independent cluster.
         let (db, key, owner, _subject) = setup();
         let conn = db.conn();
-        let ra = ready_to_issue(conn, Some(&owner.0));
+        let ra = ready_to_issue(conn, Some(&owner.0), &owner);
         let err = issue_role_credential_impl(
             conn,
             &Issuer::from_key(key.clone()),
@@ -1247,6 +1444,365 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("to itself"), "unexpected: {err}");
+    }
+
+    /// Record an attempt for `role` by `subject` on `session`. `passed` is
+    /// the grade (`None` leaves the attempt ungraded).
+    fn seed_attempt(
+        conn: &Connection,
+        id: &str,
+        role: &str,
+        subject: &str,
+        session: &str,
+        passed: Option<bool>,
+    ) {
+        conn.execute_batch(
+            "INSERT OR IGNORE INTO question_banks (id, skill_id, label, ratified) \
+             VALUES ('bank', 'skill_rust', 'T', 1);",
+        )
+        .unwrap();
+        let graded_at = passed.map(|_| NOW);
+        conn.execute(
+            "INSERT INTO assessment_attempts \
+             (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, \
+              integrity_session_id, started_at, role_assessment_id, passed, graded_at) \
+             VALUES (?1, ?2, 'bank', 'skill_rust', 1, '[]', '[]', ?3, ?4, ?5, ?6, ?7)",
+            params![
+                id,
+                subject,
+                session,
+                NOW,
+                role,
+                passed.map(i64::from),
+                graded_at
+            ],
+        )
+        .unwrap();
+    }
+
+    fn issue_on(
+        conn: &Connection,
+        key: &SigningKey,
+        role: &str,
+        subject: &Did,
+        session: &str,
+    ) -> Result<VerifiableCredential, String> {
+        issue_role_credential_impl(
+            conn,
+            &Issuer::from_key(key.clone()),
+            role,
+            subject,
+            session,
+            NOW,
+        )
+    }
+
+    #[test]
+    fn sponsor_issuance_refuses_an_unknown_session() {
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let ra = ready_to_issue(conn, Some(&owner.0), &subject);
+        let err = issue_on(conn, &key, &ra, &subject, "sess_missing").unwrap_err();
+        assert_eq!(
+            err,
+            "integrity session sess_missing is unknown on this device"
+        );
+    }
+
+    #[test]
+    fn sponsor_issuance_refuses_a_session_that_is_not_an_attempt_for_the_role() {
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let ra = ready_to_issue_role(conn, Some(&owner.0), "SRE L4");
+        seed_session(conn, "sess_ok", "completed", 0.95, 0);
+        // The subject passed with this session, but for another role.
+        let other = ready_to_issue_role(conn, Some(&owner.0), "Other role");
+        seed_attempt(conn, "att_other", &other, &subject.0, "sess_ok", Some(true));
+        let err = issue_on(conn, &key, &ra, &subject, "sess_ok").unwrap_err();
+        assert_eq!(
+            err,
+            "integrity session sess_ok is not an attempt for this role assessment"
+        );
+    }
+
+    #[test]
+    fn sponsor_issuance_refuses_another_subjects_attempt() {
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let someone_else = derive_did_key(&SigningKey::from_bytes(&[5u8; 32]));
+        // Someone else passed the role with this session.
+        let ra = ready_to_issue(conn, Some(&owner.0), &someone_else);
+        let err = issue_on(conn, &key, &ra, &subject, "sess_ok").unwrap_err();
+        assert_eq!(
+            err,
+            "integrity session sess_ok belongs to another subject's attempt"
+        );
+    }
+
+    #[test]
+    fn sponsor_issuance_refuses_an_ungraded_attempt() {
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let ra = ready_to_issue_role(conn, Some(&owner.0), "SRE L4");
+        seed_session(conn, "sess_ok", "completed", 0.95, 0);
+        seed_attempt(conn, "att_open", &ra, &subject.0, "sess_ok", None);
+        let err = issue_on(conn, &key, &ra, &subject, "sess_ok").unwrap_err();
+        assert_eq!(
+            err,
+            "the attempt for integrity session sess_ok has not been graded"
+        );
+    }
+
+    #[test]
+    fn sponsor_issuance_refuses_a_failed_attempt() {
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let ra = ready_to_issue_role(conn, Some(&owner.0), "SRE L4");
+        seed_session(conn, "sess_ok", "completed", 0.95, 0);
+        seed_attempt(conn, "att_failed", &ra, &subject.0, "sess_ok", Some(false));
+        let err = issue_on(conn, &key, &ra, &subject, "sess_ok").unwrap_err();
+        assert_eq!(
+            err,
+            "the attempt for integrity session sess_ok did not pass"
+        );
+    }
+
+    #[test]
+    fn sponsor_issuance_accepts_the_subjects_passed_attempt_for_the_role() {
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let ra = ready_to_issue(conn, Some(&owner.0), &subject);
+        // Another candidate's failed attempt at the same role does not interfere.
+        let someone_else = derive_did_key(&SigningKey::from_bytes(&[5u8; 32]));
+        seed_session(conn, "sess_other", "completed", 0.95, 0);
+        seed_attempt(
+            conn,
+            "att_other",
+            &ra,
+            &someone_else.0,
+            "sess_other",
+            Some(false),
+        );
+
+        let vc = issue_on(conn, &key, &ra, &subject, "sess_ok").unwrap();
+        assert_eq!(vc.credential_subject.id, subject);
+        assert_eq!(
+            vc.integrity.expect("integrity embedded").session_id,
+            "sess_ok"
+        );
+    }
+
+    /// A finished session `sess_att` on the subject's iPhone, its App Attest
+    /// key attesting the session nonce, and the subject's assessment
+    /// credential for it issued at grading through `attester` (credential-
+    /// bound when the phone signs the credential's digest). Returns the
+    /// platform world and the credential.
+    fn attested_attempt(
+        conn: &Connection,
+        role: &str,
+        attester: &dyn crate::sentinel::attestation::BindingAttester,
+        world: &alexandria_verify::attestation::test_support::World,
+    ) -> VerifiableCredential {
+        use crate::sentinel::attestation::{
+            apple_app_id, session_nonce, AttestationPayload, DeviceAttestation, Platform,
+        };
+        use alexandria_verify::attestation::test_support::{b64, build_assertion};
+        const STARTED: &str = "2026-04-12T23:00:00Z";
+        let record = DeviceAttestation {
+            platform: Platform::Ios,
+            nonce_hex: hex::encode(session_nonce("sess_att", STARTED)),
+            app_id: apple_app_id(),
+            payload: AttestationPayload::AppAttest {
+                key_id_b64: world.key_id_b64(),
+                attestation_b64: world.attestation_b64(),
+                assertion_b64: Some(b64(&build_assertion(world, b"c0ffee", 1))),
+                asserted_root: Some("c0ffee".into()),
+            },
+            captured_at: STARTED.into(),
+            companion: None,
+        };
+        conn.execute(
+            "INSERT INTO integrity_sessions
+                 (id, status, integrity_score, critical_count, warning_count, assurance_level,
+                  attestation_json, commitment_root, started_at, ended_at)
+             VALUES ('sess_att', 'completed', 0.95, 0, 0, 'device_attested', ?1, 'c0ffee',
+                     ?2, ?3)",
+            params![serde_json::to_string(&record).unwrap(), STARTED, NOW],
+        )
+        .unwrap();
+        let subject_key = SigningKey::from_bytes(&[2u8; 32]);
+        let subject = derive_did_key(&subject_key);
+        let mut req = crate::credentials::fixtures::sample_request(subject.clone());
+        req.credential_type = CredentialType::AssessmentCredential;
+        req.integrity_session_id = Some("sess_att".into());
+        let assessed = credentials::issue_with(
+            conn,
+            &Issuer::from_key(subject_key),
+            &req,
+            NOW,
+            &credentials::EvidenceSource {
+                trust: trust_of(world),
+                attester,
+            },
+        )
+        .unwrap()
+        .credential;
+        seed_attempt(conn, "att_att", role, &subject.0, "sess_att", Some(true));
+        conn.execute(
+            "UPDATE assessment_attempts SET credential_id = ?1 WHERE id = 'att_att'",
+            params![assessed.id],
+        )
+        .unwrap();
+        assessed
+    }
+
+    fn trust_of(
+        world: &alexandria_verify::attestation::test_support::World,
+    ) -> crate::sentinel::attestation::TrustConfig {
+        crate::sentinel::attestation::TrustConfig {
+            apple_root_pem: world.root_pem.clone(),
+            ..Default::default()
+        }
+    }
+
+    /// The subject's phone, signing whatever digest it is asked for.
+    struct SubjectPhone<'a>(&'a alexandria_verify::attestation::test_support::World);
+    impl crate::sentinel::attestation::BindingAttester for SubjectPhone<'_> {
+        fn bind(
+            &self,
+            _: &str,
+            _: &crate::sentinel::attestation::DeviceAttestation,
+            digest: &[u8; 32],
+        ) -> Result<String, String> {
+            use alexandria_verify::attestation::test_support::{b64, build_assertion};
+            Ok(b64(&build_assertion(self.0, digest, 2)))
+        }
+    }
+
+    /// The sponsor's device, which holds no key for the candidate's session.
+    struct SponsorDevice;
+    impl crate::sentinel::attestation::BindingAttester for SponsorDevice {
+        fn bind(
+            &self,
+            _: &str,
+            _: &crate::sentinel::attestation::DeviceAttestation,
+            _: &[u8; 32],
+        ) -> Result<String, String> {
+            Err("this device holds no key for the session".into())
+        }
+    }
+
+    /// A role requiring `device_attested`, with the sponsor's own key.
+    fn device_attested_role(conn: &Connection, owner: &Did) -> String {
+        let org =
+            create_organization_impl(conn, "Acme", "stake_owner", Some(&owner.0), NOW).unwrap();
+        create_role_assessment_impl(
+            conn,
+            &CreateRoleAssessmentRequest {
+                org_id: org.id,
+                role_title: "SRE L4".into(),
+                job_description: None,
+                course_id: None,
+                skill_ids: vec![],
+                issuance_policy: None,
+                required_assurance_level: Some("device_attested".into()),
+            },
+            NOW,
+        )
+        .unwrap()
+        .id
+    }
+
+    /// The sponsor's device cannot bind fresh evidence for the candidate's
+    /// session, so the role's assurance is judged from the attempt's own
+    /// assessment credential: its credential-bound evidence verifies, and the
+    /// role credential names it in an `AssessedCredentialEvidence` entry.
+    #[test]
+    fn a_device_attested_role_issues_on_an_attempt_credential_with_credential_bound_evidence() {
+        use alexandria_verify::assessed::AssessedCredentialEvidence;
+        use alexandria_verify::attestation::test_support::{build_world, AAGUID_PROD};
+        use alexandria_verify::attestation::{
+            AttestationOutcome, Platform, VerifiedAssuranceLevel,
+        };
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let world = build_world(
+            &crate::sentinel::attestation::apple_app_id(),
+            crate::sentinel::attestation::session_nonce("sess_att", "2026-04-12T23:00:00Z"),
+            AAGUID_PROD,
+            0,
+        );
+        let role = device_attested_role(conn, &owner);
+        let assessed = attested_attempt(conn, &role, &SubjectPhone(&world), &world);
+
+        let vc = issue_role_credential_with(
+            conn,
+            &Issuer::from_key(key.clone()),
+            &role,
+            &subject,
+            "sess_att",
+            NOW,
+            &credentials::EvidenceSource {
+                trust: trust_of(&world),
+                attester: &SponsorDevice,
+            },
+        )
+        .unwrap();
+
+        let entry = AssessedCredentialEvidence::find(&vc)
+            .unwrap()
+            .expect("entry");
+        assert_eq!(entry.credential_id, assessed.id);
+        assert_eq!(
+            entry.integrity_hash,
+            crate::domain::vc::integrity_hash_of(&assessed).unwrap()
+        );
+        assert_eq!(
+            entry.attestation,
+            AttestationOutcome::VerifiedCredentialBound {
+                platform: Platform::Ios
+            }
+        );
+        assert_eq!(
+            entry.verified_assurance_level,
+            VerifiedAssuranceLevel::DeviceAttested
+        );
+    }
+
+    /// The attempt's credential carries only session-bound evidence: nothing
+    /// verified the session's device for that credential, so a role
+    /// requiring `device_attested` is refused.
+    #[test]
+    fn a_device_attested_role_refuses_an_attempt_credential_without_credential_bound_evidence() {
+        use alexandria_verify::attestation::test_support::{build_world, AAGUID_PROD};
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let world = build_world(
+            &crate::sentinel::attestation::apple_app_id(),
+            crate::sentinel::attestation::session_nonce("sess_att", "2026-04-12T23:00:00Z"),
+            AAGUID_PROD,
+            0,
+        );
+        let role = device_attested_role(conn, &owner);
+        attested_attempt(conn, &role, &SponsorDevice, &world);
+
+        let err = issue_role_credential_with(
+            conn,
+            &Issuer::from_key(key.clone()),
+            &role,
+            &subject,
+            "sess_att",
+            NOW,
+            &credentials::EvidenceSource {
+                trust: trust_of(&world),
+                attester: &SponsorDevice,
+            },
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("assurance level 'local' does not meet required 'device_attested'"),
+            "{err}"
+        );
     }
 
     #[test]

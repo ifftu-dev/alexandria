@@ -12,6 +12,7 @@ pub mod level;
 pub mod store;
 pub mod weights;
 
+use alexandria_verify::attestation::AttestationOutcome;
 use serde::{Deserialize, Serialize};
 
 use crate::crypto::did::Did;
@@ -57,9 +58,22 @@ pub struct AggregationInput {
     pub rubric_completeness: f64,
     pub proctoring_reliability: f64,
     pub evidence_traceability: f64,
-    /// The subject signed this claim about themselves. It keeps its weighted
-    /// score but never counts as an independent issuer cluster.
+    /// The subject signed this claim about themselves. It takes the
+    /// self-claim weight whatever `credential_type` declares (see
+    /// [`weights::provenance_weight`]) and never counts as an independent
+    /// issuer cluster.
     pub self_issued: bool,
+    /// What the credential's device attestation evidence proved when it was
+    /// verified for scoring. Verified credential-bound evidence raises a
+    /// self-issued credential to the attested weight.
+    #[serde(default)]
+    pub attestation: AttestationOutcome,
+    /// The session status the credential's integrity assertion states, if
+    /// it carries one. Carried for explanation only: the session-status rule
+    /// is applied once, before inputs are built (`store::load_evidence_for`),
+    /// so every input that reaches [`aggregate_skill_state`] counts.
+    #[serde(default)]
+    pub session_status: Option<String>,
 }
 
 /// Run the aggregation pipeline (§22.2) and return an explainable
@@ -72,7 +86,7 @@ pub fn aggregate_skill_state(
     config: &AggregationConfig,
 ) -> DerivedSkillState {
     use weights::{
-        freshness_weight, independence_weight, issuer_weight, quality_weight, type_weight,
+        freshness_weight, independence_weight, issuer_weight, provenance_weight, quality_weight,
     };
 
     let computed_at = verification_time.to_string();
@@ -101,7 +115,7 @@ pub fn aggregate_skill_state(
 
     for e in evidence {
         let w_issuer = issuer_weight(&e.issuer, config);
-        let w_type = type_weight(e.credential_type, config);
+        let w_type = provenance_weight(e, config);
         let w_fresh = freshness_weight(e, skill_id, verification_time, config);
         let w_quality = quality_weight(e, config);
         let w_ind = independence_weight(e, evidence, config);
@@ -172,6 +186,8 @@ mod tests {
             proctoring_reliability: 0.8,
             evidence_traceability: 0.9,
             self_issued: false,
+            attestation: Default::default(),
+            session_status: None,
         }
     }
 
@@ -212,6 +228,8 @@ mod tests {
             proctoring_reliability: q.1,
             evidence_traceability: q.2,
             self_issued: false,
+            attestation: Default::default(),
+            session_status: None,
         };
         let low = aggregate_skill_state(
             &Did("did:key:zA".into()),

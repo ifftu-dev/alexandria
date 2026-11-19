@@ -144,6 +144,19 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // Backend flags raised before a session's chain starts, committed after
     // the trust profile selection. See `crate::sentinel::snapshots`.
     (40, "integrity_pending_flags", include_str!("integrity_pending_flags.sql")),
+    // Personal key rotation is deleted: the key registry keeps only the key
+    // bound to an identifier that is not self-resolving, with no validity
+    // window or rotated-by link, and refuses a row without a key.
+    (41, "key_registry_lookup_only", include_str!("key_registry_lookup_only.sql")),
+    // A status list fetched from where a credential names it is ordered by
+    // its own signed `validFrom` (unix seconds), never by `version`, which
+    // is the issuer's counter for lists it holds or gossips. NULL for a list
+    // that did not arrive by fetch.
+    (42, "status_list_valid_from", "ALTER TABLE credential_status_lists ADD COLUMN valid_from INTEGER;"),
+    // Credential requests as verified when pulled, and the request's issuance
+    // policy on an attempt started from one, so its floor and probe policy
+    // apply the way a sponsor role's do. See `crate::commands::exchange`.
+    (43, "exchange_requests", include_str!("exchange_requests.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

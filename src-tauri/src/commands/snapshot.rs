@@ -109,7 +109,7 @@ fn create_snapshot(
             .map(|skill| skill.computation_spec.as_str())
             .collect::<std::collections::BTreeSet<_>>();
         let computation_spec = if computation_specs.is_empty() {
-            "v4-verified-vc".to_string()
+            crate::evidence::reputation::COMPUTATION_SPEC.to_string()
         } else {
             computation_specs.into_iter().collect::<Vec<_>>().join("+")
         };
@@ -468,7 +468,10 @@ mod tests {
         );
         // The seeded row predates its verified inputs, so snapshotting
         // recomputes it under the current spec before freezing it.
-        assert_eq!(record.computation_spec.as_deref(), Some("v4-verified-vc"));
+        assert_eq!(
+            record.computation_spec.as_deref(),
+            Some("v5-session-status")
+        );
         let credential_id = record.credential_id.as_deref().unwrap();
         let original_json: String = db
             .conn()
@@ -482,7 +485,7 @@ mod tests {
         assert_eq!(original.scope, SNAPSHOT_SCOPE);
         assert_eq!(original.as_of, "2024-04-24T23:06:40+00:00");
         assert_eq!(original.skills[0].impact_score_ppm, 850_000);
-        assert_eq!(original.skills[0].computation_spec, "v4-verified-vc");
+        assert_eq!(original.skills[0].computation_spec, "v5-session-status");
         let source_hash: String = db
             .conn()
             .query_row(

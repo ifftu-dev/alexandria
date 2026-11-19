@@ -1,0 +1,49 @@
+{
+  "description": "The role's probe policy ran and a probe failed.",
+  "policy": {
+    "min_integrity": null,
+    "max_critical": null,
+    "max_warning": null,
+    "require_clean": false,
+    "required_assurance_level": null,
+    "probe_policy": "reseed",
+    "min_trust_profile": null,
+    "min_verification_rung": null
+  },
+  "integrity": {
+    "sessionId": "isess_policy_vector",
+    "status": "completed",
+    "integrityScore": 0.91,
+    "criticalCount": 0,
+    "warningCount": 1,
+    "assuranceLevel": "local",
+    "generatedAt": "2026-06-01T00:00:00Z",
+    "trustProfile": "camera",
+    "verificationRung": "probed",
+    "signalsRun": [
+      "core",
+      "camera"
+    ],
+    "signalsNotRun": [
+      "device_attestation"
+    ],
+    "probe": {
+      "outcome": "failed",
+      "policies": [
+        "reseed"
+      ],
+      "satisfied": 1,
+      "failed": 1,
+      "skipped": 0
+    }
+  },
+  "attestation": {
+    "outcome": "not_supplied"
+  },
+  "expect": {
+    "refusal": {
+      "code": "probe_failed",
+      "policy": "reseed"
+    }
+  }
+}

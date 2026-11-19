@@ -11,6 +11,11 @@ use crate::domain::vc::{CredentialType, ProvenanceTier};
 pub struct AggregationConfig {
     pub version: String,
     pub type_weights: HashMap<CredentialType, f64>,
+    /// Class weight of a self-issued credential whose attestation evidence
+    /// verified credential-bound (see [`super::weights::provenance_weight`]).
+    /// It sits above the `SelfAssertion` weight and below every issuer-signed
+    /// evidence class.
+    pub attested_weight: f64,
     /// Quality-factor triples `(rubric, proctoring, traceability)` keyed by
     /// evidence provenance tier (§14.7 inputs). A claim with no provenance
     /// (`None`) uses `(1.0, 1.0, 1.0)` — the original behavior — so existing
@@ -72,8 +77,21 @@ impl Default for AggregationConfig {
         provenance_quality.insert(ProvenanceTier::IssuerSigned, (1.00, 1.00, 1.00));
 
         Self {
-            version: "1.2".into(),
+            // 1.3: class weight follows verified provenance — a self-issued
+            // credential takes the `SelfAssertion` weight whatever type it
+            // declares (`weights::provenance_weight`).
+            // 1.4: verified credential-bound attestation evidence raises a
+            // self-issued credential to `attested_weight`, and session status
+            // counts where a reader can rely on it.
+            version: "1.4".into(),
             type_weights,
+            // 0.30: credential-bound evidence shows a genuine build on a
+            // genuine device produced this credential's content, which is more
+            // than the holder's word (`SelfAssertion` 0.25). It says nothing
+            // about who sat at the device, so it stays below the weakest
+            // evidence another party signs (`AttestationCredential` 0.35).
+            // The midpoint keeps a margin on both sides.
+            attested_weight: 0.30,
             provenance_quality,
             skill_decay: HashMap::new(),
             default_decay: 0.08,

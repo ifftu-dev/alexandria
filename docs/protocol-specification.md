@@ -1,7 +1,7 @@
 # Alexandria Protocol Specification
 
 Status: live
-Updated: 2026-11-12
+Updated: 2026-11-17
 Category: Standards Track
 
 ---
@@ -15,8 +15,11 @@ path. Credential status is issuer-bound (§5.3). Cardano carries optional VC
 integrity anchors (§11.3), the completion witness (§5.1), stake-key
 registrations (§3.1) and batched username anchors (§6.5); the DAO validators
 are deployed, but no application path submits governance transactions (§10.5).
-Decision records: [`adr/0001-vc-first-credentials.md`](./adr/0001-vc-first-credentials.md)
-and [`adr/0003-credential-authority.md`](./adr/0003-credential-authority.md).
+Decision records: [`adr/0001-vc-first-credentials.md`](./adr/0001-vc-first-credentials.md),
+[`adr/0003-credential-authority.md`](./adr/0003-credential-authority.md),
+[`adr/0006-checkable-integrity-evidence.md`](./adr/0006-checkable-integrity-evidence.md),
+[`adr/0007-did-key-never-rotates.md`](./adr/0007-did-key-never-rotates.md) and
+[`adr/0008-hosted-organisation-issued-credentials.md`](./adr/0008-hosted-organisation-issued-credentials.md).
 
 ---
 
@@ -141,7 +144,7 @@ Presentation envelopes and PinBoard commitments still allocate `urn:uuid:` ids; 
 
 ### 3.4 DID Identity for the VC Layer
 
-For the DID identity model, key-rotation requirements, and historical-key resolution used by the verifiable credentials layer (§14), see §14.5. The wallet-level key derivation defined in §3.1 supplies the underlying Ed25519 signing material; the VC layer binds a `did:key` identifier to that same key by multicodec-wrapping the Ed25519 public key (varint `0xed01`) and encoding it as multibase base58btc.
+For the DID identity model used by the verifiable credentials layer (§14), see §14.5. A `did:key` always resolves to the key in its identifier; there is no personal key rotation (§14.5.3). The wallet-level key derivation defined in §3.1 supplies the underlying Ed25519 signing material; the VC layer binds a `did:key` identifier to that same key by multicodec-wrapping the Ed25519 public key (varint `0xed01`) and encoding it as multibase base58btc.
 
 ---
 
@@ -202,14 +205,14 @@ Assertions are stored in `reputation_assertions`. Each row records its `computat
 
 ### 4.5 Computation
 
-The reference engine (`evidence::reputation`, computation spec `v4-verified-vc`) runs after each credential is accepted into the local store and derives two row kinds from `credentials`:
+The reference engine (`evidence::reputation`, computation spec `v5-session-status`) runs after each credential is accepted into the local store and derives two row kinds from `credentials`:
 
 | Role | Scope | Inputs | Score |
 |------|-------|--------|-------|
 | `learner` | (subject, skill, level) | Every skill-kind VC that verifies now and whose signed subject, skill and id match its row | Highest `SkillClaim.score` observed |
 | `instructor` | (issuer, skill, level) | Only credentials classified as verified issuer-signed: a distinct issuer's valid signature over someone else's claim | Mean of the scores that issuer awarded |
 
-Self-asserted, self-witnessed, and course-endorsed self-claims contribute only to the learner row. Issuer inequality alone does not credit an instructor; the signature classification does.
+Self-asserted, self-witnessed, and course-endorsed self-claims contribute only to the learner row. Issuer inequality alone does not credit an instructor; the signature classification does. A credential whose integrity session ended `suspended` or `flagged` enters no row when that status is reliable: the credential is issuer-signed, or its attestation evidence verified credential-bound (§14.9.5). For any other credential the status is the holder's word and is ignored.
 
 ### 4.6 Reputation Distribution Model
 
@@ -390,7 +393,7 @@ Seven base libp2p protocols plus six request-response protocols (§6.5) compose 
 | `/alexandria/profiles/1.0` | User profile updates |
 | `/alexandria/opinions/1.0` | Qualified field commentary and signed discussion threads/interactions |
 | `/alexandria/peer-exchange/1.0` | Known peer address propagation |
-| `/alexandria/vc-did/1.0` | DID document + key-rotation announcements (§14.5) |
+| `/alexandria/vc-did/1.0` | DID announcements (§14.5); a `did:key` announcement registers nothing and only retries credentials from that issuer still pending verification |
 | `/alexandria/vc-status/1.0` | Bitstring Status List snapshots and deltas (§14.11.2) |
 | `/alexandria/vc-presentation/1.0` | Opt-in selective-disclosure presentation envelopes (§14.18) |
 | `/alexandria/pinboard/1.0` | PinBoard pinning-commitment observations (§14.12, §14.20.4) |
@@ -980,7 +983,7 @@ These guarantees are architectural — they are enforced by the code structure, 
 
 **Threat**: Theft of an issuer's signing key enables the attacker to mint arbitrary VCs in the issuer's name.
 
-**Mitigations**: Key rotation is mandatory (§14.5.3); verifiers resolve the verification method valid at the credential's `validFrom` via the historical key registry, so rotating a compromised key does not invalidate pre-compromise credentials. The compromised issuer MUST revoke affected credentials via the §14.11.2 status list. §14.14.4 permits verifiers to downgrade the issuer weight for an issuer with a history of compromise or bad-faith revocation.
+**Mitigations**: A `did:key` cannot rotate (§14.5.3). A learner whose key is compromised starts a new identity; identity recovery is unspecified. An organisation removes the compromised key from its domain descriptor, which withdraws organisation backing from every credential that key signed while their signatures still verify. The compromised issuer SHOULD revoke affected credentials via the §14.11.2 status list while it still controls the key. §14.14.4 permits verifiers to downgrade the issuer weight for an issuer with a history of compromise or bad-faith revocation.
 
 ### 13.11 Status List Poisoning
 
@@ -1032,7 +1035,7 @@ Therefore, transferable NFTs MUST NOT be the source of truth for educational or 
 
 Pure soulbound-token systems are directionally useful but insufficient as a complete architecture because they typically fail one or more of: revocation flexibility, correction workflows, selective disclosure, portability across wallets and DID methods, and long-term resilience across infrastructure changes.
 
-A credentialing protocol for Alexandria MUST support: issuance, verification, expiration, revocation, selective presentation, key rotation, and issuer continuity (or graceful issuer death).
+A credentialing protocol for Alexandria MUST support: issuance, verification, expiration, revocation, selective presentation, organisation key replacement (§14.5.3), and issuer continuity (or graceful issuer death).
 
 Therefore, Alexandria adopts a VC-first architecture, optionally with SBT-like semantics at the presentation layer, but NOT as the canonical data model.
 
@@ -1103,9 +1106,11 @@ Subject(c) = s
 
 This binding MUST NOT be alterable after issuance except through explicit supersession by a newly issued credential (§14.11.4).
 
-#### 14.5.3 Key Rotation
+#### 14.5.3 Issuer Keys
 
-Issuers MUST support key rotation. A verifier evaluating signature `σ` created at issuance time `t_i` MUST use the issuer verification method valid for `t_i`, unless superseded by a cryptographically valid historical key registry.
+A `did:key` resolves to the key in its identifier, always. There is no personal key rotation: no registry entry, gossip announcement or bundle can change how a `did:key` resolves, and a verifier MUST NOT consult a key registry for one. A key registry is consulted only for a DID method that is not self-resolving.
+
+An organisation is identified by its domain: a DNS TXT descriptor (`alexandria-org/1`) lists the `did:key` identifiers allowed to sign for it. The credential's issuer MAY be an object whose `id` is the signing key's DID and which carries the organisation's `name` and `domain`, covered by the proof. Organisation backing is checked against the descriptor, which the verifier resolves and supplies: `verified` (with the descriptor's name and domain), `key_not_listed`, `wrong_domain`, `invalid_descriptor` or `descriptor_not_supplied`. Backing never changes the verification result. An organisation rotates by editing its key list; removing a key withdraws backing from everything that key signed, while the signatures still verify as plain keys. See [ADR 0007](./adr/0007-did-key-never-rotates.md).
 
 ### 14.6 Credential Taxonomy
 
@@ -1153,13 +1158,22 @@ Each credential MUST conform to the following logical structure.
       "evidenceRefs": ["urn:uuid:evidence-1", "urn:uuid:evidence-2"]
     }
   },
-  "credentialStatus": {
-    "id": "https://cloud.example/status-lists/did:key:z6MkIssuer123/1#271",
-    "type": "BitstringStatusListEntry",
-    "statusPurpose": "revocation",
-    "statusListIndex": "271",
-    "statusListCredential": "https://cloud.example/status-lists/did:key:z6MkIssuer123/1"
-  },
+  "credentialStatus": [
+    {
+      "id": "https://cloud.example/status-lists/did:key:z6MkIssuer123/1#271",
+      "type": "BitstringStatusListEntry",
+      "statusPurpose": "revocation",
+      "statusListIndex": "271",
+      "statusListCredential": "https://cloud.example/status-lists/did:key:z6MkIssuer123/1"
+    },
+    {
+      "id": "https://cloud.example/status-lists/did:key:z6MkIssuer123/2#271",
+      "type": "BitstringStatusListEntry",
+      "statusPurpose": "suspension",
+      "statusListIndex": "271",
+      "statusListCredential": "https://cloud.example/status-lists/did:key:z6MkIssuer123/2"
+    }
+  ],
   "termsOfUse": {
     "policyVersion": "1.0",
     "usage": "verification-permitted"
@@ -1172,13 +1186,22 @@ Each credential MUST conform to the following logical structure.
     "warningCount": 1,
     "assuranceLevel": "local",
     "generatedAt": "2026-04-13T00:00:00Z",
-    "trustProfile": "core",
+    "trustProfile": "camera",
     "verificationRung": "probed",
     "coverageStatementDigest": "blake3:...",
-    "signalsRun": ["core"],
-    "signalsNotRun": ["device_attestation", "camera"],
+    "signalsRun": ["core", "camera"],
+    "signalsDegraded": ["camera"],
+    "signalsNotRun": ["device_attestation"],
+    "cameraCoverage": 0.95,
     "probe": { "outcome": "satisfied", "policies": ["reseed"], "satisfied": 2, "failed": 0, "skipped": 0 }
   },
+  "relatedResource": [
+    {
+      "id": "https://cloud.example/coverage-statements/blake3:...",
+      "digestSRI": "sha256-...",
+      "mediaType": "application/json"
+    }
+  ],
   "proof": {
     "type": "DataIntegrityProof",
     "cryptosuite": "eddsa-jcs-2022",
@@ -1196,7 +1219,23 @@ declares only the W3C v2 context; Alexandria's own terms (`skillId`, `level`,
 through that context's issuer-dependent default vocabulary, so a JSON-LD
 processor expands the document without fetching anything that is not a W3C
 document. The proof is a W3C Data Integrity proof using the `eddsa-jcs-2022`
-cryptosuite, and `credentialStatus` is a Bitstring Status List entry.
+cryptosuite. `credentialStatus` is one Bitstring Status List entry or a list;
+Alexandria issues a revocation entry and a suspension entry at the same index
+(§14.11). `issuer` is the DID string, or an object with the DID as `id` (§14.5.3).
+
+`relatedResource` names the coverage statement again, at
+`{status host}/coverage-statements/{digest}` (or
+`urn:alexandria:coverage-statement:{digest}` without a status host), with a
+`digestSRI` over the statement's bytes. A verifier MUST reject a credential
+whose `relatedResource` names a statement other than the assertion's
+`coverageStatementDigest` (`coverageStatementMismatch`). Every statement text
+ever published stays resolvable offline from the verifier library's registry.
+
+`evidence` (VC Data Model 2.0) carries at most one `DeviceAttestationEvidence`
+entry when the session ran on an attested device (§14.9.5), and a role
+credential carries an `AssessedCredentialEvidence` entry naming the credential
+it was issued on (§14.9.6). The example above, from a desktop without a
+companion phone, carries neither.
 
 The optional `integrity` block is the **Sentinel integrity attestation** (§14.9.5). When present it is part of the signed envelope — the proof covers it, so the issuer attests to the figures and a verifier reads how the credential was earned, not merely that it was issued. Absent on credentials not backed by a monitored assessment session.
 
@@ -1271,31 +1310,34 @@ When a session is bound, the issuer summarises its terminal state into the `inte
 | `signalsRun` | Signal sets the profile ran: `core`, plus `device_attestation` and `camera` where included |
 | `signalsDegraded` | Signals the profile ran that were lost: `camera` when camera coverage was incomplete, `device_attestation` when the stored attestation no longer verifies |
 | `signalsNotRun` | Signal sets the profile does not include |
+| `cameraCoverage` | Fraction of committed windows that carried camera checks, in `[0,1]`; `0` with no windows. Present only when the profile includes the camera, and absent from assertions issued before the field existed |
 | `probe` | When a probe step ran: `outcome` (`failed` if any failed, else `satisfied` if any, else `skipped`), the `policies` used, and `satisfied` / `failed` / `skipped` counts |
 
-The profile, rung, digest, signal lists and probe summary are optional and omitted when empty. A verifier that re-serialises the typed credential to check its proof must know these fields, or it drops them and the proof fails (see the trust-profiles spec Notes on the `alexandria-verify` release).
+The profile, rung, digest, signal lists, camera coverage and probe summary are optional and omitted when empty. A verifier that re-serialises the typed credential to check its proof must know these fields, or it drops them and the proof fails (see the trust-profiles spec Notes on the `alexandria-verify` release).
 
 `assuranceLevel` is one of:
 
 - `"local"` — privacy-first default. Figures are device-reported; under this level a determined attacker could suppress flags, so verifiers SHOULD weight `local` attestations accordingly.
-- `"device_attested"` — the issuing device re-verified, at issuance, a platform attestation bound to the session: Apple App Attest (an attestation object chaining to Apple's App Attestation Root CA over the session nonce, plus an assertion by the attested key over the terminal `commitmentRoot`) or Google Play Integrity (a classic token for the session nonce, decrypted and verified with the developer's response keys, `PLAY_RECOGNIZED` and `MEETS_DEVICE_INTEGRITY`). The platform vouches that an unmodified build of the app on a genuine device produced the session; it does not vouch for the person. A desktop cannot attest itself (App Attest reports unsupported on every Mac); it reaches this level only when the learner's own attested phone joined the session as a companion, which proves that a genuine app on the learner's phone joined, not that it watched.
+- `"device_attested"` — the issuing device's statement that it re-verified, at issuance, a platform attestation bound to the session: Apple App Attest (an attestation object chaining to Apple's App Attestation Root CA over the session nonce, plus an assertion by the attested key over the terminal `commitmentRoot`) or Google Play Integrity (a classic token for the session nonce, decrypted and verified with the developer's response keys, `PLAY_RECOGNIZED` and `MEETS_DEVICE_INTEGRITY`). The platform vouches that an unmodified build of the app on a genuine device produced the session; it does not vouch for the person. A desktop cannot attest itself (App Attest reports unsupported on every Mac); it reaches this level only when the learner's own attested phone joined the session as a companion, which proves that a genuine app on the learner's phone joined, not that it watched.
 - `"anchored"` and `"high_assurance"` — reserved for a snapshot-commitment root anchored with a timestamp and immutability proof, and for an independently witnessed session. The implementation has no verified path to either, and a policy requiring a reserved level refuses issuance.
 
 The session nonce is `SHA-256("alexandria-device-attest-v1" ‖ 0x00 ‖ session_id ‖ 0x00 ‖ started_at)`. A stored level is never copied into a credential: the issuer recomputes the nonce and re-verifies the stored attestation, and embeds `"local"` when it does not verify. A companion phone's attestation is credited only when its binding names the issuing profile's own learner DID.
 
-The `integrityPolicy` bounds are each optional:
+`assuranceLevel` is the issuing device's word. What a verifier relies on is the **verified assurance level** it establishes from the credential's `DeviceAttestationEvidence` entry, with trust inputs it supplies (Apple root, app identifiers, Play Integrity response keys). The entry is *credential-bound* when the platform signed the credential's binding digest, `SHA-256(JCS({tag: "alexandria-attestation-binding-v1", commitmentRoot, subject, claim, integrity}))` (an App Attest assertion by the session's key, or a Play Integrity token with the digest as nonce), and *session-bound* when it carries only the session's own attestation. The issuer obtains credential-bound evidence at issuance, asking a companion phone over the link when one backs the session, and falls back to session-bound when it cannot. The verifier reports `attestation` as `not_supplied`, `verified_credential_bound`, `verified_session_bound`, `unverifiable` (no trust inputs for that platform) or `invalid` with a reason code; invalid evidence rejects the credential. `verifiedAssuranceLevel` is `device_attested` only for verified credential-bound evidence, and `local` otherwise. See [ADR 0006](./adr/0006-checkable-integrity-evidence.md).
 
-| Bound | Refuses issuance when |
-|---|---|
-| `minIntegrity` | The composite score is below it, or absent |
-| `maxCritical`, `maxWarning` | A flag count exceeds it |
-| `requireClean` | The status is not `completed` |
-| `requiredAssuranceLevel` | `assuranceLevel` differs |
-| `minTrustProfile` | The session's profile does not include every signal set the floor names (`camera` does not meet an `attested` floor). A camera counts only when at least 90% of committed windows had camera checks, and the attestation only when it verifies at issuance. The floor is also judged when the attempt starts, and issuance refuses unless the two judgements agree |
-| `minVerificationRung` | The session's rung is below it |
-| `probePolicy` | A policy other than `none` did not run, or a probe failed. A skipped probe is accepted; require a satisfied one with `minVerificationRung: probed` |
+The `integrityPolicy` (`IssuancePolicy`, snake_case fields) bounds are each optional:
 
-`probeConnectionId` names the model connection that writes generated probes under the `llm` policy; it is not judged at issuance. The camera coverage bound of earlier revisions (`minCameraCoverage`) is removed: coverage is now a property of the `camera` and `full` profiles. If **any** set bound is violated, issuance MUST be refused (no credential is minted); the issuer returns the first violated bound. A policy without a bound session is a request error. A bound session without a policy embeds the attestation but gates on nothing.
+| Bound | Refuses issuance when | Code |
+|---|---|---|
+| `require_clean` | The status is not `completed` | `not_clean` |
+| `min_integrity` | The composite score is below it, or absent | `integrity_below_minimum`, `no_integrity_score` |
+| `max_critical`, `max_warning` | A flag count exceeds it | `too_many_critical`, `too_many_warnings` |
+| `required_assurance_level` | The verified assurance level is below it. A minimum: `local` is met by every credential, `device_attested` only by verified credential-bound evidence, reserved levels never | `assurance_below_required` |
+| `min_trust_profile` | The session's profile does not include every signal set the floor names (`camera` does not meet an `attested` floor). A signal counts when it is in `signalsRun` and not in `signalsNotRun` or `signalsDegraded`, with two refinements: a degraded camera still counts when `cameraCoverage` is from 0.9 to 1, and device attestation also needs evidence that verifies, credential- or session-bound | `trust_profile_below_floor` |
+| `min_verification_rung` | The session's rung is below it | `rung_below_minimum` |
+| `probe_policy` | A policy other than `none` did not run, or a probe failed. A skipped probe is accepted; require a satisfied one with `min_verification_rung: probed` | `probe_policy_not_run`, `probe_failed` |
+
+The rule is judged over verifier-visible facts only (the policy, the integrity assertion and the attestation outcome) by one function, `alexandria_verify::policy::evaluate`, in the table's order, so an issuing device, a hosted service and a candidate's picker reach the same answer. The issuing device additionally judges the floor when the attempt starts and refuses unless the two judgements agree. `probe_connection_id` names the model connection that writes generated probes under the `llm` policy; it is not judged at issuance. The camera coverage bound of earlier revisions (`minCameraCoverage`) is removed: coverage is now a property of the `camera` and `full` profiles. If **any** set bound is violated, issuance MUST be refused (no credential is minted); the issuer returns the first violated bound. A policy without a bound session is a request error. A bound session without a policy embeds the attestation but gates on nothing.
 
 This makes a "trusted" credential one that was only minted when the assessment behind it satisfied the sponsor's integrity rules, with the evidence travelling inside the signed credential for any verifier to check.
 
@@ -1307,7 +1349,11 @@ An **organization** (sponsor) defines **role assessments** that map a job descri
 - `RoleAssessment` — `{ org_id, role_title, job_description, course_id?, skill_ids[], issuance_policy, required_assurance_level }`. The `issuance_policy` is the §14.9.5 `IssuancePolicy`; `required_assurance_level` is folded into it at issuance.
 - `AssessmentAttempt.role_assessment_id?` — the published role a learner chose to assess for, fixed at the first start and reported back on resume. Learners list candidate roles with `assessment_open_roles(skill_id)`; sponsors list a role's attempts with `list_role_attempts(role_assessment_id)` and issue from one.
 
-`issue_role_credential(role_assessment_id, subject, integrity_session_id)` is the keystone: it loads the role's policy, folds in the required assurance level, and issues a `RoleCredential` (claim `{ role: role_title, scope: org_name }`) through the §14.9.5 gated pipeline — so the role credential is refused unless the bound integrity session satisfies the sponsor's rules, and carries the integrity attestation for verifiers. Backing IPCs: `create_organization`, `list_organizations`, `create_role_assessment`, `list_role_assessments`, `get_role_assessment`, `set_role_assessment_status`, `issue_role_credential`, `assessment_open_roles`, `list_role_attempts`.
+`issue_role_credential(role_assessment_id, subject, integrity_session_id)` is the keystone: it loads the role's policy, folds in the required assurance level, and issues a `RoleCredential` (claim `{ role: role_title, scope: org_name }`) through the §14.9.5 gated pipeline — so the role credential is refused unless the bound integrity session satisfies the sponsor's rules, and carries the integrity attestation for verifiers. Issuance first requires that the session belongs to a graded, passed attempt for that role made by the named subject. When that attempt has its own `AssessmentCredential`, the role credential carries an `AssessedCredentialEvidence` entry naming it by id and integrity hash, with the attestation outcome and verified assurance level found for it, and the policy is judged from that entry (`policy::evaluate_assessed`).
+
+**Organisation-issued credentials from the hosted service.** A remote candidate answers an organisation's credential request (§14.18.4) from their own device. The hosted service verifies the share, including its attestation evidence, judges the role's policy with the same rule, and issues a `RoleCredential` signed with the organisation's hosted key under its domain-listed `did:key`, with an issuer object naming the organisation, the candidate's integrity assertion unchanged and an `AssessedCredentialEvidence` entry. It carries revocation and suspension entries in lists the service hosts for that key. The candidate's app collects it with the signed `GET /api/credentials/for/{did}`, verifies it and stores it like any received credential. See [ADR 0008](./adr/0008-hosted-organisation-issued-credentials.md).
+
+**The policy in the request.** A credential request MAY carry the organisation's `issuance_policy` (§14.18.4). Before an attempt answering it starts, `exchange_prepare_assessment` fetches the request, checks the organisation's proof, and stores the request as verified; `exchange_start_assessment` does so again, judges the request's floor before any item, and stores the policy on the attempt. Trust profile selection takes the floor from the stored request named by `ProfileRequest.exchange_request_id` (never together with a role). `integrity_device_support` reports whether this device can attest a session or pair a phone, so the request view can say up front when a floor is out of reach. `exchange_credentials` marks each shareable credential with `meets_policy`, `refusal_code` and `refusal`, judged by the shared rule; a refused credential stays shareable, but the organisation will not issue its own credential for it. Backing IPCs: `create_organization`, `list_organizations`, `create_role_assessment`, `list_role_assessments`, `get_role_assessment`, `set_role_assessment_status`, `issue_role_credential`, `assessment_open_roles`, `list_role_attempts`.
 
 ### 14.10 Non-Transferability Semantics
 
@@ -1342,7 +1388,9 @@ Each revocable credential MUST provide a resolvable status reference. A credenti
 
 The status reference is a Bitstring Status List entry: `statusListIndex` is a
 bit position in the issuer's list, counted from the most significant bit of
-each byte, and `statusListCredential` names the list. Lists are at least
+each byte, and `statusListCredential` names the list. An Alexandria credential
+carries two entries at the same index: `revocation` into the issuer's list
+number 1 and `suspension` into list number 2 (§14.11.3). Lists are at least
 131,072 bits. The credential bundle (§14.20) carries each list this node issues as a signed
 `BitstringStatusListCredential`. Only the credential issuer may publish or
 apply a status change for that credential. The implementation checks that the caller-derived DID matches both
@@ -1371,9 +1419,17 @@ evidence about the credential. A credential whose reference is a `urn:` names a
 list that travels only in the credential bundle. Both forms verify offline from a
 bundle; only the URL form verifies from the credential alone.
 
+**Gossip and fetched copies.** A list gossiped on `vc-status` carries a
+detached signature over `(list_id, issuer, purpose, version, bits)`; the
+canonical bytes are tagged `alexandria-status-list-v2`, so a list's purpose
+is signed. A node applies a gossiped list only when its `list_id` names the
+signing issuer (URL or URN form) and never over a row held under another
+issuer. A node that fetches lists orders copies by their signed `validFrom`
+and never writes a list its own profile issues from a fetch.
+
 #### 14.11.3 Suspension
 
-Temporary invalidation MAY be supported through status lists. For suspension interval `[t_s, t_r]`, a credential is suspended at verification time `t_v` if `t_s ≤ t_v ≤ t_r`. Suspended credentials MUST be excluded from positive active computations during suspension.
+Suspension is temporary invalidation through the suspension status list, published, hosted and bundled exactly as the revocation list is. Suspend sets the credential's bit and reinstate clears it; a timed suspension is lifted by the issuer's node when its time comes. A verifier reads only the bit: a set bit is `suspended`, and a missing or unreachable suspension list is pending (`suspension_list_missing`, `suspension_list_unavailable`), never "not suspended". The issuer's local reason and end time are its own bookkeeping and are not consulted by verification. Suspended credentials MUST be excluded from positive active computations during suspension.
 
 #### 14.11.4 Supersession
 
@@ -1461,28 +1517,25 @@ why an independent implementation is a few hundred lines rather than a project.
 A credential is self-verifying in the common case: `did:key` embeds the issuer's
 public key, so no lookup is needed and no service is consulted.
 
-Two situations break that, and an implementer should know before meeting one in
-production rather than after.
+Two facts are not in the credential, and an implementer should know before
+meeting them in production rather than after.
 
-**A rotated issuer key.** If the issuer rotated keys and signed with the new one
-while keeping their DID, self-resolution returns the *pre-rotation* key and the
-signature fails. Verifying it needs the key-registry entry whose
-`[validFrom, validUntil)` window contains the verification time. This is
-inherent to key rotation, not a defect: an identifier that embeds one key cannot
-also embed its successors.
+**Revocation and suspension.** A credential says where its status lists live,
+not what they say. A verifier without a list cannot know. It MUST return a
+pending outcome that identifies the missing list; it MUST NOT accept the
+credential or label it revoked or suspended. An unavailable lookup and a
+confirmed missing list are distinct pending reasons.
 
-**Revocation.** A credential says where its status list lives, not what the list
-says. A verifier without the list cannot know. It MUST return a pending outcome
-that identifies the missing status list; it MUST NOT accept the credential or
-label it revoked. An unavailable lookup and a confirmed missing list are
-distinct pending reasons.
+**An organisation's backing.** The signature names a key, not an organisation.
+Whether an organisation stands behind the key needs its domain descriptor
+(§14.5.3), which the verifier resolves itself.
 
-Both are why a credential bundle (§14.20) carries the key registry and the status lists
-alongside the credentials. A bundle is verifiable entirely offline. A bare
-credential can still have its signature and signed claims checked, but a
-status-bearing credential remains pending until its list is supplied. Neither
-case requires contacting Alexandria; it requires having been given the relevant
-data, which the bundle format exists to do.
+A credential bundle (§14.20) carries the status lists alongside the
+credentials, so it verifies entirely offline. A bare credential can still have
+its signature and signed claims checked, but a status-bearing credential
+remains pending until its lists are supplied. Neither fact requires contacting
+Alexandria: the lists come from the bundle or the issuer's status host, and the
+descriptor from the organisation's own domain.
 
 ### 14.13 Verification Algorithm
 
@@ -1504,6 +1557,8 @@ The verifier MUST output a structured result:
   "superseded": false,
   "verificationTime": "2026-04-13T00:00:00Z",
   "pendingReasons": [],
+  "attestation": { "outcome": "verified_credential_bound", "platform": "ios" },
+  "verifiedAssuranceLevel": "device_attested",
   "acceptanceDecision": "accept"
 }
 ```
@@ -1511,8 +1566,11 @@ The verifier MUST output a structured result:
 `acceptanceDecision` is one of `accept`, `pending`, or `reject`.
 `pendingReasons` contains stable snake-case reason codes:
 `issuer_key_missing`, `issuer_key_unavailable`, `status_list_missing`,
-`status_list_unavailable`, `suspension_state_unavailable`,
-`supersession_state_unavailable`, and `integrity_anchor_unavailable`. `statusValid` is false when a present status
+`status_list_unavailable`, `suspension_list_missing`,
+`suspension_list_unavailable`, `supersession_state_unavailable`, and
+`integrity_anchor_unavailable`. `attestation` and `verifiedAssuranceLevel` are
+described in §14.9.5; `coverageStatementMismatch` (§14.7) appears only when
+true. `statusValid` is false when a present status
 reference is malformed or its bit index lies outside the supplied list.
 `integrity_anchor_unavailable` is reported only when the policy requires an
 integrity anchor and the anchor lookup failed.
@@ -1540,12 +1598,14 @@ facts and final classification:
 
 1. validate the credential envelope and bounded field shapes
 2. validate subject binding and applicable time fields
-3. resolve each referenced status-list bit
-4. consult applicable suspension and supersession state
-5. resolve the issuer key at the verification time, preferring a supplied
-   historical key binding and otherwise using `did:key` self-resolution
+3. resolve each referenced status-list bit (revocation and suspension)
+4. consult supersession state
+5. resolve the issuer key: `did:key` self-resolution, or a supplied key
+   binding for a DID method that is not self-resolving
 6. recompute the `eddsa-jcs-2022` hash data and verify `proofValue`
-7. evaluate credential type, expiry, lifecycle, and integrity-anchor policy
+7. evaluate credential type, expiry, lifecycle, and integrity-anchor policy,
+   the coverage statement cross-check (§14.7) and any attestation evidence
+   (§14.9.5)
 8. emit all check facts, pending reason codes, and the decision
 
 A malformed key, proof, status index, or other completed mandatory check is a
@@ -1660,6 +1720,15 @@ Credential class default weights SHOULD follow:
 | RoleCredential | 0.60 |
 | AttestationCredential | 0.35 |
 | SelfAssertion | 0.25 |
+
+Weight follows verified provenance, not the declared type. A self-issued
+credential (issuer = subject) takes the `SelfAssertion` weight whatever type
+it declares, or an attested weight (0.30 in the reference implementation) when
+its attestation evidence verified credential-bound; only an issuer-signed
+credential takes its declared type's weight. A `suspended` or `flagged`
+session status removes a credential from aggregation only where the status is
+reliable (issuer-signed, or credential-bound evidence); elsewhere it is
+ignored.
 
 Implementations MAY tune these but MUST expose the chosen values.
 
@@ -1870,7 +1939,11 @@ accepted once.
 
 The credential exchange (§14.21) is one such presentation carrying exactly one
 credential plus `request` (the organisation's request, under the holder's
-signature) and, when the holder is also the issuer, `issuerState`.
+signature) and, when the holder is also the issuer, `issuerState`. A request
+MAY carry `issuance_policy`, the policy the organisation will judge the answer
+against before issuing its own credential (§14.9.6). Being part of the request,
+it is covered by the organisation's request proof and the holder's signature.
+A request MUST NOT carry `probe_connection_id`; one that does is refused.
 
 ### 14.19 NFT Wrapper Rules
 

@@ -1,7 +1,7 @@
 # Alexandria — Architecture
 
 Status: live
-Updated: 2026-10-27
+Updated: 2026-11-17
 
 > Offline-first, trustless, multi-platform.
 
@@ -462,7 +462,7 @@ path within the same process hangs indefinitely.
 | Profiles | `/alexandria/profiles/1.0` | User profile announcements |
 | Opinions | `/alexandria/opinions/1.0` | Subjective ratings on courses, peers |
 | Peer Exchange | `/alexandria/peer-exchange/1.0` | Known peer address propagation |
-| VC DID | `/alexandria/vc-did/1.0` | DID document + key-rotation announcements |
+| VC DID | `/alexandria/vc-did/1.0` | DID announcements; a `did:key` announcement registers nothing |
 | VC Status | `/alexandria/vc-status/1.0` | Bitstring Status List snapshots and deltas |
 | VC Presentation | `/alexandria/vc-presentation/1.0` | Opt-in selective-disclosure presentation envelopes |
 | PinBoard | `/alexandria/pinboard/1.0` | PinBoard pinning commitment observations |
@@ -799,14 +799,14 @@ Alexandria infrastructure (§20.4 survivability).
 ### Six layers
 
 1. **Identity** — `did:key` self-resolving DIDs over Ed25519 keys
-   (`crypto::did`, PR 3). Historical key rotation tracked in
-   `key_registry` so credentials signed under a pre-rotation key
-   still verify.
+   (`crypto::did`, PR 3). A `did:key` always resolves to its own key;
+   `key_registry` serves only DID methods that are not self-resolving
+   ([ADR 0007](adr/0007-did-key-never-rotates.md)).
 2. **Credential** — W3C-style Verifiable Credentials with
    W3C Data Integrity `eddsa-jcs-2022` proofs over JCS-canonical
    bytes (`domain::vc`, PR 4). Stored in `credentials` (PR 5).
-3. **Status** — Bitstring Status List bitmap per issuer in
-   `credential_status_lists`. Versioned to prevent rollback on
+3. **Status** — Bitstring Status List bitmaps per issuer in
+   `credential_status_lists`: list 1 for revocation, list 2 for suspension. Versioned to prevent rollback on
    gossip propagation. PR 5 + PR 9.
 4. **Anchoring** — Batched integrity anchors
    (`cardano::anchor_queue`). The issuer's node anchors one Merkle
@@ -870,7 +870,7 @@ resolution, so an author cannot publish a document other nodes would refuse.
 ### P2P propagation
 
 Four new gossip topics carry VC-layer messages:
-- `/alexandria/vc-did/1.0` → DID doc + rotation announcements
+- `/alexandria/vc-did/1.0` → DID announcements
 - `/alexandria/vc-status/1.0` → status list snapshots / deltas
 - `/alexandria/vc-presentation/1.0` → opt-in selective presentations
 - `/alexandria/pinboard/1.0` → PinBoard pinning commitments
@@ -893,7 +893,7 @@ this on every test run.
 
 | Spec section | PR | Status |
 |--------------|----|----|
-| §4–§5 (DID identity, key rotation) | PR 3 | Implemented |
+| §4–§5 (DID identity; personal key rotation deleted) | PR 3 | Implemented |
 | §6–§7 (credential taxonomy + canonical structure) | PR 4 | Implemented |
 | §8–§10 (required fields, issuance, non-transferability) | PR 4–5 | Implemented |
 | §11 (expiration, revocation, suspension, supersession) | PR 5 | Implemented |

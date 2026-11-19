@@ -1,5 +1,5 @@
 {
-  "description": "The issuer rotated keys and signed with the new one while keeping their DID. did:key self-resolution returns the pre-rotation key and fails; the registry entry covering the verification time is what makes this verify.",
+  "description": "The relatedResource names a coverage statement (urn:alexandria:coverage-statement:{digest}) whose digest differs from the integrity assertion's coverageStatementDigest. The signature is valid, but the credential names two statements, so it is rejected with coverageStatementMismatch.",
   "verificationTime": "2026-06-01T00:00:00Z",
   "policy": {
     "reject_expired": true,
@@ -33,34 +33,36 @@
       "score": 0.9,
       "skillId": "skill_vector"
     },
+    "integrity": {
+      "sessionId": "vector-session",
+      "status": "completed",
+      "criticalCount": 0,
+      "warningCount": 0,
+      "assuranceLevel": "local",
+      "generatedAt": "2026-01-01T00:00:00Z",
+      "trustProfile": "core",
+      "verificationRung": "process",
+      "coverageStatementDigest": "blake3:17b6ffedf0cfe387ad935003c549f54fe6a9e28ee1b4fe6813d267235ae6af1f"
+    },
+    "relatedResource": [
+      {
+        "id": "urn:alexandria:coverage-statement:blake3:d68db7778e5b325bc8d074607fbe32ff49f39916c5c6ba82f33fea23546a1992",
+        "digestSRI": "sha256-qy+Qx1nYvHizdPRgXuV2q0zhLjr2cxwDeaGaGdKKzLg=",
+        "mediaType": "application/json"
+      }
+    ],
     "proof": {
       "type": "DataIntegrityProof",
       "cryptosuite": "eddsa-jcs-2022",
       "created": "2026-01-01T00:00:00Z",
-      "verificationMethod": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT#z6MkrqDKuXTHNaAW4f19nuTxfxZhXQ9RMKvQiZ5vT5oB599T",
+      "verificationMethod": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT#z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
       "proofPurpose": "assertionMethod",
-      "proofValue": "zxzPWgDZGraHgo5yNKZX9zqmXGv8q1TsFC3EXZxatUTYywVHNxjiPHRfRRWN3XpN7ZjDfwJxHCtWqjbkcmWH7Dtv"
+      "proofValue": "z5itbYMDFguSTpq8RRt9vdLeFDkd3BNUB9vzPkvATTaftd7N7S3CnhcJNxSH7UPRpQ3pZcgzjqAWqVc3zB43ufa6E"
     }
   },
   "store": {
-    "keyRegistry": [
-      {
-        "did": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
-        "keyId": "key-1",
-        "publicKeyHex": "f510edb23365ea32000e4d367e0210fbae27cfeeb39c431cd51fc3600124d800",
-        "validFrom": "1970-01-01T00:00:00Z",
-        "validUntil": "2026-02-01T00:00:00Z"
-      },
-      {
-        "did": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
-        "keyId": "key-2",
-        "publicKeyHex": "b7ebf265e5f9104e83588f2b4584e336f69470351004bb160f033e84feced80a",
-        "validFrom": "2026-02-01T00:00:00Z",
-        "validUntil": null
-      }
-    ],
+    "keyRegistry": [],
     "statusLists": {},
-    "suspended": {},
     "superseded": []
   },
   "expect": {
@@ -74,8 +76,13 @@
     "integrityAnchored": false,
     "suspended": false,
     "superseded": false,
+    "coverageStatementMismatch": true,
     "verificationTime": "2026-06-01T00:00:00Z",
     "pendingReasons": [],
-    "acceptanceDecision": "accept"
+    "attestation": {
+      "outcome": "not_supplied"
+    },
+    "verifiedAssuranceLevel": "local",
+    "acceptanceDecision": "reject"
   }
 }

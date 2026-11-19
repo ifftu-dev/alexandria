@@ -14,3 +14,6 @@ Status values:
 | [0003](0003-credential-authority.md) | Credential status is issuer-bound; challenge and plugin-attestation authority are retired | implemented | 2026-09-15 |
 | [0004](0004-tauri-free-runtime-crate-boundary.md) | The Tauri-free runtime lives behind a crate boundary (`alexandria-studio`) | active | 2026-09-16 |
 | [0005](0005-sponsored-batched-anchoring.md) | Credential anchors are batched Merkle roots, paid by an on-chain sponsor instead of a treasury key | active | 2026-11-10 |
+| [0006](0006-checkable-integrity-evidence.md) | Integrity evidence is checkable by the relying party or labelled self-reported | implemented | 2026-11-16 |
+| [0007](0007-did-key-never-rotates.md) | A `did:key` never rotates; organisations rotate through their domain's key list | implemented | 2026-11-16 |
+| [0008](0008-hosted-organisation-issued-credentials.md) | The hosted service issues organisation-signed credentials under the organisation's domain-listed key | implemented | 2026-11-16 |

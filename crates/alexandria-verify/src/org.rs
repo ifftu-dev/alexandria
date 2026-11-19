@@ -18,6 +18,11 @@
 //! relayed. Nobody between the two has to be trusted, including the service
 //! that carried the request.
 //!
+//! The same record backs the credentials an organisation issues. Such a
+//! credential's issuer is an object naming the signing key's DID with the
+//! organisation's `name` and `domain`, and [`organisation_backing`] reports
+//! whether that domain's descriptor lists the key.
+//!
 //! The crate performs no I/O: callers resolve the TXT records and hand them
 //! to [`descriptor_from_txt`].
 
@@ -33,8 +38,9 @@ pub const TXT_LABEL: &str = "_alexandria";
 /// The record's `v=` value.
 pub const TXT_VERSION: &str = "alexandria-org1";
 
-/// The most signing keys a descriptor may list: enough to rotate, few enough
-/// that a descriptor is not a key dump.
+/// The most signing keys a descriptor may list: enough for an old key and its
+/// successor to be listed together, few enough that a descriptor is not a key
+/// dump.
 pub const MAX_KEYS: usize = 8;
 
 /// The longest organisation name accepted.
@@ -346,6 +352,61 @@ pub fn verify(
     .map_err(OrgError::MalformedProof)?;
     key.verify(&input, &ed25519_dalek::Signature::from_bytes(&sig))
         .map_err(|_| OrgError::BadSignature)
+}
+
+/// Which organisation, if any, stands behind a credential's issuer key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum OrganisationBacking {
+    /// The domain's descriptor lists the issuer key. `name` and `domain` are
+    /// the ones the descriptor publishes.
+    Verified { name: String, domain: String },
+    /// The descriptor does not list the issuer key, for example because the
+    /// organisation removed it. The signature may still verify.
+    KeyNotListed,
+    /// The descriptor is for a domain other than the one the issuer names.
+    WrongDomain,
+    /// The descriptor fails [`check_descriptor`] and backs nothing.
+    InvalidDescriptor,
+    /// No descriptor was supplied.
+    DescriptorNotSupplied,
+}
+
+/// Report whether `descriptor` backs `credential`'s issuer key.
+///
+/// The caller resolves the descriptor, as for any organisation proof: for an
+/// issuer object that names a `domain`, the TXT records at [`txt_name`] of
+/// that domain read through [`descriptor_from_txt`]. When the issuer names a
+/// domain the descriptor must be that domain's; a string issuer names none,
+/// so any descriptor the caller chose is judged on its key list alone.
+///
+/// Backing is withdrawn as soon as the key leaves the descriptor, from every
+/// credential the key signed. This is a fact about the key only: it says
+/// nothing about the signature or the credential's status, so read it beside
+/// the verification result, never instead of it.
+pub fn organisation_backing(
+    credential: &crate::vc::VerifiableCredential,
+    descriptor: Option<&OrgDescriptor>,
+) -> OrganisationBacking {
+    let Some(descriptor) = descriptor else {
+        return OrganisationBacking::DescriptorNotSupplied;
+    };
+    if check_descriptor(descriptor, &descriptor.domain).is_err() {
+        return OrganisationBacking::InvalidDescriptor;
+    }
+    if let Some(named) = credential.issuer.domain() {
+        if normalise_domain(named).ok().as_deref() != Some(descriptor.domain.as_str()) {
+            return OrganisationBacking::WrongDomain;
+        }
+    }
+    let key = credential.issuer.as_str();
+    if !descriptor.keys.iter().any(|listed| listed == key) {
+        return OrganisationBacking::KeyNotListed;
+    }
+    OrganisationBacking::Verified {
+        name: descriptor.name.clone(),
+        domain: descriptor.domain.clone(),
+    }
 }
 
 #[cfg(test)]

@@ -313,7 +313,7 @@ pub(crate) mod test_support {
             skill_id,
             level,
             0.9,
-            status,
+            status.map(Into::into),
         );
     }
 
@@ -326,7 +326,7 @@ pub(crate) mod test_support {
         skill_id: &str,
         level: u8,
         score: f64,
-        status: Option<CredentialStatus>,
+        status: Option<crate::domain::vc::CredentialStatuses>,
     ) {
         let issuer_did = derive_did_key(issuer);
         let class = if issuer_did == *subject {
@@ -347,7 +347,7 @@ pub(crate) mod test_support {
             context: vec!["https://www.w3.org/ns/credentials/v2".into()],
             id: Some(credential_id.into()),
             type_: vec!["VerifiableCredential".into(), class.into()],
-            issuer: issuer_did.clone(),
+            issuer: issuer_did.clone().into(),
             valid_from: "2026-01-01T00:00:00Z".into(),
             valid_until: None,
             credential_subject: claim.into_subject(subject.clone()),
@@ -355,6 +355,8 @@ pub(crate) mod test_support {
             terms_of_use: None,
             witness: None,
             integrity: None,
+            evidence: Vec::new(),
+            related_resource: Vec::new(),
             proof: Proof::unsigned("2026-01-01T00:00:00Z"),
         };
         let credential = sign_credential(

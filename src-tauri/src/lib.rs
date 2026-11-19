@@ -18,6 +18,7 @@ pub mod diag;
 pub mod domain;
 pub mod enrollment;
 pub mod evidence;
+pub(crate) mod exchange_requests;
 pub mod goals;
 pub mod interview_panel;
 #[cfg(test)]
@@ -1135,15 +1136,31 @@ pub fn run() {
                                 // issuance site creates or changes a list; the
                                 // commands that do so publish inline, and this
                                 // pass catches the rest and any push that failed.
+                                // Timed suspensions that have come due are
+                                // lifted first, so the lists pushed carry it.
                                 if let Some(issuer) = issuer.as_ref() {
                                     let pending = {
                                         let guard = db_for_queue.lock();
                                         match guard.as_deref() {
-                                            Ok(Some(db)) => credentials::status_list::pending(
-                                                db.conn(),
-                                                issuer.did(),
-                                            )
-                                            .unwrap_or_default(),
+                                            Ok(Some(db)) => {
+                                                match credentials::lifecycle::lift_expired_suspensions(
+                                                    db.conn(),
+                                                    issuer.did(),
+                                                    &crate::clock::now_rfc3339(),
+                                                ) {
+                                                    Ok(report) => {
+                                                        for error in report.errors {
+                                                            log::warn!("timed suspension not lifted: {error}");
+                                                        }
+                                                    }
+                                                    Err(e) => log::warn!("timed suspensions: {e}"),
+                                                }
+                                                credentials::status_list::pending(
+                                                    db.conn(),
+                                                    issuer.did(),
+                                                )
+                                                .unwrap_or_default()
+                                            }
                                             _ => Vec::new(),
                                         }
                                     };
@@ -1756,6 +1773,7 @@ pub fn run() {
             commands::skill_bootstrap::bootstrap_extract_text,
             // Dynamic assessments
             commands::exchange::exchange_requests,
+            commands::exchange::exchange_prepare_assessment,
             commands::exchange::exchange_start_assessment,
             commands::exchange::exchange_credentials,
             commands::exchange::exchange_preview,
@@ -1843,6 +1861,7 @@ pub fn run() {
             commands::integrity::integrity_start_session,
             commands::integrity::integrity_attest_session,
             commands::integrity::integrity_select_profile,
+            commands::integrity::integrity_device_support,
             commands::integrity::integrity_coverage_statement,
             commands::integrity::integrity_coverage_statements,
             commands::integrity_companion::integrity_companion_offer,
