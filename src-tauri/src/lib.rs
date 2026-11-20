@@ -1831,6 +1831,7 @@ pub fn run() {
             commands::taxonomy::list_skills,
             commands::taxonomy::get_skill,
             commands::taxonomy::list_skill_graph_edges,
+            commands::taxonomy::list_skill_graph_relations,
             commands::taxonomy::tag_element_skill,
             commands::taxonomy::untag_element_skill,
             commands::taxonomy::list_element_skill_tags,

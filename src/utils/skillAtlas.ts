@@ -1,4 +1,4 @@
-import type { SkillGraphEdge, SkillInfo, SubjectFieldInfo, VerifiableCredential } from '@/types'
+import type { SkillGraphEdge, SkillGraphRelation, SkillInfo, SubjectFieldInfo, VerifiableCredential } from '@/types'
 import { BLOOM_ORDER, type BloomLevel } from './bloom'
 
 export type BloomRank = 0 | 1 | 2 | 3 | 4 | 5
@@ -16,6 +16,17 @@ export interface AtlasRelation {
   earned: boolean
 }
 
+export const SKILL_RELATION_TYPES = ['related', 'complementary', 'alternative'] as const
+export type SkillRelationType = typeof SKILL_RELATION_TYPES[number]
+
+/** A related, complementary or alternative skill: a connection, never a prerequisite. */
+export interface AtlasRelatedSkill {
+  skillId: string
+  name: string
+  type: SkillRelationType
+  loaded: boolean
+}
+
 export interface AtlasNode {
   skill: Readonly<SkillInfo>
   fieldId: string | null
@@ -24,6 +35,8 @@ export interface AtlasNode {
   intrinsicBloom: BloomLevel | null
   prerequisites: readonly AtlasRelation[]
   dependents: readonly AtlasRelation[]
+  /** Undirected: a relation appears on both of its skills. */
+  relations: readonly AtlasRelatedSkill[]
   /**
    * At least one prerequisite, and every one the skill counts is loaded and
    * earned. Unknown, unloaded or uncounted prerequisites never satisfy it.
@@ -58,6 +71,8 @@ export interface AtlasModel {
 export interface BuildSkillAtlasInput {
   skills: readonly SkillInfo[]
   edges: readonly SkillGraphEdge[]
+  /** Omitted or empty when relations could not be loaded; the graph works without them. */
+  relations?: readonly SkillGraphRelation[]
   activeCredentials: readonly VerifiableCredential[]
   subjectDid: string | null
   subjectFields?: readonly (Pick<SubjectFieldInfo, 'id' | 'name'> & { atlas_slot?: number | null })[]
@@ -71,6 +86,11 @@ export function isBloomRank(value: unknown): value is BloomRank {
 function bloomLevel(value: string | null | undefined): BloomLevel | null {
   const normalized = value?.toLowerCase()
   return BLOOM_ORDER.find((level) => level === normalized) ?? null
+}
+
+/** The stored default stands in for a type this build does not know. */
+function relationType(value: string): SkillRelationType {
+  return SKILL_RELATION_TYPES.find((type) => type === value) ?? 'related'
 }
 
 function compareIds(left: string, right: string): number {
@@ -117,9 +137,25 @@ export function buildSkillAtlas(input: BuildSkillAtlasInput): AtlasModel {
     })
   }
 
+  const relationsBySkill = new Map<string, Map<string, AtlasRelatedSkill>>()
+  const relate = (fromId: string, toId: string, type: SkillRelationType) => {
+    if (!skills.has(fromId)) return
+    if (!relationsBySkill.has(fromId)) relationsBySkill.set(fromId, new Map())
+    const related = relationsBySkill.get(fromId)
+    const other = skills.get(toId)
+    if (related && !related.has(toId)) related.set(toId, { skillId: toId, name: other?.name ?? toId, type, loaded: other !== undefined })
+  }
+  for (const relation of input.relations ?? []) {
+    if (relation.skill_id === relation.related_skill_id) continue
+    const type = relationType(relation.relation_type)
+    relate(relation.skill_id, relation.related_skill_id, type)
+    relate(relation.related_skill_id, relation.skill_id, type)
+  }
+
   const nodes: AtlasNode[] = [...skills.values()].sort((a, b) => compareIds(a.id, b.id)).map((skill) => {
     const prerequisites = [...(prerequisitesBySkill.get(skill.id)?.values() ?? [])].sort((a, b) => compareIds(a.skillId, b.skillId))
     const dependents = [...(dependentsBySkill.get(skill.id)?.values() ?? [])].sort((a, b) => compareIds(a.skillId, b.skillId))
+    const relations = [...(relationsBySkill.get(skill.id)?.values() ?? [])].sort((a, b) => compareIds(a.skillId, b.skillId))
     const rank = ranks.get(skill.id)
     const status: AtlasStatus = earnedIds.has(skill.id) ? 'earned' : 'ready'
     const prerequisitesSatisfied = prerequisites.length > 0 && prerequisites.length === skill.prerequisite_count &&
@@ -132,6 +168,7 @@ export function buildSkillAtlas(input: BuildSkillAtlasInput): AtlasModel {
       intrinsicBloom: bloomLevel(skill.bloom_level),
       prerequisites,
       dependents,
+      relations,
       prerequisitesSatisfied,
       readyNext: status === 'ready' && prerequisitesSatisfied,
     }

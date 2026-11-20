@@ -484,6 +484,51 @@ pub struct SkillGraphEdge {
     pub prerequisite_bloom: String,
 }
 
+/// List every non-prerequisite relation (related, complementary,
+/// alternative) for the skill graph, in one call.
+#[tauri::command]
+pub async fn list_skill_graph_relations(
+    state: State<'_, AppState>,
+) -> Result<Vec<SkillGraphRelation>, String> {
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "taxonomy.skill-graph.relations",
+            move |db| skill_relations(db.conn()).map_err(|e| e.to_string()),
+        )
+        .await
+}
+
+/// Every row of `skill_relations`, as stored. A relation is undirected; the
+/// stored direction carries no meaning.
+pub(crate) fn skill_relations(
+    conn: &rusqlite::Connection,
+) -> rusqlite::Result<Vec<SkillGraphRelation>> {
+    let mut stmt = conn.prepare(
+        "SELECT skill_id, related_skill_id, relation_type
+         FROM skill_relations
+         ORDER BY skill_id, related_skill_id",
+    )?;
+    let rows = stmt.query_map([], |row| {
+        Ok(SkillGraphRelation {
+            skill_id: row.get(0)?,
+            related_skill_id: row.get(1)?,
+            relation_type: row.get(2)?,
+        })
+    })?;
+    rows.collect()
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillGraphRelation {
+    pub skill_id: String,
+    pub related_skill_id: String,
+    /// `related`, `complementary` or `alternative`.
+    pub relation_type: String,
+}
+
 // ============================================================================
 // Element skill tag commands
 // ============================================================================
@@ -617,5 +662,46 @@ mod tests {
         assert_eq!(slot("sf_cs"), Some(Some(1)));
         assert_eq!(slot("sf_web"), Some(Some(7)));
         assert_eq!(slot("sf_local"), Some(None));
+    }
+
+    #[test]
+    fn every_bundled_relation_is_listed_once_with_a_known_type() {
+        let db = Database::open_in_memory().expect("open database");
+        db.run_migrations().expect("run migrations");
+        crate::db::bundled::install_bundled_data(db.conn()).expect("install bundled data");
+
+        let bundled: serde_json::Value =
+            serde_json::from_str(include_str!("../../../bootstrap/public_taxonomy.json"))
+                .expect("parse bundled taxonomy");
+        let mut expected: Vec<(String, String, String)> = bundled["skill_relations"]
+            .as_array()
+            .expect("bundled relations")
+            .iter()
+            .map(|row| {
+                let field = |name: &str| row[name].as_str().expect(name).to_string();
+                (
+                    field("skill_id"),
+                    field("related_skill_id"),
+                    field("relation_type"),
+                )
+            })
+            .collect();
+        expected.sort();
+        assert!(!expected.is_empty());
+
+        let mut listed: Vec<(String, String, String)> = skill_relations(db.conn())
+            .expect("list relations")
+            .into_iter()
+            .map(|r| (r.skill_id, r.related_skill_id, r.relation_type))
+            .collect();
+        listed.sort();
+
+        assert_eq!(listed, expected);
+        for (_, _, relation_type) in &listed {
+            assert!(
+                ["related", "complementary", "alternative"].contains(&relation_type.as_str()),
+                "unknown relation type {relation_type}"
+            );
+        }
     }
 }

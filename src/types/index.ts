@@ -704,6 +704,14 @@ export interface SkillGraphEdge {
   prerequisite_bloom: string
 }
 
+/** A non-prerequisite relation; undirected, so the stored order carries no meaning. */
+export interface SkillGraphRelation {
+  skill_id: string
+  related_skill_id: string
+  /** `related`, `complementary` or `alternative`. */
+  relation_type: string
+}
+
 export interface ElementSkillTag {
   skill_id: string
   skill_name: string
