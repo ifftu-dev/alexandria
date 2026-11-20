@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Frame, type Page } from '@playwright/test'
 import {
   called, lesson, openLaunches, openLesson, openPlayer, PACKAGE_ORIGIN, seen, navigate, type Served,
 } from './packageHarness'
@@ -19,6 +19,23 @@ async function waitDone(page: Page) {
     .toHaveAttribute('data-done', '', { timeout: 15000 })
 }
 
+/**
+ * Presses the lesson's button for `way` and waits until the attempt has
+ * run: the lesson reported it, or the browser already replaced the lesson's
+ * document (a refused navigation of its own frame leaves an error page). A
+ * navigation or window the browser let through would start from that same
+ * task; the short wait afterwards lets it reach the harness.
+ */
+async function attempt(page: Page, frame: Frame, way: string) {
+  const lessonUrl = frame.url()
+  await frame.getByRole('button', { name: way, exact: true }).click()
+  await expect.poll(async () => frame.isDetached() || frame.url() !== lessonUrl
+    || way in await frame.evaluate(() => JSON.parse(document.getElementById('seen')?.getAttribute('data-values') ?? '{}') as object)
+      .catch(() => ({}))).toBe(true)
+  await page.waitForTimeout(ATTEMPT_SETTLE_MS)
+}
+const ATTEMPT_SETTLE_MS = 200
+
 /** The lesson's own account of each attempt, for the failure message. */
 async function attempts(page: Page) {
   const values = await seen(page)
@@ -28,9 +45,8 @@ async function attempts(page: Page) {
 test('no request leaves the package origin, from the lesson, a worker or any window the lesson can reach', async ({ page }) => {
   const served = await openPlayer(page, { fixture: 'package-isolation' })
   await openLesson(page, 'network')
+  // Done only once every window was tried and the worker reported its attempts.
   await waitDone(page)
-  // Let late requests (worker, styles, media) arrive.
-  await page.waitForTimeout(500)
   expect(served.refused, await attempts(page)).toEqual([])
   expect(served.sockets).toEqual([])
 })
@@ -80,9 +96,7 @@ for (const way of NAVIGATIONS) {
   test(`no frame leaves the package origin: ${way}`, async ({ page }) => {
     const served = await openPlayer(page, { fixture: 'package-isolation' })
     const appUrl = page.url()
-    await openLesson(page, 'navigation')
-    await lesson(page).getByRole('button', { name: way, exact: true }).click()
-    await page.waitForTimeout(1000)
+    await attempt(page, await openLesson(page, 'navigation'), way)
     expect(served.refused).toEqual([])
     expect(page.url()).toBe(appUrl)
     const left = page.frames().map(frame => frame.url()).filter(url => url.includes(HOSTILE) || url.startsWith('data:'))
@@ -104,9 +118,7 @@ const POPUPS = [
 for (const way of POPUPS) {
   test(`no window opens: ${way}`, async ({ page }) => {
     const served = await openPlayer(page, { fixture: 'package-isolation' })
-    await openLesson(page, 'popup')
-    await lesson(page).getByRole('button', { name: way, exact: true }).click()
-    await page.waitForTimeout(1000)
+    await attempt(page, await openLesson(page, 'popup'), way)
     expect(served.popups).toEqual([])
     expect(page.context().pages()).toHaveLength(1)
     expect(served.refused).toEqual([])
@@ -170,6 +182,30 @@ for (const next of ['fresh attempt', 'leave and return'] as const) {
     )
     expect(status).toBe(404)
     expect(served.missing).toContain(`${PACKAGE_ORIGIN}/${first}/storage.html`)
+  })
+}
+
+// Every launch shares the package origin, so clearing its storage is the only
+// thing between one launch's data and the next. A launch whose clearing page
+// does not answer truthfully, for this request, must not start.
+const clearPage = (message: string) => `<!doctype html><html><head><script>
+  var nonce = location.hash.slice(1);
+  window.top.postMessage(${message}, '*');
+</script></head><body></body></html>`
+
+const BAD_CLEARS: Record<string, string> = {
+  'it reports that clearing failed': `{ source: 'alexandria-package', type: 'storage-cleared', nonce: nonce, ok: false, failed: ['indexedDB'] }`,
+  'its answer lacks the request nonce': `{ source: 'alexandria-package', type: 'storage-cleared', ok: true, failed: [] }`,
+  'its answer carries another nonce': `{ source: 'alexandria-package', type: 'storage-cleared', nonce: 'stale', ok: true, failed: [] }`,
+  'its answer does not come from the clearing page': `{ type: 'storage-cleared', nonce: nonce, ok: true, failed: [] }`,
+}
+
+for (const [why, message] of Object.entries(BAD_CLEARS)) {
+  test(`a launch does not start when storage clearing fails: ${why}`, async ({ page }) => {
+    await openPlayer(page, { fixture: 'package-isolation', reservedFiles: { 'clear.html': clearPage(message) } })
+    await expect(page.locator('[data-package-player] [role="alert"]')).toBeVisible({ timeout: 10000 })
+    expect(page.frames().some(frame => frame.url().includes('/_alexandria/wrapper.html'))).toBe(false)
+    expect(await called(page, 'package_attempt_initialise')).toBe(0)
   })
 }
 

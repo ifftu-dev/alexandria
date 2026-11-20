@@ -79,6 +79,8 @@ export function cmi5Backend() {
   const used = new Map<string, Set<string>>()
   const sessions = new Map<string, Session>()
   let launches = 0
+  /** Sessions the player itself ended with `package_cmi5_end`. */
+  const endedByPlayer = new Set<string>()
   let count = 0
 
   const units = (): PackageActivity[] => {
@@ -228,7 +230,9 @@ export function cmi5Backend() {
           complete: used.has(unit.id) && satisfied(unit), score: null,
         }))
       case 'package_cmi5_launch': return launch(args)
-      case 'package_cmi5_end': return end(args.sessionId)
+      case 'package_cmi5_end':
+        endedByPlayer.add(String(args.sessionId))
+        return end(args.sessionId)
       case 'package_cmi5_focus': return true
       case 'package_attempt_terminate': return rollUp()
       default:
@@ -237,5 +241,8 @@ export function cmi5Backend() {
     }
   }
 
-  return { invoke, endpoint, statements, called: (command: string) => calls.filter(call => call.command === command).length }
+  /** Unit names of the sessions launched that the player has not ended, in launch order. */
+  const notEndedByPlayer = () => [...sessions.values()].filter(session => !endedByPlayer.has(session.id)).map(session => session.unit.title)
+  return { invoke, endpoint, statements, notEndedByPlayer,
+    called: (command: string) => calls.filter(call => call.command === command).length }
 }

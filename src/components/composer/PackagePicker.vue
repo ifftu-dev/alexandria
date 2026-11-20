@@ -12,6 +12,7 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppSpinner } from '@/components/ui'
 import type { Package, PackageActivity } from '@/types'
 import { packageErrorMessage, type PackageErrorMessage } from './packageMessages'
+import { outline } from '@/components/course/package/packageTree'
 
 const props = defineProps<{
   /** Whether the course is or will be public; asks for the redistribution confirmation. */
@@ -33,16 +34,8 @@ const mayRedistribute = ref(false)
 
 interface Row { activity: PackageActivity, depth: number }
 
-const rows = computed<Row[]>(() => {
-  const out: Row[] = []
-  const walk = (activity: PackageActivity, depth: number) => {
-    if (!activity.visible) return
-    out.push({ activity, depth })
-    for (const child of activity.children ?? []) walk(child, depth + 1)
-  }
-  for (const child of chosen.value?.description.tree.children ?? []) walk(child, 0)
-  return out
-})
+const rows = computed<Row[]>(() =>
+  outline(chosen.value?.description.tree.children).map(({ item, depth }) => ({ activity: item, depth })))
 
 const sizeValue = computed(() => {
   const description = chosen.value?.description

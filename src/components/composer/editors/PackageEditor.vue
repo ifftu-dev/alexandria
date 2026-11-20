@@ -10,7 +10,8 @@ import { AppButton } from '@/components/ui'
 import PackagePicker from '../PackagePicker.vue'
 import PackagePlayer from '@/components/course/package/PackagePlayer.vue'
 import { courseWillBePublic, packageErrorMessage, type PackageErrorMessage } from '../packageMessages'
-import type { Element, Package, PackageActivity } from '@/types'
+import type { Element, Package } from '@/types'
+import { launchables } from '@/components/course/package/packageTree'
 
 const props = defineProps<{ element: Element }>()
 const emit = defineEmits<{ updated: [Element] }>()
@@ -25,15 +26,7 @@ const saving = ref(false)
 const previewing = ref(false)
 const failure = ref<PackageErrorMessage | null>(null)
 
-const lessonCount = computed(() => {
-  let count = 0
-  const walk = (activity: PackageActivity) => {
-    if (activity.launch) count += 1
-    for (const child of activity.children ?? []) walk(child)
-  }
-  if (pkg.value) walk(pkg.value.description.tree)
-  return count
-})
+const lessonCount = computed(() => launchables(pkg.value?.description.tree).length)
 
 async function load() {
   loaded.value = false

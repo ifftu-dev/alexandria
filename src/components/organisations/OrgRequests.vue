@@ -549,6 +549,7 @@ onUnmounted(() => {
           :pairwise-actor="entry.item.records.pairwise_actor"
           :real-did-actor="entry.item.records.real_did_actor"
           :proposed-account="entry.item.records.proposed_account"
+          share
           :busy="busy === entry.key"
           @approve="(d: RecordConsentDecision) => shareRecords(entry, d)"
           @cancel="hide(entry)"

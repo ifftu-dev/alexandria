@@ -8,12 +8,12 @@ const props = defineProps<{ usage: LearningRecordUsage }>()
 const { t, locale } = useI18n()
 const headingId = useId()
 
-/** Binary units, as the limit is defined: 16 MiB reads "16 MB". */
+/** Binary units, as the limit is defined: 16 MiB reads "16 MB". Unit names come from the catalogue. */
 function size(bytes: number): string {
   const number = (value: number) => new Intl.NumberFormat(locale.value, { maximumFractionDigits: 1 }).format(value)
-  if (bytes < 1024) return `${number(bytes)} B`
-  if (bytes < 1024 * 1024) return `${number(bytes / 1024)} KB`
-  return `${number(bytes / (1024 * 1024))} MB`
+  if (bytes < 1024) return t('dashboard.activityLog.size.bytes', { size: number(bytes) })
+  if (bytes < 1024 * 1024) return t('dashboard.activityLog.size.kilobytes', { size: number(bytes / 1024) })
+  return t('dashboard.activityLog.size.megabytes', { size: number(bytes / (1024 * 1024)) })
 }
 
 const fraction = computed(() => props.usage.limit_bytes > 0

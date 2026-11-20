@@ -361,6 +361,9 @@ async function probeLesson(page: Page, id: 'probe' | 'plain' | 'noid'): Promise<
   return openLesson(page, id, id === 'probe' ? 'probe.html' : `probe.html?${id}`)
 }
 
+/** A commit interval for checks that nothing more is written: three of them pass quickly. */
+const SHORT_COMMIT_INTERVAL_MS = 200
+
 const lastCommit = async (page: Page, activity: string) =>
   (await commits(page)).filter(commit => commit.activity_id === activity).slice(-1)[0]
 
@@ -423,7 +426,8 @@ test('the host receives the whole run-time state on commit and on terminate', as
 })
 
 test('API: after Terminate every call but the error functions fails with the after-termination codes and nothing reaches the host', async ({ page }) => {
-  await openPlayer(page, { fixture: 'scorm2004-conformance' })
+  // A short commit interval, so waiting out a few of them is quick.
+  await openPlayer(page, { fixture: 'scorm2004-conformance', commitIntervalMs: SHORT_COMMIT_INTERVAL_MS })
   const frame = await probeLesson(page, 'probe')
   // The lesson's frame goes once it terminates; a late call (from its unload
   // handler, or a page that kept the object) reaches the API it was given.
@@ -437,7 +441,7 @@ test('API: after Terminate every call but the error functions fails with the aft
     return calls.map(([name, ...args]) => `${api[name!]!(...args)}/${api.GetLastError!()}`)
   }, [get('cmi.location'), set('cmi.location', 'after'), ['Commit', ''], ['Terminate', ''], ['Initialize', '']] as Call[])
   expect(late).toEqual(['/123', 'false/133', 'false/143', 'false/113', 'false/104'])
-  await page.waitForTimeout(2500)
+  await page.waitForTimeout(3 * SHORT_COMMIT_INTERVAL_MS)
   expect((await commits(page)).length).toBe(writes)
 })
 

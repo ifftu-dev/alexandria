@@ -681,6 +681,9 @@ export interface GrantRecords {
   status: OutboxStatus | null
 }
 
+/** What an access log row records (`AccessAction` in src-tauri/src/domain/record_sending.rs). */
+export type AccessAction = 'send' | 'void'
+
 /** One send in the learner-readable access log. */
 export interface RecordAccessEntry {
   seq: number
@@ -688,12 +691,25 @@ export interface RecordAccessEntry {
   recipient_id: string
   recipient_kind: RecipientKind
   recipient_name: string
-  action: 'send' | 'void'
+  action: AccessAction
   scope: RecordScope
   record_count: number
   identifier: string
   accepted: boolean
   detail: string | null
+}
+
+/**
+ * A record a recipient refused at its last try
+ * (src-tauri/src/record_sending/outbox.rs), from `record_send_failures`,
+ * shown in the activity log beside the record.
+ */
+export interface SendFailure {
+  recipient_id: string
+  record_id: string
+  attempts: number
+  last_error: string
+  next_attempt_at: string | null
 }
 
 /**

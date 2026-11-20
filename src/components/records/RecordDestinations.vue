@@ -19,6 +19,8 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppInput, ConfirmDialog } from '@/components/ui'
 import RecordConsent from './RecordConsent.vue'
 import RecordSendLog from './RecordSendLog.vue'
+import { useRecordSendLog } from '@/composables/useRecordSendLog'
+import { formatDateTime } from '@/utils/formatDateTime'
 import type { DestinationPreview, RecordConsentDecision, RecordDestination, RemovalReport } from '@/types'
 
 withDefaults(defineProps<{ showLog?: boolean }>(), { showLog: false })
@@ -38,14 +40,9 @@ const busy = ref(false)
 const formError = ref('')
 const removing = ref<RecordDestination | null>(null)
 const removingBusy = ref(false)
-const log = ref<InstanceType<typeof RecordSendLog> | null>(null)
+const sendLog = useRecordSendLog()
 
-function when(iso: string | null): string {
-  if (!iso) return ''
-  const parsed = new Date(iso)
-  if (Number.isNaN(parsed.getTime())) return iso
-  return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(parsed)
-}
+const when = (iso: string | null) => formatDateTime(iso, locale.value)
 
 async function refresh() {
   error.value = ''
@@ -54,7 +51,20 @@ async function refresh() {
   } catch (e) {
     error.value = String(e)
   }
-  await log.value?.refresh()
+  // Every view of the send log shares it; what this panel sent shows in all of them.
+  await sendLog.refresh()
+}
+
+/**
+ * What to tell the learner when the host refused to look up or add a
+ * destination. A supervised profile cannot add one on its own: the host
+ * answers `guardian_approval_required`, and the learner is told a guardian
+ * decides, not shown the refusal.
+ */
+function refusal(cause: unknown): string {
+  const message = String(cause)
+  if (message.startsWith('guardian_approval_required')) return t('organisations.records.guardianRequired')
+  return message
 }
 
 function resetForm() {
@@ -76,7 +86,7 @@ async function next() {
       username: username.value.trim(),
     })
   } catch (e) {
-    formError.value = String(e)
+    formError.value = refusal(e)
   } finally {
     busy.value = false
   }
@@ -97,7 +107,7 @@ async function approve(decision: RecordConsentDecision) {
     resetForm()
     await refresh()
   } catch (e) {
-    formError.value = String(e)
+    formError.value = refusal(e)
   } finally {
     busy.value = false
   }
@@ -218,7 +228,7 @@ onMounted(refresh)
       @cancel="resetForm"
     />
 
-    <RecordSendLog v-if="showLog" ref="log" />
+    <RecordSendLog v-if="showLog" />
 
     <ConfirmDialog
       :open="removing !== null"

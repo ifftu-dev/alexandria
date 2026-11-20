@@ -48,3 +48,7 @@ Proposed doc edits, not made here:
 - `docs/learning-standards/28-device-and-hosted-runs.md`: ticket 23's device checklist applies to this build as is; add "the Android network security config admits only 127.0.0.1 in release".
 - `src-tauri/src/AGENTS.md`: reserved package files now include `returned.html`; a cmi5 launch's policy depends on `Launches::set_endpoint_port`.
 
+
+### Review (2026-11-21)
+
+- Known gap: `cmi5-player.spec.ts` still serves its own package origin (a different origin, the fake loopback endpoint routed in the page, the endpoint-admitting policy and `cmi5Backend`); it now shares only `handlerConstant` with `packageHarness.ts`. Moving it onto `openPlayer` needs origin, screen, policy and route hooks in the harness.

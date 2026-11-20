@@ -8,11 +8,16 @@
 // local and session storage, IndexedDB databases, cache storage, service
 // worker registrations, cookies and the frame's name. The player loads this
 // page in the package frame before a launch's wrapper and again before it
-// closes the launch, and waits for the `storage-cleared` message. The response also carries a
-// Clear-Site-Data header for the engines that honour it.
+// closes the launch, and waits for the `storage-cleared` message, which
+// echoes the nonce the player put in this page's fragment (`clear.html#<nonce>`)
+// so the document this page replaced cannot answer in its place. `ok` is true
+// only when every step worked; the player refuses to start a launch otherwise.
+// The response also carries a Clear-Site-Data header for the engines that
+// honour it.
 (function () {
   'use strict';
   var failures = [];
+  var nonce = window.location.hash.slice(1);
 
   function attempt(name, work) {
     try {
@@ -69,7 +74,7 @@
   Promise.all(steps).then(function () {
     try {
       window.top.postMessage(
-        { source: 'alexandria-package', type: 'storage-cleared', ok: failures.length === 0, failed: failures },
+        { source: 'alexandria-package', type: 'storage-cleared', nonce: nonce, ok: failures.length === 0, failed: failures },
         '*'
       );
     } catch (_) {}
