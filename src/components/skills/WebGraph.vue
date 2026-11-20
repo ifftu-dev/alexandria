@@ -19,15 +19,18 @@
  *   button per dot.
  * - The explorer (ticket 05) does not mount this component, because its node
  *   elements must stay the same DOM nodes across Web, Simple and Detailed so
- *   they can travel and keep focus. In Web it calls `useWebGraph` with its
- *   map element as root, places its existing node elements at each dot's
- *   `x`, `y` and `hit` (screen pixels), renders `WebGraphDot` inside them in
+ *   they can travel and keep focus. In Web its adapter (`useExplorerWeb`)
+ *   calls `useWebGraph` with the explorer's map element as root; the
+ *   explorer places its existing node elements at each dot's `x`, `y` and
+ *   `hit` (screen pixels), renders `WebGraphDot` inside them in
  *   place of the Simple or Detailed skin, binds the same attributes and
  *   handlers as the template below (`data-skill`, `tabindex` from `roving`,
  *   `aria-pressed`, click, pointerenter and pointerleave on the node; key,
  *   focus, pointer, click-capture and wheel handlers on the root), and draws
  *   `WebGraphLines` in its canvas. `zoomBy` and `panBy` serve its zoom and pan
- *   buttons; a null camera fits what is shown.
+ *   buttons (`AtlasMapTools`); a null camera fits what is shown.
+ * - The memoised Web graph and layout of a model come from `webLayoutEntry`
+ *   (`@/utils/webGeometry`), computed once per model for every surface.
  *
  * Positions and camera are controlled: the owner passes the shared dragged
  * positions (`useSkillAtlas().webPositions`) and stores every `drag` event
