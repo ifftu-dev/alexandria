@@ -30,7 +30,7 @@ mod draft;
 mod rows;
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use std::future::Future;
 use std::path::{Path, PathBuf};

@@ -15,7 +15,7 @@ use crate::content_store::node::ContentNode;
 use crate::db::Database;
 use crate::domain::package::ArchiveLocation;
 
-mod fixture {
+pub(crate) mod fixture {
     //! A stored-only zip writer, enough for well-formed test packages.
 
     fn crc32(data: &[u8]) -> u32 {
@@ -112,7 +112,7 @@ const WELCOME: &[u8] = b"<html><body>Welcome</body></html>";
 const LIFTING: &[u8] = b"<html><body>Lift with your legs</body></html>";
 const SCRIPT: &[u8] = b"window.lesson = 'shared';";
 
-fn induction_package() -> Vec<u8> {
+pub(crate) fn induction_package() -> Vec<u8> {
     fixture::zip(&[
         ("imsmanifest.xml", MANIFEST.as_bytes()),
         ("welcome/index.html", WELCOME),
