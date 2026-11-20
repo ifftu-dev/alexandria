@@ -33,6 +33,7 @@ pub(crate) fn state_in(directory: &std::path::Path) -> Arc<AppState> {
         )),
         evidence_staging: Arc::new(crate::sentinel::evidence::EvidenceStaging::new()),
         package_launches: Arc::new(crate::package_serving::Launches::new()),
+        package_previews: Arc::new(crate::packages::preview::Previews::new()),
         db_executor: crate::db::executor::DatabaseExecutor::new(db.clone()),
         db,
         keystore: Arc::new(Mutex::new(None)),

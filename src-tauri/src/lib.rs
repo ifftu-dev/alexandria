@@ -121,6 +121,9 @@ pub struct AppState {
     /// Open standards package launches, read by the `package` scheme
     /// handler. Emptied when the profile stops.
     pub package_launches: Arc<package_serving::Launches>,
+    /// Open package previews (an author running their own package element
+    /// without an enrolment). In memory only; emptied when the profile stops.
+    pub package_previews: Arc<packages::preview::Previews>,
 
     // ─── per-profile resources (populated while active) ─────────────
     pub db: Arc<std::sync::Mutex<Option<Database>>>,
@@ -437,6 +440,7 @@ impl AppState {
         // Package launches belong to this profile's session; their prefixes
         // must not serve anything once it ends.
         self.package_launches.close_all();
+        self.package_previews.clear();
 
         // Seeding can write through the shared DB/content handles. Join it
         // before either resource can be closed or repointed at another user.
@@ -1412,6 +1416,7 @@ pub fn run() {
                 ipc_limiter: Arc::new(std::sync::Mutex::new(ratelimit::IpcRateLimiter::new())),
                 evidence_staging: Arc::new(sentinel::evidence::EvidenceStaging::new()),
                 package_launches: Arc::new(package_serving::Launches::new()),
+                package_previews: Arc::new(packages::preview::Previews::new()),
                 db,
                 db_executor,
                 keystore,
@@ -1693,6 +1698,12 @@ pub fn run() {
             commands::package_attempts::package_attempt_commit,
             commands::package_attempts::package_attempt_terminate,
             commands::package_attempts::package_attempt_activities,
+            commands::package_previews::package_preview_open,
+            commands::package_previews::package_preview_fresh,
+            commands::package_previews::package_preview_initialise,
+            commands::package_previews::package_preview_commit,
+            commands::package_previews::package_preview_activities,
+            commands::package_previews::package_preview_terminate,
             commands::learning_records::learning_records_usage,
             // Content (iroh blob store)
             commands::content::content_add,

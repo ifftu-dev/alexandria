@@ -51,6 +51,7 @@ pub mod notifications;
 pub mod opinions;
 pub mod package_attempts;
 pub mod package_launches;
+pub mod package_previews;
 pub mod packages;
 pub mod personhood_lab;
 pub mod personhood_receipts;

@@ -27,6 +27,7 @@ mod archive;
 pub mod attempts;
 mod cache;
 mod draft;
+pub mod preview;
 mod rows;
 
 #[cfg(test)]
