@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import taxonomy from '../../../bootstrap/public_taxonomy.json'
 import { scaleTaxonomy } from '../../../tests/desktop-ui/atlasBackend'
-import { WEB_MIN_DISTANCE, webLayout, type WebGraph } from './webGeometry'
+import { WEB_MIN_DISTANCE, continueWebLayout, webLayout, type WebGraph } from './webGeometry'
 
 type Point = { x: number; y: number }
 
@@ -109,6 +109,43 @@ describe('Web layout', () => {
     expect(near * 1.2).toBeLessThan(far)
   })
 })
+
+describe('Continuing the Web layout', () => {
+  // Vue.js builds on JavaScript and on nothing else: drag JavaScript aside and hold it there.
+  const held = 'skill_javascript'
+  const neighbour = 'skill_vue'
+  const rest = webLayout(BUNDLED)
+  const dragged = new Map(rest)
+  dragged.set(held, { x: rest.get(held)!.x + 120, y: rest.get(held)!.y })
+
+  it('keeps a held skill exactly where it is put while its neighbours follow it', () => {
+    // A second of frames, one call per frame as a live drag makes them.
+    let next: Map<string, Point> = dragged
+    for (let frame = 0; frame < 60; frame++) next = continueWebLayout(BUNDLED, next, { pinned: new Set([held]) })
+    expect(next.get(held)).toEqual(dragged.get(held))
+    const gap = (layout: ReadonlyMap<string, Point>) => distance(layout.get(held)!, layout.get(neighbour)!)
+    expect(gap(next)).toBeLessThan(gap(dragged) * 0.85)
+    expect([...next.keys()].sort()).toEqual([...rest.keys()].sort())
+  })
+
+  it('moves nothing much when continued from rest, and repeats exactly', () => {
+    const next = continueWebLayout(BUNDLED, rest)
+    for (const [id, point] of next) expect(distance(point, rest.get(id)!)).toBeLessThan(2)
+    expect(continueWebLayout(BUNDLED, dragged, { pinned: new Set([held]) })).toEqual(continueWebLayout(BUNDLED, dragged, { pinned: new Set([held]) }))
+  })
+
+  it('starts a skill it has no position for from the seeded start, and ignores positions of skills not in the graph', () => {
+    const partial = new Map([...rest].filter(([id]) => id !== neighbour))
+    partial.set('not-a-skill', { x: 0, y: 0 })
+    const next = continueWebLayout(BUNDLED, partial)
+    expect(next.has('not-a-skill')).toBe(false)
+    expect(Number.isFinite(next.get(neighbour)!.x)).toBe(true)
+  })
+})
+
+function distance(a: Point, b: Point): number {
+  return Math.hypot(a.x - b.x, a.y - b.y)
+}
 
 /** The smallest distance between any two points, by sweeping them in x order. */
 function closestPair(points: readonly Point[]): number {

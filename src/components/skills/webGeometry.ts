@@ -364,3 +364,37 @@ export function webLayout(graph: WebGraph): Map<string, WebPoint> {
   for (let i = 0; i < x.length; i++) { x[i]! -= midX; y[i]! -= midY }
   return positionsOf(sim)
 }
+
+/** Ticks and strength of one call of `continueWebLayout`: one animation frame of a live drag. */
+export const WEB_LIVE_TICKS = 1
+export const WEB_LIVE_ALPHA = 0.3
+
+export interface WebContinueOptions {
+  /** Skills that hold still where `positions` puts them, such as the dot under the pointer. */
+  pinned?: ReadonlySet<string>
+  ticks?: number
+  /** Strength of every force but the overlap push, as in the layout's cooling run. */
+  alpha?: number
+}
+
+/**
+ * The layout's forces run on from the given positions, for a live drag:
+ * pinned skills hold still and the rest follow and settle. A skill with no
+ * position starts where the layout would seed it; positions of skills not in
+ * the graph are ignored. Nothing is re-centred, so the web stays under the
+ * pointer.
+ */
+export function continueWebLayout(graph: WebGraph, positions: ReadonlyMap<string, WebPoint>,
+  options: WebContinueOptions = {}): Map<string, WebPoint> {
+  const sim = simulation(prepare(graph))
+  const { x, y, pinned } = sim
+  const { ticks = WEB_LIVE_TICKS, alpha = WEB_LIVE_ALPHA } = options
+  seed(sim)
+  sim.graph.ids.forEach((id, i) => {
+    const point = positions.get(id)
+    if (point) { x[i] = point.x; y[i] = point.y }
+    if (options.pinned?.has(id)) pinned[i] = 1
+  })
+  for (let t = 0; t < ticks; t++) tick(sim, alpha)
+  return positionsOf(sim)
+}
