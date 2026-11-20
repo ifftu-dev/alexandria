@@ -19,6 +19,7 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppInput, ConfirmDialog } from '@/components/ui'
 import RecordConsent from './RecordConsent.vue'
 import RecordSendLog from './RecordSendLog.vue'
+import { useRecordSendLog } from '@/composables/useRecordSendLog'
 import type { DestinationPreview, RecordConsentDecision, RecordDestination, RemovalReport } from '@/types'
 
 withDefaults(defineProps<{ showLog?: boolean }>(), { showLog: false })
@@ -38,7 +39,7 @@ const busy = ref(false)
 const formError = ref('')
 const removing = ref<RecordDestination | null>(null)
 const removingBusy = ref(false)
-const log = ref<InstanceType<typeof RecordSendLog> | null>(null)
+const sendLog = useRecordSendLog()
 
 function when(iso: string | null): string {
   if (!iso) return ''
@@ -54,7 +55,8 @@ async function refresh() {
   } catch (e) {
     error.value = String(e)
   }
-  await log.value?.refresh()
+  // Every view of the send log shares it; what this panel sent shows in all of them.
+  await sendLog.refresh()
 }
 
 function resetForm() {
@@ -218,7 +220,7 @@ onMounted(refresh)
       @cancel="resetForm"
     />
 
-    <RecordSendLog v-if="showLog" ref="log" />
+    <RecordSendLog v-if="showLog" />
 
     <ConfirmDialog
       :open="removing !== null"

@@ -2,18 +2,16 @@
 /**
  * What this device sent of the learner's records, and to whom: the local
  * half of the access log. Reads by an organisation are known only to its
- * hosted service and are listed from there, beside this.
+ * hosted service and are listed from there, beside this. The rows live in
+ * `useRecordSendLog`, shared by every place this is shown.
  */
-import { onMounted, ref } from 'vue'
+import { onMounted, type DeepReadonly } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useLocalApi } from '@/composables/useLocalApi'
+import { useRecordSendLog } from '@/composables/useRecordSendLog'
 import type { RecordAccessEntry } from '@/types'
 
-const { invoke } = useLocalApi()
 const { t, locale } = useI18n()
-
-const entries = ref<RecordAccessEntry[]>([])
-const error = ref('')
+const { entries, error, refresh } = useRecordSendLog()
 
 function when(iso: string): string {
   const parsed = new Date(iso)
@@ -21,7 +19,7 @@ function when(iso: string): string {
   return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(parsed)
 }
 
-function line(e: RecordAccessEntry): string {
+function line(e: DeepReadonly<RecordAccessEntry>): string {
   const values = { count: e.record_count, recipient: e.recipient_name, identifier: e.identifier, detail: e.detail ?? '' }
   if (e.action === 'void') {
     return e.accepted ? t('organisations.records.log.voided', values) : t('organisations.records.log.voidRefused', values)
@@ -29,16 +27,6 @@ function line(e: RecordAccessEntry): string {
   return e.accepted ? t('organisations.records.log.sent', values) : t('organisations.records.log.refused', values)
 }
 
-async function refresh() {
-  error.value = ''
-  try {
-    entries.value = (await invoke<RecordAccessEntry[] | null>('record_access_log')) ?? []
-  } catch (e) {
-    error.value = String(e)
-  }
-}
-
-defineExpose({ refresh })
 onMounted(refresh)
 </script>
 
