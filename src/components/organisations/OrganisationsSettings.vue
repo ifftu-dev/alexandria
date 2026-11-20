@@ -9,6 +9,9 @@
  * With no Cloud set for the network the inbox would be empty for a reason
  * that has nothing to do with whether anyone asked, so that is said plainly
  * instead of showing an empty inbox.
+ *
+ * Record destinations sit below, outside the switch: sending records to a
+ * store the learner names needs no organisation and no Cloud.
  */
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -19,6 +22,7 @@ import { useSettings } from '@/composables/useSettings'
 import { AppButton, AppInput, AppSwitch } from '@/components/ui'
 import OrgRequests from './OrgRequests.vue'
 import OrgAccess from './OrgAccess.vue'
+import RecordDestinations from '@/components/records/RecordDestinations.vue'
 
 const ENABLED_KEY = 'organisations.enabled'
 
@@ -129,6 +133,11 @@ onMounted(async () => {
       <OrgRequests @shared="accessPanel?.refresh()" />
       <OrgAccess ref="accessPanel" :cloud-url="cloud" />
     </template>
+
+    <!-- Core, not an organisation feature: shown whatever the switch says.
+         The access panel lists sends beside the hosted entries; without it
+         on screen, the destinations panel lists them itself. -->
+    <RecordDestinations :show-log="!enabled || !cloud" />
 
     <form class="space-y-2 rounded-xl border border-border p-4" data-testid="panel-link" @submit.prevent="openPanelLink">
       <p class="text-sm font-medium text-foreground">{{ t('organisations.settings.panelTitle') }}</p>

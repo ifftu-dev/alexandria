@@ -25,7 +25,11 @@ vi.mock('@/composables/useSettings', () => {
   }
 })
 
-const stubs = { OrgRequests: { template: '<div data-testid="org-requests" />' }, OrgAccess: { props: ['cloudUrl'], template: '<div data-testid="org-access">{{ cloudUrl }}</div>' } }
+const stubs = {
+  OrgRequests: { template: '<div data-testid="org-requests" />' },
+  OrgAccess: { props: ['cloudUrl'], template: '<div data-testid="org-access">{{ cloudUrl }}</div>' },
+  RecordDestinations: { props: ['showLog'], template: '<div data-testid="record-destinations">{{ showLog ? "with-log" : "no-log" }}</div>' },
+}
 
 function arm(cloud: string | null) {
   mocks.invoke.mockImplementation(async (command: string) => {
@@ -72,6 +76,21 @@ describe('OrganisationsSettings', () => {
     await wrapper.find('[role=switch]').trigger('click'); await flushPromises()
     expect(mocks.setSetting).toHaveBeenCalledWith('organisations.enabled', 'true')
     expect(wrapper.find('[data-testid=org-requests]').exists()).toBe(true)
+  })
+
+  it('keeps record destinations with the switch off, listing their sends themselves', async () => {
+    mocks.enabled = 'false'
+    arm(null)
+    const off = mount(OrganisationsSettings, { props: { cloudSettingsSection: 'developer' }, global: { stubs } })
+    await flushPromises()
+    expect(off.get('[data-testid=record-destinations]').text()).toBe('with-log')
+
+    mocks.enabled = 'true'
+    arm('https://cloud.example')
+    const on = mount(OrganisationsSettings, { props: { cloudSettingsSection: 'developer' }, global: { stubs } })
+    await flushPromises()
+    // The access panel lists the sends beside the hosted entries.
+    expect(on.get('[data-testid=record-destinations]').text()).toBe('no-log')
   })
 
   it('opens a pasted panel link and goes to the seat', async () => {

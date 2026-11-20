@@ -207,7 +207,8 @@ fn the_view_set_is_exact() {
 /// activity state, sequencing state; keys and unique constraints only, so no
 /// named index) and 4 triggers that refuse grading a package element.
 /// Learning records add 2 tables (records, per-recipient outbox) and 2
-/// indexes, plus a column on courses.
+/// indexes, plus a column on courses. Record sending adds 4 tables
+/// (recipients, destinations, destination secrets, access log) and 1 index.
 #[test]
 fn the_schema_object_counts_are_pinned() {
     let db = migrated();
@@ -215,8 +216,8 @@ fn the_schema_object_counts_are_pinned() {
         .into_iter()
         .filter(|t| t != "_migrations" && t != "_schema_identity")
         .count();
-    assert_eq!(tables, 150, "table count changed");
-    assert_eq!(names(db.conn(), "index").len(), 134, "index count changed");
+    assert_eq!(tables, 154, "table count changed");
+    assert_eq!(names(db.conn(), "index").len(), 135, "index count changed");
     assert_eq!(
         names(db.conn(), "trigger").len(),
         10,
@@ -561,7 +562,7 @@ fn with_provisional_notifications(db: Database) -> Database {
 #[test]
 fn provisional_notifications_upgrade_preserves_data_and_backfills_call_kinds() {
     let db = provisional_notification_database();
-    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 28);
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 29);
     assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
     let saved: (
         String,
@@ -692,7 +693,8 @@ fn provisional_notifications_upgrade_preserves_data_and_backfills_call_kinds() {
             (43, "exchange_requests".into()),
             (44, "packages".into()),
             (45, "package_attempts".into()),
-            (46, "learning_records".into())
+            (46, "learning_records".into()),
+            (47, "record_sending".into())
         ]
     );
     let applied_at: String = db
@@ -740,7 +742,7 @@ fn notifications_migrate_fresh_and_current_main_without_changing_existing_calls(
         }
         assert_eq!(
             super::run_migrations_on_connection(db.conn()).unwrap(),
-            46 - prior_version
+            47 - prior_version
         );
         assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
         db.conn().execute_batch(
@@ -826,7 +828,7 @@ fn provisional_notifications_failed_upgrade_reopens_and_retries_atomically() {
     db.conn()
         .execute_batch("DROP TRIGGER fail_upgrade")
         .unwrap();
-    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 28);
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 29);
     assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
 }
 
