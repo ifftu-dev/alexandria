@@ -3,6 +3,7 @@ import type {
   PackageAttempt, PackageAttemptProgress, PackageCommit, PackageDescription, PackageLaunchInit, PackageSequencingState,
 } from '@/types'
 import playerDescription from './package-player/description.json'
+import player2004Description from './package-player-2004/description.json'
 import isolationDescription from './package-isolation/description.json'
 import scorm12Description from './scorm12-conformance/description.json'
 import scorm2004Description from './scorm2004-conformance/description.json'
@@ -27,6 +28,7 @@ const LEARNER_ID = 'learner-for-this-package'
 /** The fixture packages a check can load, each a directory under `tests/desktop-ui/`. */
 const DESCRIPTIONS = {
   'package-player': playerDescription,
+  'package-player-2004': player2004Description,
   'package-isolation': isolationDescription,
   'scorm12-conformance': scorm12Description,
   'scorm2004-conformance': scorm2004Description,

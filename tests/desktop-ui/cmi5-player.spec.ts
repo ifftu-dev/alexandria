@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { expect, test, type FrameLocator, type Page } from '@playwright/test'
+import { handlerConstant } from './packageHarness'
 
 // cmi5 at the player seam: the real course player and wrapper page, the
 // cmi5 fixture package (a block of two units and a unit that asks for its
@@ -20,13 +21,6 @@ const reserved: Record<string, URL> = {
   'wrapper.html': new URL('wrapper.html', serving),
   'wrapper.js': new URL('wrapper.js', serving),
   'returned.html': new URL('returned.html', serving),
-}
-
-async function handlerConstant(name: string) {
-  const source = await readFile(new URL('handler.rs', serving), 'utf8')
-  const found = new RegExp(`const ${name}: &str = "((?:[^"\\\\]|\\\\[\\s\\S])*)";`).exec(source)
-  if (!found?.[1]) throw new Error(`${name} not found in handler.rs`)
-  return found[1].replace(/\\\n\s*/g, '')
 }
 
 const contentType = (path: string) =>

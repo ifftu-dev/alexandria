@@ -92,7 +92,18 @@
         form.submit();
       });
       quietly('service worker', function () { return navigator.serviceWorker && navigator.serviceWorker.register('shared/worker.js'); });
-      quietly('worker', function () { new Worker('shared/worker.js'); });
+      // Done once the worker has made its attempts (or could not run) and
+      // every window has been tried, so the check need not wait and guess.
+      var pending = 2;
+      function settled() { if (--pending === 0) hostile.done(); }
+      try {
+        var worker = new Worker('shared/worker.js');
+        worker.onmessage = function () { hostile.show('worker', 'tried'); settled(); };
+        worker.onerror = function () { hostile.show('worker', 'failed to run'); settled(); };
+      } catch (error) {
+        hostile.show('worker', 'threw ' + (error && error.name));
+        settled();
+      }
 
       hostile.ready();
       hostile.everyWindow(function (win, how) {
@@ -101,7 +112,7 @@
         quietly(how + ': image', function () { new win.Image().src = away + 'image-from/' + encodeURIComponent(how); });
         quietly(how + ': socket', function () { new win.WebSocket('wss://hostile.example/socket-from'); });
         hostile.show(how, 'tried');
-      }, hostile.done);
+      }, settled);
     </script>
   </body>
 </html>
