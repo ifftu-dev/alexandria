@@ -83,7 +83,8 @@ pub fn enforce_limit(conn: &Connection, limit_bytes: u64) -> Result<usize, Recor
         })?;
         rows.collect::<Result<_, _>>()?
     };
-    let mut groups: BTreeMap<(String, String), Vec<(i64, String, bool)>> = BTreeMap::new();
+    type Group = Vec<(i64, String, bool)>;
+    let mut groups: BTreeMap<(String, String), Group> = BTreeMap::new();
     for (seq, registration, activity, verb, removable) in completions {
         groups
             .entry((registration, activity))
