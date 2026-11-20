@@ -2126,6 +2126,7 @@ pub fn run() {
             commands::organisations::org_grants,
             commands::organisations::org_grant_set_sync,
             commands::organisations::org_grant_revoke,
+            commands::organisations::org_grant_narrow_records,
             commands::organisations::org_sync_now,
             commands::interview_panel::interview_panel_open,
             commands::interview_panel::interview_panel_status,
