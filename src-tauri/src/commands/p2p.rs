@@ -249,7 +249,7 @@ pub async fn p2p_start(app: AppHandle, state: State<'_, AppState>) -> Result<Str
                 let extras: Vec<crate::p2p::discovery::ExtraRelay> = extras_raw
                     .and_then(|raw| serde_json::from_value(raw).ok())
                     .unwrap_or_default();
-                crate::p2p::discovery::set_extra_relays(extras);
+                crate::p2p::discovery::apply_extra_relays(extras).await;
                 // Contributing (relay-serving + DHT-serving) is desktop-only.
                 // Mobile stays a pure client regardless of the stored setting:
                 // backgrounded apps churn the routing table and can't be
@@ -467,7 +467,7 @@ pub async fn save_extra_relays(
 
     // Apply to the live discovery surface so availability/bootstrap pick
     // it up without a restart (circuit reservations come on next start).
-    crate::p2p::discovery::set_extra_relays(relays.clone());
+    crate::p2p::discovery::apply_extra_relays(relays.clone()).await;
     Ok(relays)
 }
 
