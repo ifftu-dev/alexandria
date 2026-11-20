@@ -450,6 +450,55 @@ describe('shared skill atlas state', () => {
     expect(atlas.modalOpen.value).toBe(false)
     expect(atlas.feedback.value).toBeNull()
   })
+  it('keeps Web toggles, narrowing and a Web camera per surface, apart from the Detailed camera', async () => {
+    const { atlas } = await setup()
+    expect(atlas.pageView.value).toMatchObject({ webNames: false, webArrows: false, webRelated: true, webNarrowed: false, webCamera: null })
+    const webCamera = { x: 1, y: 2, zoom: 3 }
+    atlas.updateView('modal', { webNames: true, webArrows: true, webRelated: false, webNarrowed: true, webCamera })
+    webCamera.x = 50
+    expect(atlas.modalView.value).toMatchObject({ webNames: true, webArrows: true, webRelated: false, webNarrowed: true, webCamera: { x: 1, y: 2, zoom: 3 }, camera: null })
+    expect(atlas.pageView.value).toMatchObject({ webNames: false, webArrows: false, webRelated: true, webNarrowed: false, webCamera: null })
+  })
+  it('shares one set of dragged Web positions across surfaces until Reset, a new graph or a profile lock', async () => {
+    const { atlas, profiles, useSkillAtlas } = await setup()
+    expect(atlas.webPositions.value.size).toBe(0)
+    await atlas.ensureLoaded()
+    const rest = atlas.webPositions.value
+    expect(Number.isFinite(rest.get('s')?.x)).toBe(true)
+    const sidebar = useSkillAtlas()
+    sidebar.setWebPositions(new Map([['s', { x: 500, y: -20 }], ['not-a-skill', { x: 1, y: 1 }]]))
+    expect(atlas.webPositions.value.get('s')).toEqual({ x: 500, y: -20 })
+    expect(atlas.webPositions.value.has('not-a-skill')).toBe(false)
+    // A credential refresh draws the same graph: drags stay.
+    credentials = [vc(4)]
+    await atlas.refresh('credentials')
+    expect(atlas.model.value?.nodes[0]?.earnedBloom?.rank).toBe(4)
+    expect(sidebar.webPositions.value.get('s')).toEqual({ x: 500, y: -20 })
+    atlas.resetWebPositions()
+    expect(sidebar.webPositions.value).toEqual(rest)
+    atlas.setWebPositions(new Map([['s', { x: 9, y: 9 }]]))
+    await profiles.lockProfile()
+    expect(atlas.webPositions.value.size).toBe(0)
+    await profiles.unlockProfile('profile-a', 'password')
+    await flushPromises()
+    await atlas.ensureLoaded()
+    expect(atlas.webPositions.value).toEqual(rest)
+  })
+  it('lays the Web graph out once per graph, and drops drags when the graph changes', async () => {
+    const { atlas } = await setup()
+    await atlas.ensureLoaded()
+    const rest = atlas.webPositions.value
+    credentials = [vc(2)]
+    await atlas.refresh('credentials')
+    expect(atlas.webPositions.value).toBe(rest)
+    atlas.setWebPositions(new Map([['s', { x: 300, y: 300 }]]))
+    ipc.mockImplementation((command, args) => command === 'list_skills'
+      ? Promise.resolve([skill, { ...skill, id: 't', name: 'Other' }])
+      : backend(command, args))
+    await atlas.refresh('retry')
+    expect([...atlas.webPositions.value.keys()].sort()).toEqual(['s', 't'])
+    expect(atlas.webPositions.value.get('s')).not.toEqual({ x: 300, y: 300 })
+  })
   it('clears private data synchronously before delayed lock hooks and rejects a late DID lookup', async () => {
     const { useProfiles, onProfileLocked } = await import('./useProfiles')
     const barrier = deferred<void>()
