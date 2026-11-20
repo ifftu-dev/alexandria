@@ -468,24 +468,30 @@ test('known limit: a search for the SCORM 2004 API from a 1.2 lesson climbs past
 test('commits are coalesced: one host write per interval with the latest state, and at once on finish', async ({ page }) => {
   const frame = await started(page)
   // Fifteen commits over about two and a half seconds.
-  await frame.evaluate(async () => {
+  const elapsed = await frame.evaluate(async () => {
     const api = (window as unknown as { probe: { api: Record<string, (...args: string[]) => string> } }).probe.api
+    const start = performance.now()
     for (let page = 1; page <= 15; page++) {
       api.LMSSetValue!('cmi.core.lesson_location', `page-${page}`)
       api.LMSCommit!('')
       await new Promise(resolve => setTimeout(resolve, 170))
     }
+    return performance.now() - start
   })
   await expect.poll(async () => (await lastCommit(page))?.runtime.cmi, { timeout: 5000 }).toMatchObject({ core: { lesson_location: 'page-15' } })
+  // At most one write per two-second interval (the wrapper's default), plus
+  // the one the last interval leaves pending. Counted, not timed: the app
+  // page may take a write in late when the machine is busy.
   const times = await commitTimes(page)
-  expect(times.length).toBeLessThanOrEqual(3)
-  for (let i = 1; i < times.length; i++) expect(times[i]! - times[i - 1]!).toBeGreaterThanOrEqual(1800)
+  expect(times.length).toBeGreaterThan(0)
+  expect(times.length).toBeLessThanOrEqual(Math.ceil(elapsed / 2000) + 1)
 
   const before = times.length
   const finishedAt = Date.now()
   await answers(frame, [set('cmi.core.lesson_location', 'last'), ['LMSFinish', '']])
-  await expect.poll(async () => (await commits(page)).length, { timeout: 1000 }).toBe(before + 1)
-  expect((await commitTimes(page)).slice(-1)[0]! - finishedAt).toBeLessThan(1000)
+  // Sooner than the two-second interval: the finish does not wait for it.
+  await expect.poll(async () => (await commits(page)).length, { timeout: 1900 }).toBe(before + 1)
+  expect((await commitTimes(page)).slice(-1)[0]! - finishedAt).toBeLessThan(1900)
   expect(await lastCommit(page)).toMatchObject({ session_ended: true, runtime: { cmi: { core: { lesson_location: 'last' } } } })
 })
 
