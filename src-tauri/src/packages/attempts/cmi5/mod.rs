@@ -56,6 +56,15 @@ pub use listener::revive;
 /// The page a unit returns to when it exits, under the launch prefix.
 pub const RETURN_PAGE: &str = "_alexandria/returned.html";
 
+/// Whether a unit's own window may load `target`: only addresses under the
+/// launch prefix the unit was launched under, on the package origin. A unit
+/// that sends its window anywhere else (another site, a data: page, another
+/// launch) would leave the content policy and the bootstrap behind.
+pub fn unit_window_may_navigate(prefix: &str, target: &url::Url) -> bool {
+    let base = format!("{}/{prefix}/", package_serving::origin());
+    target.as_str().starts_with(&base)
+}
+
 /// The open sessions of this profile. Held in the app state; emptied, with
 /// every endpoint stopped, when the profile stops.
 #[derive(Default)]
