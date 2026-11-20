@@ -94,15 +94,17 @@ describe('Web layout', () => {
     // The atlas budget is no main-thread task over 50 ms; this runs near 40 ms
     // on a laptop, and the bound allows twice that for shared CI runners. A
     // layout that lost its grid and went quadratic takes seconds on every run.
-    // Other test files share the machine, so one slow run says little: the
-    // best of up to ten runs must meet the bound, stopping at the first that does.
+    // Other test files share the machine, so the run is timed in this
+    // process's CPU time, which waiting for a core does not add to, and the
+    // best of up to ten runs must meet the bound.
     const BUDGET_MS = 100
+    const cpuMs = () => { const { user, system } = process.cpuUsage(); return (user + system) / 1000 }
     webLayout(SCALE)
     let best = Infinity
     for (let run = 0; run < 10 && best >= BUDGET_MS; run++) {
-      const started = performance.now()
+      const started = cpuMs()
       webLayout(SCALE)
-      best = Math.min(best, performance.now() - started)
+      best = Math.min(best, cpuMs() - started)
     }
     expect(best).toBeLessThan(BUDGET_MS)
   })
