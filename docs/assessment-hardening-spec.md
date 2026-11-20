@@ -1,8 +1,8 @@
 # Assessment hardening: answers the issuer holds, an honest companion level and probes that cost something
 
-Status: draft
-Updated: 2026-11-20
-Triage: ready-for-agent
+Status: implemented
+Updated: 2026-11-21
+Triage: done
 Repos: alexandria, alexandria-cloud
 
 A reassessment of how easy it is to cheat an assessment after the trust profiles and credential trust work landed. It found four ways to earn a credential dishonestly that need little or no skill, one of which earns the top device label and an organisation's signature. This spec closes the ones that can be closed, and labels the one that cannot. Background: [sentinel-trust-profiles-spec.md](sentinel-trust-profiles-spec.md), [credential-trust-spec.md](credential-trust-spec.md), the course access spec (in review on its own branch), [enterprise-boundary.md](enterprise-boundary.md), [ADR 0006](adr/0006-checkable-integrity-evidence.md), [ADR 0008](adr/0008-hosted-organisation-issued-credentials.md). Vocabulary: [GLOSSARY.md](../GLOSSARY.md).
@@ -299,3 +299,14 @@ Taken on 2026-11-20:
 | What counts as issuer custody | Answers never left the issuer. |
 | `live` rung | Existing interview flow, plus the policy wait. |
 | Consent and retention | Shown before the first item; kept with the run. |
+
+## Notes
+
+2026-11-21: implemented and closed. Tickets 01–12 in [assessment-hardening/](assessment-hardening/) are done; each ticket's notes record what was built. Deviations from the text above, in short:
+
+- The required rung is the existing `min_verification_rung`, judged on a strict ladder; no second field. The assertion has no format version field: `alexandria-verify` 0.8.0 (unreleased) carries the format change. Coverage statement version 3 also rewords the `probed` lines.
+- Companion evidence no longer credits a floor's device attestation, so a companion session cannot select `attested` or `full`. Android phones are refused for a `device_attested` role too while Android attestation is off.
+- The hosted service credits `consistent` only over its own passed probes plus the device's statement; a role naming no probe policy is recorded as `authored`; invalid close evidence refuses with `attestation_evidence_invalid`.
+- An attested hosted attempt's App Attest key is held in memory, so an app restart lapses the attempt.
+- Known gap: a role issued from a sponsor's device that requires `live` cannot issue from a real interview, since the live segment is recorded only in the interview's own check. Closing it needs an interview linked to a role attempt, which this spec ruled out; it needs its own decision.
+- Open for the owner: real-device checks of App Attest on hosted attempts and of the Windows signer reader join the existing device attestation task; translations of the new strings are pending.
