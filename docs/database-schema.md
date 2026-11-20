@@ -9,8 +9,8 @@ Status: live
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 45 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 143 tables, 132 indexes, 1 view, 10 triggers.
+**Schema**: 46 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 145 tables, 134 indexes, 1 view, 10 triggers.
 
 ---
 
@@ -68,6 +68,7 @@ and requires a database's history to be an exact prefix of this list:
 43. `exchange_requests`
 44. `packages`
 45. `package_attempts`
+46. `learning_records`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -346,6 +347,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `course_document_version` INTEGER
 - `completion_policy_json` TEXT
 - `draft_completion_policy_json` TEXT
+- `creator_did` TEXT
 
 #### `element_progress`
 
@@ -1818,6 +1820,36 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `imported_at` TEXT NOT NULL
 - `last_opened_at` TEXT — last extraction for a launch; the idle check drops the extracted files after a period without one
 
+### Learning records (2)
+
+#### `learning_record_outbox`
+
+- `recipient_id` TEXT PK
+- `record_id` TEXT PK → `learning_records.id`
+- `state` TEXT NOT NULL default `'queued'` — failed: the last try failed; retried at next_attempt_at
+- `attempts` INTEGER NOT NULL default `0` — tries so far
+- `last_error` TEXT — why the last try failed, shown in the activity log
+- `next_attempt_at` TEXT — when to try again after a failure
+- `sent_at` TEXT
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
+#### `learning_records`
+
+- `seq` INTEGER PK — write order; the oldest record has the lowest
+- `id` TEXT NOT NULL — the record's stable local id; each recipient's statement id is a keyed hash of it
+- `learner_did` TEXT NOT NULL — the learner the record is about, named by DID on the device
+- `kind` TEXT NOT NULL — interaction: a response a package reported, sent only under a scope that names it
+- `verb` TEXT NOT NULL — the event's verb (registered, launched, progressed, completed, passed, failed, scored, responded)
+- `course_id` TEXT NOT NULL
+- `element_id` TEXT — NULL for a course-level record
+- `registration` TEXT — the local enrolment or package attempt the record belongs to
+- `activity_id` TEXT NOT NULL — the activity's identifier (a DID URL under the course's creator)
+- `summary` INTEGER NOT NULL default `0` — 1: kept as the one summary of its attempt at this activity when the log was over its limit
+- `event_json` TEXT NOT NULL — the learning event, built into a statement per recipient
+- `bytes` INTEGER NOT NULL — size counted against the log's limit
+- `recorded_at` TEXT NOT NULL — when the event happened, RFC 3339 UTC
+
 ---
 
 ## View and triggers
@@ -1921,6 +1953,7 @@ erDiagram
     interview_sessions ||--o{ interview_transcript_segments : session_id
     chat_messages ||--o{ learning_memory : source_message_id
     chat_threads ||--o{ learning_memory : thread_id
+    learning_records ||--o{ learning_record_outbox : record_id
     subject_fields ||--o{ opinions : subject_field_id
     package_attempts ||--o{ package_activity_state : attempt_id
     packages ||--o{ package_attempts : package_hash

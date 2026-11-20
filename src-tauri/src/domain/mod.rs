@@ -15,6 +15,7 @@ pub mod governance_locator;
 pub mod guardian_ai;
 pub mod identity;
 pub mod integrity_commitment;
+pub mod learning_record;
 pub mod notification;
 pub mod opinions;
 pub mod package;

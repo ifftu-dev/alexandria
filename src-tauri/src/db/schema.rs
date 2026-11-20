@@ -166,6 +166,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // skill-tagged or given grading configuration. See
     // `crate::packages::attempts`.
     (45, "package_attempts", include_str!("package_attempts.sql")),
+    // Learning records the app writes about the learner's own activity, the
+    // per-recipient outbox the sending code fills, and the creator DID their
+    // activity identifiers are anchored to. See `crate::learning_records`.
+    (46, "learning_records", include_str!("learning_records.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

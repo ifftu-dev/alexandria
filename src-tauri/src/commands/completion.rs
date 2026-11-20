@@ -176,7 +176,7 @@ fn ensure_enrollment_is_current(
 
 /// Minimum per-element score that counts as "passed" for the purpose
 /// of assembling a course-completion witness.
-const COMPLETION_PASS_SCORE: f64 = 0.6;
+const COMPLETION_PASS_SCORE: f64 = crate::domain::course_document::ASSESSMENT_PASS_SCORE;
 
 /// A gradeable element the learner still needs to pass, with the score
 /// context the UI shows when a credential can't yet be earned.

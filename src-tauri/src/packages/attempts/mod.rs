@@ -31,6 +31,7 @@ use crate::domain::package_attempt::{
     PackageActivityResult, PackageAttempt, PackageAttemptProgress, PackageAttemptStatus,
     PackageCommit, PackageLaunchInit,
 };
+use crate::learning_records;
 use crate::package_serving::{drop_unless_open, Launches};
 use crate::packages::{PackageDb, PackageDirs};
 
@@ -183,7 +184,26 @@ pub async fn initialise(
             .as_ref()
             .ok_or_else(|| AttemptError::NotFound(format!("activity {activity_id}")))?;
 
+        // A session the content left open ends here: record what it reported
+        // before its time is folded in.
+        if let Some(open) = rows::activity(conn, &attempt.id, &activity_id)? {
+            learning_records::log_unwritten(learning_records::record_package_session(
+                conn,
+                &attempt,
+                &package,
+                &activity_id,
+                &open.runtime,
+            ));
+        }
         let stored = rows::finish_open_session(conn, &attempt.id, &activity_id)?;
+        if attempt.status != PackageAttemptStatus::Closed {
+            learning_records::log_unwritten(learning_records::record_package_launch(
+                conn,
+                &attempt,
+                &package,
+                &activity_id,
+            ));
+        }
         let mut rolled_up = None;
         if progress::completes_on_launch(launch) && attempt.status != PackageAttemptStatus::Closed {
             // Shown-only content reports nothing: launching it completes it.
@@ -286,6 +306,15 @@ pub async fn commit(
                 session_seconds,
             },
         )?;
+        if commit.session_ended {
+            learning_records::log_unwritten(learning_records::record_package_session(
+                conn,
+                &attempt,
+                &package,
+                &commit.activity_id,
+                &commit.runtime,
+            ));
+        }
         roll_up(db, &attempt, &package)
     })
     .await
@@ -308,6 +337,19 @@ pub async fn terminate(
         let conn = db.conn();
         let attempt = open_attempt(conn, &attempt_id)?;
         let package = stored_package(conn, &attempt.package_hash)?;
+        // Record what each activity reported; results already recorded when
+        // their session ended are not written twice.
+        for activity_id in rows::outcomes(conn, &attempt.id)?.into_keys() {
+            if let Some(stored) = rows::activity(conn, &attempt.id, &activity_id)? {
+                learning_records::log_unwritten(learning_records::record_package_session(
+                    conn,
+                    &attempt,
+                    &package,
+                    &activity_id,
+                    &stored.runtime,
+                ));
+            }
+        }
         rows::finish_open_sessions(conn, &attempt.id)?;
         roll_up(db, &attempt, &package)
     })

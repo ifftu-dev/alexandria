@@ -44,6 +44,7 @@ pub mod instructor;
 pub mod integrity;
 pub mod integrity_companion;
 pub mod interview;
+pub mod learning_records;
 #[cfg(test)]
 mod live_demo;
 pub mod notifications;

@@ -396,6 +396,17 @@ export interface PackageAttemptProgress {
   cache_dropped: boolean
 }
 
+/**
+ * The activity log's size against its visible limit
+ * (src-tauri/src/domain/learning_record.rs), from `learning_records_usage`.
+ */
+export interface LearningRecordUsage {
+  bytes: number
+  limit_bytes: number
+  records: number
+  interaction_records: number
+}
+
 export interface AuthorizedCourseAttestor {
   did: string
   public_key_hex: string

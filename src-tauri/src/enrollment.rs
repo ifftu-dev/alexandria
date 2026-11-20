@@ -14,6 +14,7 @@ use serde::Serialize;
 use crate::crypto::hash::entity_id;
 use crate::domain::course_document::{CourseCompletionPolicy, COURSE_DOCUMENT_VERSION};
 use crate::domain::enrollment::{ElementProgress, Enrollment, UpdateProgressRequest};
+use crate::learning_records;
 
 /// Why an enrolment operation failed. Its display is the text the commands
 /// return.
@@ -165,27 +166,27 @@ pub fn enroll(db: &crate::db::Database, course_id: &str) -> Result<Enrollment, E
         ],
     )?;
 
-    db.conn()
-        .query_row(
-            "SELECT id, course_id, course_document_cid, course_document_version, completion_policy_json, \
-                    enrolled_at, completed_at, status, updated_at \
-             FROM enrollments WHERE id = ?1",
-            params![id],
-            |row| {
-                Ok(Enrollment {
-                    id: row.get(0)?,
-                    course_id: row.get(1)?,
-                    course_document_cid: row.get(2)?,
-                    course_document_version: row.get(3)?,
-                    completion_policy_json: row.get(4)?,
-                    enrolled_at: row.get(5)?,
-                    completed_at: row.get(6)?,
-                    status: row.get(7)?,
-                    updated_at: row.get(8)?,
-                })
-            },
-        )
-        .map_err(EnrollmentError::from)
+    let enrollment = db.conn().query_row(
+        "SELECT id, course_id, course_document_cid, course_document_version, completion_policy_json, \
+                enrolled_at, completed_at, status, updated_at \
+         FROM enrollments WHERE id = ?1",
+        params![id],
+        |row| {
+            Ok(Enrollment {
+                id: row.get(0)?,
+                course_id: row.get(1)?,
+                course_document_cid: row.get(2)?,
+                course_document_version: row.get(3)?,
+                completion_policy_json: row.get(4)?,
+                enrolled_at: row.get(5)?,
+                completed_at: row.get(6)?,
+                status: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        },
+    )?;
+    learning_records::log_unwritten(learning_records::record_enrolment(db.conn(), &enrollment));
+    Ok(enrollment)
 }
 
 fn validate_course_binding(
@@ -229,6 +230,19 @@ pub fn update_progress(
     req: UpdateProgressRequest,
 ) -> Result<ElementProgress, EnrollmentError> {
     let id = entity_id(&[&enrollment_id, &req.element_id]);
+    let prior = db
+        .conn()
+        .query_row(
+            "SELECT status, score FROM element_progress WHERE enrollment_id = ?1 AND element_id = ?2",
+            params![enrollment_id, req.element_id],
+            |row| {
+                Ok(crate::learning_records::PriorProgress {
+                    status: row.get(0)?,
+                    score: row.get(1)?,
+                })
+            },
+        )
+        .optional()?;
 
     // Upsert: insert or update
     db.conn()
@@ -271,6 +285,12 @@ pub fn update_progress(
                     })
                 },
             )?;
+
+    learning_records::log_unwritten(learning_records::record_progress(
+        db.conn(),
+        prior.as_ref(),
+        &progress,
+    ));
 
     // Post-migration 040: completion no longer triggers evidence
     // creation or aggregation. In the VC-first model, element
