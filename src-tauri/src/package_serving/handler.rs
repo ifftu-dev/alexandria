@@ -68,12 +68,17 @@ const BOOTSTRAP_JS: &[u8] = include_bytes!("bootstrap.js");
 const CLEAR_HTML: &[u8] = include_bytes!("clear.html");
 const SCORM12_JS: &[u8] = include_bytes!("../../resources/scorm-again/scorm12.min.js");
 const SCORM2004_JS: &[u8] = include_bytes!("../../resources/scorm-again/scorm2004.min.js");
+const WRAPPER_HTML: &[u8] = include_bytes!("wrapper.html");
+const WRAPPER_JS: &[u8] = include_bytes!("wrapper.js");
 
 /// The app's own files under every launch prefix, at
-/// `<prefix>/_alexandria/<name>`.
+/// `<prefix>/_alexandria/<name>`. The wrapper is the player's page at the
+/// package origin: it holds the run-time API for the lesson frame inside it.
 const RESERVED_FILES: &[(&str, &[u8])] = &[
     ("bootstrap.js", BOOTSTRAP_JS),
     ("clear.html", CLEAR_HTML),
+    ("wrapper.html", WRAPPER_HTML),
+    ("wrapper.js", WRAPPER_JS),
     ("scorm12.min.js", SCORM12_JS),
     ("scorm2004.min.js", SCORM2004_JS),
 ];

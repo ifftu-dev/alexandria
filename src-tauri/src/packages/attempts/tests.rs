@@ -769,3 +769,93 @@ async fn completing_a_package_while_a_launch_of_it_is_open_keeps_the_files_until
     assert!(ended.cache_dropped);
     assert!(!extracted.root.exists(), "the extracted files are gone");
 }
+
+#[tokio::test]
+async fn the_table_of_contents_lists_every_lesson_in_order_with_what_it_reported() {
+    let learner = Learner::new().await;
+    learner.add_package("el_pkg", "com.example.induction").await;
+    let attempt = open(&learner.db, ENROLLMENT, "el_pkg").await.expect("open");
+
+    let untouched = activities(&learner.db, &attempt.id)
+        .await
+        .expect("results of a new attempt");
+    assert_eq!(
+        untouched
+            .iter()
+            .map(|result| (result.activity_id.as_str(), result.started, result.complete))
+            .collect::<Vec<_>>(),
+        [
+            ("welcome", false, false),
+            ("lifting", false, false),
+            ("handout", false, false)
+        ]
+    );
+
+    // Welcome left part-way, lifting passed at 90.
+    initialise(&learner.db, &learner.key, &attempt.id, "welcome")
+        .await
+        .expect("launch welcome");
+    commit(
+        &learner.db,
+        scorm12_commit(
+            &attempt.id,
+            "welcome",
+            json!({ "lesson_status": "incomplete", "exit": "suspend" }),
+            true,
+        ),
+    )
+    .await
+    .expect("commit welcome");
+    finish_lesson(
+        &learner,
+        &attempt.id,
+        "lifting",
+        "passed",
+        json!({ "raw": "90" }),
+    )
+    .await;
+
+    let results = activities(&learner.db, &attempt.id).await.expect("results");
+    let welcome = &results[0];
+    assert_eq!(welcome.activity_id, "welcome");
+    assert!(welcome.started && !welcome.complete);
+    assert_eq!(welcome.score, None);
+    let lifting = &results[1];
+    assert!(lifting.started && lifting.complete);
+    assert_eq!(lifting.score, Some(0.9));
+    assert!(!results[2].started, "the handout was never opened");
+}
+
+#[tokio::test]
+async fn launching_shown_only_content_hands_the_player_the_progress_it_completed() {
+    let learner = Learner::new().await;
+    learner.add_package("el_pkg", "com.example.induction").await;
+    let attempt = open(&learner.db, ENROLLMENT, "el_pkg").await.expect("open");
+
+    let lesson = initialise(&learner.db, &learner.key, &attempt.id, "welcome")
+        .await
+        .expect("launch a lesson");
+    assert!(
+        lesson.progress.is_none(),
+        "a lesson reports through its commits"
+    );
+
+    let handout = initialise(&learner.db, &learner.key, &attempt.id, "handout")
+        .await
+        .expect("open the handout");
+    let progress = handout.progress.expect("the handout's launch completed it");
+    assert!(!progress.package_completed, "two lessons are still open");
+    assert_eq!(progress.element_progress.element_id, "el_pkg");
+    assert_eq!(progress.element_progress.status, "in_progress");
+}
+
+#[tokio::test]
+async fn the_table_of_contents_of_an_unknown_attempt_is_refused() {
+    let learner = Learner::new().await;
+    learner.add_package("el_pkg", "com.example.induction").await;
+
+    let error = activities(&learner.db, "no-such-attempt")
+        .await
+        .expect_err("unknown attempt");
+    assert!(error.to_string().starts_with("not_found:"), "{error}");
+}

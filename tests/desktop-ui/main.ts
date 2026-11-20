@@ -182,6 +182,31 @@ if (screen === 'motion') {
     notify: (kind: AppNotification['kind']) => emit('notifications:new', { session, row: backend.notify(kind) }),
     removeNotification: (kind: AppNotification['kind']) => emit('notifications:changed', { session, unread: backend.removeNotification(kind) }),
   } })
+} else if (screen === 'package-player') {
+  // The real course player over a course whose only element is the SCORM 1.2
+  // fixture package, with a fake host bridge. The spec serves the package
+  // origin itself and reads what the host received from `packageFixture`.
+  const { packageBackend } = await import('./packageBackend')
+  const backend = packageBackend()
+  Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
+    invoke: (command: string, args?: Record<string, unknown>) => backend.invoke(command, args),
+    transformCallback: () => 1, unregisterCallback: () => {},
+  } })
+  const { useProfiles } = await import('@/composables/useProfiles')
+  await useProfiles().initialize()
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/learn/:id', component: (await import('@/pages/learn/Player.vue')).default },
+    { path: '/:pathMatch(.*)*', component: { render: () => h('p', 'Elsewhere') } },
+  ] })
+  await router.push('/learn/course-safety')
+  createApp({ render: () => h('div', { class: 'flex h-dvh flex-col' }, [h(RouterView)]) }).use(i18n).use(router).mount('#app')
+  Object.assign(window, { packageFixture: {
+    commits: backend.commits,
+    control: backend.control,
+    called: (command: string) => backend.called(command).length,
+    navigate: (path: string) => router.push(path),
+  } })
 } else if (screen === 'skill-atlas') {
   // Keep the props-only fixture free of unrelated page lifecycle and global CSS.
   const { default: SkillAtlasFixture } = await import('./SkillAtlasFixture.vue')

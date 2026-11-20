@@ -366,6 +366,8 @@ export interface PackageLaunchInit {
   time_limit_action: string | null
   /** Hand to the run-time library's `loadFromJSON` before the lesson loads. */
   runtime: { cmi: Record<string, unknown> }
+  /** Set when the launch itself completed the activity (shown-only content). */
+  progress: PackageAttemptProgress | null
 }
 
 /** One coalesced commit: the whole run-time state of one activity. */
@@ -375,6 +377,16 @@ export interface PackageCommit {
   /** True for the commit the content's own finish call produced. */
   session_ended: boolean
   runtime: { cmi: Record<string, unknown> }
+}
+
+/** What one lesson of an attempt has reported: a table-of-contents row. */
+export interface PackageActivityResult {
+  activity_id: string
+  /** Launched in this attempt. */
+  started: boolean
+  complete: boolean
+  /** 0..1, self-reported by the content. */
+  score: number | null
 }
 
 export interface PackageAttemptProgress {

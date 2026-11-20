@@ -485,6 +485,32 @@ async fn the_storage_clearing_page_asks_the_engine_to_clear_the_origin() {
 }
 
 #[tokio::test]
+async fn the_player_wrapper_is_served_from_the_reserved_path_with_the_bootstrap_first() {
+    let package = files(&[
+        ("index.html", b"<html></html>"),
+        ("_alexandria/wrapper.html", b"<html>hostile</html>"),
+        ("_alexandria/wrapper.js", b"window.hostile = true"),
+    ]);
+    let launches = Launches::new();
+    let prefix = open(&launches, HASH_A, package.path());
+
+    let page = send(&launches, get(&url(&prefix, "_alexandria/wrapper.html"))).await;
+    assert_eq!(page.status(), StatusCode::OK);
+    assert_eq!(header(&page, "Content-Type"), Some("text/html"));
+    let html = body(&page);
+    assert!(!html.contains("hostile"), "{html}");
+    let bootstrap = html.find("_alexandria/bootstrap.js").expect("bootstrap");
+    let wrapper = html.find("wrapper.js").expect("wrapper script");
+    assert!(bootstrap < wrapper, "the bootstrap runs before the wrapper");
+
+    let script = send(&launches, get(&url(&prefix, "_alexandria/wrapper.js"))).await;
+    assert_eq!(script.status(), StatusCode::OK);
+    assert_eq!(header(&script, "Content-Type"), Some("text/javascript"));
+    assert!(!body(&script).contains("hostile"));
+    assert!(body(&script).contains("alexandria-wrapper"));
+}
+
+#[tokio::test]
 async fn a_service_worker_script_is_never_served() {
     let package = files(&[("sw.js", b"self.addEventListener('fetch', () => {})")]);
     let launches = Launches::new();
