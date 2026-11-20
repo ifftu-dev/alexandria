@@ -194,6 +194,24 @@ test('the package completes when the sequencing engine reports the course comple
   expect(refused).toEqual([])
 })
 
+test('the sequencing engine state is handed over at once when the app goes to the background', async ({ page }) => {
+  await open(page)
+  await seen(page, 'intro')
+  await lesson(page).locator('#bookmark').click()
+  // The start's own state, and nothing more until a navigation.
+  await expect.poll(async () => (await savedStates(page)).length).toBe(1)
+
+  const wrapper = page.frames().find(frame => frame.url().endsWith('/_alexandria/wrapper.html'))!
+  await wrapper.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  // Well inside the two-second coalescing interval: the lesson's state and the engine's.
+  await expect.poll(async () => (await savedStates(page)).length, { timeout: 1000 }).toBe(2)
+  await expect.poll(async () => (await commits(page)).length, { timeout: 1000 }).toBe(1)
+  expect((await commits(page))[0]).toMatchObject({ activity_id: 'intro', session_ended: false, runtime: { cmi: { location: 'intro-2' } } })
+})
+
 test('when starting delivers nothing the learner chooses a lesson', async ({ page }) => {
   const { refused } = await open(page, '&flow=off')
   await expect(page.locator('[data-package-sequencing="choose"]')).toBeVisible()
