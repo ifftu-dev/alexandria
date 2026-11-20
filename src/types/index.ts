@@ -316,6 +316,11 @@ export interface OpenedPackageFile {
   element_id: string
 }
 
+/** A package file opened to learn from, with the learner's local enrolment in its draft course. */
+export interface OpenedPackageCourse extends OpenedPackageFile {
+  enrollment_id: string
+}
+
 export interface PackageExtractProgress {
   hash: string
   files_done: number

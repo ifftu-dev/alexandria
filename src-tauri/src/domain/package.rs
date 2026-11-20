@@ -63,6 +63,15 @@ pub struct OpenedPackageFile {
     pub element_id: String,
 }
 
+/// A package file opened to learn from: the draft course around it and the
+/// learner's local enrolment in that course, which the player needs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OpenedPackageCourse {
+    #[serde(flatten)]
+    pub opened: OpenedPackageFile,
+    pub enrollment_id: String,
+}
+
 /// Extraction progress, sent after each file and about once per MiB inside a
 /// large file. The totals come from the stored description.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

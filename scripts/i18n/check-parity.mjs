@@ -122,6 +122,15 @@ const PENDING_TRANSLATION = [
   // worth prioritising there.
   'learn.package.',
   'learn.player.elementType.package',
+  // Adding a standards package in the course editor and opening a package
+  // file (learning standards ticket 07): summary, refusal reasons,
+  // redistribution confirmation, preview. English-only until the next
+  // instructor translation pass; the redistribution confirmation is a
+  // licensing statement and worth prioritising there.
+  'instructor.package.',
+  'instructor.elementTypes.package',
+  'instructor.compose.blockerUnattachedPackages',
+  'learn.packageFile.',
   // Not-found page for stale deep links, added when retired route redirects
   // were deleted. English-only pending a translate pass; renders in English
   // via the i18n fallback.

@@ -7,8 +7,6 @@
   "is_biometric_available": "capability probe; pending UI",
   "resolve_profile": "inner fn unit-tested (content_store/profile.rs)",
   "content_has": "content CRUD; read half unused",
-  "package_import": "standards package import (learning standards ticket 03); course editor UI is ticket 07",
-  "package_open_file": "open a package file as a draft course (learning standards ticket 03); file picker UI pending",
   "package_extract": "package extraction with progress (learning standards ticket 03); the player launch is ticket 06",
   "content_node_status": "content diagnostics; pending UI",
   "content_resolve": "documented content path; pending UI",

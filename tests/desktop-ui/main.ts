@@ -221,6 +221,29 @@ if (screen === 'motion') {
     called: (command: string) => backend.called(command).length,
     navigate: (path: string) => router.push(path),
   } })
+} else if (screen === 'course-editor') {
+  // The real course editor over an instructor's draft holding a package
+  // element, with a fake host. The spec serves the package origin for the
+  // preview and reads what the host received from `courseEditorFixture`.
+  const { courseEditorBackend } = await import('./courseEditorBackend')
+  const backend = courseEditorBackend()
+  Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
+    invoke: (command: string, args?: Record<string, unknown>) => backend.invoke(command, args),
+    transformCallback: () => 1, unregisterCallback: () => {},
+  } })
+  const { useProfiles } = await import('@/composables/useProfiles')
+  await useProfiles().initialize()
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/instructor/composer/:id', component: (await import('@/pages/instructor/Composer.vue')).default },
+    { path: '/:pathMatch(.*)*', component: { render: () => h('p', 'Elsewhere') } },
+  ] })
+  await router.push('/instructor/composer/course-induction')
+  createApp({ render: () => h('div', { class: 'p-6' }, [h(RouterView)]) }).use(i18n).use(router).mount('#app')
+  Object.assign(window, { courseEditorFixture: {
+    control: backend.control,
+    called: (command: string) => backend.called(command),
+  } })
 } else if (screen === 'skill-atlas') {
   // Keep the props-only fixture free of unrelated page lifecycle and global CSS.
   const { default: SkillAtlasFixture } = await import('./SkillAtlasFixture.vue')
