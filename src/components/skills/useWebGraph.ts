@@ -139,7 +139,11 @@ export function webFitCamera(points: Iterable<WebPoint>, width: number, height: 
  * apart. `root` is the element that holds the dots (each carries
  * `data-skill`) and takes the pointer, wheel, key and focus handlers.
  */
-export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, root: Readonly<Ref<HTMLElement | undefined>>) {
+export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents, root: Readonly<Ref<HTMLElement | undefined>>) {
+  // The owner's getter builds a new object on every call, so it is read once
+  // per change of the owner's state, never once per dot or per frame.
+  const current = computed(source)
+  const input = (): WebGraphInput => current.value
   const { reduced: systemReduced } = useMotion()
   const motionReduced = computed(() => input().reducedMotion || systemReduced.value)
   const model = computed(() => input().model)

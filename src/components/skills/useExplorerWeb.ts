@@ -40,7 +40,10 @@ export interface ExplorerWebOptions {
  * event, so the explorer delegates to it once per handler. Everything the Web
  * graph reads is empty outside Web, so the other views never pay for it.
  */
-export function useExplorerWeb({ input, update, dragged, reset: resetOwner, whenIdle, map }: ExplorerWebOptions) {
+export function useExplorerWeb({ input: source, update, dragged, reset: resetOwner, whenIdle, map }: ExplorerWebOptions) {
+  // Read once per change of the explorer's state, never once per dot or per frame.
+  const current = computed(source)
+  const input = (): ExplorerWebInput => current.value
   const active = computed(() => input().viewMode === 'web')
   const entry = computed(() => webLayoutEntry(input().model))
   const view = computed(() => input().view)
