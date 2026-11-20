@@ -24,11 +24,7 @@ use crate::AppState;
 pub const SESSION_ENDED_EVENT: &str = "package-cmi5-ended";
 
 fn db<'a>(state: &'a State<'_, AppState>) -> ExecutorDb<'a> {
-    ExecutorDb {
-        executor: &state.db_executor,
-        lease: state.profile_lease(),
-        workload: DatabaseWorkload::Learner,
-    }
+    super::executor_db(state, DatabaseWorkload::Learner)
 }
 
 /// The window label of a unit's own window.
@@ -79,7 +75,7 @@ pub async fn package_cmi5_launch(
         LaunchRequest {
             attempt_id,
             activity_id,
-            prefix,
+            prefix: prefix.clone(),
             languages,
         },
     )
@@ -87,8 +83,10 @@ pub async fn package_cmi5_launch(
     .map_err(|e| e.to_string())?;
     #[cfg(desktop)]
     if launched.own_window {
-        open_unit_window(&app, &state, &launched)?;
+        open_unit_window(&app, &state, &prefix, &launched)?;
     }
+    #[cfg(not(desktop))]
+    let _ = prefix;
     #[cfg(not(desktop))]
     let _ = app;
     Ok(launched)
@@ -98,15 +96,20 @@ pub async fn package_cmi5_launch(
 fn open_unit_window(
     app: &tauri::AppHandle,
     state: &State<'_, AppState>,
+    prefix: &str,
     launched: &Cmi5Launch,
 ) -> Result<(), String> {
     use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
     let url = url::Url::parse(&launched.url).map_err(|e| e.to_string())?;
     let label = window_label(&launched.session_id);
+    let prefix = prefix.to_string();
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
         .title(launched.activity_id.as_str())
         .inner_size(1024.0, 768.0)
+        // The unit stays under its own launch: anywhere else would leave
+        // the content policy and the bootstrap behind.
+        .on_navigation(move |target| cmi5::unit_window_may_navigate(&prefix, target))
         .on_page_load(|window, payload| {
             // The unit returned: its own window has done its job.
             if payload.url().path().ends_with(cmi5::RETURN_PAGE) {

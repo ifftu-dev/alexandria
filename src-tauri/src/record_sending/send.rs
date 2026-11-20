@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use super::access_log::{self, AccessAction, NewAccessEntry};
-use super::{outbox, timestamp, RecipientEntry, RecordDb, Transport};
+use super::{outbox, run_step, timestamp, RecipientEntry, RecordDb, SendError, Transport};
 use crate::learning_records;
 
 /// Records per request. Stores accept far larger batches; this keeps one
@@ -59,20 +59,16 @@ pub async fn send_due<D: RecordDb>(
     learner_secret: &[u8; 32],
     learner_did: &str,
     now: DateTime<Utc>,
-) -> Result<BatchOutcome, String> {
-    let built_for = recipient
-        .recipient(learner_secret, learner_did)
-        .map_err(|e| e.to_string())?;
+) -> Result<BatchOutcome, SendError> {
+    let built_for = recipient.recipient(learner_secret, learner_did)?;
     let mut outcome = BatchOutcome::default();
     for _ in 0..MAX_BATCHES_PER_PASS {
         let entry = recipient.clone();
-        let records = db
-            .run("records.outbox.due", move |db| {
-                outbox::queue(db.conn(), &entry, now)
-                    .and_then(|_| outbox::due(db.conn(), &entry.id, now, BATCH_SIZE))
-                    .map_err(|e| e.to_string())
-            })
-            .await?;
+        let records = run_step(db, "records.outbox.due", move |db| {
+            outbox::queue(db.conn(), &entry, now)?;
+            outbox::due(db.conn(), &entry.id, now, BATCH_SIZE)
+        })
+        .await?;
         if records.is_empty() {
             break;
         }
@@ -96,11 +92,10 @@ pub async fn send_due<D: RecordDb>(
         }
         outcome.failed += unbuildable.len() as u32;
         let entry = recipient.clone();
-        db.run("records.outbox.set-aside", move |db| {
-            outbox::drop_queued(db.conn(), &entry.id, &outside).map_err(|e| e.to_string())?;
+        run_step(db, "records.outbox.set-aside", move |db| {
+            outbox::drop_queued(db.conn(), &entry.id, &outside)?;
             for (id, error) in unbuildable {
-                outbox::mark_unsent(db.conn(), &entry.id, &[id], &error, true, now)
-                    .map_err(|e| e.to_string())?;
+                outbox::mark_unsent(db.conn(), &entry.id, &[id], &error, true, now)?;
             }
             Ok(())
         })
@@ -123,10 +118,9 @@ pub async fn send_due<D: RecordDb>(
         }
         let entry = recipient.clone();
         let name = recipient_name.to_string();
-        db.run("records.outbox.record", move |db| {
+        run_step(db, "records.outbox.record", move |db| {
             for (ids, result) in deliveries {
-                record_delivery(db.conn(), &entry, &name, &ids, result, now)
-                    .map_err(|e| e.to_string())?;
+                record_delivery(db.conn(), &entry, &name, &ids, result, now)?;
             }
             Ok(())
         })
@@ -165,7 +159,7 @@ fn record_delivery(
     ids: &[String],
     result: Result<(), LrsError>,
     now: DateTime<Utc>,
-) -> Result<(), super::SendError> {
+) -> Result<(), SendError> {
     let refusal = match &result {
         Ok(()) => {
             outbox::mark_sent(conn, &recipient.id, ids, now)?;
@@ -196,10 +190,18 @@ fn record_delivery(
     )
 }
 
+/// What voiding did: how many records the recipient accepted voids for,
+/// and, when it stopped before the end, why.
+#[derive(Debug)]
+pub struct Voided {
+    pub count: usize,
+    pub stopped: Option<SendError>,
+}
+
 /// Sends voiding statements for `record_ids` (local ids of records the
 /// recipient accepted), in batches, and logs each batch. Best effort: stops
-/// at the first batch that fails and returns why. Returns how many were
-/// voided.
+/// at the first batch that fails, reporting how many were voided before it
+/// and why it stopped.
 #[allow(clippy::too_many_arguments)]
 pub async fn void_sent<D: RecordDb>(
     db: &D,
@@ -210,55 +212,80 @@ pub async fn void_sent<D: RecordDb>(
     learner_did: &str,
     record_ids: Vec<String>,
     now: DateTime<Utc>,
-) -> Result<usize, String> {
-    let built_for: Recipient = recipient
-        .recipient(learner_secret, learner_did)
-        .map_err(|e| e.to_string())?;
-    let mut voided = 0;
+) -> Result<Voided, SendError> {
+    let built_for: Recipient = recipient.recipient(learner_secret, learner_did)?;
+    let mut count = 0;
     for chunk in record_ids.chunks(BATCH_SIZE) {
-        let statements = chunk
-            .iter()
-            .map(|id| {
-                xapi::build_statement(
-                    &LearningEvent::voiding(id, now),
-                    &built_for,
-                    &BuildOptions::default(),
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        let result = transport.deliver(&statements).await;
-        let refusal = match &result {
-            Ok(()) => None,
-            Err(error) if reached_recipient(error) => Some(error.to_string()),
-            Err(error) => return Err(error.to_string()),
-        };
-        let entry = recipient.clone();
-        let name = recipient_name.to_string();
-        let ids = chunk.to_vec();
-        let logged_refusal = refusal.clone();
-        db.run("records.access-log.void", move |db| {
-            access_log::append(
-                db.conn(),
-                &NewAccessEntry {
-                    at: &timestamp(now),
-                    recipient_id: &entry.id,
-                    recipient_kind: entry.kind,
-                    recipient_name: &name,
-                    action: AccessAction::Void,
-                    scope: &entry.scope,
-                    record_ids: &ids,
-                    identifier: &entry.actor_name,
-                    refusal: logged_refusal.as_deref(),
-                },
-            )
-            .map_err(|e| e.to_string())
-        })
-        .await?;
-        if let Some(refusal) = refusal {
-            return Err(refusal);
+        let stopped = void_batch(
+            db,
+            recipient,
+            recipient_name,
+            transport,
+            &built_for,
+            chunk,
+            now,
+        )
+        .await
+        .err();
+        if stopped.is_some() {
+            return Ok(Voided { count, stopped });
         }
-        voided += chunk.len();
+        count += chunk.len();
     }
-    Ok(voided)
+    Ok(Voided {
+        count,
+        stopped: None,
+    })
+}
+
+/// Sends and logs one batch of voiding statements.
+async fn void_batch<D: RecordDb>(
+    db: &D,
+    recipient: &RecipientEntry,
+    recipient_name: &str,
+    transport: &dyn Transport,
+    built_for: &Recipient,
+    chunk: &[String],
+    now: DateTime<Utc>,
+) -> Result<(), SendError> {
+    let statements = chunk
+        .iter()
+        .map(|id| {
+            xapi::build_statement(
+                &LearningEvent::voiding(id, now),
+                built_for,
+                &BuildOptions::default(),
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let refusal = match transport.deliver(&statements).await {
+        Ok(()) => None,
+        Err(error) if reached_recipient(&error) => Some(error),
+        Err(error) => return Err(error.into()),
+    };
+    let entry = recipient.clone();
+    let name = recipient_name.to_string();
+    let ids = chunk.to_vec();
+    let logged_refusal = refusal.as_ref().map(ToString::to_string);
+    run_step(db, "records.access-log.void", move |db| {
+        access_log::append(
+            db.conn(),
+            &NewAccessEntry {
+                at: &timestamp(now),
+                recipient_id: &entry.id,
+                recipient_kind: entry.kind,
+                recipient_name: &name,
+                action: AccessAction::Void,
+                scope: &entry.scope,
+                record_ids: &ids,
+                identifier: &entry.actor_name,
+                refusal: logged_refusal.as_deref(),
+            },
+        )
+    })
+    .await?;
+    match refusal {
+        Some(refusal) => Err(refusal.into()),
+        None => Ok(()),
+    }
 }

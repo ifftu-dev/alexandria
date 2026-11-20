@@ -794,3 +794,32 @@ fn cmi5_parameters_join_the_units_own_query_before_its_fragment() {
     assert_eq!(merge_query(Some("?x=2#top"), "a=1"), "?x=2&a=1#top");
     assert_eq!(merge_query(Some("#top"), "a=1"), "?a=1#top");
 }
+
+#[test]
+fn a_unit_window_stays_under_its_own_launch() {
+    let origin = package_serving::origin();
+    let prefix = "0123456789abcdef0123456789abcdef";
+    let at = |text: &str| url::Url::parse(text).expect("url");
+    let allowed = [
+        format!("{origin}/{prefix}/au/index.html?endpoint=x"),
+        format!("{origin}/{prefix}/au/next.html#part"),
+        format!("{origin}/{prefix}/{RETURN_PAGE}"),
+    ];
+    for target in &allowed {
+        assert!(unit_window_may_navigate(prefix, &at(target)), "{target}");
+    }
+    let refused = [
+        "https://example.org/phish".to_string(),
+        "http://127.0.0.1:41234/xapi/statements".to_string(),
+        "data:text/html,<p>hi</p>".to_string(),
+        "about:blank".to_string(),
+        format!("{origin}/fedcba9876543210fedcba9876543210/au/index.html"),
+        format!("{origin}/{prefix}"),
+        format!("{origin}/{prefix}/../fedcba9876543210fedcba9876543210/x.html"),
+        format!("{origin}.evil.example/{prefix}/au/index.html"),
+        "tauri://localhost/".to_string(),
+    ];
+    for target in &refused {
+        assert!(!unit_window_may_navigate(prefix, &at(target)), "{target}");
+    }
+}

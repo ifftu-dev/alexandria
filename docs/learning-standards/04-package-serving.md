@@ -36,3 +36,9 @@ Proposed doc edits, not made here:
 - `GLOSSARY.md`: add **Package launch**: an open, prefix-bound serving of one package's files.
 - `docs/project-structure.md`: list `src-tauri/src/package_serving/` and `commands/package_launches.rs`.
 - `docs/plugins.md`: beside the `plugin://` scheme description, note that package content has its own `package` scheme with a looser script policy, confined by the launch prefix, and is never served under `plugin://`.
+
+### Review (2026-11-21)
+
+- The bootstrap was injected after the first `<head` match anywhere in the page, so script before the head, a commented head or `<head` in a string kept it from running first. It now goes at the document start: after only a byte-order mark and, when a doctype follows leading whitespace, comments or an XML prolog, after that doctype (the page keeps its rendering mode). Test: `the_bootstrap_starts_the_document_whatever_comes_before_the_head`.
+- The content policy is built from directive parts; a cmi5 launch's endpoint is added by rebuilding it, not by editing the header text.
+- Known deviation, as ticket 03 records: a launch waits for the whole archive to be extracted.

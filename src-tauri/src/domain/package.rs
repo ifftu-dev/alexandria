@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Where a package's archive, the kept copy, lives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ArchiveLocation {
+pub enum PackageArchiveLocation {
     /// A file in the profile's packages directory. The node never serves
     /// it and nothing announces it: a draft's package stays on the device.
     Draft,
@@ -17,18 +17,18 @@ pub enum ArchiveLocation {
     Store,
 }
 
-impl ArchiveLocation {
+impl PackageArchiveLocation {
     pub fn as_str(self) -> &'static str {
         match self {
-            ArchiveLocation::Draft => "draft",
-            ArchiveLocation::Store => "store",
+            PackageArchiveLocation::Draft => "draft",
+            PackageArchiveLocation::Store => "store",
         }
     }
 
     pub fn parse(value: &str) -> Option<Self> {
         match value {
-            "draft" => Some(ArchiveLocation::Draft),
-            "store" => Some(ArchiveLocation::Store),
+            "draft" => Some(PackageArchiveLocation::Draft),
+            "store" => Some(PackageArchiveLocation::Store),
             _ => None,
         }
     }
@@ -47,7 +47,7 @@ pub struct Package {
     pub description: PackageDescription,
     /// Size of the archive in bytes.
     pub archive_bytes: u64,
-    pub location: ArchiveLocation,
+    pub location: PackageArchiveLocation,
     pub imported_at: String,
     /// The last time the package was extracted for a launch.
     pub last_opened_at: Option<String>,

@@ -25,18 +25,55 @@ pub async fn list_enrollments(
         .await
 }
 
-/// Enroll in a course.
+/// Enroll in a course. The archives of the course's standards packages are
+/// then fetched in the background, so they play offline later; the player
+/// fetches any still missing when it opens one.
 #[tauri::command]
 pub async fn enroll(state: State<'_, AppState>, course_id: String) -> Result<Enrollment, String> {
-    state
+    let for_db = course_id.clone();
+    let enrolled = state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "enrollment.enroll",
-            move |db| enrollment::enroll(db, &course_id).map_err(|e| e.to_string()),
+            move |db| enrollment::enroll(db, &for_db).map_err(|e| e.to_string()),
         )
-        .await
+        .await?;
+    prefetch_packages(&state, course_id).await;
+    Ok(enrolled)
+}
+
+/// Best effort: fetches and records the package archives a course carries.
+async fn prefetch_packages(state: &State<'_, AppState>, course_id: String) {
+    let Some(resolver) = state.resolver.lock().await.as_ref().cloned() else {
+        return;
+    };
+    let Ok(paths) = state.active_paths() else {
+        return;
+    };
+    let dirs = crate::packages::PackageDirs::for_profile(&paths);
+    let db = crate::packages::OwnedExecutorDb {
+        executor: state.db_executor.clone(),
+        lease: state.profile_lease(),
+        workload: DatabaseWorkload::Background,
+    };
+    let node = state.content_node.clone();
+    tauri::async_runtime::spawn(async move {
+        let hashes = crate::packages::course_packages(&db, &course_id)
+            .await
+            .unwrap_or_default();
+        if hashes.is_empty() || dirs.ensure().is_err() {
+            return;
+        }
+        for hash in hashes {
+            if let Err(error) =
+                crate::packages::get_or_receive(&db, &node, &dirs, &resolver, &hash).await
+            {
+                log::info!("package {hash} not fetched at enrolment: {error}");
+            }
+        }
+    });
 }
 
 /// Update progress on a course element.

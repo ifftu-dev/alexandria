@@ -36,3 +36,7 @@ Proposed doc edits, not made here:
 - `docs/learning-standards-spec.md` → Credentials: say the refusal is enforced by the element commands and database triggers, since the completion policy names no element.
 - `docs/learning-standards-spec.md` → Package storage and import, last bullet: a package file opened from disk is enrolled locally on a device-only signed document.
 - The glossary and architecture documents: preview attempts (in memory, author only).
+
+### Review (2026-11-21)
+
+- A package picked and then cancelled or replaced no longer leaves its draft archive for good: profile start sweeps draft packages no element and no attempt refers to (`packages::sweep_unused_drafts`, see ticket 03). No cancel command was added; the sweep covers both cases.

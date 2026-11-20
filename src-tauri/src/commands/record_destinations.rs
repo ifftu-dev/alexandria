@@ -9,7 +9,7 @@ use crate::domain::record_sending::{
 };
 use crate::profile::scope::ProfileState as State;
 use crate::record_sending::outbox::{self, SendFailure};
-use crate::record_sending::{access_log, destinations, LeasedDb};
+use crate::record_sending::{access_log, destinations};
 use crate::AppState;
 
 /// The learner's key seed and DID, which every identifier a recipient sees
@@ -21,8 +21,8 @@ async fn learner_key(state: &State<'_, AppState>) -> Result<([u8; 32], String), 
     Ok((issuer.key().to_bytes(), issuer.did().as_str().to_string()))
 }
 
-fn leased(state: &State<'_, AppState>) -> LeasedDb {
-    LeasedDb::new(state.db_executor.clone(), state.profile_lease())
+fn leased<'a>(state: &'a State<'_, AppState>) -> crate::packages::ExecutorDb<'a> {
+    super::executor_db(state, crate::db::executor::DatabaseWorkload::Learner)
 }
 
 /// What the consent screen shows for a store before the learner approves
@@ -36,7 +36,9 @@ pub async fn record_destination_preview(
 ) -> Result<DestinationPreview, String> {
     let (secret, did) = learner_key(&state).await?;
     let secret = zeroize::Zeroizing::new(secret);
-    destinations::preview(&leased(&state), &address, &username, &secret, &did).await
+    destinations::preview(&leased(&state), &address, &username, &secret, &did)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// The learner approved a store.
@@ -47,7 +49,9 @@ pub async fn record_destination_add(
 ) -> Result<RecordDestination, String> {
     let (secret, did) = learner_key(&state).await?;
     let secret = zeroize::Zeroizing::new(secret);
-    destinations::add(&leased(&state), request, &secret, &did, chrono::Utc::now()).await
+    destinations::add(&leased(&state), request, &secret, &did, chrono::Utc::now())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -73,12 +77,18 @@ pub async fn record_destination_remove(
 ) -> Result<RemovalReport, String> {
     let (secret, did) = learner_key(&state).await?;
     let secret = zeroize::Zeroizing::new(secret);
-    destinations::remove(&leased(&state), &id, &secret, &did, chrono::Utc::now()).await
+    destinations::remove(&leased(&state), &id, &secret, &did, chrono::Utc::now())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Asks the background sender to try every destination now.
 #[tauri::command]
-pub async fn record_destinations_send_now(_state: State<'_, AppState>) -> Result<(), String> {
+pub async fn record_destinations_send_now(
+    // Read for its admission check only: the call must come from the open
+    // profile's session, like every other record command.
+    _admitted: State<'_, AppState>,
+) -> Result<(), String> {
     destinations::wake();
     Ok(())
 }

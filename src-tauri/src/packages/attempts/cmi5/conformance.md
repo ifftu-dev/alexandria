@@ -131,7 +131,7 @@ Status values: **passes**; **known deviation** (what the app does instead is pin
 | Requirement | Status | Test |
 |---|---|---|
 | 4.2.0.0-1, 6.0.0.0-1: the endpoint passes the xAPI LRS conformance suite | known deviation: not a conformant record store; statement reads filter but never page, `voidedStatementId` finds nothing | «known_deviation_statement_reads_never_page_and_voided_reads_find_nothing» |
-| 4.2.0.0-2: an account that reads every statement across sessions | known deviation: none on the endpoint; the conformance tests read the store in-process by registration, and the learner's records leave through record destinations | «lts_001_essentials_launch_launch_data_and_statement_order» |
+| 4.2.0.0-2: an account that reads every statement across sessions | known deviation: none on the endpoint; the conformance tests read the store in-process by registration. The cmi5 defined statements leave through record destinations as learning records; statements a unit writes on its own are in the activity log, its export (rewritten for the learner), its size limit and delete all, but are not sent to record destinations or shares (known gap) | «lts_001_essentials_launch_launch_data_and_statement_order» |
 | 6.0.0.0-4, 6.2.0.0-1: statement and state requirements of 9 and 10 | passes | rows above |
 
 ## Import (3, 6.1, 13, 14)
