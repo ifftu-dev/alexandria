@@ -2547,6 +2547,7 @@ export type MessageKey =
   | 'organisations.requests.assessment.preview'
   | 'organisations.requests.assessment.received'
   | 'organisations.requests.assessment.refusal.assurance_below_required'
+  | 'organisations.requests.assessment.refusal.custody_below_required'
   | 'organisations.requests.assessment.refusal.integrity_below_minimum'
   | 'organisations.requests.assessment.refusal.no_integrity_assertion'
   | 'organisations.requests.assessment.refusal.no_integrity_score'

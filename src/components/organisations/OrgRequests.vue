@@ -131,6 +131,7 @@ function refusalReason(code: string | null, fallback: string | null): string {
     case 'probe_failed': return t('organisations.requests.assessment.refusal.probe_failed')
     case 'no_integrity_assertion': return t('organisations.requests.assessment.refusal.no_integrity_assertion')
     case 'unreadable_evidence': return t('organisations.requests.assessment.refusal.unreadable_evidence')
+    case 'custody_below_required': return t('organisations.requests.assessment.refusal.custody_below_required')
     default: return fallback ?? code ?? ''
   }
 }
