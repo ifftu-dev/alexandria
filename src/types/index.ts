@@ -2069,7 +2069,7 @@ export interface IssuancePolicy {
   max_critical?: number | null
   max_warning?: number | null
   require_clean?: boolean
-  required_assurance_level?: string | null
+  required_assurance_level?: VerifiedAssuranceLevel | null
   /**
    * Probe policy for attempts made for this role; overrides the assessment's
    * unless 'none'. At issuance anything but 'none' requires the probe step to
@@ -2124,7 +2124,7 @@ export interface RoleAssessment {
   course_id?: string | null
   skill_ids: string[]
   issuance_policy?: IssuancePolicy | null
-  required_assurance_level?: string | null
+  required_assurance_level?: VerifiedAssuranceLevel | null
   status: string
   created_at: string
   updated_at: string
@@ -2187,7 +2187,7 @@ export interface CreateRoleAssessmentRequest {
   course_id?: string | null
   skill_ids?: string[]
   issuance_policy?: IssuancePolicy | null
-  required_assurance_level?: string | null
+  required_assurance_level?: VerifiedAssuranceLevel | null
 }
 
 export interface VerificationResult {

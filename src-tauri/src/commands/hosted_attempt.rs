@@ -152,8 +152,7 @@ pub async fn hosted_attempt_open(
     }
     let attested = terms.terms.requires_device_attested();
     if attested {
-        crate::sentinel::attestation::require_verified_device(
-            Some(crate::sentinel::attestation::ASSURANCE_DEVICE_ATTESTED),
+        crate::sentinel::attestation::require_device_attested(
             crate::sentinel::attestation::AttemptDevice::current(),
         )?;
     }

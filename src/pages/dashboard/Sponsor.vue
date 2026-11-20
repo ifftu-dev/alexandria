@@ -18,7 +18,7 @@ import { useAuth } from '@/composables/useAuth'
 import RoleIntegrityPolicy from '@/components/integrity/RoleIntegrityPolicy.vue'
 import SessionReviewList from '@/components/integrity/SessionReviewList.vue'
 import { integrityChoiceReady, integrityPolicyFields, noIntegrityMinimums, type RoleIntegrityChoice } from '@/utils/sentinel/rolePolicy'
-import type { IssuancePolicy, RoleAttemptSummary, RoleSessionReview, VerifiableCredential } from '@/types'
+import type { IssuancePolicy, RoleAttemptSummary, RoleSessionReview, VerifiableCredential, VerifiedAssuranceLevel } from '@/types'
 
 const { t } = useI18n()
 const sponsor = useSponsor()
@@ -34,7 +34,7 @@ const tabs = computed(() => [
 // `local` is device-reported; `device_attested` needs a verified platform
 // attestation (iOS App Attest / Android Play Integrity). Anchoring and
 // committee co-signing have no verified path.
-const ASSURANCE_LEVELS = ['local', 'device_attested']
+const ASSURANCE_LEVELS: readonly VerifiedAssuranceLevel[] = ['local', 'device_attested']
 
 // --- Organizations -------------------------------------------------------
 const orgModalOpen = ref(false)
@@ -63,7 +63,7 @@ const roleForm = ref({
   max_critical: '',
   max_warning: '',
   require_clean: false,
-  required_assurance_level: '',
+  required_assurance_level: '' as VerifiedAssuranceLevel | '',
 })
 const roleBusy = ref(false)
 const roleIntegrity = ref<RoleIntegrityChoice>(noIntegrityMinimums())
