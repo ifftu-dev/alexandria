@@ -182,6 +182,20 @@ if (screen === 'motion') {
     notify: (kind: AppNotification['kind']) => emit('notifications:new', { session, row: backend.notify(kind) }),
     removeNotification: (kind: AppNotification['kind']) => emit('notifications:changed', { session, unread: backend.removeNotification(kind) }),
   } })
+} else if (screen === 'activity-log') {
+  // The real activity log page over an in-memory log. `?records=<n>` seeds n
+  // launches instead of the four mixed records. Calls are recorded.
+  const { activityLogBackend } = await import('./activityLogBackend')
+  const count = params.get('records')
+  const backend = activityLogBackend(count === null ? null : Number(count))
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
+    invoke: backend.invoke, transformCallback: () => 1, unregisterCallback: () => {},
+  } })
+  const { default: ActivityLog } = await import('@/pages/dashboard/ActivityLog.vue')
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: ActivityLog }] })
+  await router.push('/activity-log')
+  createApp({ render: () => h('div', { class: 'p-6' }, [h(RouterView)]) }).use(i18n).use(router).mount('#app')
+  Object.assign(window, { activityLogFixture: { calls: backend.calls } })
 } else if (screen === 'skill-atlas') {
   // Keep the props-only fixture free of unrelated page lifecycle and global CSS.
   const { default: SkillAtlasFixture } = await import('./SkillAtlasFixture.vue')
