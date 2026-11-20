@@ -82,6 +82,9 @@ test("the player's fixture packages run the backend test that pins their descrip
     "tests/desktop-ui/package-player/package/quiz/index.html",
     "tests/desktop-ui/package-isolation/package/peer.html",
     "tests/desktop-ui/scorm12-conformance/package/imsmanifest.xml",
+    "tests/desktop-ui/package-player-2004/package/intro.html",
+    "tests/desktop-ui/scorm2004-conformance/adl/packages/SX-02/imsmanifest.xml",
+    "tests/desktop-ui/scorm2004-edition3/package/imsmanifest.xml",
   ]) {
     assert.deepEqual(classifyChangedFiles([path]), {
       backend: true,

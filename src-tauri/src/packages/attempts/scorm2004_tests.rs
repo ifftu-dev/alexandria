@@ -262,3 +262,40 @@ async fn a_lesson_that_did_not_suspend_starts_a_new_attempt_unless_the_engine_re
     assert_eq!(back.entry, "resume");
     assert_eq!(back.runtime["cmi"]["location"], json!("page-5"));
 }
+
+#[tokio::test]
+async fn a_resumed_lesson_counts_the_time_of_its_own_learner_attempt_only() {
+    // The test suite's DMB: a lesson that timed out starts a new attempt with
+    // no time; after a suspend, that attempt's time comes back, not the time
+    // of every session the lesson has had.
+    let (learner, attempt) = learner_with_package().await;
+    initialise(&learner.db, &learner.key, &attempt, "intro")
+        .await
+        .expect("launch");
+    let timed_out = json!({ "exit": "time-out", "session_time": "PT2H", "total_time": "PT2H" });
+    commit(
+        &learner.db,
+        scorm2004_commit(&attempt, "intro", timed_out, true),
+    )
+    .await
+    .expect("commit");
+
+    let fresh = initialise(&learner.db, &learner.key, &attempt, "intro")
+        .await
+        .expect("new attempt");
+    assert_eq!(fresh.runtime["cmi"]["total_time"], json!("PT0S"));
+    // The library adds the session to the total it was given on terminate.
+    let suspended = json!({ "exit": "suspend", "session_time": "P29D", "total_time": "P29D" });
+    commit(
+        &learner.db,
+        scorm2004_commit(&attempt, "intro", suspended, true),
+    )
+    .await
+    .expect("commit");
+
+    let resumed = initialise(&learner.db, &learner.key, &attempt, "intro")
+        .await
+        .expect("resume");
+    assert_eq!(resumed.entry, "resume");
+    assert_eq!(resumed.runtime["cmi"]["total_time"], json!("PT696H"));
+}

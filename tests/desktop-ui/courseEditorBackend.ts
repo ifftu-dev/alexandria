@@ -1,6 +1,5 @@
 import type { Chapter, Course, Element, Package, PackageDescription } from '@/types'
-import description from './package-player/description.json'
-import { packageBackend } from './packageBackend'
+import { packageBackend, packageDescriptionOf, type PackageFixtureName } from './packageBackend'
 
 const HASH = 'ab'.repeat(32)
 
@@ -13,15 +12,16 @@ export const REFUSAL_CODES = [
 
 /**
  * A fake host for the course editor: an instructor's draft course with a text
- * lesson and a package element over the SCORM 1.2 player fixture. Importing
- * answers from a table of file paths; a preview is served by the player
- * fixture's backend, so the preview really launches the package. Every
- * command is recorded.
+ * lesson and a package element over a player fixture package (the SCORM 1.2
+ * player fixture unless `fixture` names another). Importing answers from a
+ * table of file paths; a preview is served by the player fixture's backend,
+ * so the preview really launches the package. Every command is recorded.
  */
-export function courseEditorBackend() {
-  const player = packageBackend()
-  const packageDescription = description as unknown as PackageDescription
-  const stored: Package = { hash: HASH, standard: 'scorm12', title: packageDescription.title, description: packageDescription,
+export function courseEditorBackend(options: { fixture?: PackageFixtureName } = {}) {
+  const fixture = options.fixture ?? 'package-player'
+  const player = packageBackend({ fixture })
+  const packageDescription: PackageDescription = packageDescriptionOf(fixture)
+  const stored: Package = { hash: HASH, standard: packageDescription.standard, title: packageDescription.title, description: packageDescription,
     archive_bytes: 4096, location: 'draft', imported_at: '2026-11-01T00:00:00Z', last_opened_at: null }
   const course: Course = {
     id: 'course-induction', title: 'Workshop induction', kind: 'course', description: null, author_address: 'stake-instructor',
@@ -95,6 +95,8 @@ export function courseEditorBackend() {
       case 'package_preview_commit': return player.invoke('package_attempt_commit', args)
       case 'package_preview_activities': return player.invoke('package_attempt_activities', args)
       case 'package_preview_terminate': return player.invoke('package_attempt_terminate', args)
+      case 'package_preview_sequencing': return player.invoke('package_attempt_sequencing', args)
+      case 'package_preview_sequencing_save': return player.invoke('package_attempt_sequencing_save', args)
       default: return player.invoke(command, args)
     }
   }

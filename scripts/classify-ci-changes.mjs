@@ -11,6 +11,10 @@ const BACKEND_PREFIXES = [
   "tests/desktop-ui/package-player/",
   "tests/desktop-ui/package-isolation/",
   "tests/desktop-ui/scorm12-conformance/",
+  "tests/desktop-ui/package-player-2004/",
+  "tests/desktop-ui/scorm2004-conformance/",
+  "tests/desktop-ui/scorm2004-edition2/",
+  "tests/desktop-ui/scorm2004-edition3/",
   "world/",
 ]
 

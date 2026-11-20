@@ -2,7 +2,8 @@ import { readFile } from 'node:fs/promises'
 import type { Page } from '@playwright/test'
 
 // Serves the package origin the fake hosts hand out (`launch-N/` under
-// `http://scorm-package.test`) from the player fixture package on disk, as
+// `http://scorm-package.test`) from a fixture package on disk (the player
+// fixture unless told otherwise), as
 // the package player spec does: reserved files from the app's serving
 // directory, the bootstrap linked into every HTML page, and the scheme
 // handler's own content policy headers. Any other request is refused and
@@ -10,13 +11,13 @@ import type { Page } from '@playwright/test'
 
 export const PACKAGE_ORIGIN = 'http://scorm-package.test'
 const serving = new URL('../../src-tauri/src/package_serving/', import.meta.url)
-const packageFiles = new URL('./package-player/package/', import.meta.url)
 const reserved: Record<string, URL> = {
   'bootstrap.js': new URL('bootstrap.js', serving),
   'clear.html': new URL('clear.html', serving),
   'wrapper.html': new URL('wrapper.html', serving),
   'wrapper.js': new URL('wrapper.js', serving),
   'scorm12.min.js': new URL('../../resources/scorm-again/scorm12.min.js', serving),
+  'scorm2004.min.js': new URL('../../resources/scorm-again/scorm2004.min.js', serving),
 }
 
 async function handlerConstant(name: string) {
@@ -29,7 +30,8 @@ async function handlerConstant(name: string) {
 const contentType = (path: string) =>
   path.endsWith('.html') ? 'text/html' : path.endsWith('.js') ? 'text/javascript' : 'application/octet-stream'
 
-export async function servePackageOrigin(page: Page) {
+export async function servePackageOrigin(page: Page, fixture = 'package-player') {
+  const packageFiles = new URL(`./${fixture}/package/`, import.meta.url)
   const policy = await handlerConstant('CONTENT_POLICY')
   const permissions = await handlerConstant('PERMISSIONS_POLICY')
   const refused: string[] = []

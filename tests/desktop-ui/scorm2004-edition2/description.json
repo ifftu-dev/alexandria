@@ -1,0 +1,110 @@
+{
+  "standard": "scorm2004",
+  "edition": "2nd",
+  "identifier": "dev.alexandria.fixture.scorm2004-edition2",
+  "title": "SCORM 2004 2nd Edition",
+  "tree": {
+    "id": "edition2",
+    "title": "SCORM 2004 2nd Edition",
+    "visible": true,
+    "sequencing": {
+      "control_mode": {
+        "choice": true,
+        "choice_exit": true,
+        "flow": true,
+        "forward_only": false,
+        "use_current_attempt_objective_info": true,
+        "use_current_attempt_progress_info": true
+      }
+    },
+    "children": [
+      {
+        "id": "first",
+        "title": "First lesson",
+        "visible": true,
+        "launch": {
+          "path": "probe.html",
+          "parameters": "?first",
+          "kind": "sco",
+          "launch_data": "edition=2",
+          "mastery_score": 0.8
+        },
+        "sequencing": {
+          "objectives": {
+            "primary": {
+              "id": "first-pass",
+              "satisfied_by_measure": true,
+              "min_normalized_measure": 0.8,
+              "map_info": [
+                {
+                  "target_objective_id": "g-first",
+                  "read_satisfied_status": true,
+                  "read_normalized_measure": true,
+                  "write_satisfied_status": true,
+                  "write_normalized_measure": false
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": "second",
+        "title": "Second lesson",
+        "visible": true,
+        "launch": {
+          "path": "probe.html",
+          "parameters": "?second",
+          "kind": "sco"
+        },
+        "sequencing": {
+          "sequencing_rules": {
+            "pre_condition_rules": [
+              {
+                "condition_combination": "any",
+                "conditions": [
+                  {
+                    "condition": "satisfied",
+                    "operator": "not",
+                    "referenced_objective": "second-gate"
+                  },
+                  {
+                    "condition": "objectiveStatusKnown",
+                    "operator": "not",
+                    "referenced_objective": "second-gate"
+                  }
+                ],
+                "action": "disabled"
+              }
+            ]
+          },
+          "objectives": {
+            "primary": {
+              "id": "second-pass",
+              "satisfied_by_measure": false,
+              "min_normalized_measure": 1.0
+            },
+            "others": [
+              {
+                "id": "second-gate",
+                "satisfied_by_measure": false,
+                "min_normalized_measure": 1.0,
+                "map_info": [
+                  {
+                    "target_objective_id": "g-first",
+                    "read_satisfied_status": true,
+                    "read_normalized_measure": true,
+                    "write_satisfied_status": false,
+                    "write_normalized_measure": false
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "files": 2,
+  "uncompressed_bytes": 4826
+}

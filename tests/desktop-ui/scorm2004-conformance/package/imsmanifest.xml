@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A SCORM 2004 4th Edition package for the conformance checks: a probe
+     lesson the tests drive call by call (with every value a manifest can give
+     a lesson), the same probe with none of them, and the probe again with a
+     primary objective that has no identifier. Choice is on, so the tests can
+     open any lesson from the table of contents. -->
+<manifest identifier="dev.alexandria.fixture.scorm2004-conformance" version="1.0"
+    xmlns="http://www.imsglobal.org/xsd/imscp_v1p1"
+    xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_v1p3"
+    xmlns:adlseq="http://www.adlnet.org/xsd/adlseq_v1p3"
+    xmlns:imsss="http://www.imsglobal.org/xsd/imsss">
+  <metadata>
+    <schema>ADL SCORM</schema>
+    <schemaversion>2004 4th Edition</schemaversion>
+  </metadata>
+  <organizations default="conformance">
+    <organization identifier="conformance">
+      <title>SCORM 2004 conformance</title>
+      <item identifier="probe" identifierref="res-probe">
+        <title>Probe with manifest values</title>
+        <adlcp:timeLimitAction>exit,message</adlcp:timeLimitAction>
+        <adlcp:dataFromLMS>chapter=3&amp;mode=practice</adlcp:dataFromLMS>
+        <adlcp:completionThreshold completedByMeasure="true" minProgressMeasure="0.6"/>
+        <imsss:sequencing>
+          <imsss:limitConditions attemptAbsoluteDurationLimit="PT30M"/>
+          <imsss:objectives>
+            <imsss:primaryObjective objectiveID="probe-pass" satisfiedByMeasure="true">
+              <imsss:minNormalizedMeasure>0.7</imsss:minNormalizedMeasure>
+            </imsss:primaryObjective>
+            <imsss:objective objectiveID="probe-extra"/>
+          </imsss:objectives>
+        </imsss:sequencing>
+      </item>
+      <item identifier="plain" identifierref="res-plain">
+        <title>Probe without manifest values</title>
+      </item>
+      <item identifier="noid" identifierref="res-noid">
+        <title>Probe whose primary objective has no identifier</title>
+        <imsss:sequencing>
+          <imsss:objectives>
+            <imsss:primaryObjective satisfiedByMeasure="true">
+              <imsss:minNormalizedMeasure>0.5</imsss:minNormalizedMeasure>
+            </imsss:primaryObjective>
+          </imsss:objectives>
+        </imsss:sequencing>
+      </item>
+      <imsss:sequencing>
+        <imsss:controlMode choice="true" flow="true"/>
+      </imsss:sequencing>
+    </organization>
+  </organizations>
+  <resources>
+    <resource identifier="res-probe" type="webcontent" adlcp:scormType="sco" href="probe.html">
+      <file href="probe.html"/>
+    </resource>
+    <resource identifier="res-plain" type="webcontent" adlcp:scormType="sco" href="probe.html?plain">
+      <file href="probe.html"/>
+    </resource>
+    <resource identifier="res-noid" type="webcontent" adlcp:scormType="sco" href="probe.html?noid">
+      <file href="probe.html"/>
+    </resource>
+  </resources>
+</manifest>
