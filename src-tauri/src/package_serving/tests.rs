@@ -885,3 +885,48 @@ async fn a_launch_of_an_unknown_package_opens_nothing() {
     assert!(matches!(refused, Err(PackageError::NotFound(_))));
     assert!(!launches.is_package_open(HASH_B));
 }
+
+// ── cmi5 launches ────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_cmi5_launch_admits_its_own_session_endpoint_and_nothing_else() {
+    let package = files(&[("au/index.html", b"<html><head></head></html>")]);
+    let launches = Launches::new();
+    let cmi5 = open(&launches, HASH_A, package.path());
+    let scorm = open(&launches, HASH_B, package.path());
+    assert!(launches.set_endpoint_port(&cmi5, Some(41234)));
+
+    for path in ["au/index.html", "missing.js", "_alexandria/wrapper.html"] {
+        let policy = policy(&send(&launches, get(&url(&cmi5, path))).await);
+        assert_eq!(
+            directive(&policy, "connect-src"),
+            "connect-src 'self' http://127.0.0.1:41234",
+            "{path}"
+        );
+        // Only connections: frames, media and forms stay on the package.
+        for name in ["default-src", "frame-src", "media-src", "form-action"] {
+            assert!(!directive(&policy, name).contains("127.0.0.1"), "{name}");
+        }
+    }
+    let other = policy(&send(&launches, get(&url(&scorm, "au/index.html"))).await);
+    assert_eq!(directive(&other, "connect-src"), "connect-src 'self'");
+
+    // The session ends: the launch goes back to the plain policy.
+    assert!(launches.set_endpoint_port(&cmi5, None));
+    let after = policy(&send(&launches, get(&url(&cmi5, "au/index.html"))).await);
+    assert_eq!(directive(&after, "connect-src"), "connect-src 'self'");
+    assert!(!launches.set_endpoint_port("0123456789abcdef0123456789abcdef", Some(1)));
+}
+
+#[tokio::test]
+async fn the_return_page_tells_the_player_the_unit_exited() {
+    let package = files(&[("_alexandria/returned.html", b"<html>hostile</html>")]);
+    let launches = Launches::new();
+    let prefix = open(&launches, HASH_A, package.path());
+
+    let page = send(&launches, get(&url(&prefix, "_alexandria/returned.html"))).await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let html = body(&page);
+    assert!(!html.contains("hostile"));
+    assert!(html.contains("au-exited"), "{html}");
+}

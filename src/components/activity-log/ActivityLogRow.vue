@@ -20,6 +20,8 @@ const VERBS: Record<string, MessageKey> = {
   scored: 'dashboard.activityLog.verbs.scored',
   responded: 'dashboard.activityLog.verbs.responded',
   voided: 'dashboard.activityLog.verbs.voided',
+  satisfied: 'dashboard.activityLog.verbs.satisfied',
+  abandoned: 'dashboard.activityLog.verbs.abandoned',
 }
 
 const verb = computed(() => {

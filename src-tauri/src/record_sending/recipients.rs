@@ -94,6 +94,27 @@ pub fn list(conn: &Connection, kind: RecipientKind) -> Result<Vec<RecipientEntry
     rows.map(|row| row?).collect()
 }
 
+/// Replaces a recipient's scope and drops whatever is queued for it that
+/// the new scope no longer admits. Records already sent stay sent. Returns
+/// whether the recipient exists.
+pub fn update_scope(conn: &Connection, id: &str, scope: &Scope) -> Result<bool, SendError> {
+    scope.validate()?;
+    let courses = serde_json::to_string(&scope.course_ids)?;
+    let updated = conn.execute(
+        "UPDATE record_recipients SET course_ids = ?2, include_interactions = ?3 WHERE id = ?1",
+        params![id, courses, scope.include_interactions],
+    )?;
+    conn.execute(
+        "DELETE FROM learning_record_outbox \
+         WHERE recipient_id = ?1 AND state <> 'sent' AND record_id IN ( \
+           SELECT id FROM learning_records \
+           WHERE course_id NOT IN (SELECT value FROM json_each(?2)) \
+              OR (kind = 'interaction' AND ?3 = 0))",
+        params![id, courses, scope.include_interactions],
+    )?;
+    Ok(updated > 0)
+}
+
 /// Removes a recipient and everything queued for it, so nothing more is
 /// sent. Its access log rows stay. Returns whether it existed.
 pub fn delete(conn: &Connection, id: &str) -> Result<bool, SendError> {

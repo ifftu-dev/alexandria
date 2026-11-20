@@ -32,6 +32,8 @@ pub enum IdentifierChoice {
     Pairwise,
     /// The learner's own DID.
     RealDid,
+    /// The account an organisation proposed in its record share request.
+    Proposed,
 }
 
 /// A course the learner may include in a scope.
@@ -147,4 +149,44 @@ pub struct RecordAccessEntry {
     pub accepted: bool,
     /// Why the recipient refused them.
     pub detail: Option<String>,
+}
+
+/// What a record share request offers the learner to decide on, beside the
+/// request itself: the courses it names (titled where this device knows
+/// them), whether it asks for per-answer records, and the identifier the
+/// records would carry under each choice.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordShareOffer {
+    pub courses: Vec<CourseChoice>,
+    /// Whether the organisation asked for interaction-level records too.
+    pub interactions_requested: bool,
+    /// The account name records carry with the default identifier.
+    pub pairwise_actor: String,
+    /// The account name records carry if the learner chooses their DID.
+    pub real_did_actor: String,
+    /// The account the organisation proposed, if any.
+    pub proposed_account: Option<alexandria_verify::access::RecordAccount>,
+}
+
+/// The learner's answer to the records part of a request: a scope no wider
+/// than the request's, and the identifier records carry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordShareDecision {
+    pub course_ids: Vec<String>,
+    #[serde(default)]
+    pub include_interactions: bool,
+    #[serde(default)]
+    pub identifier: IdentifierChoice,
+}
+
+/// A grant's record share as the learner sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GrantRecords {
+    pub courses: Vec<CourseChoice>,
+    pub include_interactions: bool,
+    /// `pairwise`, `real_did` or `proposed`.
+    pub identifier: String,
+    pub actor_name: String,
+    /// Absent once the share has stopped sending.
+    pub status: Option<OutboxStatus>,
 }

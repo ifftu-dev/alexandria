@@ -146,6 +146,17 @@ pub async fn add<D: RecordDb>(
 ) -> Result<RecordDestination, String> {
     let username = request.username.trim().to_string();
     check_credentials(&username, Some(&request.secret)).map_err(|e| e.to_string())?;
+    let identity = match request.identifier {
+        IdentifierChoice::Pairwise => Identity::Pairwise,
+        IdentifierChoice::RealDid => Identity::RealDid,
+        // Only a record share request carries a proposed account.
+        IdentifierChoice::Proposed => {
+            return Err(SendError::InvalidCredentials(
+                "a store you add yourself has no proposed account".into(),
+            )
+            .to_string())
+        }
+    };
     let scope = Scope {
         course_ids: request.course_ids,
         include_interactions: request.include_interactions,
@@ -165,10 +176,6 @@ pub async fn add<D: RecordDb>(
 
     let endpoint = store.base().to_string();
     let label = label(&endpoint, &username);
-    let identity = match request.identifier {
-        IdentifierChoice::Pairwise => Identity::Pairwise,
-        IdentifierChoice::RealDid => Identity::RealDid,
-    };
     let entry = RecipientEntry {
         id: uuid::Uuid::new_v4().to_string(),
         kind: RecipientKind::Destination,
@@ -457,7 +464,8 @@ pub fn wake() {
 const IDLE: Duration = Duration::from_secs(60);
 
 /// The background sender, a profile job: a pass whenever woken, when a
-/// retry falls due, and at least every [`IDLE`].
+/// retry falls due, and at least every [`IDLE`]. Each pass serves record
+/// destinations and then record shares ([`super::shares::send_pending`]).
 pub(crate) async fn run(
     db: InboundDatabase,
     keystore: Arc<tokio::sync::Mutex<Option<crate::crypto::keystore::Keystore>>>,
@@ -476,10 +484,10 @@ async fn pass(
     keystore: &tokio::sync::Mutex<Option<crate::crypto::keystore::Keystore>>,
 ) -> Duration {
     let any = db
-        .run("records.destinations.any", |db| {
+        .run("records.recipients.any", |db| {
             db.conn()
                 .query_row(
-                    "SELECT EXISTS (SELECT 1 FROM record_destinations)",
+                    "SELECT EXISTS (SELECT 1 FROM record_recipients)",
                     [],
                     |row| row.get::<_, bool>(0),
                 )
@@ -502,6 +510,9 @@ async fn pass(
     let did = issuer.did().as_str().to_string();
     if let Err(error) = send_pending(db, &secret, &did, Utc::now()).await {
         log::warn!("record destinations pass failed: {error}");
+    }
+    if let Err(error) = super::shares::send_pending(db, issuer.key(), Utc::now()).await {
+        log::warn!("record shares pass failed: {error}");
     }
     let next = db
         .run("records.outbox.next-retry", |db| {

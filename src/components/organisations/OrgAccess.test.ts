@@ -14,8 +14,20 @@ function grant(over: Partial<GrantView> = {}): GrantView {
     grantId: 'g-1', orgDomain: 'acme.example', orgName: 'Acme Hiring', purpose: 'Backend engineer shortlist',
     skills: [{ skillId: 'skill_big_o', name: 'Big-O Analysis', hasEvidence: true, bloomLevel: 3, level: 4 }],
     sync: false, grantedAt: 1_900_000_000, syncedAt: 1_900_000_000, syncError: null, revokedAt: null,
-    lastViewedAt: '2026-10-10T09:00:00Z', viewCount: 3, ...over,
+    lastViewedAt: '2026-10-10T09:00:00Z', viewCount: 3, records: null, ...over,
   }
+}
+
+/** A record-only share: two courses with responses, under an identifier made for Acme. */
+function recordShare(): GrantView {
+  return grant({
+    grantId: 'g-rec', skills: [], syncedAt: null,
+    records: {
+      courses: [{ id: 'c-safety', title: 'Warehouse safety' }, { id: 'c-forklift', title: 'Forklift basics' }],
+      include_interactions: true, identifier: 'pairwise', actor_name: 'z6MkPairwiseForAcme',
+      status: { queued: 0, failed: 0, sent: 5, last_error: null, next_attempt_at: null, last_sent_at: '2026-11-20T09:01:00.000Z' },
+    },
+  })
 }
 
 function arm(grants: GrantView[]) {
@@ -33,6 +45,10 @@ function arm(grants: GrantView[]) {
       // The follow-up commands answer from the local record: no view counts.
       case 'org_grant_set_sync': return { ...grant(), sync: args!.sync as boolean, lastViewedAt: null, viewCount: null }
       case 'org_grant_revoke': return { ...grant(), revokedAt: 1_900_100_000, lastViewedAt: null, viewCount: null }
+      case 'org_grant_narrow_records': return {
+        ...recordShare(), lastViewedAt: null, viewCount: null,
+        records: { ...recordShare().records!, courses: [{ id: 'c-safety', title: 'Warehouse safety' }], include_interactions: false },
+      }
       case 'org_sync_now': return { sent: 1, unchanged: 2, failed: [] }
       case 'set_visibility': return null
       default: throw new Error(command)
@@ -62,6 +78,25 @@ describe('OrgAccess', () => {
     expect(cards[0]!.text()).toContain('organisations.access.updated')
     expect(cards[1]!.text()).toContain('organisations.access.syncFailed')
     expect(cards[1]!.text()).toContain('organisations.access.notViewed')
+  })
+
+  it('shows a record share and narrows it to fewer courses without responses', async () => {
+    arm([recordShare()])
+    const wrapper = mountAccess(); await flushPromises()
+    const records = wrapper.find('[data-testid=grant-records]')
+    expect(records.text()).toContain('Warehouse safety, Forklift basics')
+    expect(records.text()).toContain('organisations.records.withResponses')
+    expect(wrapper.find('[data-testid=narrow-apply]').attributes('disabled')).toBeDefined()
+
+    await wrapper.find('[data-testid=narrow-course-c-forklift]').setValue(false)
+    await wrapper.find('[data-testid=narrow-interactions]').setValue(false)
+    await wrapper.find('[data-testid=narrow-apply]').trigger('click'); await flushPromises()
+    expect(mocks.invoke).toHaveBeenCalledWith('org_grant_narrow_records', {
+      grantId: 'g-rec', courseIds: ['c-safety'], includeInteractions: false,
+    })
+    const after = wrapper.find('[data-testid=grant-records]').text()
+    expect(after).not.toContain('Forklift basics')
+    expect(after).not.toContain('organisations.records.withResponses')
   })
 
   it('turns keeping up to date on through org_grant_set_sync and shows what came back', async () => {

@@ -289,6 +289,19 @@ export interface PackageActivity {
   /** SCORM 2004 `adlcp:data`. */
   shared_data?: PackageSharedDataMap[]
   children?: PackageActivity[]
+  /** cmi5 blocks and assignable units only (`Cmi5Activity` in the studio crate). */
+  cmi5?: PackageCmi5Activity
+}
+
+/** What a cmi5 course structure says about a block or unit beyond the tree. */
+export interface PackageCmi5Activity {
+  /** Units only: when the unit counts as satisfied. */
+  move_on?: 'passed' | 'completed' | 'completed_and_passed' | 'completed_or_passed' | 'not_applicable'
+  /** Units only: whether the unit asks for a window of its own. */
+  launch_method?: 'any_window' | 'own_window'
+  entitlement_key?: string
+  activity_type?: string
+  objectives?: string[]
 }
 
 // SCORM 2004 sequencing, as `alexandria_studio::package::sequencing` describes
@@ -534,6 +547,21 @@ export interface PackageAttemptProgress {
 }
 
 /**
+ * One launch of a cmi5 assignable unit (src-tauri/src/domain/package_attempt.rs),
+ * from `package_cmi5_launch`. `url` already carries the cmi5 launch parameters.
+ */
+export interface Cmi5Launch {
+  session_id: string
+  attempt_id: string
+  activity_id: string
+  url: string
+  /** Desktop: the unit opened in a window of its own. */
+  own_window: boolean
+  /** Mobile: the unit asked for its own window; it plays framed in forced focus mode. */
+  focus_forced: boolean
+}
+
+/**
  * The activity log's size against its visible limit
  * (src-tauri/src/domain/learning_record.rs), from `learning_records_usage`.
  */
@@ -554,8 +582,11 @@ export interface RecordScope {
 
 export type RecipientKind = 'destination' | 'share'
 
-/** The identifier a recipient sees: one made only for it, or the learner's own DID. */
-export type IdentifierChoice = 'pairwise' | 'real_did'
+/**
+ * The identifier a recipient sees: one made only for it, the learner's own
+ * DID, or (record shares only) the account the organisation proposed.
+ */
+export type IdentifierChoice = 'pairwise' | 'real_did' | 'proposed'
 
 export interface CourseChoice {
   id: string
@@ -618,6 +649,38 @@ export interface RemovalReport {
   void_error: string | null
 }
 
+/** An xAPI account (`homePage`, `name`) records name the learner by. */
+export interface RecordAccount {
+  home_page: string
+  name: string
+}
+
+/** What a record share request offers the learner to decide on. */
+export interface RecordShareOffer {
+  courses: CourseChoice[]
+  interactions_requested: boolean
+  pairwise_actor: string
+  real_did_actor: string
+  proposed_account: RecordAccount | null
+}
+
+/** The learner's answer to the records part of an access request. */
+export interface RecordShareDecision {
+  course_ids: string[]
+  include_interactions: boolean
+  identifier: IdentifierChoice
+}
+
+/** A grant's record share as the learner sees it. */
+export interface GrantRecords {
+  courses: CourseChoice[]
+  include_interactions: boolean
+  identifier: '' | 'pairwise' | 'real_did' | 'proposed'
+  actor_name: string
+  /** Absent once the share has stopped sending. */
+  status: OutboxStatus | null
+}
+
 /** One send in the learner-readable access log. */
 export interface RecordAccessEntry {
   seq: number
@@ -640,7 +703,7 @@ export interface RecordAccessEntry {
 export interface LearningRecordEntry {
   id: string
   kind: 'completion' | 'interaction'
-  /** xAPI verb short name: registered, launched, progressed, completed, passed, failed, scored, responded, voided. */
+  /** xAPI verb short name: registered, launched, progressed, completed, passed, failed, scored, responded, voided, satisfied, abandoned (cmi5). */
   verb: string
   course_id: string
   course_title: string | null
@@ -3605,6 +3668,15 @@ export interface AccessRequest {
   network_id: string
   created_at: number
   expires_at: number
+  /** Learning records asked for, beside or instead of skills. */
+  records?: AccessRecordScope
+}
+
+/** The records part of an access request or grant (alexandria_verify::access::RecordScope). */
+export interface AccessRecordScope {
+  course_ids: string[]
+  kinds: ('completion' | 'interaction')[]
+  account?: RecordAccount
 }
 
 /** One requested skill, as the learner can answer it. */
@@ -3625,6 +3697,8 @@ export interface AccessRequestItem {
   orgProof: OrgProof | null
   org: OrgCheck
   skills: SkillChoice[]
+  /** The records part of the request, as the consent screen shows it. */
+  records: RecordShareOffer | null
 }
 
 /** Access the learner has given an organisation. Times are unix seconds unless noted. */
@@ -3642,6 +3716,8 @@ export interface GrantView {
   /** RFC 3339, as Alexandria Cloud reports it. */
   lastViewedAt: string | null
   viewCount: number | null
+  /** The learning records this grant shares, if any. */
+  records: GrantRecords | null
 }
 
 export interface GrantsView {

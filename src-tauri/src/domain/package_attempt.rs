@@ -137,3 +137,20 @@ pub struct PackageAttemptProgress {
     /// completed attempt only); the next launch rebuilds them.
     pub cache_dropped: bool,
 }
+
+/// One launch of a cmi5 assignable unit: what the player opens.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Cmi5Launch {
+    /// The session identifier the unit was given; ends the session.
+    pub session_id: String,
+    pub attempt_id: String,
+    pub activity_id: String,
+    /// The unit's launch URL under the launch prefix, with the cmi5 launch
+    /// parameters merged into its own query.
+    pub url: String,
+    /// Desktop: the unit asked for a window of its own and has one.
+    pub own_window: bool,
+    /// Mobile: the unit asked for a window of its own, so it plays in the
+    /// package frame with focus mode forced on and no way out of it.
+    pub focus_forced: bool,
+}

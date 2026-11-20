@@ -1,4 +1,4 @@
-//! The player's browser checks serve packages from
+//! The player's browser checks serve SCORM and cmi5 packages from
 //! `tests/desktop-ui/<fixture>/package/` and hand the player the package
 //! description in `description.json` beside it, as the host would. This test
 //! keeps the two honest: each description is exactly what import makes of its
@@ -14,8 +14,8 @@ use alexandria_studio::package::{import_package, Limits, PackageDescription};
 mod fixture;
 
 /// The fixture packages: the player's own, the hostile one for the isolation
-/// checks, the SCORM 1.2 and 2004 conformance probes and the SCORM 2004
-/// 2nd and 3rd Edition packages.
+/// checks, the SCORM 1.2 and 2004 conformance probes, the SCORM 2004
+/// 2nd and 3rd Edition packages and the cmi5 course.
 const FIXTURES: &[&str] = &[
     "package-player",
     "package-isolation",
@@ -23,6 +23,7 @@ const FIXTURES: &[&str] = &[
     "scorm2004-conformance",
     "scorm2004-edition2",
     "scorm2004-edition3",
+    "package-player/cmi5",
 ];
 
 fn fixture_dir(name: &str) -> PathBuf {

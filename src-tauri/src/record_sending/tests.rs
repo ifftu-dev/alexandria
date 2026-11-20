@@ -22,34 +22,34 @@ use crate::domain::enrollment::UpdateProgressRequest;
 use crate::domain::record_sending::{IdentifierChoice, NewDestinationRequest, RecordDestination};
 use crate::settings::{registry::keys, SettingsStore};
 
-const LEARNER_SEED: u8 = 1;
+pub(super) const LEARNER_SEED: u8 = 1;
 const CREATOR_SEED: u8 = 9;
 
-fn did(seed: u8) -> String {
+pub(super) fn did(seed: u8) -> String {
     crate::crypto::did::derive_did_key(&SigningKey::from_bytes(&[seed; 32]))
         .as_str()
         .to_string()
 }
 
-fn t0() -> DateTime<Utc> {
+pub(super) fn t0() -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 11, 20, 9, 0, 0).unwrap()
 }
 
 /// A learner enrolled in two courses, with learning records written by the
 /// real host functions: a registration in each, and in the first an element
 /// launched and completed (which also records course progress).
-struct Learner {
-    handle: Arc<Mutex<Option<Database>>>,
-    db: InboundDatabase,
-    secret: [u8; 32],
-    did: String,
-    course: String,
-    other_course: String,
-    video: String,
+pub(super) struct Learner {
+    pub(super) handle: Arc<Mutex<Option<Database>>>,
+    pub(super) db: InboundDatabase,
+    pub(super) secret: [u8; 32],
+    pub(super) did: String,
+    pub(super) course: String,
+    pub(super) other_course: String,
+    pub(super) video: String,
 }
 
 impl Learner {
-    async fn new() -> Self {
+    pub(super) async fn new() -> Self {
         let database = Database::open_in_memory().expect("in-memory db");
         database.run_migrations().expect("migrations");
         let learner_did = did(LEARNER_SEED);
@@ -120,13 +120,13 @@ impl Learner {
         }
     }
 
-    fn with_conn<T>(&self, f: impl FnOnce(&rusqlite::Connection) -> T) -> T {
+    pub(super) fn with_conn<T>(&self, f: impl FnOnce(&rusqlite::Connection) -> T) -> T {
         let guard = self.handle.lock().unwrap();
         f(guard.as_ref().unwrap().conn())
     }
 
     /// Local ids of the records in `course`, oldest first.
-    fn record_ids(&self, course: &str) -> Vec<String> {
+    pub(super) fn record_ids(&self, course: &str) -> Vec<String> {
         self.with_conn(|conn| {
             let mut ids: Vec<String> = crate::learning_records::list(conn)
                 .unwrap()
@@ -140,7 +140,7 @@ impl Learner {
     }
 
     /// A response a package reported, as the package writer stores it.
-    fn add_interaction_record(&self) -> String {
+    pub(super) fn add_interaction_record(&self) -> String {
         let activity = ActivityRef::course(did(CREATOR_SEED), &self.course)
             .element(&self.video)
             .package_activity("ab".repeat(32), "lifting")
@@ -206,7 +206,7 @@ impl Learner {
         self.with_conn(|conn| destinations::list(conn).unwrap())
     }
 
-    fn access_log(&self) -> Vec<access_log::AccessLogEntry> {
+    pub(super) fn access_log(&self) -> Vec<access_log::AccessLogEntry> {
         self.with_conn(|conn| access_log::list(conn).unwrap())
     }
 }
@@ -220,14 +220,14 @@ fn statement_id(learner: &Learner, endpoint: &str, username: &str, local_id: &st
         .statement_id(local_id)
 }
 
-fn actor_names(statements: &[Value]) -> Vec<String> {
+pub(super) fn actor_names(statements: &[Value]) -> Vec<String> {
     statements
         .iter()
         .map(|s| s["actor"]["account"]["name"].as_str().unwrap().to_string())
         .collect()
 }
 
-fn ids(statements: &[Value]) -> Vec<String> {
+pub(super) fn ids(statements: &[Value]) -> Vec<String> {
     statements
         .iter()
         .map(|s| s["id"].as_str().unwrap().to_string())

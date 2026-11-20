@@ -20,6 +20,12 @@ const notNow = moduleRef<Set<string>>(new Set())
  * knows it arrived, but nothing on its card can be answered: the backend
  * refuses anyway, and a button that only fails would look like a fault.
  *
+ * An access request may also ask for learning records (a record share). Its
+ * card then carries the record consent screen: the courses and kinds asked
+ * for, which the learner may narrow, and the identifier the records carry.
+ * Approving it signs the same grant as sharing skills: there is no second
+ * consent path, and no step beyond it for a supervised profile either.
+ *
  * There is still no decline for an access request. "Not now" hides it here
  * for this session and tells nobody; a request left alone expires. A refusal
  * button would turn consent into a record of who said no to whom.
@@ -38,6 +44,7 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton } from '@/components/ui'
 import OrgBadge from './OrgBadge.vue'
 import RequestPolicy from './RequestPolicy.vue'
+import RecordConsent from '@/components/records/RecordConsent.vue'
 import { bloomName } from '@/utils/bloom'
 import { floorNeedsDevice, type DeviceAbility } from '@/utils/requestPolicy'
 import type {
@@ -50,6 +57,8 @@ import type {
   OrgCredentialRequest,
   OrgInterview,
   OrgOffer,
+  RecordConsentDecision,
+  RecordShareDecision,
   ShareableCredential,
   SignedCredentialShare,
   SkillChoice,
@@ -296,7 +305,7 @@ function togglePick(key: string, skillId: string) {
   }
 }
 
-async function share(entry: Extract<Entry, { kind: 'access' }>, sync: boolean) {
+async function share(entry: Extract<Entry, { kind: 'access' }>, sync: boolean, records: RecordShareDecision | null = null) {
   if (busy.value) return
   busy.value = entry.key
   setError(entry.key, '')
@@ -310,8 +319,11 @@ async function share(entry: Extract<Entry, { kind: 'access' }>, sync: boolean) {
       // asked, so the organisation cannot widen the answer by asking for more.
       skillIds: picked.value[entry.key] ?? [],
       sync,
+      records,
     })
-    notice.value = sync
+    notice.value = records
+      ? t('organisations.records.share.shared', { org: grant.orgName })
+      : sync
       ? t('organisations.requests.access.sharedSync', { org: grant.orgName })
       : t('organisations.requests.access.shared', { org: grant.orgName })
     emit('shared', grant)
@@ -321,6 +333,15 @@ async function share(entry: Extract<Entry, { kind: 'access' }>, sync: boolean) {
   } finally {
     busy.value = ''
   }
+}
+
+/** The record consent screen's answer, sent as the records part of the grant. */
+function shareRecords(entry: Extract<Entry, { kind: 'access' }>, decision: RecordConsentDecision) {
+  void share(entry, false, {
+    course_ids: decision.course_ids,
+    include_interactions: decision.include_interactions,
+    identifier: decision.identifier,
+  })
 }
 
 function hide(entry: Entry) {
@@ -498,7 +519,7 @@ onUnmounted(() => {
       <!-- ── Access request ── -->
       <template v-if="entry.kind === 'access'">
         <p class="text-sm text-foreground">{{ t('organisations.requests.access.purpose', { purpose: entry.item.request.purpose }) }}</p>
-        <fieldset class="space-y-2">
+        <fieldset v-if="entry.item.skills.length" class="space-y-2">
           <legend class="text-xs font-medium text-muted-foreground">{{ t('organisations.requests.access.skillsHeading') }}</legend>
           <label
             v-for="skill in entry.item.skills"
@@ -519,7 +540,27 @@ onUnmounted(() => {
             </span>
           </label>
         </fieldset>
-        <div class="flex flex-wrap gap-2">
+        <RecordConsent
+          v-if="entry.item.records && entry.org.verified"
+          :recipient="entry.org.name ?? entry.item.request.organization"
+          :courses="entry.item.records.courses"
+          :initial-course-ids="entry.item.records.courses.map((c) => c.id)"
+          :interactions-offered="entry.item.records.interactions_requested"
+          :pairwise-actor="entry.item.records.pairwise_actor"
+          :real-did-actor="entry.item.records.real_did_actor"
+          :proposed-account="entry.item.records.proposed_account"
+          :busy="busy === entry.key"
+          @approve="(d: RecordConsentDecision) => shareRecords(entry, d)"
+          @cancel="hide(entry)"
+        >
+          <template #undo>
+            <p class="text-sm text-foreground">
+              {{ t('organisations.records.share.undoStops', { org: entry.org.name ?? entry.item.request.organization }) }}
+            </p>
+            <p class="text-sm text-foreground">{{ t('organisations.records.share.undoCannot') }}</p>
+          </template>
+        </RecordConsent>
+        <div v-if="!entry.item.records" class="flex flex-wrap gap-2">
           <AppButton
             size="sm"
             :disabled="!entry.org.verified || !!busy || !(picked[entry.key] ?? []).length"

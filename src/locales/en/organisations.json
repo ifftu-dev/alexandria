@@ -233,12 +233,25 @@
       "pairwiseNote": "No other recipient sees it, so two recipients cannot compare notes about you.",
       "realDid": "My own identifier",
       "realDidNote": "Links these records to your credentials and to anyone else you share this identifier with.",
+      "proposed": "The identifier {recipient} proposed",
+      "proposedNote": "Matches the account {recipient} keeps for you in its own systems ({homePage}).",
       "undoHeading": "If you remove it later",
       "undoStops": "Nothing more is sent, and the store is asked to void what it received.",
       "undoCannot": "Records already sent stay with whoever runs the store. Alexandria cannot recall them.",
       "privateAddress": "This store is on this device or your private network.",
       "confirmPrivate": "I want to send records to this address",
       "approve": "Approve and send"
+    },
+    "share": {
+      "heading": "Learning records",
+      "undoStops": "Nothing more is sent, and {org}'s Alexandria Cloud deletes the records it received under this share.",
+      "undoCannot": "Records it already passed on to its own systems stay there; it is asked to void them.",
+      "approve": "Approve and share",
+      "shared": "Sharing your learning records with {org}.",
+      "narrow": "Share fewer courses",
+      "narrowApply": "Share only these",
+      "narrowNote": "You can share less at any time. Sharing more needs a new request.",
+      "stopped": "No longer sending records."
     }
   }
 }

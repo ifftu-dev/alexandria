@@ -329,6 +329,9 @@ dependencies = [
  "hickory-resolver",
  "hkdf 0.12.4",
  "hmac 0.12.1",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "image",
  "iota_stronghold",
  "iroh",
@@ -359,6 +362,7 @@ dependencies = [
  "pallas-txbuilder",
  "pallas-wallet",
  "pdf-extract",
+ "percent-encoding",
  "postcard",
  "rand 0.8.7",
  "reqwest 0.12.28",
@@ -452,7 +456,7 @@ dependencies = [
 
 [[package]]
 name = "alexandria-verify"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "aes",
  "aes-gcm",

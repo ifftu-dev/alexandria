@@ -1,0 +1,20 @@
+{
+  "description": "A grant with no skills and no records.",
+  "now": 1791000000,
+  "signed": {
+    "statement": {
+      "format": "alexandria-grant/1",
+      "action": "grant",
+      "grant_id": "0d5b8f3e-1c2a-4b6d-8e9f-7a1b2c3d4e5f",
+      "request_id": "6f1d0c52-3a8e-4f7b-9d2a-0c1e5b7a9f10",
+      "audience": "urn:alexandria:org:hr.example.org",
+      "nonce": "2b7e1516-28ae-4d2a-abf7-158809cf4f3c",
+      "subject_did": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+      "skill_ids": [],
+      "sync": false,
+      "created": 1791000000
+    },
+    "signature": "N-AuEYNkkX6kM9eFBnWW3_P4-lNqo8xV1jAVwoojScr54Q3lNnQpkg8rayBD--0QWx02fnWG-sMtUKORDjEFCw"
+  },
+  "expect": "malformed"
+}

@@ -38,7 +38,8 @@ use serde::Serialize;
 pub use alexandria_studio::xapi::RecordKind;
 pub use limit::{enforce_limit, usage, LIMIT_BYTES};
 pub use write::{
-    record_enrolment, record_package_launch, record_package_session, record_progress, PriorProgress,
+    package_activity_ref, record_cmi5, record_enrolment, record_package_launch,
+    record_package_session, record_progress, Cmi5Record, PriorProgress,
 };
 
 /// A record that could not be written never fails the learner's action: the

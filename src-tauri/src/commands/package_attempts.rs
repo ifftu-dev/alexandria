@@ -128,6 +128,15 @@ pub async fn package_attempt_terminate(
     attempt_id: String,
 ) -> Result<PackageAttemptProgress, String> {
     let dirs = PackageDirs::for_profile(&state.active_paths()?);
+    // Any cmi5 session still open ends first (abandoned unless terminated).
+    attempts::cmi5::end_attempt(
+        &db(&state),
+        &state.cmi5_sessions,
+        &state.package_launches,
+        &attempt_id,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     attempts::terminate(&db(&state), &dirs, &state.package_launches, &attempt_id)
         .await
         .map_err(|e| e.to_string())

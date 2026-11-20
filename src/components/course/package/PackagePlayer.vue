@@ -2,9 +2,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Channel } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppSpinner } from '@/components/ui'
 import type {
+  Cmi5Launch,
   Element,
   ElementProgress,
   OpenedPackageLaunch,
@@ -28,7 +30,7 @@ import {
 import { previewInvoke } from './packagePreview'
 
 // A package element: a SCORM package running in the wrapper at the package
-// origin, under a label the app draws. Results come from the package's own
+// origin, or cmi5 units framed by it, under a label the app draws. Results come from the package's own
 // script and are shown as self-reported; the host writes element progress
 // and this component passes it up. See `packageSession.ts` for the protocol.
 
@@ -69,6 +71,12 @@ const blocked = ref<Blocked[]>([])
 const focus = ref(false)
 const confirmingFresh = ref(false)
 const busy = ref(false)
+/** cmi5: the running unit's own window, while it is open (desktop). */
+const unitWindow = ref<Cmi5Launch | null>(null)
+/** cmi5: the running unit returned to its return page. */
+const unitExited = ref(false)
+/** cmi5: the running unit asked for its own window on mobile; focus mode stays on. */
+const focusForced = ref(false)
 /**
  * A new frame element for every session: a frame keeps its name and its
  * history (which holds the earlier launch's addresses) across navigations.
@@ -76,6 +84,7 @@ const busy = ref(false)
 const frameKey = ref(0)
 let session: PackageSession | null = null
 let disposed = false
+let stopListening: UnlistenFn | null = null
 
 // SCORM 2004: the sequencing engine in the wrapper decides what is delivered
 // and which controls apply; the player draws what it reports.
@@ -213,6 +222,11 @@ async function startSession() {
         phase.value = 'error'
         loadError.value = reason === 'unsupported-standard' ? t('learn.package.unsupported') : reason
       },
+      unitExited: () => {
+        unitExited.value = true
+        void endUnit()
+      },
+      unitWindow: (launch) => { unitWindow.value = launch },
       navigation: (state) => { navigation.value = state },
       delivered: (activityId) => {
         currentId.value = activityId
@@ -247,13 +261,29 @@ async function startSession() {
 async function openLesson(activity: PackageActivity) {
   if (!session || !activity.launch) return
   currentId.value = activity.id
+  unitExited.value = false
   try {
-    await session.openLesson(activity)
+    const opened = await session.openLesson(activity)
+    focusForced.value = 'focus_forced' in opened && opened.focus_forced
+    if (focusForced.value) focus.value = true
     void refreshResults()
   } catch (error) {
     loadError.value = String(error)
     phase.value = 'error'
   }
+}
+
+/** cmi5: ends the running unit's session (its own window closes with it). */
+async function endUnit() {
+  await session?.endLesson()
+  focusForced.value = false
+  void refreshResults()
+}
+
+/** cmi5: brings the unit's own window forward; a window already gone ends the unit. */
+async function focusUnitWindow() {
+  const open = await session?.focusUnitWindow()
+  if (open === false) await endUnit()
 }
 
 function step(offset: number) {
@@ -289,11 +319,19 @@ async function startFresh() {
 }
 
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && focus.value) focus.value = false
+  if (event.key === 'Escape' && focus.value && !focusForced.value) focus.value = false
 }
 
 onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
+  // cmi5: the host ends a session itself when the unit's own window closes.
+  void listen<{ session_id: string, progress?: PackageAttemptProgress | null }>('package-cmi5-ended', (event) => {
+    session?.unitEnded(event.payload.session_id, event.payload.progress ?? null)
+    focusForced.value = false
+  }).then((unlisten) => {
+    if (disposed) unlisten()
+    else stopListening = unlisten
+  }).catch(() => {})
   const hash = props.element.content_cid
   if (!props.enrollmentId && !props.preview) {
     phase.value = 'unenrolled'
@@ -327,6 +365,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   disposed = true
   window.removeEventListener('keydown', onKeydown)
+  stopListening?.()
   const closing = session
   session = null
   // The frame goes with this component; the wrapper finishes the lesson as
@@ -360,6 +399,8 @@ onBeforeUnmount(() => {
         type="button"
         class="pressable shrink-0 rounded-md border border-amber-600/40 px-2 py-0.5 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/50"
         :aria-pressed="focus"
+        :disabled="focusForced"
+        :title="focusForced ? t('learn.package.focusForced') : undefined"
         @click="focus = !focus"
       >
         {{ focus ? t('learn.package.label.focusOff') : t('learn.package.label.focusOn') }}
@@ -585,6 +626,26 @@ onBeforeUnmount(() => {
             </template>
             <p v-else>{{ t('learn.package.ended') }}</p>
           </div>
+          <div
+            v-if="unitWindow"
+            data-package-unit-window
+            class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center text-sm text-muted-foreground"
+            role="status"
+          >
+            <p>{{ t('learn.package.unitWindow.body') }}</p>
+            <div class="flex flex-wrap justify-center gap-2">
+              <AppButton data-package-unit-focus size="xs" @click="focusUnitWindow">{{ t('learn.package.unitWindow.focus') }}</AppButton>
+              <AppButton data-package-unit-end size="xs" variant="secondary" @click="endUnit">{{ t('learn.package.unitWindow.end') }}</AppButton>
+            </div>
+          </div>
+          <p
+            v-else-if="unitExited"
+            data-package-unit-exited
+            class="absolute inset-x-0 top-0 z-10 border-b border-border bg-muted/60 px-3 py-2 text-center text-xs text-muted-foreground"
+            role="status"
+          >
+            {{ t('learn.package.unitExited') }}
+          </p>
           <iframe
             v-if="phase !== 'loading'"
             :key="frameKey"

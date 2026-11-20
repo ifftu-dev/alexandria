@@ -1096,3 +1096,139 @@ fn a_cmi5_description_is_stored_as_this_json_and_read_back() {
     assert_eq!(back, package);
     assert_eq!(MoveOn::CompletedAndPassed.as_cmi5(), "CompletedAndPassed");
 }
+
+// ---- the CATAPULT LMS test suite's valid import packages -------------------
+
+#[test]
+fn a_course_of_more_than_a_thousand_units_imports() {
+    // CATAPULT 101-one-thousand-aus (cmi5 6.1.0.0-2): 1001 units straight
+    // under the course, all launching one page. Published as a standalone
+    // structure of remote units; packaged here.
+    let units: String = (0..1001)
+        .map(|n| {
+            format!(
+                r#"<au id="https://w3id.org/xapi/cmi5/catapult/lts/au/0002-one-thousand-aus/{n}">
+                    <title><langstring lang="en">CATAPULT LMS Test AU: 0002-one-thousand-aus/{n}</langstring></title>
+                    <description><langstring lang="en">AU {n}</langstring></description>
+                    <url>http://example.com/index.html</url>
+                </au>"#
+            )
+        })
+        .collect();
+    let structure = format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+        <courseStructure xmlns="{CMI5_NS}">
+            <course id="https://w3id.org/xapi/cmi5/catapult/lts/course/0002-one-thousand-aus">
+                <title><langstring lang="en">CATAPULT LMS Test Course: 101 One Thousand AUs</langstring></title>
+                <description><langstring lang="en">1001 AUs</langstring></description>
+            </course>
+            {units}
+        </courseStructure>"#
+    );
+    let package = import(&packaged(&structure)).expect("imports");
+    let units = &package.tree.children;
+    assert_eq!(units.len(), 1001);
+    assert!(units
+        .iter()
+        .all(|unit| unit.launch.as_ref().map(|l| l.kind) == Some(LaunchKind::AssignableUnit)));
+}
+
+#[test]
+fn a_zip64_package_imports() {
+    // CATAPULT 102-zip64 (cmi5 14.0.0.0-1): the archive written with Zip64
+    // records throughout.
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+
+    let structure = format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+        <courseStructure xmlns="{CMI5_NS}">
+            <course id="https://w3id.org/xapi/cmi5/catapult/lts/course/102-zip64">
+                <title><langstring lang="en">CATAPULT LMS Test Course: 102 Zip64</langstring></title>
+                <description><langstring lang="en">CATAPULT LMS Test Course: 102 Zip64</langstring></description>
+            </course>
+            <au id="https://w3id.org/xapi/cmi5/catapult/lts/au/102-zip64" moveOn="CompletedOrPassed">
+                <title><langstring lang="en">CATAPULT LMS Test AU: 102 Zip64</langstring></title>
+                <description><langstring lang="en">CATAPULT LMS Test AU: 102 Zip64</langstring></description>
+                <url>index.html</url>
+            </au>
+        </courseStructure>"#
+    );
+    let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    // An empty extensible data sector makes the writer close with the Zip64
+    // end of central directory record and locator.
+    writer.set_raw_zip64_extensible_data_sector(Box::new([]));
+    let options = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .large_file(true);
+    for (name, data) in [
+        ("cmi5.xml", structure.as_str()),
+        ("index.html", "<html></html>"),
+    ] {
+        writer.start_file(name, options).unwrap();
+        writer.write_all(data.as_bytes()).unwrap();
+    }
+    let archive = writer.finish().unwrap().into_inner();
+    // Zip64 end of central directory record and locator are present.
+    assert!(archive.windows(4).any(|w| w == [0x50, 0x4b, 0x06, 0x06]));
+
+    let package = import_package(Cursor::new(archive), &Limits::default()).expect("imports");
+    assert_eq!(package.standard, Standard::Cmi5);
+    assert_eq!(package.tree.children.len(), 1);
+}
+
+/// After CATAPULT `206-1-invalid-au-url` and `207-1-invalid-courseStructure`:
+/// a unit address with a space in it, the second also with `url` before
+/// `title`, against the schema's order.
+fn invalid_address(name: &str, url_first: bool, url: &str) -> String {
+    let url = format!("<url>{url}</url>");
+    let title = format!(
+        r#"<title><langstring lang="en">CATAPULT LMS Test AU: {name}</langstring></title>
+           <description><langstring lang="en">CATAPULT LMS Test AU: {name}</langstring></description>"#
+    );
+    let body = if url_first {
+        format!("{url}{title}")
+    } else {
+        format!("{title}{url}")
+    };
+    format!(
+        r#"<?xml version="1.0" encoding="utf-8"?>
+        <courseStructure xmlns="{CMI5_NS}">
+            <course id="https://w3id.org/xapi/cmi5/catapult/lts/course/{name}">
+                <title><langstring lang="en">CATAPULT LMS Test Course: {name}</langstring></title>
+                <description><langstring lang="en">CATAPULT LMS Test Course: {name}</langstring></description>
+            </course>
+            <au id="https://w3id.org/xapi/cmi5/catapult/lts/au/{name}">{body}</au>
+        </courseStructure>"#
+    )
+}
+
+#[test]
+fn a_unit_address_that_is_not_a_url_is_refused() {
+    // CATAPULT 206-1 (cmi5 13.1.4.0-2) and 207-1 as published: both name a
+    // remote address with a space in it, refused before anything else.
+    for structure in [
+        invalid_address(
+            "206-1-invalid-au-url",
+            false,
+            "http://example.com index.html",
+        ),
+        invalid_address(
+            "207-1-invalid-courseStructure",
+            true,
+            "http://example.com index.html",
+        ),
+    ] {
+        let refused = refusal(&package(&structure));
+        assert_eq!(refused.code, RefusalCode::LaunchResourceRemote);
+    }
+}
+
+#[test]
+fn known_deviation_element_order_is_not_checked_against_the_schema() {
+    // CATAPULT 207-1 (cmi5 13.2.0.0-1) with its unit packaged: `url` before
+    // `title` breaks the schema's sequence; import reads it anyway.
+    let structure = invalid_address("207-1-invalid-courseStructure", true, "index.html");
+    let package = import(&package(&structure)).expect("imports");
+    assert_eq!(package.tree.children.len(), 1);
+}

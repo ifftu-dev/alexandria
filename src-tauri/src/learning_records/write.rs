@@ -84,7 +84,9 @@ fn event_activity(event: &LearningEvent) -> Result<&ActivityRef, RecordError> {
         | Action::Completed { target, .. }
         | Action::Passed { target, .. }
         | Action::Failed { target, .. }
-        | Action::Scored { target, .. } => &target.activity,
+        | Action::Scored { target, .. }
+        | Action::Abandoned { target, .. }
+        | Action::Satisfied { target, .. } => &target.activity,
         Action::Responded { interaction, .. } => &interaction.activity,
         Action::Voided { .. } => {
             return Err(RecordError::Database(
@@ -352,8 +354,144 @@ fn package_activity(
 fn profile_of(standard: Standard) -> Option<Profile> {
     match standard {
         Standard::Scorm12 | Standard::Scorm2004 => Some(Profile::Scorm),
-        Standard::Cmi5 => None,
+        Standard::Cmi5 => Some(Profile::Cmi5),
     }
+}
+
+/// The identifier of a package activity of an attempt (a unit, block or
+/// course node for cmi5): the element's DID URL extended with the package
+/// hash and the activity's own identifier. It is what a cmi5 unit is given
+/// as its `activityId` and what its records are about.
+pub fn package_activity_ref(
+    conn: &Connection,
+    attempt: &PackageAttempt,
+    activity_id: &str,
+) -> Result<ActivityRef, RecordError> {
+    let learner_did = learner_did(conn)?;
+    let element = element(
+        conn,
+        &attempt.enrollment_id,
+        &attempt.element_id,
+        &learner_did,
+    )?;
+    let activity = element
+        .activity
+        .package_activity(&attempt.package_hash, activity_id);
+    activity.iri()?;
+    Ok(activity)
+}
+
+/// What the launching system records for a cmi5 session.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Cmi5Record {
+    /// The unit reported `completed`, `passed` or `failed` (its verb), with
+    /// the score and duration it gave.
+    Result {
+        verb: alexandria_studio::xapi::cmi5::UnitVerb,
+        score: Option<f64>,
+        duration_seconds: Option<f64>,
+    },
+    /// The session ended without `terminated`, after this long.
+    Abandoned { seconds: f64 },
+    /// A block or the course was satisfied.
+    Satisfied(alexandria_studio::xapi::Satisfiable),
+}
+
+/// Records one cmi5 event about `activity_id` (a unit, or for
+/// [`Cmi5Record::Satisfied`] a block or the course, by course structure
+/// identifier) in an attempt. `local_id` keys the record: the same id is
+/// written once.
+pub fn record_cmi5(
+    conn: &Connection,
+    attempt: &PackageAttempt,
+    package: &Package,
+    activity_id: &str,
+    local_id: String,
+    record: &Cmi5Record,
+) -> Result<(), RecordError> {
+    use alexandria_studio::xapi::cmi5::UnitVerb;
+    let learner_did = learner_did(conn)?;
+    let element = element(
+        conn,
+        &attempt.enrollment_id,
+        &attempt.element_id,
+        &learner_did,
+    )?;
+    let activity = element
+        .activity
+        .package_activity(&attempt.package_hash, activity_id);
+    let name = find_activity(&package.description.tree, activity_id)
+        .map(|a| LanguageMap::from([(NAME_LANGUAGE.to_string(), a.title.clone())]));
+    let target = Target { activity, name };
+    let centiseconds = |seconds: Option<f64>| seconds.map(|s| (s.max(0.0) * 100.0).round() as u64);
+    let action = match record {
+        Cmi5Record::Result {
+            verb,
+            score,
+            duration_seconds,
+        } => {
+            let outcome = Outcome {
+                score: score.map(|scaled| Score {
+                    scaled: Some(scaled),
+                    ..Score::default()
+                }),
+                duration_centiseconds: centiseconds(*duration_seconds),
+                ..Outcome::default()
+            };
+            match verb {
+                UnitVerb::Passed => Action::Passed { target, outcome },
+                UnitVerb::Failed => Action::Failed { target, outcome },
+                UnitVerb::Completed => Action::Completed {
+                    target,
+                    outcome: Outcome {
+                        score: None,
+                        ..outcome
+                    },
+                },
+                UnitVerb::Initialized | UnitVerb::Terminated => return Ok(()),
+            }
+        }
+        Cmi5Record::Abandoned { seconds } => Action::Abandoned {
+            target,
+            outcome: Outcome {
+                duration_centiseconds: centiseconds(Some(*seconds)),
+                ..Outcome::default()
+            },
+        },
+        Cmi5Record::Satisfied(scope) => Action::Satisfied {
+            target,
+            scope: *scope,
+        },
+    };
+    let event = LearningEvent {
+        local_id,
+        timestamp: Utc::now(),
+        registration: Some(attempt.id.clone()),
+        action,
+        profile: Some(Profile::Cmi5),
+    };
+    insert(
+        conn,
+        &learner_did,
+        &Placement {
+            course_id: &element.course_id,
+            element_id: Some(&attempt.element_id),
+            registration: Some(&attempt.id),
+        },
+        &event,
+    )
+}
+
+fn find_activity<'a>(
+    node: &'a alexandria_studio::package::Activity,
+    id: &str,
+) -> Option<&'a alexandria_studio::package::Activity> {
+    if node.id == id {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .find_map(|child| find_activity(child, id))
 }
 
 /// Records one launch of one activity of a package attempt.

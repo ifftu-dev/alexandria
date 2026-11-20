@@ -38,6 +38,33 @@ function accessItem(id: string, org: OrgCheck = verified, created = 300): Access
       { skillId: 'skill_big_o', name: 'Big-O Analysis', hasEvidence: true, bloomLevel: 3, level: 4 },
       { skillId: 'skill_graphs', name: 'Graphs', hasEvidence: false, bloomLevel: null, level: null },
     ],
+    records: null,
+  }
+}
+
+/** An organisation asks for learning records from two courses, and no skills. */
+function recordsItem(id: string): AccessRequestItem {
+  const base = accessItem(id)
+  return {
+    ...base,
+    request: {
+      ...base.request,
+      skill_ids: [],
+      purpose: 'Mandatory safety training reporting',
+      records: {
+        course_ids: ['c-safety', 'c-forklift'],
+        kinds: ['completion', 'interaction'],
+        account: { home_page: 'https://hr.acme.example', name: 'E-1042' },
+      },
+    },
+    skills: [],
+    records: {
+      courses: [{ id: 'c-safety', title: 'Warehouse safety' }, { id: 'c-forklift', title: 'Forklift basics' }],
+      interactions_requested: true,
+      pairwise_actor: 'z6MkPairwiseForAcme',
+      real_did_actor: 'z6MkMe',
+      proposed_account: { home_page: 'https://hr.acme.example', name: 'E-1042' },
+    },
   }
 }
 
@@ -156,7 +183,7 @@ describe('OrgRequests', () => {
 
     await button(wrapper, 'organisations.requests.access.share').trigger('click'); await flushPromises()
     expect(mocks.invoke).toHaveBeenCalledWith('org_grant', {
-      directoryUrl: CLOUD, request: item.request, orgProof: proof, skillIds: ['skill_big_o'], sync: false,
+      directoryUrl: CLOUD, request: item.request, orgProof: proof, skillIds: ['skill_big_o'], sync: false, records: null,
     })
     expect(wrapper.emitted('shared')).toHaveLength(1)
     // Both panels refresh: this one asks again.
@@ -164,6 +191,39 @@ describe('OrgRequests', () => {
 
     await button(wrapper, 'organisations.requests.access.shareSync').trigger('click'); await flushPromises()
     expect(mocks.invoke).toHaveBeenCalledWith('org_grant', expect.objectContaining({ sync: true, orgProof: proof }))
+  })
+
+  it('answers a record share through the same grant, narrowed, with no extra step', async () => {
+    const item = recordsItem('ar-rec')
+    arm({ access: [item] })
+    const wrapper = mount(OrgRequests); await flushPromises()
+    const consent = wrapper.find('[data-testid=request-access] [data-testid=record-consent]')
+    expect(consent.exists()).toBe(true)
+    expect(consent.text()).toContain('Warehouse safety')
+    expect(consent.text()).toContain('organisations.records.share.undoStops')
+    // No skills were asked for, so there is nothing to tick and no skill buttons.
+    expect(wrapper.text()).not.toContain('organisations.requests.access.skillsHeading')
+    expect(wrapper.text()).not.toContain('organisations.requests.access.shareSync')
+
+    // One course only, responses left off, the organisation's proposed account.
+    await consent.find('[data-testid=consent-course-c-forklift]').setValue(false)
+    await consent.find('[data-testid=consent-identifier-proposed]').setValue(true)
+    expect(consent.find('[data-testid=consent-actor]').text()).toBe('E-1042')
+    await consent.find('[data-testid=consent-approve]').trigger('click'); await flushPromises()
+
+    const grantCalls = mocks.invoke.mock.calls.filter((c) => c[0] === 'org_grant')
+    expect(grantCalls).toEqual([[
+      'org_grant',
+      {
+        directoryUrl: CLOUD, request: item.request, orgProof: proof, skillIds: [], sync: false,
+        records: { course_ids: ['c-safety'], include_interactions: false, identifier: 'proposed' },
+      },
+    ]])
+    // The same consent path as any grant: nothing else is asked or called,
+    // including for a supervised profile (no guardian rule exists on grants).
+    const others = mocks.invoke.mock.calls.map((c) => c[0]).filter((c) => !['org_grant', 'org_access_requests'].includes(c))
+    expect(others.every((c) => !String(c).includes('guardian'))).toBe(true)
+    expect(wrapper.emitted('shared')).toHaveLength(1)
   })
 
   it('cannot share once nothing is ticked', async () => {

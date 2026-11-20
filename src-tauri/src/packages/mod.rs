@@ -107,6 +107,29 @@ pub trait PackageDb: Sync {
         F: FnOnce(&Database) -> Result<T, String> + Send + 'static;
 }
 
+/// [`PackageDb`] over the profile's database executor, owned: for work that
+/// outlives the command that started it (a cmi5 session's endpoint).
+pub(crate) struct OwnedExecutorDb {
+    pub(crate) executor: DatabaseExecutor,
+    pub(crate) lease: ProfileLease,
+    pub(crate) workload: DatabaseWorkload,
+}
+
+impl PackageDb for OwnedExecutorDb {
+    fn run<T, F>(
+        &self,
+        label: &'static str,
+        operation: F,
+    ) -> impl Future<Output = Result<T, String>> + Send
+    where
+        T: Send + 'static,
+        F: FnOnce(&Database) -> Result<T, String> + Send + 'static,
+    {
+        self.executor
+            .execute(self.workload, self.lease.clone(), label, operation)
+    }
+}
+
 /// [`PackageDb`] over the profile's database executor.
 pub(crate) struct ExecutorDb<'a> {
     pub(crate) executor: &'a DatabaseExecutor,

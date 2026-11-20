@@ -292,7 +292,9 @@
       "failed": "Failed",
       "scored": "Scored",
       "responded": "Responded",
-      "voided": "Withdrawn"
+      "voided": "Withdrawn",
+      "satisfied": "Met the requirements",
+      "abandoned": "Left unfinished"
     },
     "confirm": {
       "oneTitle": "Delete this record?",

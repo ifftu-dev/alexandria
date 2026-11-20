@@ -15,6 +15,9 @@
 //       lesson frame. `url` must lie under this launch's prefix.
 //   { source: 'alexandria-player', type: 'end' }
 //       End the current lesson session (answered with `ended`).
+//   A cmi5 launch (`standard: 'cmi5'`) has no run-time API here and no
+//   `runtime`: the unit talks xAPI to its session's endpoint itself, so the
+//   wrapper only frames `url` and sends no commits.
 //
 // Wrapper -> host:
 //   { source: 'alexandria-wrapper', type: 'ready' }
@@ -203,7 +206,7 @@
     s.closed = true;
     s.ending = false;
     try {
-      if (window[s.apiName] === s.runtime.facade) delete window[s.apiName];
+      if (s.apiName && window[s.apiName] === s.runtime.facade) delete window[s.apiName];
     } catch (_) {}
     tell({ type: 'ended', activityId: s.activityId });
   }
@@ -236,7 +239,30 @@
     return typeof url === 'string' && url.indexOf(launchPrefix) === 0 && url.indexOf(launchPrefix + '_alexandria/') !== 0;
   }
 
+  // cmi5: frame the unit and nothing else.
+  function launchFramed(message) {
+    endSession();
+    if (!insideLaunch(message.url)) return tell({ type: 'refused', reason: 'outside-launch' });
+    var frame = document.createElement('iframe');
+    frame.id = 'lesson';
+    frame.title = typeof message.title === 'string' ? message.title : '';
+    frame.src = message.url;
+    session = {
+      activityId: String(message.activityId),
+      frame: frame,
+      runtime: null,
+      apiName: null,
+      finished: true,
+      closed: false,
+      ending: false,
+      pending: null,
+      timer: null,
+    };
+    document.body.appendChild(frame);
+  }
+
   function launch(message) {
+    if (message.standard === 'cmi5') return launchFramed(message);
     var entry = RUNTIMES[message.standard];
     if (entry && entry.sequenced) return launchDelivered(message);
     endSession();
