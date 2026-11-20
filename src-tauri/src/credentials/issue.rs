@@ -56,7 +56,9 @@ fn gate(
 /// The shared rule over a credential's integrity `assertion`: a role
 /// credential issued on an assessed credential is judged by what was
 /// verified about that credential ([`alexandria_verify::policy::
-/// evaluate_assessed`]); any other by its own attestation evidence checked
+/// evaluate_assessed`]); one issued from a hosted attempt by what the issuer
+/// found ([`alexandria_verify::policy::evaluate_hosted`]), as the hosted
+/// service judged it; any other by its own attestation evidence checked
 /// against `trust`. Used at issuance and by the credential exchange's picker.
 pub(crate) fn judge_shared_rule(
     policy: &IssuancePolicy,
@@ -64,16 +66,18 @@ pub(crate) fn judge_shared_rule(
     vc: &VerifiableCredential,
     trust: &alexandria_verify::attestation::AttestationTrust,
 ) -> Result<(), CredentialError> {
-    match alexandria_verify::assessed::AssessedCredentialEvidence::find(vc)
-        .map_err(|e| CredentialError::Envelope(e.to_string()))?
+    let envelope = |e: &dyn std::fmt::Display| CredentialError::Envelope(e.to_string());
+    if let Some(assessed) = alexandria_verify::assessed::AssessedCredentialEvidence::find(vc)
+        .map_err(|e| envelope(&e))?
     {
-        Some(assessed) => {
-            alexandria_verify::policy::evaluate_assessed(policy, assertion, &assessed)?
-        }
-        None => {
-            let attestation = alexandria_verify::attestation::verify_evidence(vc, trust);
-            alexandria_verify::policy::evaluate(policy, assertion, &attestation)?;
-        }
+        alexandria_verify::policy::evaluate_assessed(policy, assertion, &assessed)?;
+    } else if let Some(hosted) =
+        alexandria_verify::custody::HostedAttemptEvidence::find(vc).map_err(|e| envelope(&e))?
+    {
+        alexandria_verify::policy::evaluate_hosted(policy, assertion, &hosted)?;
+    } else {
+        let attestation = alexandria_verify::attestation::verify_evidence(vc, trust);
+        alexandria_verify::policy::evaluate(policy, assertion, &attestation)?;
     }
     Ok(())
 }
@@ -560,6 +564,75 @@ mod tests {
             .unwrap()
             .integrity
             .expect("integrity assertion embedded")
+    }
+
+    /// A role credential from a hosted attempt is judged by what its
+    /// `HostedAttemptEvidence` entry records, the issuer's own findings, as
+    /// the hosted service judged it: not at `local` with the probe summary
+    /// the device reported.
+    #[test]
+    fn a_role_credential_from_a_hosted_attempt_is_judged_from_its_entry() {
+        use alexandria_verify::attestation::{AttestationOutcome, Platform};
+        use alexandria_verify::custody::{AnswerCustody, HostedAttemptEvidence};
+        use alexandria_verify::vc::ProbeSummary;
+        let satisfied = ProbeSummary {
+            outcome: "satisfied".into(),
+            policies: vec!["authored".into()],
+            satisfied: 1,
+            failed: 0,
+            skipped: 0,
+        };
+        let raw: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../crates/alexandria-verify/tests/vectors/01-valid.json"
+        ))
+        .unwrap();
+        let mut vc: VerifiableCredential =
+            serde_json::from_value(raw["credential"].clone()).unwrap();
+        let assertion = IntegrityAssertion {
+            session_id: "isess_hosted".into(),
+            status: "completed".into(),
+            integrity_score: Some(0.9),
+            critical_count: 0,
+            warning_count: 0,
+            assurance_level: "device_attested".into(),
+            commitment_root: None,
+            anchor_ref: None,
+            generated_at: NOW.into(),
+            trust_profile: Some("attested".into()),
+            verification_rung: Some("probed".into()),
+            coverage_statement_digest: None,
+            signals_run: vec!["core".into(), "device_attestation".into()],
+            signals_degraded: vec![],
+            signals_not_run: vec!["camera".into()],
+            camera_coverage: None,
+            // The device reported a failed probe; the issuer's step is the one judged.
+            probe: Some(ProbeSummary {
+                outcome: "failed".into(),
+                failed: 1,
+                satisfied: 0,
+                ..satisfied.clone()
+            }),
+            answer_custody: Some(AnswerCustody::Issuer),
+        };
+        vc.integrity = Some(assertion.clone());
+        vc.evidence = vec![HostedAttemptEvidence::new(
+            "hatt",
+            Some(satisfied),
+            AttestationOutcome::VerifiedCredentialBound {
+                platform: Platform::Ios,
+                companion: false,
+            },
+        )
+        .into_entry()];
+        let policy = IssuancePolicy {
+            required_answer_custody: Some(AnswerCustody::Issuer),
+            required_assurance_level: Some("device_attested".into()),
+            min_verification_rung: Some(alexandria_verify::integrity::VerificationRung::Probed),
+            probe_policy: Some(alexandria_verify::policy::ProbePolicy::Authored),
+            ..Default::default()
+        };
+        let trust = crate::sentinel::attestation::TrustConfig::default().inputs();
+        judge_shared_rule(&policy, &assertion, &vc, &trust).expect("met on the entry");
     }
 
     #[test]
