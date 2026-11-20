@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import taxonomy from '../../../bootstrap/public_taxonomy.json'
 import { scaleTaxonomy } from '../../../tests/desktop-ui/atlasBackend'
-import { WEB_MIN_DISTANCE, continueWebLayout, webDotRadius, webLayout, webNearestInDirection, webNearestTo, type WebGraph } from './webGeometry'
+import {
+  WEB_MIN_DISTANCE, WEB_SIDEBAR_NODE_LIMIT, continueWebLayout, webDotRadius, webLayout, webNearestInDirection, webNearestTo, webSidebarSubset,
+  type WebGraph,
+} from './webGeometry'
 
 type Point = { x: number; y: number }
 
@@ -196,6 +199,45 @@ describe('Keyboard roving between Web dots', () => {
     expect(webNearestTo({ x: 0, y: 0 }, dots)).toBe('centre')
     expect(webNearestTo({ x: 0, y: 0 }, dots, new Set(['left', 'up']))).toBe('up')
     expect(webNearestTo({ x: 0, y: 0 }, dots, new Set())).toBeNull()
+  })
+})
+
+describe('Sidebar subset of the Web graph', () => {
+  // a → b → c → d is a chain of prerequisites (b builds on a); e builds on nothing and leads nowhere; f builds on a.
+  const chain: WebGraph = {
+    nodes: ['a', 'b', 'c', 'd', 'e', 'f'].map(id => ({ id, slot: 0 })),
+    prerequisites: [{ skill: 'b', prerequisite: 'a' }, { skill: 'c', prerequisite: 'b' }, { skill: 'd', prerequisite: 'c' }, { skill: 'f', prerequisite: 'a' }],
+    relations: [['d', 'e']],
+  }
+  const sorted = (ids: ReadonlySet<string>) => [...ids].sort()
+
+  it('shows the whole graph up to the node limit', () => {
+    const whole = webSidebarSubset(chain, new Set(['b']), 6)
+    expect(sorted(whole.ids)).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
+    expect(whole.partial).toBe(false)
+  })
+
+  it('above the limit shows earned skills and every skill one prerequisite step from them, either way', () => {
+    const part = webSidebarSubset(chain, new Set(['b']), 5)
+    // Relations are not steps: e stays out although d relates to it.
+    expect(sorted(part.ids)).toEqual(['a', 'b', 'c'])
+    expect(part.partial).toBe(true)
+  })
+
+  it('above the limit with nothing earned shows the skills that build on nothing', () => {
+    for (const earned of [new Set<string>(), new Set(['not-in-the-graph'])]) {
+      const part = webSidebarSubset(chain, earned, 5)
+      expect(sorted(part.ids)).toEqual(['a', 'e'])
+      expect(part.partial).toBe(true)
+    }
+  })
+
+  it('shows the bundled taxonomy in full and only part of the scale taxonomy at the default limit', () => {
+    expect(webSidebarSubset(BUNDLED, new Set()).partial).toBe(false)
+    const part = webSidebarSubset(SCALE, new Set(['skill_big_o']))
+    expect(part.partial).toBe(true)
+    expect(part.ids.size).toBeLessThan(WEB_SIDEBAR_NODE_LIMIT)
+    expect(part.ids.has('skill_big_o')).toBe(true)
   })
 })
 

@@ -457,3 +457,40 @@ export function webNearestTo(point: WebPoint, positions: ReadonlyMap<string, Web
   }
   return best?.id ?? null
 }
+
+/**
+ * The most skills the sidebar graph draws whole. Tuned so the bundled
+ * taxonomy (about a hundred skills) always shows in full and the 1,500-skill
+ * scale fixture does not.
+ */
+export const WEB_SIDEBAR_NODE_LIMIT = 300
+
+export interface WebSidebarSubset {
+  /** The skills the sidebar graph draws. */
+  ids: Set<string>
+  /** True when that is less than the whole graph, so the sidebar says so. */
+  partial: boolean
+}
+
+/**
+ * Which skills the sidebar graph draws. Up to `limit` skills, all of them.
+ * Above it, the earned skills and every skill one prerequisite step from
+ * them in either direction; with nothing earned, the skills that build on
+ * nothing in the graph. Relations are not steps.
+ */
+export function webSidebarSubset(graph: Pick<WebGraph, 'nodes' | 'prerequisites'>, earned: ReadonlySet<string>,
+  limit: number = WEB_SIDEBAR_NODE_LIMIT): WebSidebarSubset {
+  const all = new Set(graph.nodes.map(node => node.id))
+  if (all.size <= limit) return { ids: all, partial: false }
+  const links = graph.prerequisites.filter(link => all.has(link.skill) && all.has(link.prerequisite) && link.skill !== link.prerequisite)
+  const ids = new Set([...earned].filter(id => all.has(id)))
+  if (ids.size === 0) {
+    const buildsOnSomething = new Set(links.map(link => link.skill))
+    return { ids: new Set([...all].filter(id => !buildsOnSomething.has(id))), partial: true }
+  }
+  for (const link of links) {
+    if (earned.has(link.skill)) ids.add(link.prerequisite)
+    if (earned.has(link.prerequisite)) ids.add(link.skill)
+  }
+  return { ids, partial: true }
+}
