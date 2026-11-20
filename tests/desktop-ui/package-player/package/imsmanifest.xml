@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A small SCORM 1.2 package written for the player's browser checks: two
+     lessons under a heading and a page that is only shown. -->
+<manifest identifier="dev.alexandria.fixture.workshop-safety" version="1.0"
+    xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2"
+    xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_rootv1p2">
+  <metadata>
+    <schema>ADL SCORM</schema>
+    <schemaversion>1.2</schemaversion>
+  </metadata>
+  <organizations default="workshop">
+    <organization identifier="workshop">
+      <title>Workshop safety</title>
+      <item identifier="getting-started">
+        <title>Getting started</title>
+        <item identifier="welcome" identifierref="res-welcome">
+          <title>Welcome to the workshop</title>
+        </item>
+        <item identifier="quiz" identifierref="res-quiz">
+          <title>Safety check</title>
+          <adlcp:datafromlms>questions=2</adlcp:datafromlms>
+          <adlcp:masteryscore>80</adlcp:masteryscore>
+        </item>
+      </item>
+      <item identifier="summary" identifierref="res-summary">
+        <title>Summary sheet</title>
+      </item>
+    </organization>
+  </organizations>
+  <resources>
+    <resource identifier="res-welcome" type="webcontent" adlcp:scormtype="sco" href="welcome/index.html">
+      <file href="welcome/index.html"/>
+      <file href="welcome/glossary.html"/>
+      <dependency identifierref="res-shared"/>
+    </resource>
+    <resource identifier="res-quiz" type="webcontent" adlcp:scormtype="sco" href="quiz/index.html">
+      <file href="quiz/index.html"/>
+      <dependency identifierref="res-shared"/>
+    </resource>
+    <resource identifier="res-summary" type="webcontent" adlcp:scormtype="asset" href="summary.html">
+      <file href="summary.html"/>
+    </resource>
+    <resource identifier="res-shared" type="webcontent" adlcp:scormtype="asset">
+      <file href="shared/lesson.js"/>
+    </resource>
+  </resources>
+</manifest>

@@ -1,0 +1,50 @@
+{
+  "standard": "scorm12",
+  "identifier": "dev.alexandria.fixture.workshop-safety",
+  "title": "Workshop safety",
+  "tree": {
+    "id": "workshop",
+    "title": "Workshop safety",
+    "visible": true,
+    "children": [
+      {
+        "id": "getting-started",
+        "title": "Getting started",
+        "visible": true,
+        "children": [
+          {
+            "id": "welcome",
+            "title": "Welcome to the workshop",
+            "visible": true,
+            "launch": {
+              "path": "welcome/index.html",
+              "kind": "sco"
+            }
+          },
+          {
+            "id": "quiz",
+            "title": "Safety check",
+            "visible": true,
+            "launch": {
+              "path": "quiz/index.html",
+              "kind": "sco",
+              "launch_data": "questions=2",
+              "mastery_score": 80.0
+            }
+          }
+        ]
+      },
+      {
+        "id": "summary",
+        "title": "Summary sheet",
+        "visible": true,
+        "launch": {
+          "path": "summary.html",
+          "kind": "asset"
+        }
+      }
+    ]
+  },
+  "files": 6,
+  "uncompressed_bytes": 8103
+}

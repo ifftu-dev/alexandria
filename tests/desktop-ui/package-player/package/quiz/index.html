@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Safety check</title>
+    <script src="../shared/lesson.js"></script>
+  </head>
+  <body>
+    <h1>Safety check</h1>
+    <button id="pass" type="button">Answer both questions correctly</button>
+    <button id="fail" type="button">Answer one question correctly</button>
+    <pre id="seen"></pre>
+    <script>
+      // A scored lesson. It reports a raw score and lets the run-time apply
+      // the manifest's mastery score when the session finishes.
+      lesson.start([
+        'cmi.core.entry',
+        'cmi.launch_data',
+        'cmi.student_data.mastery_score',
+      ]);
+      function answer(raw) {
+        lesson.set('cmi.core.score.raw', raw);
+        lesson.set('cmi.core.lesson_status', 'completed');
+        lesson.set('cmi.core.session_time', '0000:01:30');
+        lesson.finish();
+      }
+      document.getElementById('pass').addEventListener('click', function () { answer('90'); });
+      document.getElementById('fail').addEventListener('click', function () { answer('50'); });
+    </script>
+  </body>
+</html>
