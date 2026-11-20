@@ -63,6 +63,7 @@ pub(crate) fn parse<R: Read + Seek>(
         launch: None,
         prerequisites: None,
         children,
+        cmi5: None,
     };
     if !has_launch(&tree) {
         return Err(Refusal::new(
@@ -107,6 +108,7 @@ fn activity<R: Read + Seek>(
         launch,
         prerequisites: item.child_text("prerequisites").map(str::to_owned),
         children,
+        cmi5: None,
         id,
     })
 }

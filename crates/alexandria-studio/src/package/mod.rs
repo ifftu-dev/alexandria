@@ -15,10 +15,11 @@
 //! import decompresses every entry to count what is really there, because the
 //! sizes an archive declares are whatever its author typed.
 //!
-//! SCORM 1.2 is parsed. SCORM 2004 and cmi5 are recognised and refused with
-//! [`RefusalCode::UnsupportedStandard`] until their importers exist.
+//! SCORM 1.2 and cmi5 are parsed. SCORM 2004 is recognised and refused with
+//! [`RefusalCode::UnsupportedStandard`] until its importer exists.
 
 mod archive;
+mod cmi5;
 mod scorm;
 mod scorm12;
 mod xml;
@@ -29,6 +30,7 @@ use std::io::{Read, Seek};
 use serde::{Deserialize, Serialize};
 
 pub use archive::{extract_package, ExtractError, ExtractProgress, ExtractSummary};
+pub use cmi5::{Cmi5Activity, Cmi5Course, Cmi5Objective, LaunchMethod, MoveOn};
 
 /// The caps import and extraction hold an archive to.
 ///
@@ -124,16 +126,20 @@ pub struct PackageDescription {
     /// Set for SCORM 2004 only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edition: Option<Edition>,
-    /// The package's own identifier: the manifest identifier for SCORM.
+    /// The package's own identifier: the manifest identifier for SCORM, the
+    /// course `id` for cmi5.
     pub identifier: String,
     pub title: String,
-    /// The activity tree. The root is the package's default organization and
-    /// is never launchable itself.
+    /// The activity tree. The root is the package's default organization
+    /// (the course, for cmi5) and is never launchable itself.
     pub tree: Activity,
     /// Files in the archive.
     pub files: u64,
     /// Their total size once decompressed, as measured, not as declared.
     pub uncompressed_bytes: u64,
+    /// Set for cmi5 only: what the course structure says beyond the tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cmi5: Option<Cmi5Course>,
 }
 
 impl PackageDescription {
@@ -163,6 +169,9 @@ pub struct Activity {
     pub prerequisites: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Activity>,
+    /// Set for cmi5 blocks and assignable units only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cmi5: Option<Cmi5Activity>,
 }
 
 impl Activity {
@@ -192,11 +201,12 @@ pub struct Launch {
     pub parameters: Option<String>,
     pub kind: LaunchKind,
     /// The text the run-time hands the content as launch data
-    /// (SCORM 1.2 `adlcp:datafromlms`).
+    /// (SCORM 1.2 `adlcp:datafromlms`, cmi5 `launchParameters`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_data: Option<String>,
     /// The passing score, on the scale of the package's own standard:
-    /// 0 to 100 for SCORM 1.2 (`adlcp:masteryscore`).
+    /// 0 to 100 for SCORM 1.2 (`adlcp:masteryscore`), 0 to 1 for cmi5
+    /// (`masteryScore`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mastery_score: Option<f64>,
     /// SCORM 1.2 `adlcp:maxtimeallowed`, as the author wrote it.
@@ -215,6 +225,11 @@ pub enum LaunchKind {
     Sco,
     /// Content that is only shown. It reports nothing.
     Asset,
+    /// A cmi5 assignable unit: content that talks xAPI to the launching
+    /// system and is launched with the cmi5 query parameters. Its
+    /// [`Launch::parameters`] are the unit URL's own query and fragment; the
+    /// cmi5 parameters are merged into that query, never put in its place.
+    AssignableUnit,
 }
 
 /// Why a package was turned away. The names are stable: they are stored,
@@ -321,8 +336,8 @@ pub fn import_package<R: Read + Seek>(
 
     // A SCORM manifest decides when both files are present.
     let Some(manifest) = archive.file(SCORM_MANIFEST) else {
-        if archive.file(CMI5_STRUCTURE).is_some() {
-            return Err(unsupported(Standard::Cmi5, None));
+        if let Some(structure) = archive.file(CMI5_STRUCTURE) {
+            return import_cmi5(archive, structure, limits);
         }
         return Err(no_manifest(&archive));
     };
@@ -351,6 +366,35 @@ pub fn import_package<R: Read + Seek>(
         tree: parsed.tree,
         files: measured.files,
         uncompressed_bytes: measured.bytes,
+        cmi5: None,
+    })
+}
+
+/// The cmi5 half of [`import_package`]: a course structure where SCORM has
+/// a manifest, then the same checks in the same order.
+fn import_cmi5<R: Read + Seek>(
+    mut archive: archive::Archive<R>,
+    structure: archive::FileRef,
+    limits: &Limits,
+) -> Result<PackageDescription, Refusal> {
+    let of_cmi5 = |refusal: Refusal| refusal.of(Standard::Cmi5, None);
+    let unparseable = |detail| of_cmi5(Refusal::new(RefusalCode::ManifestUnparseable, detail));
+    let bytes = archive
+        .read(structure, MAX_MANIFEST_BYTES)
+        .map_err(of_cmi5)?;
+    let text = xml::decode(&bytes).map_err(unparseable)?;
+    let root = xml::parse(&text).map_err(unparseable)?;
+    let parsed = cmi5::parse(&root, &archive).map_err(of_cmi5)?;
+    let measured = archive.measure(limits).map_err(of_cmi5)?;
+    Ok(PackageDescription {
+        standard: Standard::Cmi5,
+        edition: None,
+        identifier: parsed.manifest.identifier,
+        title: parsed.manifest.title,
+        tree: parsed.manifest.tree,
+        files: measured.files,
+        uncompressed_bytes: measured.bytes,
+        cmi5: Some(parsed.course),
     })
 }
 
