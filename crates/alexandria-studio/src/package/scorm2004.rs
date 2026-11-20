@@ -9,7 +9,7 @@
 //! engine given such a definition would quietly do something else.
 //! Elements SCORM 2004 tells a player to ignore are not read.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek};
 
 use super::archive::Archive;
@@ -165,16 +165,24 @@ fn applied(own: Sequencing, collection: &Sequencing, reference: &str) -> Sequenc
 }
 
 /// Objective ids are unique, and every rule and ADL objective names one that
-/// exists. Ids are URIs: a reference names the objective whose id it equals
-/// once escapes are decoded and runs of white space collapsed (the test
-/// suite writes `" %20obj%20%201%20 "` for `obj%201`), and is rewritten to
-/// that id as the manifest spells it, so the run-time compares plain strings.
+/// exists. Ids are URIs and are kept the way the test suite compares and
+/// reports them: escapes decoded, runs of white space collapsed (OB-02a
+/// writes `" %20obj%20%201%20 "` for `obj%201`; OB-12a then reads the
+/// objective back as `ob j 1`). Global objective ids get the same treatment,
+/// so the run-time compares plain strings.
 fn check_references(sequencing: &mut Sequencing) -> Read2004<()> {
-    let mut ids: HashMap<String, String> = HashMap::new();
-    if let Some(objectives) = &sequencing.objectives {
-        let all = std::iter::once(&objectives.primary).chain(&objectives.others);
-        for id in all.filter_map(|objective| objective.id.as_deref()) {
-            if ids.insert(uri_key(id), id.to_owned()).is_some() {
+    let mut ids = HashSet::new();
+    if let Some(objectives) = &mut sequencing.objectives {
+        let all = std::iter::once(&mut objectives.primary).chain(&mut objectives.others);
+        for objective in all {
+            for map in &mut objective.map_info {
+                map.target_objective_id = uri_key(&map.target_objective_id);
+            }
+            let Some(id) = objective.id.as_mut() else {
+                continue;
+            };
+            *id = uri_key(id);
+            if !ids.insert(id.clone()) {
                 return Err(format!("the objective {id} is defined more than once"));
             }
         }
@@ -188,22 +196,25 @@ fn check_references(sequencing: &mut Sequencing) -> Read2004<()> {
     });
     for condition in rules.flat_map(|rule| &mut rule.conditions) {
         if let Some(objective) = condition.referenced_objective.as_mut() {
-            let Some(id) = ids.get(&uri_key(objective)) else {
+            *objective = uri_key(objective);
+            if !ids.contains(objective.as_str()) {
                 return Err(format!(
                     "a rule condition refers to objective {objective}, which the activity does not define"
                 ));
-            };
-            objective.clone_from(id);
+            }
         }
     }
     for objective in &mut sequencing.adl_objectives {
-        let Some(id) = ids.get(&uri_key(&objective.id)) else {
+        objective.id = uri_key(&objective.id);
+        if !ids.contains(objective.id.as_str()) {
             return Err(format!(
                 "adlseq:objective {} extends an objective the activity does not define",
                 objective.id
             ));
-        };
-        objective.id.clone_from(id);
+        }
+        for map in &mut objective.map_info {
+            map.target_objective_id = uri_key(&map.target_objective_id);
+        }
     }
     Ok(())
 }

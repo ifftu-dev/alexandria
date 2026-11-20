@@ -806,9 +806,9 @@ fn values_written_in_the_wrong_case_are_still_read() {
 }
 
 #[test]
-fn an_objective_reference_written_with_escapes_and_spaces_names_the_objective_it_decodes_to() {
-    // The test suite's OB-02a and OB-12a: identifiers are URIs, compared once
-    // escapes are decoded and runs of white space collapsed.
+fn objective_ids_are_kept_decoded_and_with_white_space_collapsed() {
+    // The test suite's OB-02a and OB-12a: identifiers are URIs, compared and
+    // reported once escapes are decoded and runs of white space collapsed.
     let package = import(&lesson_with(
         r#"<imsss:sequencing>
              <imsss:sequencingRules><imsss:preConditionRule>
@@ -819,28 +819,27 @@ fn an_objective_reference_written_with_escapes_and_spaces_names_the_objective_it
                <imsss:ruleAction action="skip"/>
              </imsss:preConditionRule></imsss:sequencingRules>
              <imsss:objectives>
-               <imsss:primaryObjective objectiveID="obj%201"/>
+               <imsss:primaryObjective objectiveID="obj%201">
+                 <imsss:mapInfo targetObjectiveID=" g%20one "/>
+               </imsss:primaryObjective>
                <imsss:objective objectiveID=" ob%20j  "/>
              </imsss:objectives>
            </imsss:sequencing>"#,
         "",
     ));
     let sequencing = package.tree.children[0].sequencing.as_ref().unwrap();
+    let objectives = sequencing.objectives.as_ref().unwrap();
+    assert_eq!(objectives.primary.id.as_deref(), Some("obj 1"));
+    assert_eq!(objectives.primary.map_info[0].target_objective_id, "g one");
+    assert_eq!(objectives.others[0].id.as_deref(), Some("ob j"));
     let conditions = &sequencing
         .sequencing_rules
         .as_ref()
         .unwrap()
         .pre_condition_rules[0]
         .conditions;
-    // Each reference now spells the id of the objective it names, as written.
-    assert_eq!(
-        conditions[0].referenced_objective.as_deref(),
-        Some("obj%201")
-    );
-    assert_eq!(
-        conditions[1].referenced_objective.as_deref(),
-        Some("ob%20j")
-    );
+    assert_eq!(conditions[0].referenced_objective.as_deref(), Some("obj 1"));
+    assert_eq!(conditions[1].referenced_objective.as_deref(), Some("ob j"));
 }
 
 #[test]
