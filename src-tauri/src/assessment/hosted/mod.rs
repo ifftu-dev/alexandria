@@ -304,6 +304,8 @@ impl HostedService {
             .await
             .map_err(|e| HostedError::Disconnected(e.without_url().to_string()))?;
         let status = response.status();
+        // The route and status only: never a body, which may carry an item.
+        log::debug!(target: "hosted_attempt", "{method} {path}: {status}");
         let mut bytes = Vec::new();
         while let Some(chunk) = response
             .chunk()

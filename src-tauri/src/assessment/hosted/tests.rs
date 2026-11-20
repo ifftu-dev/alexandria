@@ -27,29 +27,46 @@ const OPTIONS: [&str; 2] = [
 
 // ── Captured logs ─────────────────────────────────────────────────
 
+/// Captures what is logged on threads that opted in ([`capturing`]), at
+/// every level. Other tests in the binary share the global logger but are
+/// never formatted or stored, so they keep their speed and their own
+/// locking.
 struct Capture(Mutex<Vec<String>>);
+
+thread_local! {
+    static CAPTURING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 impl log::Log for Capture {
     fn enabled(&self, _: &log::Metadata<'_>) -> bool {
-        true
+        CAPTURING.with(|c| c.get())
     }
     fn log(&self, record: &log::Record<'_>) {
+        if !CAPTURING.with(|c| c.get()) {
+            return;
+        }
+        // Formatted before the lock: formatting may itself log.
+        let line = format!("{} {}", record.target(), record.args());
         if let Ok(mut lines) = self.0.lock() {
-            lines.push(format!("{} {}", record.target(), record.args()));
+            lines.push(line);
         }
     }
     fn flush(&self) {}
 }
 
-/// Every log line the process writes from the first call on, at every level.
-fn logs() -> &'static Capture {
+/// Capture every log line written on this thread from here on. The tests run
+/// on a current-thread runtime, so the client, the HTTP stack and the stub
+/// all log on it.
+fn capturing() -> &'static Capture {
     static CAPTURE: OnceLock<&'static Capture> = OnceLock::new();
-    CAPTURE.get_or_init(|| {
+    let capture = CAPTURE.get_or_init(|| {
         let capture: &'static Capture = Box::leak(Box::new(Capture(Mutex::new(Vec::new()))));
         log::set_logger(capture).expect("no other logger in the test binary");
         log::set_max_level(log::LevelFilter::Trace);
         capture
-    })
+    });
+    CAPTURING.with(|c| c.set(true));
+    capture
 }
 
 // ── A stub hosted service ─────────────────────────────────────────
@@ -283,7 +300,7 @@ fn finished_session(conn: &rusqlite::Connection, id: &str) {
 /// recognises them.
 #[tokio::test]
 async fn a_hosted_attempts_item_text_stays_out_of_the_database_and_logs() {
-    let logs = logs();
+    let logs = capturing();
     let stub = Stub::start("rung_below_minimum").await;
     let (db, _, _, _) = fixtures::setup();
     finished_session(db.conn(), "sess-hosted");
@@ -337,6 +354,10 @@ async fn a_hosted_attempts_item_text_stays_out_of_the_database_and_logs() {
     );
 
     let lines = logs.0.lock().unwrap().clone();
+    assert!(
+        lines.iter().any(|l| l.contains("/answers")),
+        "the attempt's requests were logged and captured"
+    );
     for text in QUESTIONS.iter().chain(OPTIONS.iter()) {
         assert!(!database_holds(db.conn(), text), "stored: {text}");
         assert!(!lines.iter().any(|l| l.contains(text)), "logged: {text}");
