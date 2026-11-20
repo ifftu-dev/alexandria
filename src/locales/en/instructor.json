@@ -138,7 +138,8 @@
     "confirmDeleteMessage": "This permanently deletes the draft and all its chapters and elements. This can't be undone.",
     "editDetails": "Edit details",
     "notFoundTitle": "Not found",
-    "notFoundDesc": "This course or tutorial doesn't exist on this device."
+    "notFoundDesc": "This course or tutorial doesn't exist on this device.",
+    "blockerUnattachedPackages": "none | {count} package element still needs a package | {count} package elements still need a package"
   },
   "outline": {
     "elementTitlePlaceholder": "Element title",
@@ -160,7 +161,8 @@
     "essay": "Essay",
     "interactive": "Interactive",
     "assessment": "Assessment",
-    "plugin": "Plugin"
+    "plugin": "Plugin",
+    "package": "Standards package"
   },
   "elementEditor": {
     "deleteElement": "Delete element",
@@ -417,5 +419,65 @@
     "decisionExportShadow": "Export learning comparisons",
     "decisionClearShadow": "Delete learning comparisons",
     "decisionShadowCleared": "Saved learning comparisons deleted."
+  },
+  "package": {
+    "choose": "Choose a package file…",
+    "chooseAnother": "Choose a different package…",
+    "pickerTitle": "Standards package",
+    "pickerIntro": "A SCORM 1.2 or SCORM 2004 package, as a .zip file. The whole package becomes one element of this course.",
+    "fileFilter": "Standards package",
+    "checking": "Checking the package…",
+    "summaryHeading": "What you are adding",
+    "title": "Title",
+    "standard": "Standard",
+    "edition": "Edition",
+    "size": "Size",
+    "sizeValue": "{files} files, {megabytes} MB",
+    "lessons": "Lessons",
+    "lessonKind": {
+      "sco": "tracked",
+      "asset": "shown only",
+      "assignable_unit": "assignable unit"
+    },
+    "standards": {
+      "scorm12": "SCORM 1.2",
+      "scorm2004": "SCORM 2004",
+      "cmi5": "cmi5"
+    },
+    "editions": {
+      "2nd": "2nd Edition",
+      "3rd": "3rd Edition",
+      "4th": "4th Edition",
+      "none": "—"
+    },
+    "redistributeHeading": "Every learner's device will pass this package on",
+    "redistributeBody": "This course is public once published. Every device that takes it keeps a copy of the package and serves it to other learners, so the package will be redistributed to anyone who joins. Licensed or internal content belongs in a private course instead.",
+    "redistributeConfirm": "I may pass this content on to anyone who takes the course.",
+    "add": "Add to course",
+    "replace": "Use this package",
+    "cancel": "Cancel",
+    "attachedHeading": "Package",
+    "notAttached": "No package attached yet. Choose a package file to add it.",
+    "missingLocally": "The attached package is not on this device. Choose the package file again.",
+    "selfReported": "Package results are self-reported by the package's own script. A package element is never graded, carries no skill tags and never counts toward a credential.",
+    "preview": "Preview as a learner",
+    "closePreview": "Close preview",
+    "previewNote": "Preview: nothing you do here is saved or counted.",
+    "refusal": {
+      "not_an_archive": "This file is not a readable .zip archive. Export the package again as a standard zip file (no encryption, Deflate or Stored compression) and choose that file.",
+      "no_manifest": "There is no imsmanifest.xml at the top of this archive. If you zipped the package's folder, zip the files inside the folder instead, so imsmanifest.xml is at the top level.",
+      "manifest_unparseable": "The package's manifest (imsmanifest.xml) is malformed or incomplete. Re-export the package from your authoring tool and try again.",
+      "unsupported_standard": "This package uses a standard or edition Alexandria cannot play yet. Export it as SCORM 1.2 or SCORM 2004 and try again.",
+      "launch_resource_missing": "A lesson in this package points at a file that is not in the archive. Re-export the package with all of its files included.",
+      "launch_resource_remote": "A lesson in this package loads from a web address. Packages must contain all of their content; re-export it with the content included.",
+      "unsafe_entry_path": "The archive contains links, absolute paths, \"..\" or other file names that are not allowed. Re-export the package from your authoring tool.",
+      "limit_exceeded": "This package is too large: packages can hold up to 1 GiB of content in up to 20,000 files. Reduce its size or split it into several packages.",
+      "package_result_self_reported": "A package element can't be graded or become the assessed basis of a credential: its results are self-reported by the package's own script.",
+      "not_a_package": "That package is not stored on this device. Choose the package file again.",
+      "other": "The package could not be added: {error}"
+    },
+    "detail": "Details: {detail}",
+    "previewPublisher": "this course's author",
+    "lessonCount": "{count} lesson | {count} lessons"
   }
 }

@@ -6,7 +6,9 @@ import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, MotionList } from '@/components/ui'
 import { useDragReorder } from './useDragReorder'
-import type { Chapter, CreateChapterRequest, CreateElementRequest, Element } from '@/types'
+import PackagePicker from './PackagePicker.vue'
+import { courseWillBePublic, packageErrorMessage } from './packageMessages'
+import type { Chapter, CreateChapterRequest, CreateElementRequest, Element, Package } from '@/types'
 
 const props = defineProps<{
   courseId: string
@@ -62,6 +64,7 @@ const ELEMENT_TYPES = computed(() => [
   { value: 'interactive', label: t('instructor.elementTypes.interactive') },
   { value: 'assessment', label: t('instructor.elementTypes.assessment') },
   { value: 'plugin', label: t('instructor.elementTypes.plugin') },
+  { value: 'package', label: t('instructor.elementTypes.package') },
 ])
 
 const addingToChapter = ref<string | null>(null)
@@ -70,7 +73,8 @@ const newElementType = ref('video')
 const creatingElement = ref(false)
 
 async function addElement(chapterId: string) {
-  if (!newElementTitle.value.trim()) return
+  // A package element is added from its picker, once the package is chosen.
+  if (!newElementTitle.value.trim() || newElementType.value === 'package') return
   creatingElement.value = true
   try {
     // Plugin elements are created unbound; the plugin editor sets the
@@ -86,6 +90,29 @@ async function addElement(chapterId: string) {
     emit('select', el)
   } catch (e) {
     error.value = String(e)
+  } finally {
+    creatingElement.value = false
+  }
+}
+
+/** Adds a package element once the instructor has seen and confirmed the package. */
+async function addPackage(chapterId: string, pkg: Package) {
+  creatingElement.value = true
+  error.value = ''
+  try {
+    const req: CreateElementRequest = {
+      title: newElementTitle.value.trim() || pkg.title,
+      element_type: 'package',
+      content_hash: pkg.hash,
+    }
+    const el = await invoke<Element>('create_element', { chapterId, req })
+    newElementTitle.value = ''
+    addingToChapter.value = null
+    emit('changed')
+    emit('select', el)
+  } catch (e) {
+    const message = packageErrorMessage(e)
+    error.value = t(message.key, message.params)
   } finally {
     creatingElement.value = false
   }
@@ -207,7 +234,15 @@ function typeLabel(type: string): string {
           >
             <option v-for="t in ELEMENT_TYPES" :key="t.value" :value="t.value">{{ t.label }}</option>
           </select>
-          <div class="flex gap-1.5">
+          <PackagePicker
+            v-if="newElementType === 'package'"
+            purpose="add"
+            :will-be-public="courseWillBePublic()"
+            :busy="creatingElement"
+            @confirm="(pkg: Package) => addPackage(chapter.id, pkg)"
+            @cancel="addingToChapter = null"
+          />
+          <div v-else class="flex gap-1.5">
             <AppButton size="xs" :loading="creatingElement" @click="addElement(chapter.id)">{{ $t('instructor.outline.add') }}</AppButton>
             <AppButton variant="ghost" size="xs" @click="addingToChapter = null">{{ $t('common.actions.cancel') }}</AppButton>
           </div>
