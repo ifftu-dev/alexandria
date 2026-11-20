@@ -23,7 +23,8 @@ Done when: host-seam tests export a log and verify the signature over the exact 
 - **Deleting is local.** A deleted record leaves this device's log. Its outbox rows go with it, so a deleted record that was waiting to be sent (queued or failed) is never sent. A record a recipient already received stays with that recipient; deleting does not void it. The delete confirmation says both. Voiding stays with removing a destination or revoking a share.
 - A writer that is idempotent by local id (package session results, folded again on terminate) can write a deleted record again if the same event is reported again. Not handled; deletion is not a tombstone.
 - The view is a page of its own (`/activity-log`, user menu), read a hundred rows at a time, so it does not touch the settings page that record destinations will use.
-- Fixed a clippy `type_complexity` error in the size-limit code that failed `-D warnings` on the integration branch.
+- A clippy `type_complexity` error in the size-limit code was fixed here and on the integration branch at the same time; the merge keeps the integration branch's fix.
+- The package player's harness spec was flaky on this machine (a different one or two Chromium cases failed per run, none in the player's files, which this branch does not change).
 
 Proposed doc edits (not made):
 
