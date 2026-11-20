@@ -29,7 +29,10 @@ use crate::vc::{
 ///
 /// 2: verified states carry the credential's attestation outcome.
 /// 3: issuer-signed states carry organisation backing.
-pub const TRUST_CALCULATION_VERSION: u32 = 3;
+/// 4: a paired phone's credential-bound evidence verifies as
+///    `companion_attested` (the outcome says `companion`), not
+///    `device_attested`.
+pub const TRUST_CALCULATION_VERSION: u32 = 4;
 
 const COURSE_DOCUMENT_EVIDENCE_PREFIX: &str = "course-document:blake3:";
 const COMPLETION_ROOT_EVIDENCE_PREFIX: &str = "completion-root:";
@@ -905,6 +908,7 @@ mod tests {
         let mut claimed = verify_credential(&NullStore, &vc, NOW, &policy);
         claimed.attestation = AttestationOutcome::VerifiedCredentialBound {
             platform: crate::attestation::Platform::Ios,
+            companion: false,
         };
         claimed.verified_assurance_level =
             crate::attestation::VerifiedAssuranceLevel::DeviceAttested;
@@ -912,6 +916,44 @@ mod tests {
             classify_credential(&vc, &claimed, &policy, NETWORK, None),
             CredentialTrust::Invalid {
                 reasons: vec![TrustInvalidReason::InconsistentVerificationResult]
+            }
+        );
+    }
+
+    /// A result may not raise a paired phone's evidence to `device_attested`:
+    /// the level must be the one the outcome implies, `companion_attested`.
+    #[test]
+    fn a_result_raising_companion_evidence_to_device_attested_is_inconsistent() {
+        use crate::attestation::{Platform, VerifiedAssuranceLevel};
+        let learner = key(1);
+        let subject = derive_did_key(&learner);
+        let vc = credential(&learner, &subject, completion_refs());
+        let entry: crate::vc::EvidenceEntry = serde_json::from_value(serde_json::json!({
+            "type": crate::attestation::ATTESTATION_EVIDENCE_TYPE
+        }))
+        .unwrap();
+        let vc = with_evidence(&learner, vc, vec![entry]);
+        let policy = VerificationPolicy::default();
+        let mut claimed = verify_credential(&NullStore, &vc, NOW, &policy);
+        claimed.attestation = AttestationOutcome::VerifiedCredentialBound {
+            platform: Platform::Ios,
+            companion: true,
+        };
+        claimed.acceptance_decision = AcceptanceDecision::Accept;
+        claimed.verified_assurance_level = VerifiedAssuranceLevel::DeviceAttested;
+        assert_eq!(
+            classify_credential(&vc, &claimed, &policy, NETWORK, None),
+            inconsistent()
+        );
+        claimed.verified_assurance_level = VerifiedAssuranceLevel::CompanionAttested;
+        assert_eq!(
+            classify_credential(&vc, &claimed, &policy, NETWORK, None),
+            CredentialTrust::VerifiedSelfClaim {
+                endorsement: EndorsementOutcome::NotSupplied,
+                attestation: AttestationOutcome::VerifiedCredentialBound {
+                    platform: Platform::Ios,
+                    companion: true,
+                },
             }
         );
     }
@@ -993,7 +1035,8 @@ mod tests {
             CredentialTrust::VerifiedSelfClaim {
                 endorsement: EndorsementOutcome::NotSupplied,
                 attestation: AttestationOutcome::VerifiedCredentialBound {
-                    platform: Platform::Ios
+                    platform: Platform::Ios,
+                    companion: false,
                 },
             }
         );

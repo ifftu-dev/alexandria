@@ -106,9 +106,22 @@ fn attested() -> IntegrityAssertion {
     }
 }
 
+/// The same session on a desktop backed by a paired phone.
+fn companion() -> IntegrityAssertion {
+    IntegrityAssertion {
+        assurance_level: "companion_attested".into(),
+        ..attested()
+    }
+}
+
 fn build_all() -> Vec<(&'static str, Vector)> {
     let credential_bound = AttestationOutcome::VerifiedCredentialBound {
         platform: Platform::Ios,
+        companion: false,
+    };
+    let companion_bound = AttestationOutcome::VerifiedCredentialBound {
+        platform: Platform::Ios,
+        companion: true,
     };
     let session_bound = AttestationOutcome::VerifiedSessionBound {
         platform: Platform::Ios,
@@ -148,6 +161,10 @@ fn build_all() -> Vec<(&'static str, Vector)> {
             verified_assurance_level: stated,
         }),
         expect: Expect { refusal },
+    };
+    let requires = |level: &str| IssuancePolicy {
+        required_assurance_level: Some(level.into()),
+        ..Default::default()
     };
     let camera_floor = IssuancePolicy {
         min_trust_profile: Some(TrustProfile::Camera),
@@ -594,6 +611,72 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 Some(PolicyRefusal::TrustProfileBelowFloor {
                     profile: "camera".into(),
                     required: "camera".into(),
+                }),
+            ),
+        ),
+        (
+            "27-device-attested-companion-bound",
+            vector(
+                "device_attested is required. A desktop session backed by a paired \
+                 phone: the phone's evidence verifies credential-bound, but it vouches \
+                 for the phone, not the device the attempt ran on, so the verified \
+                 level is companion_attested.",
+                requires("device_attested"),
+                companion(),
+                companion_bound,
+                Some(PolicyRefusal::AssuranceBelowRequired {
+                    level: "companion_attested".into(),
+                    required: "device_attested".into(),
+                }),
+            ),
+        ),
+        (
+            "28-companion-attested-companion-bound",
+            vector(
+                "companion_attested is required and a paired phone's evidence verifies \
+                 credential-bound.",
+                requires("companion_attested"),
+                companion(),
+                companion_bound,
+                None,
+            ),
+        ),
+        (
+            "29-companion-attested-device-bound",
+            vector(
+                "companion_attested is required and the attempt's own device's evidence \
+                 verifies credential-bound: device_attested meets it.",
+                requires("companion_attested"),
+                attested(),
+                credential_bound,
+                None,
+            ),
+        ),
+        (
+            "30-companion-attested-stated-not-evidenced",
+            vector(
+                "companion_attested is required. The assertion states it, but the \
+                 credential carries no evidence: the verified level is local.",
+                requires("companion_attested"),
+                companion(),
+                none,
+                Some(PolicyRefusal::AssuranceBelowRequired {
+                    level: "local".into(),
+                    required: "companion_attested".into(),
+                }),
+            ),
+        ),
+        (
+            "31-role-on-companion-assessment",
+            role_on(
+                "A role credential requiring `device_attested`, issued on an assessed \
+                 credential whose evidence verified credential-bound through a paired \
+                 phone: the entry's companion_attested does not meet it.",
+                companion_bound,
+                VerifiedAssuranceLevel::CompanionAttested,
+                Some(PolicyRefusal::AssuranceBelowRequired {
+                    level: "companion_attested".into(),
+                    required: "device_attested".into(),
                 }),
             ),
         ),

@@ -413,10 +413,12 @@ pub struct Witness {
 /// flags, so downstream verifiers should weight them accordingly. An issuer
 /// states `"device_attested"` when the session's platform attestation (Apple
 /// App Attest or Google Play Integrity) verified on the issuing device, and
-/// carries that attestation in the credential's `evidence`. A verifier never
-/// takes the stated level on trust: it reports
+/// carries that attestation in the credential's `evidence`; it states
+/// `"companion_attested"` when a paired phone's attestation backed a desktop
+/// session. A verifier never takes the stated level on trust: it reports
 /// `device_attested` as the result's `verifiedAssuranceLevel` only when that
-/// evidence verifies and is bound to this credential (see
+/// evidence verifies, is bound to this credential and carries no companion
+/// binding, `companion_attested` when such evidence carries one (see
 /// [`crate::attestation`]), and `local` otherwise, whatever this field says.
 /// `"anchored"` and `"high_assurance"` are reserved ladder values with no
 /// verified production path; the value alone is not evidence of either.
@@ -436,7 +438,8 @@ pub struct IntegrityAssertion {
     pub integrity_score: Option<f64>,
     pub critical_count: i64,
     pub warning_count: i64,
-    /// Stated assurance: `"local"` or `"device_attested"`. `"anchored"` and
+    /// Stated assurance: `"local"`, `"companion_attested"` or
+    /// `"device_attested"`. `"anchored"` and
     /// `"high_assurance"` are reserved ladder values. Only the verifier's
     /// `verifiedAssuranceLevel`, established from `evidence`, is checked.
     pub assurance_level: String,
@@ -805,8 +808,10 @@ pub struct VerificationResult {
     /// left to the other checks.
     #[serde(default)]
     pub attestation: crate::attestation::AttestationOutcome,
-    /// `device_attested` only for verified credential-bound evidence, else
-    /// `local`, whatever level the integrity assertion states.
+    /// `device_attested` only for verified credential-bound evidence from the
+    /// attempt's own device, `companion_attested` for verified
+    /// credential-bound evidence from a paired phone, else `local`, whatever
+    /// level the integrity assertion states.
     #[serde(default)]
     pub verified_assurance_level: crate::attestation::VerifiedAssuranceLevel,
     pub acceptance_decision: AcceptanceDecision,

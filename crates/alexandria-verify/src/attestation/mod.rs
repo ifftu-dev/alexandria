@@ -21,9 +21,12 @@
 //!   nonce (and, on iOS, an assertion over the terminal commitment root).
 //!
 //! [`verify_evidence`] reports an [`AttestationOutcome`]; only verified
-//! credential-bound evidence raises the [`VerifiedAssuranceLevel`] to
-//! `device_attested`. Invalid evidence rejects the credential; every other
-//! outcome leaves it to the rest of verification.
+//! credential-bound evidence raises the [`VerifiedAssuranceLevel`]: to
+//! `device_attested` when the attempt's own device produced it, to
+//! `companion_attested` when it carries a [`CompanionBinding`] (a paired
+//! phone was present and attested; nothing is claimed about the desktop).
+//! Invalid evidence rejects the credential; every other outcome leaves it to
+//! the rest of verification.
 //!
 //! Trust inputs ([`AttestationTrust`]: Apple root, app identifiers, Play
 //! Integrity response keys, development-build allowance) come from the
@@ -336,8 +339,15 @@ pub enum AttestationOutcome {
     /// The credential carries no attestation evidence: self-reported.
     #[default]
     NotSupplied,
-    /// The platform vouched for this credential's own content.
-    VerifiedCredentialBound { platform: Platform },
+    /// The platform vouched for this credential's own content. `companion`
+    /// is true when a paired phone produced the evidence for a desktop
+    /// session (the entry carries a [`CompanionBinding`]); omitted on the
+    /// wire when false.
+    VerifiedCredentialBound {
+        platform: Platform,
+        #[serde(default, skip_serializing_if = "is_false")]
+        companion: bool,
+    },
     /// The platform vouched for the session, not for this credential.
     VerifiedSessionBound { platform: Platform },
     /// Evidence is present but cannot be checked here: no trust inputs for
@@ -353,34 +363,63 @@ impl AttestationOutcome {
         matches!(self, Self::Invalid { .. })
     }
 
-    /// The assurance level this outcome establishes for a verifier.
+    /// The assurance level this outcome establishes for a verifier:
+    /// `device_attested` for credential-bound evidence from the attempt's own
+    /// device, `companion_attested` for credential-bound evidence from a
+    /// paired phone, `local` otherwise.
     pub fn verified_assurance_level(&self) -> VerifiedAssuranceLevel {
         match self {
-            Self::VerifiedCredentialBound { .. } => VerifiedAssuranceLevel::DeviceAttested,
+            Self::VerifiedCredentialBound {
+                companion: false, ..
+            } => VerifiedAssuranceLevel::DeviceAttested,
+            Self::VerifiedCredentialBound {
+                companion: true, ..
+            } => VerifiedAssuranceLevel::CompanionAttested,
             _ => VerifiedAssuranceLevel::Local,
         }
     }
 }
 
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 /// The assurance level a verifier established from the evidence, as opposed
-/// to the `assuranceLevel` the integrity assertion states.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+/// to the `assuranceLevel` the integrity assertion states. Ordered
+/// `local` < `companion_attested` < `device_attested`.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum VerifiedAssuranceLevel {
     /// Nothing beyond the issuing device's word.
     #[default]
     Local,
-    /// Verified credential-bound platform evidence.
+    /// Verified credential-bound evidence from a paired phone backing a
+    /// desktop session: a genuine phone was present and attested. Nothing is
+    /// claimed about the desktop or the software it ran.
+    CompanionAttested,
+    /// Verified credential-bound evidence from the device the attempt ran on.
     DeviceAttested,
 }
 
 impl VerifiedAssuranceLevel {
+    /// Every level, weakest first.
+    pub const ALL: [Self; 3] = [Self::Local, Self::CompanionAttested, Self::DeviceAttested];
+
     /// The wire token, matching the assertion's `assuranceLevel` values.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Local => "local",
+            Self::CompanionAttested => "companion_attested",
             Self::DeviceAttested => "device_attested",
         }
+    }
+
+    /// The level a wire token names; `None` for the reserved `anchored` and
+    /// `high_assurance` and anything unknown.
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|level| level.as_str() == s)
     }
 }
 
@@ -955,7 +994,10 @@ mod checks {
                     }
                     _ => return Err(invalid(R::BindingMismatch)),
                 }
-                Ok(AttestationOutcome::VerifiedCredentialBound { platform })
+                Ok(AttestationOutcome::VerifiedCredentialBound {
+                    platform,
+                    companion: evidence.companion.is_some(),
+                })
             }
         }
     }
@@ -1007,19 +1049,37 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_value(AttestationOutcome::VerifiedCredentialBound {
-                platform: Platform::Ios
+                platform: Platform::Ios,
+                companion: false,
             })
             .unwrap(),
             serde_json::json!({"outcome": "verified_credential_bound", "platform": "ios"})
         );
-        for level in [
-            VerifiedAssuranceLevel::Local,
-            VerifiedAssuranceLevel::DeviceAttested,
-        ] {
+        assert_eq!(
+            serde_json::to_value(AttestationOutcome::VerifiedCredentialBound {
+                platform: Platform::Ios,
+                companion: true,
+            })
+            .unwrap(),
+            serde_json::json!({
+                "outcome": "verified_credential_bound",
+                "platform": "ios",
+                "companion": true
+            })
+        );
+        for level in VerifiedAssuranceLevel::ALL {
             assert_eq!(
                 serde_json::to_value(level).unwrap(),
                 serde_json::json!(level.as_str())
             );
+            assert_eq!(VerifiedAssuranceLevel::parse(level.as_str()), Some(level));
+        }
+        assert_eq!(
+            VerifiedAssuranceLevel::ALL.map(|l| l.as_str()),
+            ["local", "companion_attested", "device_attested"]
+        );
+        for reserved in ["anchored", "high_assurance", "unknown"] {
+            assert_eq!(VerifiedAssuranceLevel::parse(reserved), None);
         }
         for reason in [
             InvalidReason::MalformedEvidence,
@@ -1044,6 +1104,12 @@ mod tests {
     }
 
     #[test]
+    fn levels_are_ordered_local_companion_device() {
+        use VerifiedAssuranceLevel::{CompanionAttested, DeviceAttested, Local};
+        assert!(Local < CompanionAttested && CompanionAttested < DeviceAttested);
+    }
+
+    #[test]
     fn only_credential_bound_evidence_raises_the_verified_level() {
         let p = Platform::Ios;
         let cases = [
@@ -1052,8 +1118,18 @@ mod tests {
                 VerifiedAssuranceLevel::Local,
             ),
             (
-                AttestationOutcome::VerifiedCredentialBound { platform: p },
+                AttestationOutcome::VerifiedCredentialBound {
+                    platform: p,
+                    companion: false,
+                },
                 VerifiedAssuranceLevel::DeviceAttested,
+            ),
+            (
+                AttestationOutcome::VerifiedCredentialBound {
+                    platform: p,
+                    companion: true,
+                },
+                VerifiedAssuranceLevel::CompanionAttested,
             ),
             (
                 AttestationOutcome::VerifiedSessionBound { platform: p },

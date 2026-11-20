@@ -1760,7 +1760,8 @@ mod tests {
         assert_eq!(
             entry.attestation,
             AttestationOutcome::VerifiedCredentialBound {
-                platform: Platform::Ios
+                platform: Platform::Ios,
+                companion: false,
             }
         );
         assert_eq!(

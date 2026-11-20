@@ -1027,7 +1027,8 @@ mod tests {
         assert_eq!(
             verify_evidence(&issued.credential, &trust(&p.world).inputs()),
             AttestationOutcome::VerifiedCredentialBound {
-                platform: Platform::Ios
+                platform: Platform::Ios,
+                companion: true,
             }
         );
     }
