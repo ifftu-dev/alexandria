@@ -557,6 +557,77 @@ async fn documents_that_cannot_carry_the_bootstrap_are_sandboxed() {
 }
 
 #[tokio::test]
+async fn pages_route_string_sinks_through_trusted_types_and_nothing_else_does() {
+    // The bootstrap's default policy is what keeps a javascript: address from
+    // replacing a page; a worker script has no bootstrap, so only pages ask.
+    let package = files(&[
+        ("index.html", b"<html><head></head></html>"),
+        ("worker.js", b"1"),
+    ]);
+    let launches = Launches::new();
+    let prefix = open(&launches, HASH_A, package.path());
+
+    let page = send(&launches, get(&url(&prefix, "index.html"))).await;
+    assert_eq!(
+        directive(&policy(&page), "require-trusted-types-for"),
+        "require-trusted-types-for 'script'"
+    );
+    let wrapper = send(&launches, get(&url(&prefix, "_alexandria/wrapper.html"))).await;
+    assert!(policy(&wrapper).contains("require-trusted-types-for 'script'"));
+    let script = send(&launches, get(&url(&prefix, "worker.js"))).await;
+    assert!(!policy(&script).contains("trusted-types"));
+}
+
+#[tokio::test]
+async fn a_fetch_preload_in_served_markup_is_left_inert() {
+    // WebKit sends `<link rel=preload as=fetch>` to any origin whatever
+    // `connect-src` says. Without its `as`, a preload sends nothing.
+    let page: &[u8] =
+        b"<html><head><link rel=\"preload\" as=\"fetch\" href=\"https://away.example/a\">\
+        <LINK REL=preload AS='Fetch' HREF=https://away.example/b>\
+        <link rel=preload as=style href=s.css><p class=\"has as=fetch\">as=fetch</p></head></html>";
+    let package = files(&[
+        ("index.html", page),
+        (
+            "page.xhtml",
+            b"<html xmlns=\"http://www.w3.org/1999/xhtml\"><head><link rel=\"preload\" as=\"fetch\" href=\"https://away.example/c\"/></head></html>",
+        ),
+    ]);
+    let launches = Launches::new();
+    let prefix = open(&launches, HASH_A, package.path());
+
+    let html = body(&send(&launches, get(&url(&prefix, "index.html"))).await);
+    assert!(
+        html.contains(
+            r#"<link rel="preload" data-alexandria-as="fetch" href="https://away.example/a">"#
+        ),
+        "{html}"
+    );
+    assert!(
+        html.contains("<LINK REL=preload data-alexandria-as='Fetch' HREF=https://away.example/b>"),
+        "{html}"
+    );
+    // Other preloads and text that only looks like the attribute are kept.
+    assert!(
+        html.contains("<link rel=preload as=style href=s.css>"),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"<p class="has as=fetch">as=fetch</p>"#),
+        "{html}"
+    );
+
+    // A ranged request cannot fetch the markup unchanged.
+    let xhtml = send(&launches, ranged(&url(&prefix, "page.xhtml"), "bytes=0-20")).await;
+    assert_eq!(xhtml.status(), StatusCode::OK);
+    assert!(
+        body(&xhtml).contains(r#"data-alexandria-as="fetch""#),
+        "{}",
+        body(&xhtml)
+    );
+}
+
+#[tokio::test]
 async fn only_reads_are_answered() {
     let package = files(&[("index.html", b"<html></html>")]);
     let launches = Launches::new();

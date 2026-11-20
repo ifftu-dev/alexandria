@@ -60,6 +60,11 @@ const blocked = ref<Blocked[]>([])
 const focus = ref(false)
 const confirmingFresh = ref(false)
 const busy = ref(false)
+/**
+ * A new frame element for every session: a frame keeps its name and its
+ * history (which holds the earlier launch's addresses) across navigations.
+ */
+const frameKey = ref(0)
 let session: PackageSession | null = null
 let disposed = false
 
@@ -146,6 +151,7 @@ async function startSession() {
   const current = attempt.value
   if (!hash || !current || !pkg.value) return
   phase.value = 'preparing'
+  frameKey.value += 1
   extracting.value = null
   const channel = new Channel<PackageExtractProgress>()
   channel.onmessage = (progress) => { extracting.value = progress }
@@ -412,6 +418,7 @@ onBeforeUnmount(() => {
           </div>
           <iframe
             v-if="phase !== 'loading'"
+            :key="frameKey"
             ref="frame"
             data-package-frame
             :title="t('learn.package.frameTitle', { title: element.title })"
