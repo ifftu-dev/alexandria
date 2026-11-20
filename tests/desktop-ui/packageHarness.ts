@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { expect, type Frame, type FrameLocator, type Page } from '@playwright/test'
-import type { PackageCommit } from '@/types'
+import type { PackageCommit, PackageSequencingState } from '@/types'
 import type { PackageFixtureName } from './packageBackend'
 
 // The player seam for the isolation and conformance checks: the real course
@@ -71,8 +71,11 @@ export async function appFrameSources(): Promise<string> {
   return ['frame-src', ...sources.filter(source => !packageSources.includes(source)), PACKAGE_ORIGIN].join(' ')
 }
 
+/** A page the handler treats as HTML (its `Kind::Html`): the bootstrap is linked in and the document policy added. */
+const isPage = (path: string) => /\.html?$/i.test(path)
+
 const contentType = (path: string) =>
-  path.endsWith('.html') ? 'text/html'
+  isPage(path) ? 'text/html'
     : path.endsWith('.js') ? 'text/javascript'
       : path.endsWith('.wav') ? 'audio/wav'
         : path.endsWith('.css') ? 'text/css'
@@ -116,7 +119,13 @@ export interface Served {
 }
 
 export interface OpenOptions {
-  fixture: PackageFixtureName
+  /** A fixture package under `tests/desktop-ui/<fixture>/package/`. */
+  fixture?: PackageFixtureName
+  /**
+   * Instead, one of the SCORM 2004 test suite's LMS test packages
+   * (`scorm2004-conformance/adl/`): every page it launches is the 2004 probe.
+   */
+  adl?: string
   /** Link the bootstrap into pages, as the handler does (default true). Off only for controls. */
   bootstrap?: boolean
   /** Files served at the package path without being in the package. */
@@ -132,7 +141,8 @@ export async function openPlayer(page: Page, options: OpenOptions): Promise<Serv
   const permissions = await handlerConstant('PERMISSIONS_POLICY')
   const limits = await handlerLimits()
   const frameSources = await appFrameSources()
-  const packageFiles = new URL(`./${options.fixture}/package/`, import.meta.url)
+  const packageFiles = new URL(`./${options.fixture ?? 'package-player'}/package/`, import.meta.url)
+  const adlLesson = new URL('./scorm2004-conformance/package/probe.html', import.meta.url)
   const served: Served = { refused: [], sockets: [], bridge: [], peers: [], missing: [], files: [], popups: [] }
 
   await page.exposeBinding(RECORD, (_source, kind: string, detail: string) => {
@@ -209,6 +219,9 @@ export async function openPlayer(page: Page, options: OpenOptions): Promise<Serv
         body = await readFile(file)
       } else if (options.extraFiles?.[path]) {
         body = options.extraFiles[path]!
+      } else if (options.adl !== undefined) {
+        if (!isPage(path)) return notFound()
+        body = await readFile(adlLesson)
       } else {
         body = await readFile(new URL(path, packageFiles))
       }
@@ -216,7 +229,7 @@ export async function openPlayer(page: Page, options: OpenOptions): Promise<Serv
       return notFound()
     }
     const headers: Record<string, string> = { 'Content-Security-Policy': policy, 'Permissions-Policy': permissions }
-    if (path.endsWith('.html')) {
+    if (isPage(path)) {
       // The handler's `without_fetch_preloads`, mirrored (its own tests pin it).
       body = Buffer.from(body.toString('utf8').replace(
         /(<link\b[^>]*?[\s/])as(\s*=\s*(?:"\s*fetch\s*"|'\s*fetch\s*'|fetch(?=[\s/>])))/gi, '$1data-alexandria-as$2'))
@@ -260,7 +273,8 @@ export async function openPlayer(page: Page, options: OpenOptions): Promise<Serv
     })
   })
 
-  await page.goto(`/tests/desktop-ui/?screen=package-player&package=${options.fixture}`)
+  const which = options.adl !== undefined ? `adl=${encodeURIComponent(options.adl)}` : `package=${options.fixture ?? 'package-player'}`
+  await page.goto(`/tests/desktop-ui/?screen=package-player&${which}`)
   await expect(page.locator('[data-package-player]')).toBeVisible()
   return served
 }
@@ -269,6 +283,8 @@ interface PackageFixtureWindow {
   packageFixture: {
     commits: PackageCommit[]
     commitTimes: number[]
+    /** SCORM 2004: the engine state the wrapper handed the host, in order. */
+    sequencing: PackageSequencingState[]
     openLaunches: () => string[]
     control: { failCommits: boolean }
     called: (command: string) => number
@@ -278,6 +294,8 @@ interface PackageFixtureWindow {
 
 export const commits = (page: Page) =>
   page.evaluate(() => (window as unknown as PackageFixtureWindow).packageFixture.commits)
+export const savedStates = (page: Page) =>
+  page.evaluate(() => (window as unknown as PackageFixtureWindow).packageFixture.sequencing)
 export const commitTimes = (page: Page) =>
   page.evaluate(() => (window as unknown as PackageFixtureWindow).packageFixture.commitTimes)
 export const openLaunches = (page: Page) =>

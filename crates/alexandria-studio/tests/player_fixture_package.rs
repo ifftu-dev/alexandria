@@ -1,4 +1,4 @@
-//! The player's browser checks serve SCORM 1.2 packages from
+//! The player's browser checks serve packages from
 //! `tests/desktop-ui/<fixture>/package/` and hand the player the package
 //! description in `description.json` beside it, as the host would. This test
 //! keeps the two honest: each description is exactly what import makes of its
@@ -14,8 +14,16 @@ use alexandria_studio::package::{import_package, Limits, PackageDescription};
 mod fixture;
 
 /// The fixture packages: the player's own, the hostile one for the isolation
-/// checks and the SCORM 1.2 conformance probe.
-const FIXTURES: &[&str] = &["package-player", "package-isolation", "scorm12-conformance"];
+/// checks, the SCORM 1.2 and 2004 conformance probes and the SCORM 2004
+/// 2nd and 3rd Edition packages.
+const FIXTURES: &[&str] = &[
+    "package-player",
+    "package-isolation",
+    "scorm12-conformance",
+    "scorm2004-conformance",
+    "scorm2004-edition2",
+    "scorm2004-edition3",
+];
 
 fn fixture_dir(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))

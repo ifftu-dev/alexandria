@@ -200,10 +200,17 @@ if (screen === 'motion') {
   // The real course player over a course whose only element is the SCORM 1.2
   // fixture package, with a fake host bridge. The spec serves the package
   // origin itself and reads what the host received from `packageFixture`.
-  // `?package=` picks another fixture package (see `packageBackend.ts`).
+  // `?package=` picks another fixture package (see `packageBackend.ts`);
+  // `?adl=<id>` one of the SCORM 2004 test suite's LMS test packages.
   const { packageBackend, isPackageFixtureName } = await import('./packageBackend')
   const requested = params.get('package')
-  const backend = packageBackend({ fixture: isPackageFixtureName(requested) ? requested : 'package-player' })
+  const adl = params.get('adl')
+  const adlDescriptions = adl
+    ? (await import('./scorm2004-conformance/adl/descriptions.json')).default as unknown as Record<string, PackageDescription>
+    : null
+  const backend = adlDescriptions && adl && adlDescriptions[adl]
+    ? packageBackend({ description: adlDescriptions[adl] })
+    : packageBackend({ fixture: isPackageFixtureName(requested) ? requested : 'package-player' })
   Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
   Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
     invoke: (command: string, args?: Record<string, unknown>) => backend.invoke(command, args),
@@ -220,6 +227,7 @@ if (screen === 'motion') {
   Object.assign(window, { packageFixture: {
     commits: backend.commits,
     commitTimes: backend.commitTimes,
+    sequencing: backend.sequencing,
     openLaunches: () => [...backend.openLaunches],
     control: backend.control,
     called: (command: string) => backend.called(command).length,
@@ -259,8 +267,11 @@ if (screen === 'motion') {
   // The real course editor over an instructor's draft holding a package
   // element, with a fake host. The spec serves the package origin for the
   // preview and reads what the host received from `courseEditorFixture`.
+  // `?package=` puts another fixture package in the package element.
   const { courseEditorBackend } = await import('./courseEditorBackend')
-  const backend = courseEditorBackend()
+  const { isPackageFixtureName } = await import('./packageBackend')
+  const requested = params.get('package')
+  const backend = courseEditorBackend({ fixture: isPackageFixtureName(requested) ? requested : undefined })
   Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
   Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
     invoke: (command: string, args?: Record<string, unknown>) => backend.invoke(command, args),
