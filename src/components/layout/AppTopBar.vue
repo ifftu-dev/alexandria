@@ -466,6 +466,14 @@ const avatarEmoji = computed(() => {
                 {{ $t('nav.userMenu.sentinel') }}
               </button>
 
+              <!-- Activity log -->
+              <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="navigateFromMenu('/activity-log')">
+                <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6M9 8h6M5.25 3.75h13.5v16.5H5.25z" />
+                </svg>
+                {{ $t('nav.userMenu.activityLog') }}
+              </button>
+
               <!-- Settings -->
               <button class="flex items-center gap-2 rounded-lg px-3 py-2 w-full text-sm text-foreground transition-colors hover:bg-muted" @click="userMenuOpen = false; openSettings()">
                 <svg class="h-4 w-4 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

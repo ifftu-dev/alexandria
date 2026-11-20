@@ -182,6 +182,20 @@ if (screen === 'motion') {
     notify: (kind: AppNotification['kind']) => emit('notifications:new', { session, row: backend.notify(kind) }),
     removeNotification: (kind: AppNotification['kind']) => emit('notifications:changed', { session, unread: backend.removeNotification(kind) }),
   } })
+} else if (screen === 'activity-log') {
+  // The real activity log page over an in-memory log. `?records=<n>` seeds n
+  // launches instead of the four mixed records. Calls are recorded.
+  const { activityLogBackend } = await import('./activityLogBackend')
+  const count = params.get('records')
+  const backend = activityLogBackend(count === null ? null : Number(count))
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
+    invoke: backend.invoke, transformCallback: () => 1, unregisterCallback: () => {},
+  } })
+  const { default: ActivityLog } = await import('@/pages/dashboard/ActivityLog.vue')
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: ActivityLog }] })
+  await router.push('/activity-log')
+  createApp({ render: () => h('div', { class: 'p-6' }, [h(RouterView)]) }).use(i18n).use(router).mount('#app')
+  Object.assign(window, { activityLogFixture: { calls: backend.calls } })
 } else if (screen === 'package-player') {
   // The real course player over a course whose only element is the SCORM 1.2
   // fixture package, with a fake host bridge. The spec serves the package
@@ -206,6 +220,29 @@ if (screen === 'motion') {
     control: backend.control,
     called: (command: string) => backend.called(command).length,
     navigate: (path: string) => router.push(path),
+  } })
+} else if (screen === 'course-editor') {
+  // The real course editor over an instructor's draft holding a package
+  // element, with a fake host. The spec serves the package origin for the
+  // preview and reads what the host received from `courseEditorFixture`.
+  const { courseEditorBackend } = await import('./courseEditorBackend')
+  const backend = courseEditorBackend()
+  Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
+    invoke: (command: string, args?: Record<string, unknown>) => backend.invoke(command, args),
+    transformCallback: () => 1, unregisterCallback: () => {},
+  } })
+  const { useProfiles } = await import('@/composables/useProfiles')
+  await useProfiles().initialize()
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/instructor/composer/:id', component: (await import('@/pages/instructor/Composer.vue')).default },
+    { path: '/:pathMatch(.*)*', component: { render: () => h('p', 'Elsewhere') } },
+  ] })
+  await router.push('/instructor/composer/course-induction')
+  createApp({ render: () => h('div', { class: 'p-6' }, [h(RouterView)]) }).use(i18n).use(router).mount('#app')
+  Object.assign(window, { courseEditorFixture: {
+    control: backend.control,
+    called: (command: string) => backend.called(command),
   } })
 } else if (screen === 'skill-atlas') {
   // Keep the props-only fixture free of unrelated page lifecycle and global CSS.

@@ -196,5 +196,11 @@
     },
     "dismiss": "Dismiss",
     "courseComplete": "Course complete. Package results are self-reported, so this course earns no credential."
+  },
+  "packageFile": {
+    "open": "Open a package file",
+    "opening": "Opening the package…",
+    "fileFilter": "Standards package",
+    "failed": "The package could not be opened: {error}"
   }
 }
