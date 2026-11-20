@@ -30,3 +30,8 @@ Done when: integration tests cover create, read, merge, delete and concurrency c
 - Method: each slice was test-first at the record store seam (HTTP against Postgres), red before green. The isolation and scope tests passed on their first run, because they exercise the credential check and row-level security the new routes reuse from ticket 20.
 - Not done (still open from ticket 20): CORS and rate limiting for `/xapi/`; the console shows no documents.
 - Proposed doc edits, not made: the hosted service's `docs/organisations.md` "Record store" section (proposed by ticket 20) should also list the document, agents, activities and about resources, the 4 MiB document limit, that `about` is open, and that documents follow the retention from their last change and are not covered by a share; the spec's Record store section could state that documents are the organisation's own data.
+
+### Review (2026-11-21)
+
+- The about handler is `xapi_about`, so the route scanner's open-route exemption names it unambiguously; it answers the version list from `XapiVersion::served()`.
+- `/xapi/` is now rate limited (ticket 20), which closes that part of the "still open" bullet above; CORS is still open.
