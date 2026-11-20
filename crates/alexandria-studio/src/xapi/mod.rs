@@ -21,6 +21,7 @@
 //!   whole, detached, by the learner's Ed25519 key.
 
 mod build;
+pub mod cmi5;
 mod identifiers;
 pub mod lrs;
 pub mod scorm;
@@ -28,7 +29,7 @@ mod statement;
 
 pub use build::{
     build_batch, build_statement, Action, BuildOptions, Interaction, InteractionComponent,
-    InteractionType, LearningEvent, Names, Outcome, Profile, RecordKind, Target, Verb,
+    InteractionType, LearningEvent, Names, Outcome, Profile, RecordKind, Satisfiable, Target, Verb,
 };
 pub use identifiers::{pairwise_did, ActivityRef, IdKey, Recipient};
 pub use statement::{

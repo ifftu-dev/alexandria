@@ -84,7 +84,9 @@ fn event_activity(event: &LearningEvent) -> Result<&ActivityRef, RecordError> {
         | Action::Completed { target, .. }
         | Action::Passed { target, .. }
         | Action::Failed { target, .. }
-        | Action::Scored { target, .. } => &target.activity,
+        | Action::Scored { target, .. }
+        | Action::Abandoned { target, .. }
+        | Action::Satisfied { target, .. } => &target.activity,
         Action::Responded { interaction, .. } => &interaction.activity,
         Action::Voided { .. } => {
             return Err(RecordError::Database(

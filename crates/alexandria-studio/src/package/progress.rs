@@ -6,15 +6,17 @@
 //! Pure: no storage and no clock. The app stores attempts and activity state
 //! and calls these functions on them.
 //!
-//! Only SCORM 1.2 is read so far. The SCORM 2004 run-time and the cmi5 launch
-//! plug in at [`read_report`], [`initial_runtime`] and [`rollup`], one match
-//! arm each.
+//! SCORM 1.2 run-time data is read here. The SCORM 2004 run-time plugs in at
+//! [`read_report`], [`initial_runtime`] and [`rollup`], one match arm each.
+//! cmi5 has no run-time data: its units write statements, the session rules
+//! are in [`crate::xapi::cmi5`], and the host stores each unit's moveOn
+//! satisfaction ([`unit_satisfied`]) as its outcome for [`rollup`].
 
 use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 
-use super::{Launch, LaunchKind, PackageDescription, Standard};
+use super::{Activity, Launch, LaunchKind, MoveOn, PackageDescription, Standard};
 
 /// Context string for the learner identifier key. Never change it: every
 /// package's content has seen identifiers derived under it.
@@ -55,7 +57,7 @@ pub struct ActivityReport {
 pub fn read_report(standard: Standard, runtime: &Value) -> ActivityReport {
     match standard {
         Standard::Scorm12 => scorm12::report(&runtime["cmi"]),
-        // Ticket 10 (SCORM 2004 run-time) and ticket 25 (cmi5 launch).
+        // Ticket 10 (SCORM 2004 run-time). cmi5 stores no run-time data.
         Standard::Scorm2004 | Standard::Cmi5 => ActivityReport::default(),
     }
 }
@@ -122,7 +124,7 @@ pub fn initial_runtime(standard: Standard, stored: Option<&Value>, host: HostVal
         .unwrap_or_default();
     let cmi = match standard {
         Standard::Scorm12 => scorm12::initial(cmi, host),
-        // Ticket 10 (SCORM 2004 run-time) and ticket 25 (cmi5 launch).
+        // Ticket 10 (SCORM 2004 run-time). cmi5 stores no run-time data.
         Standard::Scorm2004 | Standard::Cmi5 => cmi,
     };
     let mut runtime = Map::new();
@@ -155,9 +157,12 @@ pub struct Rollup {
 /// (`completed` or `passed`) and a shown-only asset by being launched. The
 /// score is the mean of the scores the lessons reported.
 ///
+/// cmi5 completes when the course's completion criteria are met: every unit
+/// satisfied, by its stored outcome or by `NotApplicable` criteria (13.1.4
+/// moveOn; a course is satisfied when all its units are).
+///
 /// SCORM 2004 completes on the root activity's completion status from the
-/// sequencing engine (ticket 10) and cmi5 on the course's completion criteria
-/// (ticket 25); until those land, neither completes.
+/// sequencing engine (ticket 10); until that lands, it never completes.
 pub fn rollup(
     description: &PackageDescription,
     outcomes: &BTreeMap<String, ActivityOutcome>,
@@ -172,9 +177,70 @@ pub fn rollup(
                     .iter()
                     .all(|activity| outcomes.get(&activity.id).is_some_and(|o| o.complete))
         }
-        Standard::Scorm2004 | Standard::Cmi5 => false,
+        Standard::Cmi5 => {
+            let units = description.launchable_activities();
+            !units.is_empty() && units.iter().all(|unit| unit_satisfied_in(unit, outcomes))
+        }
+        Standard::Scorm2004 => false,
     };
     Rollup { complete, score }
+}
+
+/// Whether a cmi5 unit has met its moveOn criteria (13.1.4) given which of
+/// `completed` and `passed` it recorded in the registration. A unit whose
+/// criteria are `NotApplicable` is satisfied without either.
+pub fn unit_satisfied(move_on: MoveOn, completed: bool, passed: bool) -> bool {
+    match move_on {
+        MoveOn::Passed => passed,
+        MoveOn::Completed => completed,
+        MoveOn::CompletedAndPassed => completed && passed,
+        MoveOn::CompletedOrPassed => completed || passed,
+        MoveOn::NotApplicable => true,
+    }
+}
+
+/// A cmi5 unit is satisfied when its outcome says so (the host stores
+/// [`unit_satisfied`] as `complete`) or its criteria are `NotApplicable`.
+fn unit_satisfied_in(unit: &Activity, outcomes: &BTreeMap<String, ActivityOutcome>) -> bool {
+    let not_applicable = unit
+        .cmi5
+        .as_ref()
+        .and_then(|cmi5| cmi5.move_on)
+        .is_none_or(|move_on| move_on == MoveOn::NotApplicable);
+    not_applicable || outcomes.get(&unit.id).is_some_and(|o| o.complete)
+}
+
+/// The blocks of a cmi5 course, and the course itself (the tree's root),
+/// whose units are all satisfied: what the launching system records
+/// `satisfied` for (9.3.9). Blocks come in document order, the course last.
+/// A block with no units is satisfied.
+pub fn satisfied_nodes<'a>(
+    description: &'a PackageDescription,
+    outcomes: &BTreeMap<String, ActivityOutcome>,
+) -> Vec<&'a Activity> {
+    fn walk<'a>(
+        node: &'a Activity,
+        outcomes: &BTreeMap<String, ActivityOutcome>,
+        found: &mut Vec<&'a Activity>,
+    ) -> bool {
+        if node.launch.is_some() {
+            return unit_satisfied_in(node, outcomes);
+        }
+        let mut all = true;
+        for child in &node.children {
+            all &= walk(child, outcomes, found);
+        }
+        if all {
+            found.push(node);
+        }
+        all
+    }
+    if description.standard != Standard::Cmi5 {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    walk(&description.tree, outcomes, &mut found);
+    found
 }
 
 /// Whether launching the activity is all it takes to complete it: content
