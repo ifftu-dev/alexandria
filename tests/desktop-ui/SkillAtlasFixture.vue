@@ -46,7 +46,8 @@ const model = computed(() => buildSkillAtlas({ skills, edges, subjectDid: 'did:f
   ],
 }))
 const view = ref<AtlasViewState>({ selectedSkillId: null, focusedFieldId: null, unassignedFocused: false,
-  query: '', bloomEmphasis: null, neighborhood: 'none', neighborhoodDepth: 1, camera: null, inspectorCollapsed: false })
+  query: '', bloomEmphasis: null, neighborhood: 'none', neighborhoodDepth: 1, camera: null, inspectorCollapsed: false,
+  webCamera: null, webNames: false, webArrows: false, webRelated: true, webNarrowed: false })
 const feedback = ref<AtlasFeedback | null>(null)
 // `view` opens the explorer in either view; like a profile that never chose, it defaults to Simple.
 const requestedView = params.get('view')

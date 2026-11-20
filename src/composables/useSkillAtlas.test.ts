@@ -450,6 +450,15 @@ describe('shared skill atlas state', () => {
     expect(atlas.modalOpen.value).toBe(false)
     expect(atlas.feedback.value).toBeNull()
   })
+  it('keeps Web toggles, narrowing and a Web camera per surface, apart from the Detailed camera', async () => {
+    const { atlas } = await setup()
+    expect(atlas.pageView.value).toMatchObject({ webNames: false, webArrows: false, webRelated: true, webNarrowed: false, webCamera: null })
+    const webCamera = { x: 1, y: 2, zoom: 3 }
+    atlas.updateView('modal', { webNames: true, webArrows: true, webRelated: false, webNarrowed: true, webCamera })
+    webCamera.x = 50
+    expect(atlas.modalView.value).toMatchObject({ webNames: true, webArrows: true, webRelated: false, webNarrowed: true, webCamera: { x: 1, y: 2, zoom: 3 }, camera: null })
+    expect(atlas.pageView.value).toMatchObject({ webNames: false, webArrows: false, webRelated: true, webNarrowed: false, webCamera: null })
+  })
   it('clears private data synchronously before delayed lock hooks and rejects a late DID lookup', async () => {
     const { useProfiles, onProfileLocked } = await import('./useProfiles')
     const barrier = deferred<void>()

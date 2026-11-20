@@ -27,7 +27,7 @@ const model = buildSkillAtlas({
   ],
   activeCredentials: [credential('a', 3), credential('c', 'invalid')], subjectDid: 'did:me',
 })
-const initialView = (): AtlasViewState => ({ selectedSkillId: null, focusedFieldId: null, unassignedFocused: false, query: '', bloomEmphasis: null, neighborhood: 'none', neighborhoodDepth: 1, camera: null, inspectorCollapsed: false })
+const initialView = (): AtlasViewState => ({ selectedSkillId: null, focusedFieldId: null, unassignedFocused: false, query: '', bloomEmphasis: null, neighborhood: 'none', neighborhoodDepth: 1, camera: null, inspectorCollapsed: false, webCamera: null, webNames: false, webArrows: false, webRelated: true, webNarrowed: false })
 const BRIDGES = 'Bridges, not yet earned, Ready, learning-outcome Bloom level 6 Create'
 const ALGEBRA = 'Algebra, earned, Bloom level 4 Analyze'
 const CRAFT = 'Craft, earned, earned level unavailable'

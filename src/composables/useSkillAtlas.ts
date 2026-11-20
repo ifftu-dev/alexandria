@@ -185,7 +185,8 @@ async function ensureLoaded(): Promise<void> {
 
 function updateView(surface: AtlasSurface, patch: Partial<AtlasViewState>): void {
   const target = surface === 'page' ? pageView : modalView
-  target.value = { ...target.value, ...patch, ...(patch.camera ? { camera: { ...patch.camera } } : {}) }
+  target.value = { ...target.value, ...patch, ...(patch.camera ? { camera: { ...patch.camera } } : {}),
+    ...(patch.webCamera ? { webCamera: { ...patch.webCamera } } : {}) }
 }
 
 function resetView(surface: AtlasSurface): void {
