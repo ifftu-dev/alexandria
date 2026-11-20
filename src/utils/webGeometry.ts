@@ -502,48 +502,99 @@ export function webNearestTo(point: WebPoint, positions: ReadonlyMap<string, Web
 
 /** Where a Web name sits around its dot. */
 export type WebNamePlace = 'below' | 'above' | 'right' | 'left'
-/** A dot names should keep off: its centre and radius in screen pixels. */
-export interface WebNameObstacle { x: number; y: number; radius: number }
-/** A name to place: its dot's centre and radius and the name's size, all in screen pixels. */
-export interface WebNameLabel { id: string; x: number; y: number; radius: number; width: number; height: number }
+/** A name's side of its dot, and how much further out than the usual gap it sits, in pixels. */
+export interface WebNamePlacement { place: WebNamePlace; offset: number }
+/** A dot names should keep off: its centre and radius in screen pixels. No name ever covers a firm one, such as the selected dot. */
+export interface WebNameObstacle { x: number; y: number; radius: number; firm?: boolean }
+/**
+ * A name to place: its dot's centre and radius and the name's size, all in
+ * screen pixels. An optional name (a neighbour's, in the compact graph) may
+ * be left out when it has no free place.
+ */
+export interface WebNameLabel { id: string; x: number; y: number; radius: number; width: number; height: number; optional?: boolean }
+export interface WebNamePlaceOptions {
+  /** Dots names keep off where they can. */
+  obstacles?: readonly WebNameObstacle[]
+  /**
+   * Compact placement, for the small graph: an optional name with no free
+   * side at the usual gap is left out rather than moved further out.
+   */
+  compact?: boolean
+}
 /** Space between a dot's edge and its name, below or above, and beside it. */
 export const WEB_NAME_GAP = 3
 export const WEB_NAME_SIDE_GAP = 4
+/** Clear space kept between two names, in pixels. */
+export const WEB_NAME_MARGIN = 2
+/** How far a name moves out from its dot at each step when no side is free, in pixels. */
+export const WEB_NAME_OFFSET_STEP = 6
+/** Steps out a name tries clear of dots too, before it settles for being clear of names alone. */
+const NAME_CLEAR_OF_DOTS_STEPS = 2
 /** Cell size of the grid that finds names near each other, in pixels. */
 const NAME_CELL = 96
 const PLACES: readonly WebNamePlace[] = ['below', 'above', 'right', 'left']
 
 /**
- * Places names so that, where there is room, none overlaps another: each
- * name, in the given order of priority, goes under its dot, or failing that
- * above, to the right or to the left; when no place is free it stays under
- * its dot. Names also keep off the `obstacles` (the dots) where they can.
- * Every name keeps a place: a name is never hidden to make room.
+ * Places names, in the given order of priority, so that no two overlap. Each
+ * name goes under its dot, or failing that above, to the right or to the
+ * left, keeping off the `obstacles` (the dots) where it can. When no side is
+ * free it moves further out from its dot, a step at a time, until one is, so
+ * every name is shown and none covers another. In compact placement an
+ * optional name with no free side at the usual gap is left out instead.
  */
-export function webNamePlaces(labels: readonly WebNameLabel[], obstacles: readonly WebNameObstacle[] = []): Map<string, WebNamePlace> {
+export function webNamePlaces(labels: readonly WebNameLabel[], options: WebNamePlaceOptions = {}): Map<string, WebNamePlacement> {
   type Box = { left: number; top: number; right: number; bottom: number }
-  const placed = new Map<string, Box[]>()
+  const names = new Map<string, Box[]>(), dots = new Map<string, Box[]>()
+  /** The lowest edge of every name placed, so a name moved past it is certainly free of names. */
+  let lowest = -Infinity
   const cells = (box: Box) => {
     const keys: string[] = []
     for (let cx = Math.floor(box.left / NAME_CELL); cx <= Math.floor(box.right / NAME_CELL); cx++)
       for (let cy = Math.floor(box.top / NAME_CELL); cy <= Math.floor(box.bottom / NAME_CELL); cy++) keys.push(`${cx},${cy}`)
     return keys
   }
-  const free = (box: Box) => cells(box).every(key => !(placed.get(key) ?? []).some(other =>
-    box.left < other.right && other.left < box.right && box.top < other.bottom && other.top < box.bottom))
-  const boxAt = ({ x, y, radius, width, height }: WebNameLabel, place: WebNamePlace): Box => {
-    const left = place === 'right' ? x + radius + WEB_NAME_SIDE_GAP : place === 'left' ? x - radius - WEB_NAME_SIDE_GAP - width : x - width / 2
-    const top = place === 'below' ? y + radius + WEB_NAME_GAP : place === 'above' ? y - radius - WEB_NAME_GAP - height : y - height / 2
+  const hits = (grid: Map<string, Box[]>, box: Box, margin: number) => cells(box).some(key => (grid.get(key) ?? []).some(other =>
+    box.left < other.right + margin && other.left < box.right + margin && box.top < other.bottom + margin && other.top < box.bottom + margin))
+  const put = (grid: Map<string, Box[]>, box: Box) => {
+    for (const key of cells(box)) grid.set(key, [...grid.get(key) ?? [], box])
+  }
+  const boxAt = ({ x, y, radius, width, height }: WebNameLabel, { place, offset }: WebNamePlacement): Box => {
+    const side = radius + WEB_NAME_SIDE_GAP + offset, under = radius + WEB_NAME_GAP + offset
+    const left = place === 'right' ? x + side : place === 'left' ? x - side - width : x - width / 2
+    const top = place === 'below' ? y + under : place === 'above' ? y - under - height : y - height / 2
     return { left, top, right: left + width, bottom: top + height }
   }
-  const add = (box: Box) => { for (const key of cells(box)) placed.set(key, [...placed.get(key) ?? [], box]) }
+  const clear = (box: Box, ofDots: boolean) => !hits(names, box, WEB_NAME_MARGIN) && !(ofDots && hits(dots, box, 0))
+  /** The nearest free placement: clear of names and dots for the first steps out, then clear of names alone. */
+  const find = (label: WebNameLabel, maxSteps: number): WebNamePlacement | null => {
+    for (const ofDots of [true, false]) {
+      const steps = ofDots ? Math.min(maxSteps, NAME_CLEAR_OF_DOTS_STEPS) : maxSteps
+      for (let step = 0; step <= steps; step++) {
+        for (const place of PLACES) {
+          const placement = { place, offset: step * WEB_NAME_OFFSET_STEP }
+          if (clear(boxAt(label, placement), ofDots)) return placement
+        }
+      }
+    }
+    return null
+  }
   // A name never reaches its own dot (it sits past the dot's edge), so every dot can be an obstacle.
-  for (const { x, y, radius } of obstacles) add({ left: x - radius, top: y - radius, right: x + radius, bottom: y + radius })
-  const places = new Map<string, WebNamePlace>()
+  for (const { x, y, radius, firm } of options.obstacles ?? []) {
+    put(firm ? names : dots, { left: x - radius, top: y - radius, right: x + radius, bottom: y + radius })
+    if (firm) lowest = Math.max(lowest, y + radius)
+  }
+  const places = new Map<string, WebNamePlacement>()
   for (const label of labels) {
-    const place = PLACES.find(candidate => free(boxAt(label, candidate))) ?? 'below'
-    add(boxAt(label, place))
-    places.set(label.id, place)
+    const leaveOut = options.compact === true && label.optional === true
+    // Moved this many steps under its dot, a name is past every name placed so far, so the search ends.
+    const top = boxAt(label, { place: 'below', offset: 0 }).top
+    const furthest = Math.max(0, Math.ceil((lowest + WEB_NAME_MARGIN - top) / WEB_NAME_OFFSET_STEP) + 1)
+    const placement = find(label, leaveOut ? 0 : furthest)
+    if (!placement) continue
+    const box = boxAt(label, placement)
+    put(names, box)
+    lowest = Math.max(lowest, box.bottom)
+    places.set(label.id, placement)
   }
   return places
 }

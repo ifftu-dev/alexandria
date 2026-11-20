@@ -852,7 +852,7 @@ function setBloom(event: Event): void {
                       <template v-if="simple">
                         <span class="node-disc" aria-hidden="true">{{ node.status === 'earned' && node.earnedBloom ? node.earnedBloom.rank + 1 : '' }}</span><span class="node-label" :class="{ 'is-label-quiet': labelQuiet(node) }" dir="auto">{{ node.skill.name }}</span>
                       </template>
-                      <WebGraphDot v-else-if="webMode && webDot(node)" :state="webDot(node)!.state" :size="webDot(node)!.size" :name="node.skill.name" :labelled="webDot(node)!.labelled" :selected="webDot(node)!.selected" :faded="webDot(node)!.faded" :place="webDot(node)!.namePlace" />
+                      <WebGraphDot v-else-if="webMode && webDot(node)" :state="webDot(node)!.state" :size="webDot(node)!.size" :name="node.skill.name" :labelled="webDot(node)!.labelled" :selected="webDot(node)!.selected" :faded="webDot(node)!.faded" :place="webDot(node)!.namePlace" :offset="webDot(node)!.nameOffset" />
                       <template v-else>
                         <span class="skill-name" dir="auto">{{ node.skill.name }}</span><span class="node-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓</span><span v-else-if="node.readyNext" aria-hidden="true">◎</span><span v-else aria-hidden="true">○</span><span>{{ nodeText(node).evidence }}</span></span>
                       </template>

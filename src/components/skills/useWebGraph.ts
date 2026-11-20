@@ -33,13 +33,20 @@ export const WEB_WHEEL_RATE = 0.002
 /** Zoom of one press of a zoom button, as a factor. */
 export const WEB_ZOOM_STEP = 1.25
 
-/** Estimated size of a name, to keep names apart: pixels per character, widest name and line height, in the full and the compact graph (match WebGraphDot's styles). */
-export const WEB_NAME_CHAR_PIXELS = 6.6
-export const WEB_COMPACT_NAME_CHAR_PIXELS = 5.5
-export const WEB_NAME_MAX_PIXELS = 160
-export const WEB_COMPACT_NAME_MAX_PIXELS = 110
-export const WEB_NAME_LINE_PIXELS = 16
-export const WEB_COMPACT_NAME_LINE_PIXELS = 13
+/**
+ * Names, in pixels, in the full and the compact graph (match WebGraphDot's
+ * styles): type size, widest name and line height, and an estimate of a
+ * character's width where a name cannot be measured.
+ */
+export const WEB_NAME = { fontPixels: 12, maxPixels: 160, linePixels: 16, charPixels: 6.8 } as const
+export const WEB_COMPACT_NAME = { fontPixels: 10, maxPixels: 110, linePixels: 13, charPixels: 5.6 } as const
+/** Weight of a name, and of the selected skill's name. */
+export const WEB_NAME_WEIGHT = 550
+export const WEB_SELECTED_NAME_WEIGHT = 650
+/** Room added to a measured name for its outline. */
+export const WEB_NAME_SLACK_PIXELS = 2
+/** How far the selection ring reaches past a dot's edge (match WebGraphDot's ring). */
+export const WEB_SELECTION_RING_PIXELS = 4
 
 /** Length of an arrowhead, in pixels. */
 export const WEB_ARROW_PIXELS = 7
@@ -69,8 +76,10 @@ export interface WebDot {
   faded: boolean
   /** Its name shows beside the dot, */
   labelled: boolean
-  /** on this side, chosen so names do not overlap where there is room. */
+  /** on this side, chosen so no two names overlap, */
   namePlace: WebNamePlace
+  /** this many pixels further out than the usual gap. */
+  nameOffset: number
 }
 
 /** What a Web graph draws and how; the component's props, read through a getter so the composable sees changes. */
@@ -237,9 +246,10 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
     // An earned skill whose level is unavailable takes the base size, filled.
     return webDotRadius(node.status === 'earned' ? node.earnedBloom?.rank : null)
   }
+  /** Every shown dot is named: with the Names toggle, narrowed, or zoomed in past the threshold. */
+  const everyName = computed(() => input().names || input().narrowed || camera.value.zoom >= WEB_NAMES_ZOOM)
   const dots = computed<WebDot[]>(() => {
-    const at = camera.value, { selectedId: selected, names, narrowed } = input()
-    const everyName = names || narrowed || at.zoom >= WEB_NAMES_ZOOM
+    const at = camera.value, { selectedId: selected } = input()
     const drawn = shownNodes.value.map((node): WebDot => {
       const id = node.skill.id
       const screen = toScreen(positions.value.get(id)!)
@@ -249,31 +259,57 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
         color: atlasFieldColor(model.value.fieldById.get(node.fieldId) ?? { id: node.fieldId, slot: null }),
         state: node.status === 'earned' ? 'earned' : node.readyNext ? 'ready-next' : 'ready',
         selected: id === selected, roving: id === rovingId.value, faded: faded(id),
-        labelled: everyName || namedIds.value.has(id), namePlace: 'below',
+        labelled: everyName.value || namedIds.value.has(id), namePlace: 'below', nameOffset: 0,
       }
     })
     placeNames(drawn)
     return drawn
   })
+
+  // Name sizes. Names are measured in the page's font where the browser can
+  // (cached per font and name), and estimated where it cannot, as in tests.
+  let measureContext: OffscreenCanvasRenderingContext2D | null | undefined
+  const nameWidths = new Map<string, number>()
+  function nameWidth(name: string, selected: boolean): number {
+    const { compact } = input(), style = compact ? WEB_COMPACT_NAME : WEB_NAME
+    if (measureContext === undefined) measureContext = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(1, 1).getContext('2d') : null
+    const family = measureContext && root.value ? getComputedStyle(root.value).fontFamily : ''
+    const font = `${selected ? WEB_SELECTED_NAME_WEIGHT : WEB_NAME_WEIGHT} ${style.fontPixels}px ${family || 'sans-serif'}`
+    const key = `${font}\u0000${name}`
+    let width = nameWidths.get(key)
+    if (width === undefined) {
+      if (measureContext) { measureContext.font = font; width = measureContext.measureText(name).width + WEB_NAME_SLACK_PIXELS }
+      else width = name.length * style.charPixels + WEB_NAME_SLACK_PIXELS
+      nameWidths.set(key, width)
+    }
+    return Math.min(style.maxPixels, width)
+  }
   /**
-   * Chooses where each shown name on screen sits, so names in a cluster do
-   * not overlap where there is room: the selected and the hovered or focused
-   * dot first, then their neighbours, then larger dots.
+   * Chooses where each shown name on screen sits so that no two overlap: the
+   * selected and the hovered or focused dot first, then their neighbours,
+   * then larger dots. A name with no free side moves further out from its
+   * dot; in the compact graph a neighbour's name is left out instead, while
+   * the hovered and selected names always show.
    */
   function placeNames(drawn: WebDot[]): void {
     const { compact } = input(), transient = transientId.value, { width, height } = size.value
-    const charPixels = compact ? WEB_COMPACT_NAME_CHAR_PIXELS : WEB_NAME_CHAR_PIXELS
-    const maxPixels = compact ? WEB_COMPACT_NAME_MAX_PIXELS : WEB_NAME_MAX_PIXELS
-    const linePixels = compact ? WEB_COMPACT_NAME_LINE_PIXELS : WEB_NAME_LINE_PIXELS
+    const style = compact ? WEB_COMPACT_NAME : WEB_NAME
     const rank = (dot: WebDot) => dot.selected ? 0 : dot.id === transient ? 1 : namedIds.value.has(dot.id) ? 2 : 3
-    const near = (dot: WebDot) => dot.x > -maxPixels && dot.x < width + maxPixels && dot.y > -linePixels * 2 && dot.y < height + linePixels * 2
+    const near = (dot: WebDot) => dot.x > -style.maxPixels && dot.x < width + style.maxPixels && dot.y > -style.linePixels * 2 && dot.y < height + style.linePixels * 2
+    // The selection ring reaches past the selected dot; names keep clear of it.
+    const radius = (dot: WebDot) => dot.size / 2 + (dot.selected ? WEB_SELECTION_RING_PIXELS : 0)
     const named = drawn.filter(dot => dot.labelled && near(dot))
     if (!named.length) return
     named.sort((a, b) => rank(a) - rank(b) || b.size - a.size || compareIds(a.id, b.id))
-    const places = webNamePlaces(named.map(dot => ({ id: dot.id, x: dot.x, y: dot.y, radius: dot.size / 2, height: linePixels,
-      width: Math.min(maxPixels, dot.node.skill.name.length * charPixels + 4) })),
-    drawn.filter(near).map(dot => ({ x: dot.x, y: dot.y, radius: dot.size / 2 })))
-    for (const dot of named) dot.namePlace = places.get(dot.id) ?? 'below'
+    const places = webNamePlaces(named.map(dot => ({ id: dot.id, x: dot.x, y: dot.y, radius: radius(dot), height: style.linePixels,
+      width: nameWidth(dot.node.skill.name, dot.selected), optional: !everyName.value && !dot.selected && dot.id !== transient })),
+    { obstacles: drawn.filter(near).map(dot => ({ x: dot.x, y: dot.y, radius: radius(dot), firm: dot.selected })), compact })
+    for (const dot of named) {
+      const placement = places.get(dot.id)
+      if (!placement) { dot.labelled = false; continue }
+      dot.namePlace = placement.place
+      dot.nameOffset = placement.offset + (dot.selected ? WEB_SELECTION_RING_PIXELS : 0)
+    }
   }
 
   // Lines run from dot edge to dot edge in screen pixels, so their width and

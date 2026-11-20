@@ -10,11 +10,11 @@
 import type { WebDotState } from './useWebGraph'
 import type { WebNamePlace } from '@/utils/webGeometry'
 
-withDefaults(defineProps<{ state: WebDotState; size: number; name: string; labelled: boolean; selected: boolean; faded: boolean; compact?: boolean; place?: WebNamePlace }>(), { place: 'below' })
+withDefaults(defineProps<{ state: WebDotState; size: number; name: string; labelled: boolean; selected: boolean; faded: boolean; compact?: boolean; place?: WebNamePlace; offset?: number }>(), { place: 'below', offset: 0 })
 </script>
 
 <template>
-  <span class="web-skin" :class="{ 'is-faded': faded, 'is-selected': selected, 'is-compact': compact }" :style="{ '--dot': `${size}px` }" aria-hidden="true">
+  <span class="web-skin" :class="{ 'is-faded': faded, 'is-selected': selected, 'is-compact': compact }" :style="{ '--dot': `${size}px`, '--name-offset': `${offset}px` }" aria-hidden="true">
     <span class="web-dot" :class="`is-${state}`" />
     <span v-if="labelled" class="web-name" :class="`is-${place}`" dir="auto">{{ name }}</span>
   </span>
@@ -29,12 +29,12 @@ withDefaults(defineProps<{ state: WebDotState; size: number; name: string; label
 /* The primary-colour selection ring used by the other views. */
 .web-skin.is-selected .web-dot { box-shadow: 0 0 0 2px var(--app-background), 0 0 0 4px var(--app-primary); }
 /* Constant on-screen size; a background-coloured outline keeps lines from cutting through. */
-.web-name { position: absolute; top: calc(100% + 3px); left: 50%; translate: -50% 0; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 550; line-height: 1.3; color: var(--app-foreground);
+.web-name { position: absolute; top: calc(100% + 3px + var(--name-offset, 0px)); left: 50%; translate: -50% 0; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 550; line-height: 1.3; color: var(--app-foreground);
   text-shadow: 0 0 2px var(--app-background), 0 0 2px var(--app-background), 0 0 3px var(--app-background), 1px 1px 0 var(--app-background), -1px -1px 0 var(--app-background), 1px -1px 0 var(--app-background), -1px 1px 0 var(--app-background); }
-/* The other sides, chosen when the name under the dot would overlap another (gaps match WEB_NAME_GAP and WEB_NAME_SIDE_GAP). */
-.web-name.is-above { top: auto; bottom: calc(100% + 3px); }
-.web-name.is-right { top: 50%; left: calc(100% + 4px); translate: 0 -50%; }
-.web-name.is-left { top: 50%; left: auto; right: calc(100% + 4px); translate: 0 -50%; }
+/* The other sides, chosen when the name under the dot would overlap another, and the offset further out when no side is free (gaps match WEB_NAME_GAP and WEB_NAME_SIDE_GAP). */
+.web-name.is-above { top: auto; bottom: calc(100% + 3px + var(--name-offset, 0px)); }
+.web-name.is-right { top: 50%; left: calc(100% + 4px + var(--name-offset, 0px)); translate: 0 -50%; }
+.web-name.is-left { top: 50%; left: auto; right: calc(100% + 4px + var(--name-offset, 0px)); translate: 0 -50%; }
 .web-skin.is-compact .web-name { font-size: 10px; max-width: 110px; }
 .web-skin.is-selected .web-name { color: var(--app-primary); font-weight: 650; }
 </style>
