@@ -27,6 +27,9 @@
 //   { source: 'alexandria-wrapper', type: 'refused', reason }
 //       A launch this wrapper will not run.
 //
+// SCORM 2004 runs one API for the whole package under its sequencing engine
+// and adds messages of its own; see the section at the end of this file.
+//
 // Content can run script in this page (it is same-origin with the lesson), so
 // nothing here is a security boundary: the host checks which lesson a commit
 // is for and the bootstrap, content policy and launch prefix do the
@@ -55,13 +58,20 @@
 
   // One entry per standard: the runtime script under `_alexandria/`, the
   // window property content looks for, and how to build a session's API and
-  // facade. SCORM 2004 (ticket 10) adds its entry here.
+  // facade. A `sequenced` standard has one API for the whole package and its
+  // own lifecycle (SCORM 2004, at the end of this file).
   var RUNTIMES = {
     scorm12: {
       script: 'scorm12.min.js',
       global: 'Scorm12API',
       apiName: 'API',
       create: createScorm12,
+    },
+    scorm2004: {
+      script: 'scorm2004.min.js',
+      global: 'Scorm2004API',
+      apiName: 'API_1484_11',
+      sequenced: true,
     },
   };
 
@@ -220,12 +230,19 @@
     loading[entry.script].push(then);
   }
 
+  // A lesson address the wrapper will open: under this launch's prefix and
+  // not one of the reserved files.
+  function insideLaunch(url) {
+    return typeof url === 'string' && url.indexOf(launchPrefix) === 0 && url.indexOf(launchPrefix + '_alexandria/') !== 0;
+  }
+
   function launch(message) {
-    endSession();
     var entry = RUNTIMES[message.standard];
+    if (entry && entry.sequenced) return launchDelivered(message);
+    endSession();
     if (!entry) return tell({ type: 'refused', reason: 'unsupported-standard' });
-    var url = typeof message.url === 'string' ? message.url : '';
-    if (url.indexOf(launchPrefix) !== 0 || url.indexOf(launchPrefix + '_alexandria/') === 0) {
+    var url = message.url;
+    if (!insideLaunch(url)) {
       return tell({ type: 'refused', reason: 'outside-launch' });
     }
     withRuntime(entry, function (Runtime) {
@@ -263,19 +280,440 @@
     if (!data || data.source !== FROM_PLAYER) return;
     hostOrigin = event.origin && event.origin !== 'null' ? event.origin : hostOrigin;
     if (data.type === 'launch') launch(data);
+    else if (data.type === 'sequence') sequence(data);
+    else if (data.type === 'navigate') navigate(data);
     else if (data.type === 'end') {
-      if (session) endSession();
+      if (pkg) closePackage();
+      else if (session) endSession();
       else tell({ type: 'ended', activityId: null });
     }
   });
 
   // The app went to the background: hand over what is pending now.
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'hidden' && session) flush(session);
+    if (document.visibilityState !== 'hidden') return;
+    if (session) flush(session);
+    if (pkg && pkg.lesson) flush(pkg.lesson);
   });
 
   // The package frame is going away (the player closed or navigated it).
-  window.addEventListener('pagehide', endSession);
+  window.addEventListener('pagehide', function () {
+    if (pkg) closePackage();
+    else endSession();
+  });
+
+  // ---- SCORM 2004 ---------------------------------------------------------
+  //
+  // One API instance serves the whole package. The sequencing engine inside
+  // it keeps the activity tree, tracking and global objectives across lessons
+  // and decides what is delivered; `reset()` starts each delivered lesson's
+  // own run-time session, and the facade on `window.API_1484_11` is bound to
+  // that one delivery, so a late call from a lesson that has gone is refused.
+  //
+  // Host -> wrapper:
+  //   { type: 'sequence', standard: 'scorm2004', settings: { activityTree },
+  //     snapshot, commitIntervalMs }
+  //       Build the package's API, restore `snapshot` (the engine's state from
+  //       the last launch, or null) and start: resume all if the snapshot
+  //       allows it, else start.
+  //   { type: 'navigate', request, target }
+  //       A request from the player's controls: `continue`, `previous`,
+  //       `choice` (with `target`), `suspendAll`, `exitAll`, `resumeAll`. A
+  //       running lesson is ended first (its frame goes, so its own handlers
+  //       can terminate) and the request travels with its termination.
+  //   { type: 'launch', standard: 'scorm2004', activityId, url, title, runtime }
+  //       Open the activity the engine delivered, with the host's
+  //       initialisation data. Any other activity is refused.
+  //   { type: 'end' }
+  //       The player is closing: suspend all (unless the session is over),
+  //       report, then `closed`.
+  //
+  // Wrapper -> host, after every navigation (a lesson's own termination, a
+  // host request, the start):
+  //   { type: 'sequencing-state', snapshot, root: { completion_status } }
+  //   { type: 'navigation', current, continue, previous, hidden, active, tree }
+  //       Controls the player draws: enabled from the engine's preview of the
+  //       request, hidden as the delivered activity's hideLMSUI says. `tree`
+  //       is the activity tree as plain data for the table of contents.
+  //   then one of:
+  //   { type: 'delivered', activityId, resumed }
+  //   { type: 'undelivered' }                 nothing delivered: the learner chooses
+  //   { type: 'session-ended', reason }       suspended, exited or finished
+  // plus `commit` and `ended` for each lesson session as for SCORM 1.2, and
+  // `closed` once `end` has been handled.
+
+  var pkg = null;
+  var NAVIGATION_REQUESTS = { continue: 1, previous: 1, choice: 1, suspendAll: 1, exitAll: 1, resumeAll: 1, start: 1 };
+
+  function createPackage(Runtime, settings, interval) {
+    var p = {
+      api: null,
+      settings: settings,
+      interval: interval,
+      lesson: null,
+      delivered: null,
+      expecting: null,
+      over: null,
+      validity: null,
+      controlsTimer: null,
+      closing: false,
+    };
+    p.api = new Runtime({
+      lmsCommitUrl: 'host:',
+      httpService: {
+        processHttpRequest: function (_url, payload, _immediate, _log, _notify, metadata) {
+          if (p.lesson) received(p.lesson, payload, Boolean(metadata && metadata.isTerminateCommit));
+          return { result: 'true', errorCode: 0 };
+        },
+        updateSettings: function () {},
+      },
+      logLevel: 5,
+      sequencing: {
+        activityTree: settings.activityTree,
+        logLevel: 'error',
+        eventListeners: {
+          onActivityDelivery: function (activity) {
+            p.delivered = { id: String(activity.id), resumed: Boolean(activity.deliveryWasResumed) };
+            p.over = null;
+          },
+          onNavigationValidityUpdate: function (validity) {
+            p.validity = validity;
+          },
+          onSequencingSessionEnd: function (event) {
+            p.over = (event && event.reason) || 'ended';
+          },
+        },
+      },
+    });
+    return p;
+  }
+
+  function sequence(message) {
+    var entry = RUNTIMES[message.standard];
+    if (!entry || !entry.sequenced) return tell({ type: 'refused', reason: 'unsupported-standard' });
+    var settings = message.settings && typeof message.settings === 'object' ? message.settings : {};
+    var interval = Number(message.commitIntervalMs) > 0 ? Number(message.commitIntervalMs) : DEFAULT_COMMIT_INTERVAL_MS;
+    withRuntime(entry, function (Runtime) {
+      pkg = restore(Runtime, settings, interval, typeof message.snapshot === 'string' ? message.snapshot : '');
+      pkg.Runtime = Runtime;
+      report();
+    });
+  }
+
+  // A package API with the engine's state restored, started or resumed.
+  // A snapshot taken without suspend all accepts neither start nor resume
+  // all; suspending it first recovers the attempt.
+  function restore(Runtime, settings, interval, snapshot) {
+    var p = createPackage(Runtime, settings, interval);
+    var api = p.api;
+    var restored = false;
+    if (snapshot) {
+      try {
+        restored = api.deserializeSequencingState(snapshot) === true;
+      } catch (_) {}
+    }
+    var resumed = restored && (api.processNavigationRequest('resumeAll')
+      || (api.processNavigationRequest('suspendAll') && api.processNavigationRequest('resumeAll')));
+    if (!resumed) {
+      p.over = null;
+      api.processNavigationRequest('start');
+    }
+    return p;
+  }
+
+  function launchDelivered(message) {
+    if (!pkg || pkg.expecting === null || String(message.activityId) !== pkg.expecting) {
+      return tell({ type: 'refused', reason: 'not-delivered' });
+    }
+    if (!insideLaunch(message.url)) return tell({ type: 'refused', reason: 'outside-launch' });
+    pkg.expecting = null;
+    var api = pkg.api;
+    api.reset(undefined, { preserveListeners: true, resetTotalTime: true });
+    // Prior state goes in before the lesson exists: the runtime refuses it
+    // after initialise.
+    try {
+      api.loadFromJSON(message.runtime);
+    } catch (_) {}
+    var s = {
+      activityId: String(message.activityId),
+      apiName: RUNTIMES.scorm2004.apiName,
+      interval: pkg.interval,
+      pending: null,
+      pendingEnded: false,
+      timer: null,
+      finished: false,
+      closed: false,
+      ending: false,
+      frame: null,
+      runtime: null,
+    };
+    s.runtime = { facade: deliveryFacade(api, s) };
+    pkg.lesson = s;
+    window.API_1484_11 = s.runtime.facade;
+    var frame = document.createElement('iframe');
+    frame.id = 'lesson';
+    frame.title = typeof message.title === 'string' ? message.title : '';
+    frame.src = message.url;
+    s.frame = frame;
+    document.body.appendChild(frame);
+    tell(navigationState());
+  }
+
+  // The eight functions, bound to one delivered lesson. After that lesson
+  // terminated, or once the wrapper ended it, calls are refused with the
+  // standard's after-termination codes instead of reaching the next lesson's
+  // session.
+  function deliveryFacade(api, s) {
+    var refusal = null;
+    function live() {
+      return !s.finished && !s.closed;
+    }
+    function refuse(value, code) {
+      refusal = code;
+      return value;
+    }
+    function pass(value) {
+      refusal = null;
+      return value;
+    }
+    return {
+      Initialize: function (parameter) {
+        if (!live()) return refuse('false', '104');
+        var result = api.Initialize(parameter);
+        controlsSoon();
+        return pass(result);
+      },
+      Terminate: function (parameter) {
+        if (!live()) return refuse('false', '113');
+        var result = api.Terminate(parameter);
+        if (result === 'true') {
+          s.finished = true;
+          // The engine has navigated inside Terminate; the next lesson opens
+          // once the lesson's own call has returned.
+          setTimeout(function () {
+            if (pkg && pkg.lesson === s && !s.closed) {
+              endDelivery(s, null);
+              report();
+            }
+          }, 0);
+        }
+        return pass(result);
+      },
+      GetValue: function (element) {
+        if (!live()) return refuse('', '123');
+        var value = api.GetValue(element);
+        // The runtime leaves the previous call's error code in place for
+        // these two; a successful read sets 0.
+        if ((element === 'cmi.completion_status' || element === 'cmi.success_status') && api.isInitialized()) {
+          api.lastErrorCode = '0';
+        }
+        return pass(value);
+      },
+      SetValue: function (element, value) {
+        if (!live()) return refuse('false', '133');
+        var result = api.SetValue(element, value);
+        controlsSoon();
+        return pass(result);
+      },
+      Commit: function (parameter) {
+        if (!live()) return refuse('false', '143');
+        return pass(api.Commit(parameter));
+      },
+      GetLastError: function () {
+        return refusal || api.GetLastError();
+      },
+      GetErrorString: function (code) {
+        return api.GetErrorString(code);
+      },
+      GetDiagnostic: function (code) {
+        return api.GetDiagnostic(code);
+      },
+    };
+  }
+
+  // Ends a delivered lesson's session: `request` (a navigation request, or
+  // null) is set first so it travels with the termination, the frame goes
+  // (its own handlers may terminate), the wrapper terminates the session if
+  // the lesson did not, and the last state is sent before `ended`. Returns
+  // whether a termination carried `request`.
+  function endDelivery(s, request) {
+    var api = pkg.api;
+    var wasLive = !s.finished && api.isInitialized();
+    s.ending = true;
+    if (wasLive && request) {
+      try {
+        api.SetValue('adl.nav.request', request);
+      } catch (_) {}
+    }
+    if (s.frame.parentNode) s.frame.parentNode.removeChild(s.frame);
+    if (!s.finished) {
+      s.finished = true;
+      try {
+        if (api.isInitialized()) api.Terminate('');
+      } catch (_) {}
+    }
+    flush(s);
+    s.closed = true;
+    s.ending = false;
+    pkg.lesson = null;
+    try {
+      if (window.API_1484_11 === s.runtime.facade) delete window.API_1484_11;
+    } catch (_) {}
+    tell({ type: 'ended', activityId: s.activityId });
+    return wasLive && Boolean(request);
+  }
+
+  function navigate(message) {
+    if (!pkg || pkg.closing) return;
+    var request = String(message.request || '');
+    if (!NAVIGATION_REQUESTS[request]) return;
+    var target = typeof message.target === 'string' ? message.target : '';
+    if (request === 'choice' && !target) return;
+    // After suspend all or exit all the engine has ended its session; the
+    // next request runs on a fresh instance restored from its own snapshot.
+    if (pkg.over && (request === 'resumeAll' || request === 'start' || request === 'choice')) {
+      var snapshot = pkg.api.serializeSequencingState();
+      pkg = restoreFor(request, target, snapshot);
+      return report();
+    }
+    pkg.delivered = null;
+    var s = pkg.lesson;
+    var withTermination = request === 'choice' ? '{target=' + target + '}choice' : request;
+    var carried = s ? endDelivery(s, withTermination) : false;
+    if (!carried) pkg.api.processNavigationRequest(request, target || undefined);
+    report();
+  }
+
+  function restoreFor(request, target, snapshot) {
+    var p = createPackage(pkg.Runtime, pkg.settings, pkg.interval);
+    p.Runtime = pkg.Runtime;
+    var api = p.api;
+    try {
+      api.deserializeSequencingState(snapshot);
+    } catch (_) {}
+    if (request === 'choice') api.processNavigationRequest('choice', target);
+    else if (!api.processNavigationRequest(request)) api.processNavigationRequest('start');
+    return p;
+  }
+
+  function closePackage() {
+    if (!pkg || pkg.closing) return;
+    pkg.closing = true;
+    pkg.delivered = null;
+    var api = pkg.api;
+    var s = pkg.lesson;
+    var carried = s ? endDelivery(s, pkg.over ? null : 'suspendAll') : false;
+    if (!carried && !pkg.over && api.getSequencingState().currentActivity) {
+      api.processNavigationRequest('suspendAll');
+    }
+    sendState();
+    tell({ type: 'closed' });
+  }
+
+  function sendState() {
+    var api = pkg.api;
+    var root = api.getSequencingState().rootActivity;
+    var tracking = root ? api.getActivityTrackingData(root.id) : null;
+    var snapshot = api.serializeSequencingState();
+    tell({
+      type: 'sequencing-state',
+      snapshot: typeof snapshot === 'string' ? snapshot : JSON.stringify(snapshot),
+      root: { completion_status: tracking ? String(tracking.completionStatus) : 'unknown' },
+    });
+  }
+
+  function report() {
+    sendState();
+    tell(navigationState());
+    if (pkg.delivered) {
+      pkg.expecting = pkg.delivered.id;
+      tell({ type: 'delivered', activityId: pkg.delivered.id, resumed: pkg.delivered.resumed });
+      pkg.delivered = null;
+    } else if (pkg.over) {
+      tell({ type: 'session-ended', reason: String(pkg.over) });
+    } else {
+      tell({ type: 'undelivered' });
+    }
+  }
+
+  function controlsSoon() {
+    if (!pkg || pkg.controlsTimer) return;
+    pkg.controlsTimer = setTimeout(function () {
+      if (!pkg) return;
+      pkg.controlsTimer = null;
+      tell(navigationState());
+    }, 50);
+  }
+
+  // Continue and previous come from the engine's preview while a lesson is
+  // running (the runtime's own validity flags only say a request may be
+  // issued); otherwise, or when the preview cannot tell, from those flags.
+  function navigationState() {
+    var api = pkg.api;
+    var validity = pkg.validity || {};
+    var state = api.getSequencingState();
+    var current = state.currentActivity;
+    var running = pkg.lesson && !pkg.lesson.finished && api.isInitialized();
+    function allowed(request) {
+      if (pkg.over) return false;
+      if (running) {
+        var preview = api.previewNavigationRequest(request);
+        if (preview.outcome === 'allowed') return true;
+        if (preview.outcome === 'blocked') return false;
+      }
+      return validity[request] === true;
+    }
+    var choice = current ? validity.choice || {} : choicesFromRoot(api, state.rootActivity);
+    return {
+      type: 'navigation',
+      current: current ? String(current.id) : null,
+      continue: allowed('continue'),
+      previous: allowed('previous'),
+      hidden: (validity.hideLmsUi || []).map(String),
+      active: !pkg.over && Boolean(current),
+      tree: state.rootActivity ? plain(state.rootActivity, choice) : null,
+    };
+  }
+
+  // With no current activity (start delivered nothing) the runtime reports
+  // no choices at all: its look-ahead from the root is an empty stub. Ask the
+  // engine's own choice validation for each activity instead.
+  function choicesFromRoot(api, root) {
+    var choice = {};
+    var process = null;
+    try {
+      process = api.getSequencingService().sequencingProcess;
+    } catch (_) {}
+    (function walk(activity) {
+      if (!activity) return;
+      var valid = true;
+      try {
+        if (process) valid = process.validateNavigationRequest('choice', activity.id, null).valid === true;
+      } catch (_) {}
+      choice[activity.id] = valid ? 'true' : 'false';
+      (activity.children || []).forEach(walk);
+    })(root);
+    return choice;
+  }
+
+  // The engine's activity graph is live and cyclic; the player gets plain
+  // data.
+  function plain(activity, choice) {
+    return {
+      id: String(activity.id),
+      title: String(activity.title || ''),
+      visible: activity.isVisible !== false,
+      completion: String(activity.completionStatus || 'unknown'),
+      choosable: choice[activity.id] === 'true' || choice[activity.id] === true,
+      children: (activity.children || [])
+        .filter(function (child) {
+          return child.isAvailable !== false;
+        })
+        .map(function (child) {
+          return plain(child, choice);
+        }),
+    };
+  }
 
   tell({ type: 'ready' });
 })();

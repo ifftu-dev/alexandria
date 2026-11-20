@@ -1,8 +1,13 @@
 import type {
   Chapter, Course, Element, ElementProgress, Enrollment, OpenedPackageLaunch, Package, PackageActivity, PackageActivityResult,
-  PackageAttempt, PackageAttemptProgress, PackageCommit, PackageDescription, PackageLaunchInit,
+  PackageAttempt, PackageAttemptProgress, PackageCommit, PackageDescription, PackageLaunchInit, PackageSequencingState,
 } from '@/types'
 import description from './package-player/description.json'
+
+export interface PackageBackendOptions {
+  /** The package the course's element holds; the SCORM 1.2 fixture by default. */
+  description?: PackageDescription
+}
 
 /** The origin the package scheme answers at in these checks; the spec serves it with `page.route`. */
 export const PACKAGE_ORIGIN = 'http://scorm-package.test'
@@ -27,8 +32,9 @@ interface StoredActivity {
  * in miniature) so a test can launch, save, leave, come back and finish.
  * Every command is recorded; unknown ones answer an empty list or null.
  */
-export function packageBackend() {
-  const packageDescription = description as unknown as PackageDescription
+export function packageBackend(options: PackageBackendOptions = {}) {
+  const packageDescription = options.description ?? description as unknown as PackageDescription
+  const scorm2004 = packageDescription.standard === 'scorm2004'
   const course: Course = {
     id: 'course-safety', title: 'Workshop safety', kind: 'course', description: 'A packaged course', author_address: 'stake-instructor',
     author_name: 'Fixture instructor', content_cid: null, thumbnail_cid: null, thumbnail_svg: null, tags: null, skill_ids: [],
@@ -39,7 +45,7 @@ export function packageBackend() {
   const chapter: Chapter = { id: 'chapter-safety', course_id: course.id, title: 'The package', description: null, position: 0 }
   const element: Element = { id: ELEMENT, chapter_id: chapter.id, title: 'Workshop safety', element_type: 'package',
     content_cid: HASH, content_inline: null, position: 0, duration_seconds: null }
-  const stored: Package = { hash: HASH, standard: 'scorm12', title: packageDescription.title, description: packageDescription,
+  const stored: Package = { hash: HASH, standard: packageDescription.standard, title: packageDescription.title, description: packageDescription,
     archive_bytes: 4096, location: 'draft', imported_at: '2026-11-01T00:00:00Z', last_opened_at: null }
 
   const calls: { command: string, args: unknown }[] = []
@@ -48,6 +54,8 @@ export function packageBackend() {
   const attempts: PackageAttempt[] = []
   const state = new Map<string, Map<string, StoredActivity>>()
   const openLaunches = new Set<string>()
+  /** SCORM 2004: the engine state the wrapper handed over, per attempt, in order. */
+  const sequencing: PackageSequencingState[] = []
   let launches = 0
   const control = { failCommits: false }
 
@@ -82,9 +90,12 @@ export function packageBackend() {
 
   // SCORM 1.2 rollup: complete when every lesson is completed or passed (an
   // asset when launched); score the mean of the reported lesson scores.
+  // SCORM 2004: complete when the engine reports the root activity completed.
   function rollUp(attempt: PackageAttempt): PackageAttemptProgress {
     const activities = state.get(attempt.id)!
-    const complete = launchable().every(activity => activities.get(activity.id)?.complete)
+    const complete = scorm2004
+      ? sequencing.filter(saved => saved.attempt_id === attempt.id).slice(-1)[0]?.root.completion_status === 'completed'
+      : launchable().every(activity => activities.get(activity.id)?.complete)
     const scores = [...activities.values()].map(item => item.score).filter((score): score is number => score !== null)
     const score = scores.length ? scores.reduce((sum, value) => sum + value, 0) / scores.length : null
     if (complete && attempt.status === 'in_progress') {
@@ -105,7 +116,33 @@ export function packageBackend() {
     return attempt
   }
 
-  function initialise(attemptId: unknown, activityId: unknown): PackageLaunchInit {
+  // SCORM 2004: a lesson's stored data comes back only when it is resumed
+  // (it exited with suspend, or the engine resumed it); otherwise the launch
+  // is a new attempt on the lesson.
+  function initialise2004(attempt: PackageAttempt, activity: PackageActivity, resumed: boolean): PackageLaunchInit {
+    const launch = activity.launch!
+    const prior = state.get(attempt.id)!.get(activity.id)
+    const resume = Boolean(prior) && (resumed || prior?.cmi.exit === 'suspend')
+    const entry = resume ? 'resume' : 'ab-initio'
+    const cmi: Cmi = {
+      ...(resume ? structuredClone(prior!.cmi) : {}),
+      learner_id: LEARNER_ID, learner_name: 'Ada Learner', entry, credit: 'credit', mode: 'normal',
+      ...(launch.launch_data ? { launch_data: launch.launch_data } : {}),
+      ...(launch.mastery_score !== undefined ? { scaled_passing_score: String(launch.mastery_score) } : {}),
+    }
+    delete cmi.session_time
+    delete cmi.exit
+    return { attempt_id: attempt.id, activity_id: activity.id, standard: 'scorm2004', learner_id: LEARNER_ID, learner_name: 'Ada Learner',
+      entry, launch_data: launch.launch_data ?? null, mastery_score: launch.mastery_score ?? null, max_time_allowed: null,
+      time_limit_action: null, runtime: { cmi }, progress: null }
+  }
+
+  function initialise(attemptId: unknown, activityId: unknown, resumed = false): PackageLaunchInit {
+    if (scorm2004) {
+      const activity = launchable().find(item => item.id === activityId)
+      if (!activity?.launch) throw new Error(`not_found: activity ${String(activityId)}`)
+      return initialise2004(attemptById(attemptId), activity, resumed)
+    }
     const attempt = attemptById(attemptId)
     const activity = launchable().find(item => item.id === activityId)
     if (!activity?.launch) throw new Error(`not_found: activity ${String(activityId)}`)
@@ -137,6 +174,15 @@ export function packageBackend() {
     if (attempt.status === 'closed') throw new Error(`attempt_closed: ${attempt.id}`)
     commits.push(structuredClone(request))
     const cmi = request.runtime.cmi as Cmi
+    if (scorm2004) {
+      const scaled = (cmi.score as { scaled?: string } | undefined)?.scaled
+      state.get(attempt.id)!.set(request.activity_id, {
+        cmi: structuredClone(cmi),
+        complete: cmi.completion_status === 'completed',
+        score: scaled ? Math.max(0, Number(scaled)) : null,
+      })
+      return rollUp(attempt)
+    }
     const core = cmi.core ?? {}
     const status = String(core.lesson_status ?? '')
     const raw = (core.score as { raw?: string } | undefined)?.raw
@@ -145,6 +191,14 @@ export function packageBackend() {
       complete: status === 'completed' || status === 'passed',
       score: raw ? Number(raw) / 100 : null,
     })
+    return rollUp(attempt)
+  }
+
+  function saveSequencing(request: PackageSequencingState): PackageAttemptProgress {
+    if (control.failCommits) throw new Error('database: disk I/O error')
+    const attempt = attemptById(request.attempt_id)
+    if (attempt.status === 'closed') throw new Error(`attempt_closed: ${attempt.id}`)
+    sequencing.push(structuredClone(request))
     return rollUp(attempt)
   }
 
@@ -194,8 +248,13 @@ export function packageBackend() {
           return { activity_id: activity.id, started: Boolean(item), complete: item?.complete ?? false, score: item?.score ?? null }
         })
       }
-      case 'package_attempt_initialise': return initialise(args.attemptId, args.activityId)
+      case 'package_attempt_initialise': return initialise(args.attemptId, args.activityId, args.resumed === true)
       case 'package_attempt_commit': return commit(args.commit as PackageCommit)
+      case 'package_attempt_sequencing': {
+        const id = attemptById(args.attemptId).id
+        return sequencing.filter(saved => saved.attempt_id === id).slice(-1)[0]?.snapshot ?? null
+      }
+      case 'package_attempt_sequencing_save': return saveSequencing(args.sequencing as PackageSequencingState)
       case 'package_attempt_terminate': return rollUp(attemptById(args.attemptId))
       default:
         if (command.startsWith('list_') || command.endsWith('_list')) return []
@@ -203,5 +262,5 @@ export function packageBackend() {
     }
   }
 
-  return { invoke, calls, commits, control, openLaunches, called: (command: string) => calls.filter(call => call.command === command) }
+  return { invoke, calls, commits, sequencing, control, openLaunches, called: (command: string) => calls.filter(call => call.command === command) }
 }
