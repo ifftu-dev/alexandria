@@ -59,6 +59,15 @@ test("desktop UI fixtures and browser configuration run frontend gates", () => {
   }
 })
 
+test("the vendored SCORM runtime runs the browser checks as well as backend gates", () => {
+  assert.deepEqual(classifyChangedFiles(["src-tauri/resources/scorm-again/scorm12.min.js"]), {
+    backend: true,
+    frontend: true,
+    security: true,
+    release: false,
+  })
+})
+
 test("future committee world and core packages run backend gates", () => {
   for (const path of [
     "committee/runtime/src/main.rs",

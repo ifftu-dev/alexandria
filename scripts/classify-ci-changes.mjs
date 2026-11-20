@@ -11,7 +11,12 @@ const BACKEND_PREFIXES = [
 ]
 
 const BACKEND_FILES = new Set([".gitattributes", "Cargo.lock", "Cargo.toml"])
-const FRONTEND_PREFIXES = ["src/", "tests/desktop-ui/"]
+const FRONTEND_PREFIXES = [
+  "src/",
+  "tests/desktop-ui/",
+  // The vendored SCORM runtime is exercised by the browser checks.
+  "src-tauri/resources/scorm-again/",
+]
 const FRONTEND_FILES = new Set([
   "index.html",
   "package-lock.json",

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Fake host for the SCORM runtime check</title>
+  </head>
+  <body>
+    <iframe id="package" title="Package"></iframe>
+    <script>
+      // Stands in for the app. It sits at a different origin from the package,
+      // launches the wrapper, answers its request for launch data and keeps
+      // every state message the wrapper sends for the test to read.
+      var config = JSON.parse(decodeURIComponent(location.hash.slice(1)))
+      window.received = []
+      window.addEventListener('message', function (event) {
+        if (event.origin !== config.packageOrigin) return
+        if (event.data.type === 'ready') {
+          event.source.postMessage({ type: 'launch', entry: config.launch.entry, cmi: config.launch.cmi }, event.origin)
+        } else if (event.data.type === 'state') {
+          window.received.push({ reason: event.data.reason, cmi: event.data.cmi })
+        }
+      })
+      document.getElementById('package').src = config.wrapper
+    </script>
+  </body>
+</html>
