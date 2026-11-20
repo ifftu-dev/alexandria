@@ -35,12 +35,12 @@ import { announceCredentialsChanged } from '@/composables/credentialEvents'
 import { AppButton } from '@/components/ui'
 import TrustProfileNotice from '@/components/integrity/TrustProfileNotice.vue'
 import PluginHost from '@/components/plugin/PluginHost.vue'
-import { needsVerifiedDevice, verifiedDeviceRefusal, verifiedPhones, type VerifiedPhones } from '@/utils/verifiedDevice'
+import { needsVerifiedDevice } from '@/utils/verifiedDevice'
+import { useVerifiedDevice } from '@/composables/useVerifiedDevice'
 import { hostedAttemptError, isDisconnected, isGone } from '@/utils/hostedAttempt'
 import { secondDeviceNote } from '@/utils/sentinel/secondDevice'
 import { errorMessage } from '@/utils/errorMessage'
 import type {
-  DeviceSupport,
   Element,
   HostedAttemptState,
   HostedItem,
@@ -81,8 +81,6 @@ const resumedAfterDrop = ref(false)
 const outcome = ref<HostedOutcome | null>(null)
 const checkingAgain = ref(false)
 const floorBlocked = ref<DeepReadonly<SelectedProfile> | null>(null)
-const deviceSupport = ref<DeviceSupport | null>(null)
-const deviceRefused = ref<VerifiedPhones | null>(null)
 
 let shownAt = 0
 let clock: ReturnType<typeof setInterval> | null = null
@@ -107,10 +105,12 @@ const verifiedDeviceRequired = computed(() =>
   terms.value?.terms.device_requirement === 'device_attested'
   || needsVerifiedDevice(target.value?.issuance_policy?.required_assurance_level),
 )
-const phones = computed<VerifiedPhones>(() => deviceRefused.value ?? verifiedPhones(deviceSupport.value))
-const verifiedDeviceBlocked = computed(() =>
-  verifiedDeviceRequired.value && (deviceRefused.value !== null || deviceSupport.value?.verified_device === false),
-)
+const {
+  phones,
+  blocked: verifiedDeviceBlocked,
+  detect: detectDeviceSupport,
+  refuse: refuseOnDevice,
+} = useVerifiedDevice(verifiedDeviceRequired)
 const resuming = computed(() => !!terms.value?.open_attempt)
 const canStart = computed(() =>
   !!terms.value
@@ -204,14 +204,6 @@ function show(state: HostedAttemptState) {
   })
 }
 
-async function detectDeviceSupport(): Promise<void> {
-  try {
-    deviceSupport.value = await invoke<DeviceSupport>('integrity_device_support')
-  } catch {
-    /* unknown: nothing is claimed; the backend still refuses */
-  }
-}
-
 onMounted(async () => {
   try {
     // The request is verified against the organisation's domain and stored
@@ -261,9 +253,7 @@ async function start() {
     show(state)
   } catch (e) {
     await stopMonitoring()
-    const refused = verifiedDeviceRefusal(e)
-    if (refused) {
-      deviceRefused.value = refused
+    if (refuseOnDevice(e)) {
       phase.value = 'consent'
     } else if (hostedAttemptError(e)?.code === 'consent_required') {
       // The terms changed since they were read: read them again.
