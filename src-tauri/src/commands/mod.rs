@@ -59,6 +59,7 @@ pub mod plugins;
 pub mod presentation;
 pub mod probes;
 pub mod profile;
+pub mod record_destinations;
 pub mod reputation;
 pub mod role_assessment;
 pub mod sentinel_display;
