@@ -71,10 +71,15 @@ var unit = (function () {
       category.push({ id: 'https://w3id.org/xapi/cmi5/context/categories/moveon' });
     }
     activities.category = (activities.category || []).concat(category);
+    var extensions = JSON.parse(JSON.stringify(template.extensions || {}));
+    // A scored judgement names the mastery score it was judged against.
+    if (result && result.score && launchData && launchData.masteryScore !== undefined) {
+      extensions['https://w3id.org/xapi/cmi5/context/extensions/masteryscore'] = launchData.masteryScore;
+    }
     var context = {
       registration: registration,
       contextActivities: activities,
-      extensions: template.extensions || {},
+      extensions: extensions,
     };
     var out = {
       id: uuid(),
