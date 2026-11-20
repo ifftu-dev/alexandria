@@ -46,6 +46,10 @@ function catalog(loc) {
 // Key prefixes shipped English-only for now. Each needs a reason and an owner
 // in the comment, so "temporary" stays visible.
 const PENDING_TRANSLATION = [
+  // Hosted attempts (assessment hardening ticket 10): English-only until the
+  // next learner translation pass; renders via the i18n fallback.
+  'learn.hosted',
+  'organisations.requests.assessment.assessHosted',
   // Sentinel probes after an attempt (trust profiles ticket 07): English-only
   // until the next learner translation pass; renders via the i18n fallback.
   'learn.assessment.probe',
