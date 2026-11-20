@@ -6,7 +6,7 @@
 // dispatch path is identical for built-ins and community plugins.
 
 import type { Component } from 'vue'
-import type { Element, QuizResult } from '@/types'
+import type { Element, ElementProgress, QuizResult } from '@/types'
 import VideoPlayer from '@/components/course/VideoPlayer.vue'
 import TextContent from '@/components/course/TextContent.vue'
 import PdfViewer from '@/components/course/PdfViewer.vue'
@@ -17,6 +17,7 @@ import DownloadableElement from '@/components/course/DownloadableElement.vue'
 import InteractivePlaceholder from '@/components/course/InteractivePlaceholder.vue'
 import UnknownElement from '@/components/course/UnknownElement.vue'
 import PluginHost from '@/components/plugin/PluginHost.vue'
+import PackagePlayer from '@/components/course/package/PackagePlayer.vue'
 
 // Context the Player provides to every dispatched element binding. Bindings
 // pull whatever they need out of this; the host owns all stateful concerns
@@ -42,6 +43,14 @@ export interface ElementHostContext {
   onComplete: () => void
   onScoredComplete: (score: number) => void
   onQuizComplete: (result: QuizResult) => void
+  /** A package element's progress, written by the host from the package's
+   *  own (self-reported) result. */
+  onPackageProgress: (progress: ElementProgress) => void
+  /** The element's stored progress, if any. */
+  progress: ElementProgress | null
+  /** Who published the course, shown on the package label; `null` for a
+   *  package file the learner opened on this device. */
+  publisher: string | null
   elementTypeLabel: (type: string) => string
 }
 
@@ -186,6 +195,19 @@ const builtinRegistry = new Map<string, ElementBinding>([
       complete: onComplete,
       'scored-complete': onScoredComplete as (...args: never[]) => void,
     }),
+  }],
+  // A standards package (SCORM) in the package player. Its result is the
+  // package's own report: the host writes element progress and the player
+  // passes it up; it never grades and never completes through onComplete.
+  ['package', {
+    component: PackagePlayer,
+    props: ({ element, enrollmentId, publisher, progress }) => ({
+      element,
+      enrollmentId,
+      publisher,
+      progress,
+    }),
+    events: ({ onPackageProgress }) => ({ progress: onPackageProgress as (...args: never[]) => void }),
   }],
 ])
 

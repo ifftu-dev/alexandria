@@ -68,6 +68,24 @@ test("the vendored SCORM runtime runs the browser checks as well as backend gate
   })
 })
 
+test("the package wrapper and bootstrap run the browser checks as well as backend gates", () => {
+  assert.deepEqual(classifyChangedFiles(["src-tauri/src/package_serving/wrapper.js"]), {
+    backend: true,
+    frontend: true,
+    security: true,
+    release: false,
+  })
+})
+
+test("the player's fixture package runs the backend test that pins its description", () => {
+  assert.deepEqual(classifyChangedFiles(["tests/desktop-ui/package-player/package/quiz/index.html"]), {
+    backend: true,
+    frontend: true,
+    security: true,
+    release: false,
+  })
+})
+
 test("future committee world and core packages run backend gates", () => {
   for (const path of [
     "committee/runtime/src/main.rs",

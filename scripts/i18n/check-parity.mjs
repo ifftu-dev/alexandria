@@ -116,6 +116,12 @@ const PENDING_TRANSLATION = [
   'interviews.',
   'tutoring.captions.',
   'nav.primary.interviews',
+  // The package player (learning standards ticket 06): label, table of
+  // contents, self-reported result, blocked-capability notices. English-only
+  // until the next learner translation pass; the label's safety wording is
+  // worth prioritising there.
+  'learn.package.',
+  'learn.player.elementType.package',
   // Not-found page for stale deep links, added when retired route redirects
   // were deleted. English-only pending a translate pass; renders in English
   // via the i18n fallback.

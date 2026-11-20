@@ -6,7 +6,7 @@
 use crate::credentials::Issuer;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::package_attempt::{
-    PackageAttempt, PackageAttemptProgress, PackageCommit, PackageLaunchInit,
+    PackageActivityResult, PackageAttempt, PackageAttemptProgress, PackageCommit, PackageLaunchInit,
 };
 use crate::packages::{attempts, ExecutorDb, PackageDirs};
 use crate::profile::scope::ProfileState as State;
@@ -71,6 +71,18 @@ pub async fn package_attempt_commit(
     commit: PackageCommit,
 ) -> Result<PackageAttemptProgress, String> {
     attempts::commit(&db(&state), commit)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// What every lesson of an attempt has reported: the player's table of
+/// contents.
+#[tauri::command]
+pub async fn package_attempt_activities(
+    state: State<'_, AppState>,
+    attempt_id: String,
+) -> Result<Vec<PackageActivityResult>, String> {
+    attempts::activities(&db(&state), &attempt_id)
         .await
         .map_err(|e| e.to_string())
 }
