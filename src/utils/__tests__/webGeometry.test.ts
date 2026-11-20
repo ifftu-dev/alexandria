@@ -5,7 +5,7 @@ import type { SkillGraphEdge, SkillInfo } from '@/types'
 import { buildSkillAtlas } from '@/utils/skillAtlas'
 import {
   WEB_MIN_DISTANCE, WEB_SIDEBAR_NODE_LIMIT, continueWebLayout, webDotRadius, webLayout, webNearestInDirection, webNearestTo, webSidebarSubset,
-  webGraphFromAtlas, webNamePlaces, webNarrowedIds,
+  webGraphFromAtlas, webLayoutEntry, webNamePlaces, webNarrowedIds,
   type WebGraph,
 } from '../webGeometry'
 
@@ -133,13 +133,14 @@ describe('Web graph from the atlas model', () => {
     skill_id: skillId, skill_name: skillId, skill_bloom: 'apply',
     prerequisite_id: prerequisiteId, prerequisite_name: prerequisiteId, prerequisite_bloom: 'apply',
   })
-  const model = buildSkillAtlas({
+  const input = {
     skills: [skill('m1', 'math'), skill('m2', 'math'), skill('d1', 'data'), skill('u1', null)],
     edges: [edge('m2', 'm1'), edge('d1', 'm1'), edge('u1', 'unloaded')],
     relations: [{ skill_id: 'm2', related_skill_id: 'd1', relation_type: 'related' }, { skill_id: 'u1', related_skill_id: 'unloaded', relation_type: 'alternative' }],
     activeCredentials: [], subjectDid: 'did:me',
     subjectFields: [{ id: 'math', name: 'Mathematics', atlas_slot: 3 }, { id: 'data', name: 'Data', atlas_slot: 0 }],
-  })
+  }
+  const model = buildSkillAtlas(input)
 
   it('carries every skill with its field slot, and the prerequisites and relations between loaded skills, each relation once', () => {
     expect(webGraphFromAtlas(model)).toEqual({
@@ -147,6 +148,17 @@ describe('Web graph from the atlas model', () => {
       prerequisites: [{ skill: 'm2', prerequisite: 'm1' }, { skill: 'd1', prerequisite: 'm1' }],
       relations: [['d1', 'm2']],
     })
+  })
+
+  it('computes the graph and layout once per model, and a new model of the same graph reuses them', () => {
+    const entry = webLayoutEntry(model)
+    expect(webLayoutEntry(model)).toBe(entry)
+    expect(entry.graph).toEqual(webGraphFromAtlas(model))
+    expect(entry.layout).toEqual(webLayout(entry.graph))
+    // A credential refresh builds a new model of the same graph.
+    const refreshed = buildSkillAtlas({ ...input, activeCredentials: [] })
+    expect(refreshed).not.toBe(model)
+    expect(webLayoutEntry(refreshed).layout).toBe(entry.layout)
   })
 })
 

@@ -40,7 +40,7 @@ import { useI18n } from 'vue-i18n'
 import type { AtlasModel } from '@/utils/skillAtlas'
 import type { AtlasCamera } from '@/utils/skillAtlasView'
 import { createAtlasPresenter } from './atlasPresentation'
-import { WEB_NAME_GAP, WEB_NAME_SIDE_GAP, type WebPoint } from '@/utils/webGeometry'
+import { WEB_NAME_GAP, WEB_NAME_SIDE_GAP, webLayoutEntry, type WebPoint } from '@/utils/webGeometry'
 import { useWebGraph, WEB_NAMES_ZOOM, type WebDot } from './useWebGraph'
 import WebGraphDot from './WebGraphDot.vue'
 import WebGraphLines from './WebGraphLines.vue'
@@ -75,7 +75,7 @@ const root = ref<HTMLElement>()
 /** The hovered or keyboard-focused dot, whose name the compact graph places first. */
 const activeId = ref<string | null>(null)
 const web = useWebGraph(() => ({
-  model: props.model, positions: props.positions, selectedId: props.selectedId, focusIds: props.focusIds, matchIds: props.matchIds,
+  model: props.model, graph: webLayoutEntry(props.model).graph, positions: props.positions, selectedId: props.selectedId, focusIds: props.focusIds, matchIds: props.matchIds,
   shownIds: props.shownIds, fitIds: props.fitIds, narrowed: props.narrowed, names: props.names, arrows: props.arrows, related: props.related,
   camera: props.camera, compact: props.compact, reducedMotion: props.reducedMotion,
 }), {
@@ -117,7 +117,6 @@ const accessibleNames = computed(() => {
   void locale.value
   return new Map(props.model.nodes.map(node => [node.skill.id, present.accessibleName(node)]))
 })
-defineExpose({ focus: web.focus, zoomBy: web.zoomBy, panBy: web.panBy })
 </script>
 
 <template>

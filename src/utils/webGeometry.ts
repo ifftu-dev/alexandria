@@ -1,3 +1,4 @@
+import { markRaw } from 'vue'
 import { compareIds, type AtlasModel, type BloomRank } from '@/utils/skillAtlas'
 import type { AtlasDepth } from '@/utils/skillAtlasView'
 
@@ -386,6 +387,28 @@ export function webLayout(graph: WebGraph): Map<string, WebPoint> {
   return positionsOf(sim)
 }
 
+/** The Web graph of a model with its resting layout, under a key that names the graph alone. */
+export interface WebLayoutEntry { key: string; graph: WebGraph; layout: ReadonlyMap<string, WebPoint> }
+const webEntries = new WeakMap<AtlasModel, WebLayoutEntry>()
+let lastWebEntry: WebLayoutEntry | null = null
+/**
+ * The Web layout depends only on the graph, and a credential refresh loads a
+ * new model of the same graph, so the graph and layout are computed once
+ * per model and the layout is memoised per graph: a model
+ * whose skills, slots, prerequisites and relations match the last one reuses
+ * its layout.
+ */
+export function webLayoutEntry(atlas: AtlasModel): WebLayoutEntry {
+  const known = webEntries.get(atlas)
+  if (known) return known
+  const graph = webGraphFromAtlas(atlas)
+  const key = JSON.stringify([graph.nodes.map(node => [node.id, node.slot]),
+    graph.prerequisites.map(link => [link.skill, link.prerequisite]), graph.relations])
+  const entry = lastWebEntry?.key === key ? lastWebEntry : { key, graph, layout: markRaw(webLayout(graph)) }
+  lastWebEntry = entry
+  webEntries.set(atlas, entry)
+  return entry
+}
 /** Ticks and strength of one call of `continueWebLayout`: one animation frame of a live drag. */
 export const WEB_LIVE_TICKS = 1
 export const WEB_LIVE_ALPHA = 0.3

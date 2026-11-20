@@ -3,7 +3,7 @@ import { motionDuration, useMotion } from '@/composables/useMotion'
 import { compareIds, type AtlasModel, type AtlasNode } from '@/utils/skillAtlas'
 import type { AtlasCamera } from '@/utils/skillAtlasView'
 import { atlasFieldColor } from './atlasPresentation'
-import { continueWebLayout, webDotRadius, webGraphFromAtlas, webNamePlaces, webNearestInDirection, webNearestTo, type WebDirection, type WebNamePlace, type WebPoint } from '@/utils/webGeometry'
+import { continueWebLayout, webDotRadius, webNamePlaces, webNearestInDirection, webNearestTo, type WebDirection, type WebGraph, type WebNamePlace, type WebPoint } from '@/utils/webGeometry'
 
 // Camera and drawing constants. Positions and dot radii are layout units; the
 // camera's zoom is screen pixels per layout unit. Lines, arrowheads and names
@@ -76,6 +76,8 @@ export interface WebDot {
 /** What a Web graph draws and how; the component's props, read through a getter so the composable sees changes. */
 export interface WebGraphInput {
   model: AtlasModel
+  /** The model's Web graph, computed once per model by its owner (`webLayoutEntry`). */
+  graph: WebGraph
   positions: ReadonlyMap<string, WebPoint>
   selectedId: string | null
   /** An explicit neighbourhood (the inspector's prerequisite or dependent focus) lit in place of the selection's. */
@@ -97,7 +99,8 @@ export interface WebGraphInput {
 
 export interface WebGraphEvents {
   select: (id: string | null) => void
-  active: (id: string | null) => void
+  /** The hovered or keyboard-focused dot, for owners that follow it. */
+  active?: (id: string | null) => void
   camera: (camera: AtlasCamera) => void
   drag: (positions: ReadonlyMap<string, WebPoint>) => void
 }
@@ -129,7 +132,7 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
   const { reduced: systemReduced } = useMotion()
   const motionReduced = computed(() => input().reducedMotion || systemReduced.value)
   const model = computed(() => input().model)
-  const graph = computed(() => webGraphFromAtlas(model.value))
+  const graph = computed(() => input().graph)
 
   // Size: measured from the root, with a default until then. The root may
   // come and go (the explorer draws its map only in some views), so it is
@@ -200,7 +203,7 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
   const keyboardFocus = ref(false)
   let pressing = false
   const transientId = computed(() => hoverId.value ?? (keyboardFocus.value ? focusedId.value : null))
-  watch(transientId, id => events.active(id))
+  watch(transientId, id => events.active?.(id))
   /** A shown skill and the shown skills one step away: prerequisites, dependents and, with Related on, relations. */
   function neighbourhood(id: string): Set<string> {
     const ids = new Set<string>()

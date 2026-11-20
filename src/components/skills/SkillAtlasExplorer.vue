@@ -9,7 +9,7 @@ import AtlasNodeLayer from './AtlasNodeLayer.vue'
 import { useWebGraph, WEB_MAX_ZOOM, WEB_MIN_ZOOM, WEB_ZOOM_STEP, type WebDot } from './useWebGraph'
 import WebGraphDot from './WebGraphDot.vue'
 import WebGraphLines from './WebGraphLines.vue'
-import { webGraphFromAtlas, webLayout, webNarrowedIds, type WebPoint } from '@/utils/webGeometry'
+import { webLayoutEntry, webNarrowedIds, type WebPoint } from '@/utils/webGeometry'
 import { animateMotion, motionDuration, useMotion } from '@/composables/useMotion'
 import type { SkillGraphView } from '@/composables/useSkillGraphView'
 import { BLOOM_ORDER } from '@/utils/bloom'
@@ -120,15 +120,14 @@ const simpleGeometry = computed(() => simpleLayout(props.model, width.value))
 // other views never pay for its layout or emphasis.
 const EMPTY_POSITIONS: ReadonlyMap<string, WebPoint> = new Map()
 /** The explorer's own layout and drags, used when the owner passes no positions. */
-const ownWebLayout = computed(() => webLayout(webGraphFromAtlas(props.model)))
+const webEntry = computed(() => webLayoutEntry(props.model))
 const ownWebDragged = shallowRef<{ model: AtlasModel; positions: ReadonlyMap<string, WebPoint> } | null>(null)
 const webPositions = computed(() => props.webPositions ??
-  (ownWebDragged.value?.model === props.model ? ownWebDragged.value.positions : ownWebLayout.value))
-const webGraphData = computed(() => webGraphFromAtlas(props.model))
+  (ownWebDragged.value?.model === props.model ? ownWebDragged.value.positions : webEntry.value.layout))
 /** Narrowed to the selection: only skills within the chosen steps show. */
 const webNarrowed = computed(() => webMode.value && props.view.webNarrowed && selectedId.value !== null && nodesById.value.has(selectedId.value))
 const webShownIds = computed(() => webNarrowed.value
-  ? webNarrowedIds(webGraphData.value, selectedId.value!, neighborhoodDepth.value, props.view.webRelated) : null)
+  ? webNarrowedIds(webEntry.value.graph, selectedId.value!, neighborhoodDepth.value, props.view.webRelated) : null)
 /** Skills in the focused field. */
 const fieldIds = computed(() => fieldFocused.value
   ? new Set(props.model.nodes.filter(node => node.fieldId === focusedFieldId.value).map(node => node.skill.id)) : null)
@@ -350,6 +349,7 @@ const matchIds = computed(() => new Set(matches.value.map(node => node.skill.id)
 const mapElement = ref<HTMLElement>()
 const webGraph = useWebGraph(() => ({
   model: props.model,
+  graph: webEntry.value.graph,
   positions: webMode.value ? webPositions.value : EMPTY_POSITIONS,
   selectedId: webMode.value ? selectedId.value : null,
   // The inspector's focus lights its neighbourhood; narrowed, everything shown is lit, so no shown name fades.
@@ -362,7 +362,6 @@ const webGraph = useWebGraph(() => ({
   camera: props.view.webCamera, compact: false, reducedMotion: props.reducedMotion === true,
 }), {
   select: skillId => { if (skillId) select(skillId); else clearWebSelection() },
-  active: () => {},
   camera: webCameraMoved,
   drag: positions => {
     if (!props.webPositions) ownWebDragged.value = { model: props.model, positions }
