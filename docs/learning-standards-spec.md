@@ -158,6 +158,8 @@ New terms, to be added to the glossary when the work starts.
 
 SCORM conformance is self-declared by design of the standard. The claim wording is "conformant, self-tested", never "certified".
 
+The recorded claims, their evidence and known gaps: [learning-standards-conformance.md](learning-standards-conformance.md).
+
 ### Package storage and import
 
 - A package is stored as a single archive in the content store and addressed by its hash, like any other element content. A package element in a course document carries that hash. The course document format version does not change: the element type is a new value, and nodes that do not know it show the existing unknown-element notice.
