@@ -254,4 +254,51 @@ describe('Web graph', () => {
     expect(dragged(wrapper).length).toBe(settled)
     expect(dragged(wrapper).at(-1)!.get('b')).toEqual({ x: 200, y: 0 })
   })
+
+  it('pans by dragging the background, zooms with the wheel about the pointer, and pinches on touch', async () => {
+    const wrapper = setup()
+    const canvas = wrapper.get('[role="group"]').element
+    await pointer(canvas, 'pointerdown', 100, 100)
+    await pointer(canvas, 'pointermove', 140, 80)
+    await pointer(canvas, 'pointerup', 140, 80)
+    expect(wrapper.props('camera')).toEqual({ x: 10, y: 70, zoom: 1 })
+    expect(wrapper.emitted('drag')).toBeUndefined()
+    // In the full graph a plain wheel scrolls the page; a pinch on a trackpad (ctrl + wheel) zooms.
+    const wheel = (options: WheelEventInit) => { const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 400, clientY: 260, ...options }); canvas.dispatchEvent(event); return event }
+    expect(wheel({ deltaY: -100 }).defaultPrevented).toBe(false)
+    expect(wheel({ deltaY: -100, ctrlKey: true }).defaultPrevented).toBe(true)
+    await nextTick()
+    const zoomed = wrapper.props('camera') as AtlasCamera
+    expect(zoomed.zoom).toBeGreaterThan(1)
+    // The point under the pointer (the centre) stays put.
+    expect(zoomed.x).toBeCloseTo(10)
+    expect(zoomed.y).toBeCloseTo(70)
+    // Two touches: spreading them apart zooms in about their midpoint.
+    await pointer(canvas, 'pointerdown', 300, 260, 1, 'touch')
+    await pointer(canvas, 'pointerdown', 500, 260, 2, 'touch')
+    await pointer(canvas, 'pointermove', 200, 260, 1, 'touch')
+    await pointer(canvas, 'pointermove', 600, 260, 2, 'touch')
+    expect((wrapper.props('camera') as AtlasCamera).zoom).toBeCloseTo(zoomed.zoom * 2)
+    await pointer(canvas, 'pointerup', 200, 260, 1, 'touch')
+    await pointer(canvas, 'pointerup', 600, 260, 2, 'touch')
+    expect(wrapper.emitted('drag')).toBeUndefined()
+  })
+
+  it('in compact form zooms with a plain wheel, and with no camera fits what is shown', async () => {
+    const wrapper = setup({ compact: true, camera: null })
+    const canvas = wrapper.get('[role="group"]').element
+    // Fitted: every dot inside the compact box.
+    for (const item of dots(wrapper)) {
+      const [x, y] = (item.attributes('style')!.match(/translate\(([-\d.]+)px, ([-\d.]+)px\)/) ?? []).slice(1).map(Number)
+      expect(x).toBeGreaterThanOrEqual(0)
+      expect(y).toBeGreaterThanOrEqual(0)
+      expect(x).toBeLessThanOrEqual(260)
+      expect(y).toBeLessThanOrEqual(200)
+    }
+    const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 100, clientX: 130, clientY: 100 })
+    canvas.dispatchEvent(event)
+    await nextTick()
+    expect(event.defaultPrevented).toBe(true)
+    expect(wrapper.emitted('update:camera')).toHaveLength(1)
+  })
 })

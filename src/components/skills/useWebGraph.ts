@@ -26,6 +26,10 @@ export const WEB_DOT_MIN_PIXELS = 4
 export const WEB_HIT_PIXELS = 14
 /** A press that moves this many pixels is a drag, not a click. */
 export const WEB_DRAG_THRESHOLD = 4
+/** Zoom per pixel of wheel travel: one notch (about 100 pixels) zooms by about a fifth. */
+export const WEB_WHEEL_RATE = 0.002
+/** Zoom of one press of a zoom button, as a factor. */
+export const WEB_ZOOM_STEP = 1.25
 
 /** Length of an arrowhead, in pixels. */
 export const WEB_ARROW_PIXELS = 7
@@ -315,13 +319,43 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
   onBeforeUnmount(stopDrag)
 
   // Pointer gestures: press a dot to drag it, the background to pan.
+  // Two touches pinch: they zoom about their midpoint and pan with it.
   type Gesture =
     | { kind: 'press'; pointerId: number; id: string | null; start: WebPoint }
     | { kind: 'dot'; pointerId: number; id: string; offset: WebPoint }
     | { kind: 'pan'; pointerId: number; start: WebPoint; camera: AtlasCamera }
+    | { kind: 'pinch'; pointerId: number; distance: number; anchor: WebPoint; camera: AtlasCamera }
   let gesture: Gesture | null = null
+  const pointers = new Map<number, WebPoint>()
+  function pinchSpan(): { distance: number; middle: WebPoint } | null {
+    const [a, b] = [...pointers.values()]
+    if (!a || !b) return null
+    return { distance: Math.max(1, Math.hypot(b.x - a.x, b.y - a.y)), middle: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } }
+  }
+  /** The camera that shows `world` at the screen point `screen` at this zoom. */
+  function cameraHolding(world: WebPoint, screen: WebPoint, zoom: number): AtlasCamera {
+    return { x: world.x - (screen.x - size.value.width / 2) / zoom, y: world.y - (screen.y - size.value.height / 2) / zoom, zoom }
+  }
+  /** Zooms by a factor, keeping the layout point under a screen point (the centre by default) where it is. */
+  function zoomBy(factor: number, about: WebPoint = { x: size.value.width / 2, y: size.value.height / 2 }): void {
+    const zoom = clampZoom(camera.value.zoom * factor)
+    if (zoom === camera.value.zoom) return
+    setCamera(cameraHolding(toWorld(about), about, zoom))
+  }
+  /** Pans by screen pixels, as the pan controls do. */
+  function panBy(dx: number, dy: number): void {
+    const at = camera.value
+    setCamera({ ...at, x: at.x + dx / at.zoom, y: at.y + dy / at.zoom })
+  }
+  /** The compact graph zooms with any wheel; the full graph, like the Detailed map, leaves a plain wheel to the page and zooms on a pinch (ctrl or meta + wheel). */
+  function wheel(event: WheelEvent): void {
+    if (!input().compact && !event.ctrlKey && !event.metaKey) return
+    event.preventDefault()
+    const pixels = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? size.value.height : 1)
+    zoomBy(Math.exp(-pixels * WEB_WHEEL_RATE), local(event))
+  }
   let suppressClick = false
-  function local(event: PointerEvent): WebPoint {
+  function local(event: MouseEvent): WebPoint {
     const box = root.value?.getBoundingClientRect()
     return { x: event.clientX - (box?.left ?? 0), y: event.clientY - (box?.top ?? 0) }
   }
@@ -332,12 +366,28 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
   function pointerDown(event: PointerEvent): void {
     if (event.pointerType === 'mouse' && event.button !== 0) return
     pressStart()
+    pointers.set(event.pointerId, local(event))
+    const span = pinchSpan()
+    if (pointers.size === 2 && span) {
+      if (gesture?.kind === 'dot') releaseHeld()
+      suppressClick = true
+      gesture = { kind: 'pinch', pointerId: event.pointerId, distance: span.distance, anchor: toWorld(span.middle), camera: camera.value }
+      return
+    }
+    if (pointers.size > 2) return
     suppressClick = false
     gesture = { kind: 'press', pointerId: event.pointerId, id: skillOf(event.target), start: local(event) }
   }
   function pointerMove(event: PointerEvent): void {
-    if (!gesture || gesture.pointerId !== event.pointerId) return
+    if (!pointers.has(event.pointerId)) return
     const at = local(event)
+    pointers.set(event.pointerId, at)
+    if (gesture?.kind === 'pinch') {
+      const span = pinchSpan()
+      if (span) setCamera(cameraHolding(gesture.anchor, span.middle, clampZoom(gesture.camera.zoom * span.distance / gesture.distance)))
+      return
+    }
+    if (!gesture || gesture.pointerId !== event.pointerId) return
     if (gesture.kind === 'press') {
       if (Math.hypot(at.x - gesture.start.x, at.y - gesture.start.y) < WEB_DRAG_THRESHOLD) return
       suppressClick = true
@@ -360,6 +410,8 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
   }
   function pointerUp(event: PointerEvent): void {
     pressEnd()
+    pointers.delete(event.pointerId)
+    if (gesture?.kind === 'pinch') { if (pointers.size < 2) gesture = null; return }
     if (!gesture || gesture.pointerId !== event.pointerId) return
     if (gesture.kind === 'dot') releaseHeld()
     gesture = null
@@ -430,6 +482,6 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
 
   return {
     size, camera, dots, lines, graph, motionReduced, rovingId, namedIds, litIds,
-    dotClick, pointerDown, pointerMove, pointerUp, clickCapture, focus, focusIn, focusOut, keyDown, keyUp, hover, pressStart, pressEnd,
+    zoomBy, panBy, wheel, dotClick, pointerDown, pointerMove, pointerUp, clickCapture, focus, focusIn, focusOut, keyDown, keyUp, hover, pressStart, pressEnd,
   }
 }
