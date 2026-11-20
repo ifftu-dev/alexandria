@@ -14,3 +14,11 @@ Spec: Sending records → common rules and Record destinations; user stories 28 
 - Nothing here needs the hosted service.
 
 Done when: host-seam tests against a small in-process xAPI stub show nothing is sent before approval, scope filtering by kind, per-recipient identifiers, offline queueing and retry, a visible failure, voiding on removal and the access log entries; interface tests cover the consent screen.
+
+## Notes
+
+2026-11-20: decisions taken after reading the code, before work starts.
+
+- There is no access log on the device today; the only one is fetched from the hosted service. This ticket creates the local one: a per-profile table with one row per send (time, recipient, scope, record count, identifier used, outcome), shown beside the hosted entries in the existing access log screen. Reads by a recipient are known only to the hosted service and keep coming from there.
+- Record destinations must work with the organisations feature switched off; do not route them through the code that returns nothing when that switch is off.
+- The sending mechanics live outside the commands layer so ticket 17 can use them; commands stay thin.
