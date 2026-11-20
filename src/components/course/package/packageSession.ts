@@ -32,9 +32,11 @@ import type {
   PackageSequencingState,
   PackageStandard,
 } from '@/types'
+import type { TauriCommand } from '@/generated/tauri-commands'
 import { sequencingSettings } from './scorm2004Sequencing'
 
-export type PackageInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>
+/** The host bridge the session calls: `useLocalApi().invoke`, or a preview adapter over it. */
+export type PackageInvoke = <T>(command: TauriCommand, args?: Record<string, unknown>) => Promise<T>
 
 /** What content asked for that the player does not provide. */
 export type BlockedKind = 'popup' | 'dialog' | 'plugin' | 'remote-resource'
@@ -92,6 +94,21 @@ export type NavigationRequest = 'continue' | 'previous' | 'choice' | 'suspendAll
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
+}
+
+/** A message the wrapper page sent, of `type`. */
+function isWrapperMessage(data: unknown, type: string): data is Record<string, unknown> {
+  return isRecord(data) && data.source === FROM_WRAPPER && data.type === type
+}
+
+function isBlockedKind(value: unknown): value is BlockedKind {
+  return typeof value === 'string' && BLOCKED_KINDS.has(value)
+}
+
+/** Content-written run-time state, if it has the shape the host reads: an object with a `cmi` object. */
+function commitRuntime(value: unknown): PackageCommit['runtime'] | null {
+  if (!isRecord(value) || Array.isArray(value) || !isRecord(value.cmi) || Array.isArray(value.cmi)) return null
+  return { ...value, cmi: value.cmi }
 }
 
 function sequencingNode(value: unknown): SequencingNode | null {
@@ -304,8 +321,8 @@ export function createPackageSession(options: PackageSessionOptions) {
 
   function onMessage(event: MessageEvent) {
     const data: unknown = event.data
-    if (!data || typeof data !== 'object') return
-    const message = data as Record<string, unknown>
+    if (!isRecord(data)) return
+    const message = data
     for (const waiter of [...waiters]) {
       if (waiter.matches(event)) waiter.resolve()
     }
@@ -313,9 +330,9 @@ export function createPackageSession(options: PackageSessionOptions) {
       if (message.type === 'commit') {
         // Only the running lesson's state is taken; the host fills in the
         // attempt itself.
-        const runtime = message.runtime as PackageCommit['runtime'] | undefined
+        const runtime = commitRuntime(message.runtime)
         const activityId = lessonId
-        if (activityId === null || message.activityId !== activityId || !runtime || typeof runtime !== 'object') return
+        if (activityId === null || message.activityId !== activityId || !runtime) return
         persist({ attempt_id: attemptId, activity_id: activityId, session_ended: message.sessionEnded === true, runtime })
       } else if (message.type === 'ended' && message.activityId === lessonId) {
         lessonId = null
@@ -330,8 +347,8 @@ export function createPackageSession(options: PackageSessionOptions) {
     if (message.source === FROM_PACKAGE && within(event.source, wrapper)) {
       if (message.type === 'focus-mode-request') events.focusRequest()
       else if (message.type === 'au-exited' && unitSession) events.unitExited?.()
-      else if (message.type === 'blocked' && typeof message.what === 'string' && BLOCKED_KINDS.has(message.what)) {
-        events.blocked(message.what as BlockedKind, typeof message.detail === 'string' ? message.detail.slice(0, 200) : null)
+      else if (message.type === 'blocked' && isBlockedKind(message.what)) {
+        events.blocked(message.what, typeof message.detail === 'string' ? message.detail.slice(0, 200) : null)
       }
     }
   }
@@ -369,8 +386,7 @@ export function createPackageSession(options: PackageSessionOptions) {
     if (!await clearStorage(frame)) throw new Error('the package storage could not be cleared')
     wrapper = frame.contentWindow
     const ready = waitFor(
-      (event) => event.source === wrapper && (event.data as { type?: unknown, source?: unknown })?.source === FROM_WRAPPER
-        && (event.data as { type?: unknown }).type === 'ready',
+      (event) => event.source === wrapper && isWrapperMessage(event.data, 'ready'),
       READY_TIMEOUT_MS,
     )
     frame.src = `${launch.base_url}_alexandria/wrapper.html`
@@ -382,8 +398,7 @@ export function createPackageSession(options: PackageSessionOptions) {
     if (lessonId !== null && wrapper) {
       const ending = lessonId
       const ended = waitFor(
-        (event) => fromWrapper(event) && (event.data as { type?: unknown, activityId?: unknown })?.type === 'ended'
-          && (event.data as { activityId?: unknown }).activityId === ending,
+        (event) => fromWrapper(event) && isWrapperMessage(event.data, 'ended') && event.data.activityId === ending,
         END_TIMEOUT_MS,
       )
       post({ type: 'end' })
@@ -517,8 +532,7 @@ export function createPackageSession(options: PackageSessionOptions) {
   async function suspendForClose(): Promise<void> {
     if (wrapper) {
       const done = waitFor(
-        (event) => fromWrapper(event) && (event.data as { type?: unknown, source?: unknown })?.source === FROM_WRAPPER
-          && (event.data as { type?: unknown }).type === 'closed',
+        (event) => fromWrapper(event) && isWrapperMessage(event.data, 'closed'),
         END_TIMEOUT_MS,
       )
       post({ type: 'end' })

@@ -48,10 +48,9 @@ const emit = defineEmits<{ progress: [progress: ElementProgress] }>()
 
 const { t } = useI18n()
 const { invoke: localInvoke } = useLocalApi()
-const invokeCommand: PackageInvoke = (command, args) => localInvoke(command as Parameters<typeof localInvoke>[0], args)
 // A preview runs the same lifecycle against the host's preview commands:
 // no enrolment, nothing stored.
-const invoke: PackageInvoke = props.preview ? previewInvoke(localInvoke, props.element.id) : invokeCommand
+const invoke: PackageInvoke = props.preview ? previewInvoke(localInvoke, props.element.id) : localInvoke
 
 type Phase = 'loading' | 'unenrolled' | 'missing' | 'preparing' | 'ready' | 'error'
 interface Row { activity: PackageActivity, depth: number }

@@ -84,6 +84,19 @@ describe('package session messages', () => {
     await vi.waitFor(() => expect(commits()).toHaveLength(1))
   })
 
+  it('stores only commits whose run-time state has the shape the host reads', async () => {
+    const { wrapper, send, commits } = await started('http://package.localhost/launch-1/', 'http://package.localhost')
+    const commit = (runtime: unknown) => ({ source: 'alexandria-wrapper', type: 'commit', activityId: 'welcome', sessionEnded: false, runtime })
+    for (const runtime of [null, 'cmi', [], {}, { cmi: 'state' }, { cmi: ['a'] }, { cmi: null }]) {
+      send(commit(runtime), wrapper, 'http://package.localhost')
+    }
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(commits()).toHaveLength(0)
+    send(commit({ cmi: { core: { lesson_location: 'page-2' } } }), wrapper, 'http://package.localhost')
+    await vi.waitFor(() => expect(commits()).toHaveLength(1))
+    expect(commits()[0]?.args).toMatchObject({ commit: { runtime: { cmi: { core: { lesson_location: 'page-2' } } } } })
+  })
+
   it('on an app scheme with an opaque launch origin, still refuses sourceless messages from other origins', async () => {
     const { frame, send, commits } = await started('package://localhost/launch-1/', 'package://localhost')
     frame.remove()
