@@ -1,5 +1,5 @@
 {
-  "description": "Several bounds unmet: the refusal is the first in the rule's order (status, score, flags, assurance, floor, rung, probes).",
+  "description": "Several bounds unmet: the refusal is the first in the rule's order (custody, status, score, flags, assurance, floor, rung, probes).",
   "policy": {
     "min_integrity": 0.8,
     "max_critical": 0,

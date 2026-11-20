@@ -1,0 +1,123 @@
+{
+  "description": "A self-issued credential carrying a HostedAttemptEvidence entry and stating `issuer` custody. The entry is only valid on an issuer-signed credential: rejected with custodyDefects [issuer_custody_self_issued, hosted_attempt_self_issued].",
+  "verificationTime": "2026-06-01T00:00:00Z",
+  "policy": {
+    "reject_expired": true,
+    "require_integrity_anchor": false,
+    "allowed_types": [
+      "FormalCredential",
+      "AssessmentCredential",
+      "AttestationCredential",
+      "RoleCredential",
+      "DerivedCredential",
+      "SelfAssertion"
+    ],
+    "reject_suspended": true,
+    "reject_superseded": true
+  },
+  "credential": {
+    "@context": [
+      "https://www.w3.org/ns/credentials/v2"
+    ],
+    "id": "urn:uuid:vector-credential",
+    "type": [
+      "VerifiableCredential",
+      "FormalCredential"
+    ],
+    "issuer": "did:key:z6Mks5vHoHvUyy6ZSK4HhxKb1MvLnkXG9fC7ysb6vq9pdeR4",
+    "validFrom": "2026-01-01T00:00:00Z",
+    "credentialSubject": {
+      "id": "did:key:z6Mks5vHoHvUyy6ZSK4HhxKb1MvLnkXG9fC7ysb6vq9pdeR4",
+      "evidenceRefs": [],
+      "level": 3,
+      "score": 0.9,
+      "skillId": "skill_vector"
+    },
+    "integrity": {
+      "sessionId": "vector-session",
+      "status": "completed",
+      "criticalCount": 0,
+      "warningCount": 0,
+      "assuranceLevel": "local",
+      "generatedAt": "2026-01-01T00:00:00Z",
+      "trustProfile": "core",
+      "verificationRung": "probed",
+      "coverageStatementDigest": "blake3:9524dd9bc1753dff56e82ba7dddf08189f4221d0ffdd5697df1bb7caed706b1f",
+      "probe": {
+        "outcome": "satisfied",
+        "policies": [
+          "authored"
+        ],
+        "satisfied": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "answerCustody": "issuer"
+    },
+    "evidence": [
+      {
+        "answerCustody": "issuer",
+        "attemptId": "hatt_vector",
+        "attestation": {
+          "outcome": "verified_credential_bound",
+          "platform": "ios"
+        },
+        "gradedBy": "issuer",
+        "probe": {
+          "failed": 0,
+          "outcome": "satisfied",
+          "policies": [
+            "authored"
+          ],
+          "satisfied": 1,
+          "skipped": 0
+        },
+        "type": "HostedAttemptEvidence",
+        "verifiedAssuranceLevel": "device_attested"
+      }
+    ],
+    "relatedResource": [
+      {
+        "id": "urn:alexandria:coverage-statement:blake3:9524dd9bc1753dff56e82ba7dddf08189f4221d0ffdd5697df1bb7caed706b1f",
+        "digestSRI": "sha256-dCtvxGREgcmGkj+asRtzehghJZSRhOE6lPEufmjeLEc=",
+        "mediaType": "application/json"
+      }
+    ],
+    "proof": {
+      "type": "DataIntegrityProof",
+      "cryptosuite": "eddsa-jcs-2022",
+      "created": "2026-01-01T00:00:00Z",
+      "verificationMethod": "did:key:z6Mks5vHoHvUyy6ZSK4HhxKb1MvLnkXG9fC7ysb6vq9pdeR4#z6Mks5vHoHvUyy6ZSK4HhxKb1MvLnkXG9fC7ysb6vq9pdeR4",
+      "proofPurpose": "assertionMethod",
+      "proofValue": "z2SzD8aRxcumKmWLwxJTntuGRLGRiTZufCJKp85tThF8DvEJAHhwSy7JWjWccqg6N3AoffM1h1EsSdjPy3xMbzRV2"
+    }
+  },
+  "store": {
+    "keyRegistry": [],
+    "statusLists": {},
+    "superseded": []
+  },
+  "expect": {
+    "credentialId": "urn:uuid:vector-credential",
+    "validSignature": true,
+    "issuerResolved": true,
+    "revoked": false,
+    "statusValid": true,
+    "expired": false,
+    "subjectBound": true,
+    "integrityAnchored": false,
+    "suspended": false,
+    "superseded": false,
+    "custodyDefects": [
+      "issuer_custody_self_issued",
+      "hosted_attempt_self_issued"
+    ],
+    "verificationTime": "2026-06-01T00:00:00Z",
+    "pendingReasons": [],
+    "attestation": {
+      "outcome": "not_supplied"
+    },
+    "verifiedAssuranceLevel": "local",
+    "acceptanceDecision": "reject"
+  }
+}

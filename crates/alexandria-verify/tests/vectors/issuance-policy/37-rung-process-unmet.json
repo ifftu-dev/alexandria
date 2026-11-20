@@ -1,0 +1,50 @@
+{
+  "description": "`process` is required and the session stands on `none`.",
+  "policy": {
+    "min_integrity": null,
+    "max_critical": null,
+    "max_warning": null,
+    "require_clean": false,
+    "required_assurance_level": null,
+    "probe_policy": null,
+    "min_trust_profile": null,
+    "min_verification_rung": "process"
+  },
+  "integrity": {
+    "sessionId": "isess_policy_vector",
+    "status": "completed",
+    "integrityScore": 0.91,
+    "criticalCount": 0,
+    "warningCount": 1,
+    "assuranceLevel": "local",
+    "generatedAt": "2026-06-01T00:00:00Z",
+    "trustProfile": "camera",
+    "verificationRung": "none",
+    "signalsRun": [
+      "core",
+      "camera"
+    ],
+    "signalsNotRun": [
+      "device_attestation"
+    ],
+    "probe": {
+      "outcome": "satisfied",
+      "policies": [
+        "reseed"
+      ],
+      "satisfied": 2,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "attestation": {
+    "outcome": "not_supplied"
+  },
+  "expect": {
+    "refusal": {
+      "code": "rung_below_minimum",
+      "rung": "none",
+      "required": "process"
+    }
+  }
+}

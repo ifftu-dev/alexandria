@@ -210,6 +210,7 @@ mod tests {
             &assessed(),
             AttestationOutcome::VerifiedSessionBound {
                 platform: Platform::Ios,
+                companion: false,
             },
         )
         .unwrap();

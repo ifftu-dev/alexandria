@@ -134,6 +134,10 @@ function invalidReasonLabel(reason: TrustInvalidReason): string {
     case 'integrity_anchor_missing': return t('credentials.detail.trustReason.anchorMissing')
     case 'type_not_allowed': return t('credentials.detail.trustReason.typeNotAllowed')
     case 'invalid_attestation': return t('credentials.detail.trustReason.invalidAttestation')
+    case 'issuer_custody_self_issued': return t('credentials.detail.trustReason.issuerCustodySelfIssued')
+    case 'hosted_attempt_self_issued': return t('credentials.detail.trustReason.hostedAttemptSelfIssued')
+    case 'hosted_attempt_invalid': return t('credentials.detail.trustReason.hostedAttemptInvalid')
+    case 'hosted_attempt_custody_mismatch': return t('credentials.detail.trustReason.hostedAttemptCustodyMismatch')
   }
 }
 

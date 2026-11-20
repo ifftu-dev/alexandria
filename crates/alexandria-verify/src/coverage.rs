@@ -31,6 +31,11 @@
 //! - `2`: the attestation line says that the issuing device verified the
 //!   attestation, and that a reader relies on it only as far as the
 //!   credential's attestation evidence verifies.
+//! - `3`: below `live`, a line says a second device or person was not ruled
+//!   out, since only a person asking unscripted questions rules it out. The
+//!   probe lines say the follow-up questions were ones the learner had not
+//!   already answered (a same-item probe no longer earns `probed`), with a
+//!   time limit fixed by the item.
 
 use std::collections::BTreeMap;
 
@@ -41,9 +46,9 @@ use crate::vc::{RelatedResource, VerifiableCredential};
 /// Version of the statement structure.
 pub const COVERAGE_FORMAT: u32 = 1;
 /// The statement text version new sessions are issued against.
-pub const CURRENT_VERSION: &str = "2";
+pub const CURRENT_VERSION: &str = "3";
 /// Every statement text version ever published, oldest first.
-pub const VERSIONS: [&str; 2] = ["1", "2"];
+pub const VERSIONS: [&str; 3] = ["1", "2", "3"];
 /// Trust profiles a statement can be about, weakest first.
 pub const PROFILES: [&str; 4] = ["core", "attested", "camera", "full"];
 /// Verification rungs a statement can be about, lowest first.
@@ -128,19 +133,42 @@ impl CoverageStatement {
 /// The lines that differ between versions.
 struct Text {
     attestation_checked: &'static str,
+    /// The `probed` rung's lines: checked, and not checked.
+    probed: (&'static str, &'static str),
+    /// Below `live`: that a second device or person was not ruled out.
+    below_live: Option<&'static str>,
 }
+
+const ATTESTATION_V2: &str = "A platform attestation that an unmodified build of the app on a genuine device ran the session, verified by the issuing device when the credential was issued. A reader relies on it only as far as the credential's attestation evidence verifies.";
+const PROBED_V1: (&str, &str) = (
+    "Short follow-up questions made from the learner's own answers, answered within a time limit and graded by the item's own grader.",
+    "Follow-up questions on the learner's own answers: none were satisfied.",
+);
 
 const TEXT_V1: Text = Text {
     attestation_checked: "A platform attestation that an unmodified build of the app on a genuine device ran the session, verified again when the credential was issued.",
+    probed: PROBED_V1,
+    below_live: None,
 };
 const TEXT_V2: Text = Text {
-    attestation_checked: "A platform attestation that an unmodified build of the app on a genuine device ran the session, verified by the issuing device when the credential was issued. A reader relies on it only as far as the credential's attestation evidence verifies.",
+    attestation_checked: ATTESTATION_V2,
+    probed: PROBED_V1,
+    below_live: None,
+};
+const TEXT_V3: Text = Text {
+    attestation_checked: ATTESTATION_V2,
+    probed: (
+        "Short follow-up questions the learner had not already answered, each answered within a time limit fixed by the item and graded by the item's own grader.",
+        "Follow-up questions the learner had not already answered: none were satisfied.",
+    ),
+    below_live: Some("Whether a second device or person helped: not ruled out. Only a live segment, where a person asks unscripted questions, rules it out."),
 };
 
 fn text(version: &str) -> Option<&'static Text> {
     match version {
         "1" => Some(&TEXT_V1),
         "2" => Some(&TEXT_V2),
+        "3" => Some(&TEXT_V3),
         _ => None,
     }
 }
@@ -159,19 +187,24 @@ const ALWAYS_NOT_CHECKED: &[&str] = &[
     "Sound: nothing is recorded or transcribed.",
 ];
 
-/// Indexed by rung position in [`RUNGS`], from `process` up.
-const RUNG_CHECKED: [&str; 4] = [
-    "Response timing and revisions on every served item, against reading-time floors and the learner's own pace, from items the backend drew by exposure and difficulty.",
-    "Short follow-up questions made from the learner's own answers, answered within a time limit and graded by the item's own grader.",
-    "Agreement of the result with the learner's practice, lessons and earlier attempts on the skill.",
-    "An unscripted live segment with an interviewer in an interview held in Alexandria.",
-];
-const RUNG_NOT_CHECKED: [&str; 4] = [
-    "The response process over every served item: it was not observed in full, or showed a measured anomaly.",
-    "Follow-up questions on the learner's own answers: none were satisfied.",
-    "Agreement with the learner's history on the skill: not established.",
-    "A live interview segment: none was satisfied.",
-];
+/// Indexed by rung position in [`RUNGS`], from `process` up; the `probed`
+/// line comes from the version's [`Text`].
+fn rung_checked(text: &Text) -> [&'static str; 4] {
+    [
+        "Response timing and revisions on every served item, against reading-time floors and the learner's own pace, from items the backend drew by exposure and difficulty.",
+        text.probed.0,
+        "Agreement of the result with the learner's practice, lessons and earlier attempts on the skill.",
+        "An unscripted live segment with an interviewer in an interview held in Alexandria.",
+    ]
+}
+fn rung_not_checked(text: &Text) -> [&'static str; 4] {
+    [
+        "The response process over every served item: it was not observed in full, or showed a measured anomaly.",
+        text.probed.1,
+        "Agreement with the learner's history on the skill: not established.",
+        "A live interview segment: none was satisfied.",
+    ]
+}
 
 const PLATFORM_CEILINGS: &[&str] = &[
     "Device attestation exists only where the platform offers it (App Attest on iOS, Play Integrity on Android); elsewhere the assurance level stays local.",
@@ -210,17 +243,20 @@ pub fn statement(
     } else {
         not_checked.push(NO_CAMERA.to_string());
     }
-    for (i, line) in RUNG_CHECKED.iter().enumerate() {
+    for (i, line) in rung_checked(text).iter().enumerate() {
         if i < rung_step {
             checked.push(line.to_string());
         }
     }
-    for (i, line) in RUNG_NOT_CHECKED.iter().enumerate() {
+    for (i, line) in rung_not_checked(text).iter().enumerate() {
         if i >= rung_step {
             not_checked.push(line.to_string());
         }
     }
     not_checked.extend(ALWAYS_NOT_CHECKED.iter().map(|s| s.to_string()));
+    if rung != "live" {
+        not_checked.extend(text.below_live.map(str::to_string));
+    }
 
     let certified_signals = certification
         .and_then(|c| c.profiles.get(profile))

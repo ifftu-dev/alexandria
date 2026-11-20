@@ -1,0 +1,123 @@
+{
+  "description": "An organisation's role credential from a hosted attempt: issuer-signed, the assertion states answerCustody `issuer`, and one HostedAttemptEvidence entry names the attempt, says the issuer held the answers and graded, and records the probe outcome and the attestation outcome and verified assurance level the issuer found. Accepted; the entry is read back as written.",
+  "verificationTime": "2026-06-01T00:00:00Z",
+  "policy": {
+    "reject_expired": true,
+    "require_integrity_anchor": false,
+    "allowed_types": [
+      "FormalCredential",
+      "AssessmentCredential",
+      "AttestationCredential",
+      "RoleCredential",
+      "DerivedCredential",
+      "SelfAssertion"
+    ],
+    "reject_suspended": true,
+    "reject_superseded": true
+  },
+  "credential": {
+    "@context": [
+      "https://www.w3.org/ns/credentials/v2"
+    ],
+    "id": "urn:uuid:vector-credential",
+    "type": [
+      "VerifiableCredential",
+      "RoleCredential"
+    ],
+    "issuer": {
+      "id": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
+      "domain": "org.example",
+      "name": "Vector Organisation"
+    },
+    "validFrom": "2026-01-01T00:00:00Z",
+    "credentialSubject": {
+      "id": "did:key:z6MknENeHzKx2gvkZPqYvz8B7xCyTeJHfH6FvnHSBJAEeagD",
+      "evidenceRefs": [],
+      "level": 3,
+      "score": 0.9,
+      "skillId": "skill_vector"
+    },
+    "integrity": {
+      "sessionId": "vector-session",
+      "status": "completed",
+      "criticalCount": 0,
+      "warningCount": 0,
+      "assuranceLevel": "local",
+      "generatedAt": "2026-01-01T00:00:00Z",
+      "trustProfile": "attested",
+      "verificationRung": "probed",
+      "coverageStatementDigest": "blake3:01c3d28b127f6cda7974f147d474f252b2e6ff0516b2c95119ea55622c17c45f",
+      "probe": {
+        "outcome": "satisfied",
+        "policies": [
+          "authored"
+        ],
+        "satisfied": 1,
+        "failed": 0,
+        "skipped": 0
+      },
+      "answerCustody": "issuer"
+    },
+    "evidence": [
+      {
+        "answerCustody": "issuer",
+        "attemptId": "hatt_vector",
+        "attestation": {
+          "outcome": "verified_credential_bound",
+          "platform": "ios"
+        },
+        "gradedBy": "issuer",
+        "probe": {
+          "failed": 0,
+          "outcome": "satisfied",
+          "policies": [
+            "authored"
+          ],
+          "satisfied": 1,
+          "skipped": 0
+        },
+        "type": "HostedAttemptEvidence",
+        "verifiedAssuranceLevel": "device_attested"
+      }
+    ],
+    "relatedResource": [
+      {
+        "id": "https://status.example/coverage-statements/blake3:01c3d28b127f6cda7974f147d474f252b2e6ff0516b2c95119ea55622c17c45f",
+        "digestSRI": "sha256-5HQiAES4Dv14+u+CqdJWldJVemkgMSNkxxdprI2IBhI=",
+        "mediaType": "application/json"
+      }
+    ],
+    "proof": {
+      "type": "DataIntegrityProof",
+      "cryptosuite": "eddsa-jcs-2022",
+      "created": "2026-01-01T00:00:00Z",
+      "verificationMethod": "did:key:z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT#z6MkvwtuLDu19TcdGubq4U8c81JmgULwCSrdExbBCCZ6oVQT",
+      "proofPurpose": "assertionMethod",
+      "proofValue": "zdbVFdASSUeLbJAPz5gHdpZ5CgHZC526wqzGhE7W42vdaFkD8kTvPH9cwYnCjpFP3FA5dJmEJuhTwBtkg9MmDMCZ"
+    }
+  },
+  "store": {
+    "keyRegistry": [],
+    "statusLists": {},
+    "superseded": []
+  },
+  "expect": {
+    "credentialId": "urn:uuid:vector-credential",
+    "validSignature": true,
+    "issuerResolved": true,
+    "revoked": false,
+    "statusValid": true,
+    "expired": false,
+    "subjectBound": true,
+    "integrityAnchored": false,
+    "suspended": false,
+    "superseded": false,
+    "verificationTime": "2026-06-01T00:00:00Z",
+    "pendingReasons": [],
+    "attestation": {
+      "outcome": "not_supplied"
+    },
+    "verifiedAssuranceLevel": "local",
+    "acceptanceDecision": "accept"
+  }
+}

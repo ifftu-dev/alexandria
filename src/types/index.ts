@@ -1985,7 +1985,23 @@ export interface IntegrityAssertion {
   cameraCoverage?: number | null
   /** Outcome of the follow-up probes, when any probe step ran. */
   probe?: IntegrityProbeSummary | null
+  /**
+   * Who held the answers. Absent from credentials issued before the field
+   * existed, which read as 'device'. 'issuer' on a self-issued credential is
+   * invalid.
+   */
+  answerCustody?: AnswerCustody | null
 }
+
+/** Mirrors `alexandria_verify::integrity::AnswerCustody`. */
+export type AnswerCustody = 'device' | 'issuer'
+
+/** Mirrors `alexandria_verify::custody::CustodyDefect`. */
+export type CustodyDefect =
+  | 'issuer_custody_self_issued'
+  | 'hosted_attempt_self_issued'
+  | 'hosted_attempt_invalid'
+  | 'hosted_attempt_custody_mismatch'
 
 /** The probe step of an integrity session, as a credential states it. */
 export interface IntegrityProbeSummary {
@@ -2064,6 +2080,8 @@ export interface IssuancePolicy {
   min_trust_profile?: TrustProfile | null
   /** Minimum verification rung, judged at issuance. */
   min_verification_rung?: VerificationRung | null
+  /** Required answer custody: 'issuer' is met only by 'issuer'; 'device' accepts either. */
+  required_answer_custody?: AnswerCustody | null
 }
 
 export interface IssueCredentialRequest {
@@ -2179,6 +2197,8 @@ export interface VerificationResult {
   superseded: boolean
   /** A `relatedResource` names a coverage statement other than the assertion's; omitted while false. */
   coverageStatementMismatch?: boolean
+  /** What is wrong with the credential's answer custody; any one rejects. Omitted while empty. */
+  custodyDefects?: CustodyDefect[]
   verificationTime: string
   pendingReasons: VerificationPendingReason[]
   /** What the credential's device attestation evidence proved. */
@@ -2219,7 +2239,12 @@ export type AttestationOutcome =
       /** A paired phone produced the evidence for a desktop session; omitted while false. */
       companion?: boolean
     }
-  | { outcome: 'verified_session_bound'; platform: AttestationPlatform }
+  | {
+      outcome: 'verified_session_bound'
+      platform: AttestationPlatform
+      /** A paired phone produced the evidence for a desktop session; omitted while false. */
+      companion?: boolean
+    }
   | { outcome: 'unverifiable'; platform: AttestationPlatform }
   | { outcome: 'invalid'; reason: AttestationInvalidReason }
 
@@ -2240,6 +2265,10 @@ export type TrustInvalidReason =
   | 'integrity_anchor_missing'
   | 'type_not_allowed'
   | 'invalid_attestation'
+  | 'issuer_custody_self_issued'
+  | 'hosted_attempt_self_issued'
+  | 'hosted_attempt_invalid'
+  | 'hosted_attempt_custody_mismatch'
 
 /** Mirrors `alexandria_verify::trust::EndorsementMismatch`. */
 export type EndorsementMismatch =

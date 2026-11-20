@@ -190,6 +190,29 @@ for (const f of readdirSync(here('.')).filter(f => f.endsWith('.json')).sort()) 
     .map(r => statementDigest(String(r.id)))
     .some(d => d !== null && d !== namedDigest)
 
+  // 8: answer custody. A self-issued credential (issuer is the subject)
+  // cannot state `issuer` custody or carry a hosted attempt entry; a hosted
+  // attempt entry must be the only one, say the issuer held the answers and
+  // graded, and sit beside an assertion stating `issuer` custody. An
+  // assertion that states no custody reads as `device`.
+  const selfIssued = issuerId === String(vc.credentialSubject.id)
+  const custody = vc.integrity ? (vc.integrity.answerCustody ?? 'device') : null
+  const hostedEntries = (vc.evidence ?? []).filter(e =>
+    e.type === 'HostedAttemptEvidence' ||
+    (Array.isArray(e.type) && e.type.includes('HostedAttemptEvidence')))
+  const levels = ['local', 'companion_attested', 'device_attested']
+  const hostedValid = hostedEntries.length === 1 && (e =>
+    typeof e.attemptId === 'string' && e.answerCustody === 'issuer' &&
+    e.gradedBy === 'issuer' && typeof e.attestation?.outcome === 'string' &&
+    levels.includes(e.verifiedAssuranceLevel))(hostedEntries[0])
+  const hasHosted = hostedEntries.length > 0
+  const custodyDefects = [
+    [selfIssued && custody === 'issuer', 'issuer_custody_self_issued'],
+    [selfIssued && hasHosted, 'hosted_attempt_self_issued'],
+    [hasHosted && !hostedValid, 'hosted_attempt_invalid'],
+    [hasHosted && custody !== 'issuer', 'hosted_attempt_custody_mismatch'],
+  ].filter(([found]) => found).map(([, code]) => code)
+
   const issuerCanComplete = (validSignature && issuerResolved) ||
     (!issuerResolved && pendingReasons.includes('issuer_key_missing'))
   const passes = issuerCanComplete && statusValid && subjectBound &&
@@ -198,15 +221,16 @@ for (const f of readdirSync(here('.')).filter(f => f.endsWith('.json')).sort()) 
     !(v.policy.reject_suspended && suspended) &&
     !(v.policy.reject_superseded && superseded) &&
     !(v.policy.require_integrity_anchor && !integrityAnchored) &&
-    !coverageStatementMismatch
+    !coverageStatementMismatch && custodyDefects.length === 0
   const acceptanceDecision = !passes ? 'reject' : pendingReasons.length ? 'pending' : 'accept'
 
-  // coverageStatementMismatch is omitted from a result while false.
-  const e = { coverageStatementMismatch: false, ...v.expect }
+  // coverageStatementMismatch and custodyDefects are omitted from a result
+  // while false or empty.
+  const e = { coverageStatementMismatch: false, custodyDefects: [], ...v.expect }
   const got = {
     validSignature, issuerResolved, revoked, statusValid, expired, subjectBound,
     integrityAnchored, suspended, superseded, coverageStatementMismatch,
-    pendingReasons, acceptanceDecision,
+    custodyDefects, pendingReasons, acceptanceDecision,
   }
   // Organisation backing: only vectors that state an expectation test it.
   if (v.expectOrganisationBacking) {

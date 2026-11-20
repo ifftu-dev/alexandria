@@ -1,0 +1,46 @@
+{
+  "description": "`probed` is required and the session stands on it, with a satisfied probe step whose policies are `[\"reseed\"]`. Accepted: an authored variant served under the `reseed` policy asks a question the candidate had not answered, and the probe summary does not say which kind ran.",
+  "policy": {
+    "min_integrity": null,
+    "max_critical": null,
+    "max_warning": null,
+    "require_clean": false,
+    "required_assurance_level": null,
+    "probe_policy": null,
+    "min_trust_profile": null,
+    "min_verification_rung": "probed"
+  },
+  "integrity": {
+    "sessionId": "isess_policy_vector",
+    "status": "completed",
+    "integrityScore": 0.91,
+    "criticalCount": 0,
+    "warningCount": 1,
+    "assuranceLevel": "local",
+    "generatedAt": "2026-06-01T00:00:00Z",
+    "trustProfile": "camera",
+    "verificationRung": "probed",
+    "signalsRun": [
+      "core",
+      "camera"
+    ],
+    "signalsNotRun": [
+      "device_attestation"
+    ],
+    "probe": {
+      "outcome": "satisfied",
+      "policies": [
+        "reseed"
+      ],
+      "satisfied": 2,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "attestation": {
+    "outcome": "not_supplied"
+  },
+  "expect": {
+    "refusal": null
+  }
+}

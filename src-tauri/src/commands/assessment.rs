@@ -2073,7 +2073,8 @@ mod tests {
         assert_eq!(
             verify_evidence(&stored, &trust.inputs()),
             AttestationOutcome::VerifiedSessionBound {
-                platform: Platform::Ios
+                platform: Platform::Ios,
+                companion: false,
             }
         );
     }
