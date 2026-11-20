@@ -29,7 +29,7 @@ Done when: interface tests cover the summary, each refusal message, the redistri
 - Tests: Rust host seam in `commands/courses.rs` (publishing), `commands/packages.rs` (opening a file), `commands/elements.rs` (type and attachment refusals), `packages/preview/tests.rs`. Interface: `tests/desktop-ui/course-editor-package.spec.ts` (screen `course-editor`, backend `courseEditorBackend.ts`, package origin helper `packageOrigin.ts`), 5 tests in Chromium and WebKit.
 - New English strings (`instructor.package.*`, `instructor.elementTypes.package`, `instructor.compose.blockerUnattachedPackages`, `learn.packageFile.*`) are in `PENDING_TRANSLATION` with a reason; the redistribution confirmation should be prioritised in the translation pass.
 - Seen while testing, not caused here: `package-player.spec.ts` fails intermittently when repeated (`--repeat-each=3`), with and without this ticket's player change.
-- Follow-ups: SCORM 2004 preview needs ticket 10's sequencing state held in the preview too; a refused or replaced import leaves its draft archive in the profile's packages directory with no element using it (nothing collects unused drafts yet).
+- Follow-ups: SCORM 2004 preview needs ticket 10's sequencing state held in the preview too; a package picked and then cancelled or replaced leaves its draft archive in the profile's packages directory with no element using it (nothing collects unused drafts yet).
 
 Proposed doc edits, not made here:
 
