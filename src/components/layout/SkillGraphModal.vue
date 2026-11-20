@@ -14,7 +14,7 @@ const emit = defineEmits<{ close: [] }>()
 const atlas = useSkillAtlas()
 const { model, modalView, error } = atlas
 const { learnSkill, openSkill, actionError } = useSkillAtlasActions('modal')
-const viewMode = useSkillGraphView()
+const viewMode = useSkillGraphView('modal')
 /** Settings that failed to load: the remembered view is unknown until a retry. */
 const settingsError = ref<string | null>(null)
 const shownError = computed(() => error.value ?? settingsError.value)
