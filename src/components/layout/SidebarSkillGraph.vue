@@ -5,10 +5,11 @@
  * field focus and the Names, Arrows and Related toggles, and the dragged dots
  * of every Web surface; it keeps its own camera.
  */
-import { computed, onMounted, useId } from 'vue'
+import { computed, onMounted, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { atlasFieldColor, createAtlasPresenter } from '@/components/skills/atlasPresentation'
 import WebGraph from '@/components/skills/WebGraph.vue'
+import { webSidebarSubset } from '@/components/skills/webGeometry'
 import { useSkillAtlas } from '@/composables/useSkillAtlas'
 import { useSkillAtlasActions } from '@/composables/useSkillAtlasActions'
 import type { AtlasField, AtlasNode } from '@/utils/skillAtlas'
@@ -16,12 +17,19 @@ import type { AtlasField, AtlasNode } from '@/utils/skillAtlas'
 const { t } = useI18n()
 const present = createAtlasPresenter(t)
 const atlas = useSkillAtlas()
-const { model, isLoading, error, modalView: view, webPositions, sidebarWebCamera } = atlas
+const { model, isLoading, error, modalView: view, webGraph, webPositions, sidebarWebCamera } = atlas
 // Open skill returns to the expanded graph only when it was open, so from here it returns to the sidebar as it was.
 const { openSkill, actionError } = useSkillAtlasActions('modal')
 onMounted(() => { void atlas.ensureLoaded() })
 const summaryId = useId()
 const summary = computed(() => model.value ? t('skills.atlas.sidebar.summary', model.value.counts) : '')
+/** The whole graph up to the node limit; above it, the earned skills and their neighbours, or the starting points. */
+const subset = computed(() => {
+  if (!model.value || !webGraph.value) return null
+  const earned = new Set(model.value.nodes.filter(node => node.status === 'earned').map(node => node.skill.id))
+  const part = webSidebarSubset(webGraph.value, earned)
+  return part.partial ? { ids: part.ids, start: earned.size === 0 } : null
+})
 const selected = computed<AtlasNode | null>(() => {
   const id = view.value.selectedSkillId
   return id ? model.value?.nodeById.get(id) ?? null : null
@@ -36,6 +44,26 @@ function expandSelected(): void {
   atlas.setModalOpen(true)
 }
 function select(id: string | null): void { atlas.updateView('modal', { selectedSkillId: id }) }
+
+// Field focus, shared with the expanded graph: other fields fade and this camera fits the field.
+const fieldFocused = computed(() => view.value.focusedFieldId !== null || view.value.unassignedFocused)
+function pressed(field: AtlasField): boolean { return fieldFocused.value && field.id === view.value.focusedFieldId }
+const focusIds = computed<ReadonlySet<string> | null>(() => {
+  if (!fieldFocused.value) return null
+  const field = model.value?.fields.find(pressed)
+  return field ? new Set(field.nodeIds) : null
+})
+function toggleField(field: AtlasField): void {
+  const focus = !pressed(field)
+  // The expanded graph frames the new focus afresh too.
+  atlas.updateView('modal', { focusedFieldId: focus ? field.id : null, unassignedFocused: focus && field.id === null, camera: null, webCamera: null })
+}
+/** Restores this camera and every dragged dot; the selection stays. */
+function reset(): void {
+  atlas.setSidebarWebCamera(null)
+  atlas.resetWebPositions()
+}
+watch([() => view.value.focusedFieldId, () => view.value.unassignedFocused], () => atlas.setSidebarWebCamera(null))
 function fieldKey(field: AtlasField): string { return field.id ?? 'unassigned' }
 </script>
 
@@ -46,9 +74,12 @@ function fieldKey(field: AtlasField): string { return field.id ?? 'unassigned' }
       <div class="sidebar-web">
         <WebGraph compact :model="model" :positions="webPositions" :label="t('skills.atlas.sidebar.graph')" :described-by="summaryId"
           :selected-id="view.selectedSkillId" :names="view.webNames" :arrows="view.webArrows" :related="view.webRelated" :camera="sidebarWebCamera"
+          :match-ids="focusIds" :fit-ids="focusIds" :shown-ids="subset?.ids ?? null"
           @select="select" @update:camera="atlas.setSidebarWebCamera" @drag="atlas.setWebPositions" />
         <p :id="summaryId" class="sr-only">{{ summary }}</p>
+        <button class="web-reset" type="button" :aria-label="t('skills.atlas.sidebar.resetLabel')" @click="reset">{{ t('skills.atlas.sidebar.reset') }}</button>
       </div>
+      <p v-if="subset" class="partial">{{ t(subset.start ? 'skills.atlas.sidebar.partialStart' : 'skills.atlas.sidebar.partial', { shown: subset.ids.size, total: model.counts.total }) }}</p>
       <div class="sidebar-caption">
         <template v-if="selected">
           <p class="caption-skill"><span class="caption-name" dir="auto">{{ selected.skill.name }}</span> <span>{{ stateWords(selected) }}</span></p>
@@ -62,7 +93,7 @@ function fieldKey(field: AtlasField): string { return field.id ?? 'unassigned' }
       </div>
       <ul class="sidebar-fields">
         <li v-for="field in model.fields" :key="fieldKey(field)" :style="{ '--field': atlasFieldColor(field) }">
-          <button class="field-name" type="button">
+          <button class="field-name" type="button" :aria-pressed="pressed(field)" @click="toggleField(field)">
             <i class="field-dot" aria-hidden="true" /><span dir="auto">{{ present.fieldName(field) }}</span>
             <small>{{ t('skills.atlas.fieldEarned', { earned: field.earned, total: field.total }) }}</small>
           </button>
@@ -82,6 +113,8 @@ function fieldKey(field: AtlasField): string { return field.id ?? 'unassigned' }
 .sidebar-atlas p { color: var(--app-muted-foreground); font-size: 11px; margin: 4px 6px; }
 .expand { display: flex; justify-content: space-between; font-weight: 600; border: 1px solid var(--app-border); }
 .sidebar-web { position: relative; margin-block-start: 6px; border: 1px solid var(--app-border); border-radius: 8px; overflow: hidden; --web-graph-height: 180px; }
+.sidebar-atlas .web-reset { position: absolute; inset-block-start: 4px; inset-inline-end: 4px; width: auto; min-height: 24px; padding: 2px 8px; border: 1px solid var(--app-border); border-radius: 999px; background: var(--app-background); color: var(--app-muted-foreground); font-size: 11px; line-height: 1.2; }
+.sidebar-atlas .web-reset:hover { background: var(--app-muted); color: var(--app-foreground); }
 .sidebar-fields { list-style: none; margin: 4px 0 0; padding: 0; }
 .field-name { display: flex; align-items: center; gap: 6px; }
 .field-name > span { flex: 1; min-width: 0; font-weight: 600; }

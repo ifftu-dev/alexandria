@@ -138,7 +138,11 @@
       "captionEarned": "Earned · {level}",
       "openLabel": "Open skill {name}",
       "expand": "Expand",
-      "expandLabel": "Expand {name} in the skill map"
+      "expandLabel": "Expand {name} in the skill map",
+      "reset": "Reset",
+      "resetLabel": "Reset zoom and moved dots",
+      "partial": "Showing {shown} of {total} skills: your earned skills and the skills next to them. Expand to see them all.",
+      "partialStart": "Showing {shown} of {total} skills: the skills that build on nothing, where you can start. Expand to see them all."
     },
     "ready": "तयार",
     "readyNext": "सुरू करण्यास तयार",
