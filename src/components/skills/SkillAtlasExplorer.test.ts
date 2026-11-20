@@ -69,7 +69,11 @@ describe('Simple and Detailed views', () => {
     const wrapper = setup(initialView(), true, null, undefined, null)
     expect(pressed(wrapper, 'Simple')).toBe('true')
     expect(pressed(wrapper, 'Detailed')).toBe('false')
-    expect(wrapper.get('[role="group"][aria-label="Graph view"]').findAll('button')).toHaveLength(2)
+    expect(pressed(wrapper, 'Web')).toBe('false')
+    // Web, Simple and Detailed in that order, each with its glyph.
+    const views = wrapper.get('[role="group"][aria-label="Graph view"]').findAll('button')
+    expect(views.map(item => item.text())).toEqual(['Web', 'Simple', 'Detailed'])
+    expect(views.every(item => item.find('svg[aria-hidden="true"]').exists())).toBe(true)
     expect([...mapNames(wrapper)].sort()).toEqual([ALGEBRA, BRIDGES, CRAFT].sort())
     const disc = (name: string) => button(wrapper, name).get('.node-disc')
     expect(disc(ALGEBRA).text()).toBe('4')
@@ -278,6 +282,8 @@ describe('Simple and Detailed views', () => {
     expect(status()).toBe('Showing the Detailed view')
     await button(wrapper, 'Simple').trigger('click')
     expect(status()).toBe('Showing the Simple view')
+    await button(wrapper, 'Web').trigger('click')
+    expect(status()).toBe('Showing the Web view')
   })
 
   it('names the Simple encoding and field colours with earned counts, and keeps the Detailed legend for Detailed', async () => {
@@ -742,4 +748,297 @@ it('emphasises as ready next only unearned skills whose counted prerequisites ar
   expect(wrapper.findAll('.map-node').map(node => node.attributes('aria-label'))).toContain('Geometry, not yet earned, Ready, learning-outcome Bloom level 3 Apply')
   await wrapper.setProps({ model: atlas([credential('a', 1)]) })
   expect(emphasised('.map-node')).toEqual([GEOMETRY_NEXT])
+})
+
+describe('Web view', () => {
+  const link = (skillId: string, prerequisiteId: string) => ({ skill_id: skillId, skill_name: skillId, skill_bloom: 'apply',
+    prerequisite_id: prerequisiteId, prerequisite_name: prerequisiteId, prerequisite_bloom: 'apply' })
+  // Algebra (earned) → Bridges → Calculus → Dynamics; Essays goes well with Algebra; Fables stands alone in another field.
+  const webModel = buildSkillAtlas({
+    skills: [
+      skill('a', 'Algebra', 'math', { bloom_level: 'apply' }), skill('b', 'Bridges', 'math', { prerequisite_count: 1, bloom_level: 'apply' }),
+      skill('c', 'Calculus', 'math', { prerequisite_count: 1, bloom_level: 'apply' }), skill('d', 'Dynamics', 'math', { prerequisite_count: 1, bloom_level: 'apply' }),
+      skill('e', 'Essays', 'writing', { bloom_level: 'apply' }), skill('f', 'Fables', 'writing', { bloom_level: 'apply' }),
+    ],
+    edges: [link('b', 'a'), link('c', 'b'), link('d', 'c')],
+    relations: [{ skill_id: 'a', related_skill_id: 'e', relation_type: 'complementary' }],
+    activeCredentials: [credential('a', 3)], subjectDid: 'did:me',
+  })
+  const W_ALGEBRA = 'Algebra, earned, Bloom level 4 Analyze'
+  const W_BRIDGES = 'Bridges, not yet earned, ready next, learning-outcome Bloom level 3 Apply'
+  const W_CALCULUS = 'Calculus, not yet earned, Ready, learning-outcome Bloom level 3 Apply'
+  const W_ESSAYS = 'Essays, not yet earned, Ready, learning-outcome Bloom level 3 Apply'
+  /**
+   * A Web camera at zoom 1. Six dots fit at a zoom past the names threshold,
+   * so tests that read names hold the camera here.
+   */
+  const AT_REST = { webCamera: { x: 0, y: 0, zoom: 1 } }
+  /** Mounts the explorer in Web on the Web model, attached so focus works. */
+  async function web(view: AtlasViewState = { ...initialView(), ...AT_REST }, reducedMotion = true) {
+    const wrapper = setup(view, reducedMotion, null, document.body, 'web')
+    await wrapper.setProps({ model: webModel })
+    return wrapper
+  }
+  const node = (wrapper: VueWrapper, name: string) => {
+    const found = wrapper.findAll('.map-node').find(item => item.attributes('aria-label') === name)
+    if (!found) throw new Error(`Missing node: ${name}`)
+    return found
+  }
+  const skillOf = (item: { element: Element }) => item.element.closest('[data-skill]')?.getAttribute('data-skill')
+  const fadedSkills = (wrapper: VueWrapper) => wrapper.findAll('.map-node').filter(item => item.find('.web-skin.is-faded').exists()).map(skillOf).sort()
+  const namedSkills = (wrapper: VueWrapper) => wrapper.findAll('.map-node').filter(item => item.find('.web-name').exists()).map(skillOf).sort()
+  const shownSkills = (wrapper: VueWrapper) => wrapper.findAll('.map-node').map(skillOf).sort()
+
+  it('draws every skill as a dot on the same node elements, named as in the other views, behind one Tab stop, and keeps the selection across every switch', async () => {
+    // A Detailed camera, so Detailed shows its map rather than the field overview.
+    const wrapper = await web({ ...initialView(), camera: { x: 400, y: 300, zoom: 1 } })
+    expect(pressed(wrapper, 'Web')).toBe('true')
+    const names = [...mapNames(wrapper)].sort()
+    expect(names).toHaveLength(6)
+    expect(wrapper.findAll('.map-node .web-dot')).toHaveLength(6)
+    expect(wrapper.find('.node-disc').exists()).toBe(false)
+    expect(wrapper.find('.node-evidence').exists()).toBe(false)
+    // One stop in the Tab order: the roving dot.
+    expect(wrapper.findAll('.map-node').filter(item => item.attributes('tabindex') === '0')).toHaveLength(1)
+    expect(wrapper.get('.atlas-map').attributes('tabindex')).toBeUndefined()
+    await node(wrapper, W_BRIDGES).trigger('click')
+    expect(wrapper.props('view').selectedSkillId).toBe('b')
+    expect(node(wrapper, W_BRIDGES).attributes('aria-pressed')).toBe('true')
+    expect(node(wrapper, W_BRIDGES).attributes('tabindex')).toBe('0')
+    const element = wrapper.find('[data-skill="b"]').element
+    for (const [from, to] of [['Web', 'Simple'], ['Simple', 'Detailed'], ['Detailed', 'Web'], ['Web', 'Detailed'], ['Detailed', 'Simple'], ['Simple', 'Web']] as const) {
+      expect(pressed(wrapper, from)).toBe('true')
+      await button(wrapper, to).trigger('click')
+      expect(pressed(wrapper, to)).toBe('true')
+      // Detailed adds the nodes past the screen edge when idle.
+      for (let task = 0; task < 8; task++) await new Promise(resolve => setTimeout(resolve, 0))
+      expect([...mapNames(wrapper)].sort()).toEqual(names)
+      expect(wrapper.props('view').selectedSkillId).toBe('b')
+      expect(wrapper.get('[aria-label="Skill inspector"] h2').text()).toBe('Bridges')
+    }
+    // Still the same element after a trip through both other views.
+    expect(wrapper.find('[data-skill="b"]').element).toBe(element)
+    expect(wrapper.findAll('.map-node').filter(item => item.attributes('tabindex') === '0')).toHaveLength(1)
+  })
+
+  it('lights the one-step neighbourhood on hover and keyboard focus while they last, keeps it for the selection, and names what is lit', async () => {
+    const wrapper = await web()
+    expect(fadedSkills(wrapper)).toEqual([])
+    expect(namedSkills(wrapper)).toEqual([])
+    await node(wrapper, W_BRIDGES).trigger('pointerenter')
+    expect(fadedSkills(wrapper)).toEqual(['d', 'e', 'f'])
+    expect(namedSkills(wrapper)).toEqual(['a', 'b', 'c'])
+    await node(wrapper, W_BRIDGES).trigger('pointerleave')
+    expect(fadedSkills(wrapper)).toEqual([])
+    // Keyboard focus lights Essays and Algebra, which goes well with it.
+    ;(node(wrapper, W_ESSAYS).element as HTMLElement).focus()
+    await nextTick()
+    expect(fadedSkills(wrapper)).toEqual(['b', 'c', 'd', 'f'])
+    ;(node(wrapper, W_ESSAYS).element as HTMLElement).blur()
+    await nextTick()
+    expect(fadedSkills(wrapper)).toEqual([])
+    await node(wrapper, W_CALCULUS).trigger('click')
+    await node(wrapper, W_CALCULUS).trigger('pointerleave')
+    expect(fadedSkills(wrapper)).toEqual(['a', 'e', 'f'])
+    expect(namedSkills(wrapper)).toEqual(['b', 'c', 'd'])
+    // The arrow keys move focus to another dot's button, which becomes the one Tab stop.
+    const roving = () => wrapper.findAll('.map-node').find(item => item.attributes('tabindex') === '0')!.element as HTMLElement
+    const first = roving()
+    first.focus()
+    for (const key of ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp']) {
+      if (document.activeElement !== first) break
+      first.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+      await nextTick()
+    }
+    expect(document.activeElement).not.toBe(first)
+    expect(document.activeElement?.classList.contains('map-node')).toBe(true)
+    expect(document.activeElement).toBe(roving())
+    ;(document.activeElement as HTMLElement).blur()
+    await nextTick()
+    // The inspector's dependent focus lights its own neighbourhood.
+    await button(wrapper, 'Focus dependents').trigger('click')
+    expect(fadedSkills(wrapper)).toEqual(['a', 'b', 'e', 'f'])
+    // Escape on the graph clears the selection and all fading.
+    node(wrapper, W_CALCULUS).element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+    await nextTick()
+    expect(wrapper.props('view').selectedSkillId).toBeNull()
+    await button(wrapper, 'Reset exploration').trigger('click')
+    expect(fadedSkills(wrapper)).toEqual([])
+  })
+
+  it('names every dot past the zoom threshold and with the Names toggle, and hides the dotted lines with Related without moving a dot', async () => {
+    const wrapper = await web()
+    const places = () => wrapper.findAll('[data-skill]').map(item => `${item.attributes('data-skill')} ${item.attributes('x')} ${item.attributes('y')}`)
+    const segments = (selector: string) => wrapper.findAll(selector).reduce((sum, path) => sum + (path.attributes('d')?.match(/M/g)?.length ?? 0), 0)
+    await wrapper.setProps({ view: { ...initialView(), webCamera: { x: 0, y: 0, zoom: 2.5 } } })
+    expect(namedSkills(wrapper)).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
+    await wrapper.setProps({ view: { ...initialView(), ...AT_REST } })
+    expect(namedSkills(wrapper)).toEqual([])
+    await button(wrapper, 'Names').trigger('click')
+    expect(pressed(wrapper, 'Names')).toBe('true')
+    expect(namedSkills(wrapper)).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
+    const before = places()
+    expect(segments('.web-relation')).toBe(1)
+    expect(segments('.web-line')).toBe(3)
+    expect(pressed(wrapper, 'Related')).toBe('true')
+    await button(wrapper, 'Related').trigger('click')
+    expect(segments('.web-relation')).toBe(0)
+    expect(segments('.web-line')).toBe(3)
+    expect(places()).toEqual(before)
+    // Arrows put a head on every prerequisite line, lit or not.
+    expect(segments('.web-head')).toBe(0)
+    await button(wrapper, 'Arrows').trigger('click')
+    expect(segments('.web-head')).toBe(3)
+    expect(wrapper.props('view')).toMatchObject({ webNames: true, webArrows: true, webRelated: false })
+  })
+
+  it('narrows to the selection one to three steps out, naming everything it shows and re-centring on a new choice', async () => {
+    const wrapper = await web()
+    expect(button(wrapper, 'Around selection').attributes('disabled')).toBeDefined()
+    expect(pressed(wrapper, 'Whole graph')).toBe('true')
+    await node(wrapper, W_BRIDGES).trigger('click')
+    await button(wrapper, 'Around selection').trigger('click')
+    expect(pressed(wrapper, 'Around selection')).toBe('true')
+    expect(shownSkills(wrapper)).toEqual(['a', 'b', 'c'])
+    expect(namedSkills(wrapper)).toEqual(['a', 'b', 'c'])
+    const depth = () => wrapper.get('.web-tools select')
+    expect(depth().findAll('option').map(option => option.text())).toEqual(['1 step', '2 steps', '3 steps'])
+    await depth().setValue('2')
+    // Two steps reach Dynamics and, through Algebra's dotted line, Essays; nothing shown fades.
+    expect(shownSkills(wrapper)).toEqual(['a', 'b', 'c', 'd', 'e'])
+    expect(fadedSkills(wrapper)).toEqual([])
+    await button(wrapper, 'Related').trigger('click')
+    expect(shownSkills(wrapper)).toEqual(['a', 'b', 'c', 'd'])
+    await depth().setValue('3')
+    expect(shownSkills(wrapper)).toEqual(['a', 'b', 'c', 'd'])
+    expect(wrapper.props('view')).toMatchObject({ webNarrowed: true, neighborhoodDepth: 3, webCamera: null })
+    await depth().setValue('1')
+    await node(wrapper, W_CALCULUS).trigger('click')
+    expect(shownSkills(wrapper)).toEqual(['b', 'c', 'd'])
+    expect(wrapper.props('view')).toMatchObject({ selectedSkillId: 'c', webCamera: null })
+    await button(wrapper, 'Whole graph').trigger('click')
+    expect(shownSkills(wrapper)).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
+  })
+
+  it('fades skills outside a search or a focused field, fitting the camera to the field', async () => {
+    const wrapper = await web({ ...initialView(), webCamera: { x: 10, y: 10, zoom: 3 } })
+    await wrapper.get('input[type="search"]').setValue('ssays')
+    expect(fadedSkills(wrapper)).toEqual(['a', 'b', 'c', 'd', 'f'])
+    expect(wrapper.findAll('.atlas-list li button').map(item => item.attributes('aria-label'))).toEqual([W_ESSAYS])
+    await wrapper.get('input[type="search"]').setValue('')
+    await button(wrapper, 'writing 0/2 earned').trigger('click')
+    expect(fadedSkills(wrapper)).toEqual(['a', 'b', 'c', 'd'])
+    expect(wrapper.props('view')).toMatchObject({ focusedFieldId: 'writing', webCamera: null })
+    expect(pressed(wrapper, 'All fields')).toBe('false')
+    await button(wrapper, 'All fields').trigger('click')
+    expect(fadedSkills(wrapper)).toEqual([])
+  })
+
+  it('hides Bloom emphasis in Web and keeps it for Detailed, and lets the inspector walk to a related skill', async () => {
+    const emphasised = { ...initialView(), bloomEmphasis: 3 as const, camera: { x: 400, y: 300, zoom: 1 } }
+    const wrapper = await web(emphasised)
+    expect(wrapper.findAll('select').some(item => item.findAll('option').some(option => option.text() === 'All earned levels'))).toBe(false)
+    expect(wrapper.text()).not.toContain('Emphasizing')
+    expect(wrapper.findAll('.is-bloom-match')).toHaveLength(0)
+    await node(wrapper, W_ALGEBRA).trigger('click')
+    const related = wrapper.findAll('.inspector-relations')[2]!
+    expect(related.find('h3').text()).toContain('Related skills')
+    await related.get('button').trigger('click')
+    expect(wrapper.props('view').selectedSkillId).toBe('e')
+    expect(node(wrapper, W_ESSAYS).attributes('aria-pressed')).toBe('true')
+    await button(wrapper, 'Detailed').trigger('click')
+    expect(wrapper.text()).toContain('Emphasizing')
+    expect(wrapper.props('view').bloomEmphasis).toBe(3)
+  })
+
+  it('switches synchronously and drags only the held dot under reduced motion; Reset restores every dot and fits, keeping the toggles', async () => {
+    vi.useFakeTimers()
+    const wrapper = await web()
+    const place = (skillId: string) => { const box = wrapper.get(`[data-skill="${skillId}"]`); return { x: Number(box.attributes('x')), y: Number(box.attributes('y')) } }
+    const centre = (skillId: string) => { const box = wrapper.get(`[data-skill="${skillId}"]`); return { x: Number(box.attributes('x')) + Number(box.attributes('width')) / 2, y: Number(box.attributes('y')) + Number(box.attributes('height')) / 2 } }
+    async function pointer(target: Element, name: string, x: number, y: number) {
+      const event = new MouseEvent(name, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y })
+      Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: 'mouse' } })
+      target.dispatchEvent(event)
+      await nextTick()
+    }
+    await button(wrapper, 'Names').trigger('click')
+    // Hold the camera still, so screen places compare directly.
+    await wrapper.setProps({ view: { ...wrapper.props('view'), webCamera: { x: 0, y: 0, zoom: 1 } } })
+    const before = { b: place('b'), c: place('c') }
+    const start = centre('b')
+    const dot = wrapper.get('[data-skill="b"] .map-node').element
+    await pointer(dot, 'pointerdown', start.x, start.y)
+    await pointer(dot, 'pointermove', start.x + 20, start.y)
+    await pointer(dot, 'pointermove', start.x + 40, start.y)
+    await pointer(dot, 'pointerup', start.x + 40, start.y)
+    expect(wrapper.emitted('web-drag')?.length).toBeGreaterThan(0)
+    expect(place('b').x).toBeCloseTo(before.b.x + 40, 0)
+    expect(place('c')).toEqual(before.c)
+    // The drag ended without selecting the dot.
+    expect(wrapper.props('view').selectedSkillId).toBeNull()
+    await node(wrapper, W_BRIDGES).trigger('click')
+    await button(wrapper, 'Around selection').trigger('click')
+    await wrapper.get('input[type="search"]').setValue('bridg')
+    await button(wrapper, 'Reset exploration').trigger('click')
+    expect(wrapper.emitted('web-reset')).toHaveLength(1)
+    expect(wrapper.props('view')).toEqual({ ...initialView(), webNames: true })
+    // Fitted again, the dragged dot is back beside Calculus as laid out.
+    await wrapper.setProps({ view: { ...wrapper.props('view'), webCamera: { x: 0, y: 0, zoom: 1 } } })
+    expect(place('b')).toEqual(before.b)
+    const pending = vi.getTimerCount()
+    await button(wrapper, 'Simple').trigger('click')
+    expect(wrapper.get('.atlas-map').classes()).not.toContain('is-switching')
+    expect(vi.getTimerCount()).toBe(pending)
+  })
+
+  it('pans the Web graph live by dragging the background and publishes the camera once, when the drag ends', async () => {
+    const wrapper = await web()
+    const map = wrapper.get('.atlas-map').element
+    const cameras = () => (wrapper.emitted('update:view') ?? []).map(([next]) => (next as AtlasViewState).webCamera)
+    const before = cameras().length
+    const place = () => wrapper.get('[data-skill="a"]').attributes('x')
+    const start = place()
+    for (const [name, x] of [['pointerdown', 400], ['pointermove', 420], ['pointermove', 460]] as const) {
+      const event = new MouseEvent(name, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: 5 })
+      Object.defineProperties(event, { pointerId: { value: 7 }, pointerType: { value: 'mouse' } })
+      map.dispatchEvent(event)
+      await nextTick()
+    }
+    // The dots moved with the pointer, and the view has not heard of it yet.
+    expect(Number(place())).toBeCloseTo(Number(start) + 60, 0)
+    expect(cameras().length).toBe(before)
+    const up = new MouseEvent('pointerup', { bubbles: true, cancelable: true, button: 0, clientX: 460, clientY: 5 })
+    Object.defineProperties(up, { pointerId: { value: 7 }, pointerType: { value: 'mouse' } })
+    map.dispatchEvent(up)
+    await nextTick()
+    expect(cameras().length).toBe(before + 1)
+    expect(wrapper.props('view').webCamera).toEqual({ x: -60, y: 0, zoom: 1 })
+    expect(Number(place())).toBeCloseTo(Number(start) + 60, 0)
+  })
+
+  it('travels between Web and the other views with the edges hidden, and announces the switch', async () => {
+    vi.useFakeTimers()
+    // A Detailed camera, so Detailed shows its map.
+    const wrapper = await web({ ...initialView(), camera: { x: 400, y: 300, zoom: 1 } }, false)
+    for (const target of ['Simple', 'Web', 'Detailed', 'Web'] as const) {
+      await button(wrapper, target).trigger('click')
+      expect(wrapper.get('.atlas-map').classes()).toContain('is-switching')
+      expect(wrapper.findAll('.atlas-map .atlas-canvas-leaving')).toHaveLength(1)
+      expect(wrapper.get('.atlas-feedback[role="status"]').text()).toBe(`Showing the ${target} view`)
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(wrapper.get('.atlas-map').classes()).not.toContain('is-switching')
+      expect(wrapper.findAll('.atlas-map .atlas-canvas-leaving')).toHaveLength(0)
+    }
+  })
+
+  it('names the Web encoding: the three dot states, colour, size and the dotted line', async () => {
+    const wrapper = await web()
+    for (const item of ['Filled: earned', 'Ringed: Ready next', 'Pale: Ready', 'Size: the Bloom level you have earned', 'Dotted line: related skills', 'Color means field']) {
+      expect(wrapper.get('.web-legend').text()).toContain(item)
+    }
+    expect(wrapper.text()).not.toContain('Field color identifies membership')
+    expect(wrapper.get('.atlas-map').attributes('aria-describedby')).toBe(wrapper.get('.map-help').attributes('id'))
+    expect(wrapper.get('.map-help').text()).toContain('Arrow keys move between skills')
+  })
 })

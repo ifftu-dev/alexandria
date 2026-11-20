@@ -25,7 +25,7 @@ const { t } = useI18n()
 const router = useRouter()
 const { learnSkill, openSkill, actionError } = useSkillAtlasActions('page')
 const atlas = useSkillAtlas()
-const graphView = useSkillGraphView()
+const graphView = useSkillGraphView('page')
 const { addGoal } = useGoals()
 const pendingGoal = ref<string | null>(null)
 const goalError = ref<string | null>(null)
@@ -341,6 +341,7 @@ async function goalSkill(skill: SkillInfo) {
       <!-- ============ GRAPH TAB ============ -->
       <div v-if="activeTab === 'graph'" class="space-y-6">
         <SkillAtlasExplorer v-if="model" v-model:view-mode="graphView" :model="model" :view="pageView" :feedback="atlas.feedbackFor('page')"
+          :web-positions="graphView === 'web' ? atlas.webPositions.value : null" @web-drag="atlas.setWebPositions" @web-reset="atlas.resetWebPositions"
           @update:view="atlas.updateView('page', $event)" @open-skill="openSkill" @learn-skill="learnSkill"
           @feedback-consumed="atlas.acknowledgeFeedback" />
         <GraphVisibilityEditor />

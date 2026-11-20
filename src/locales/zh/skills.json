@@ -223,6 +223,24 @@
     "legendEarned": "Filled: earned, the number is your Bloom level",
     "legendReadyNext": "Ringed: Ready next",
     "legendReady": "Hollow: Ready",
-    "legendField": "Color means field"
+    "legendField": "Color means field",
+    "viewWeb": "Web",
+    "viewChangedWeb": "Showing the Web view",
+    "threeSteps": "3 steps",
+    "webShow": "Show",
+    "webWhole": "Whole graph",
+    "webAround": "Around selection",
+    "webDisplay": "Display",
+    "webNames": "Names",
+    "webArrows": "Arrows",
+    "webRelated": "Related",
+    "webAllFields": "All fields",
+    "webFit": "Fit",
+    "webLegendEarned": "Filled: earned",
+    "webLegendReadyNext": "Ringed: Ready next",
+    "webLegendReady": "Pale: Ready",
+    "webLegendSize": "Size: the Bloom level you have earned",
+    "webLegendRelated": "Dotted line: related skills",
+    "webHelp": "Lines run from what a skill builds on to what builds on it. Arrow keys move between skills and Enter selects. Drag a dot to move it, or the background to pan. Pinch, or hold Ctrl or ⌘ and scroll, to zoom."
   }
 }

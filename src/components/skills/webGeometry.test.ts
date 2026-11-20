@@ -5,7 +5,7 @@ import type { SkillGraphEdge, SkillInfo } from '@/types'
 import { buildSkillAtlas } from '@/utils/skillAtlas'
 import {
   WEB_MIN_DISTANCE, WEB_SIDEBAR_NODE_LIMIT, continueWebLayout, webDotRadius, webLayout, webNearestInDirection, webNearestTo, webSidebarSubset,
-  webGraphFromAtlas,
+  webGraphFromAtlas, webNamePlaces, webNarrowedIds,
   type WebGraph,
 } from './webGeometry'
 
@@ -269,6 +269,68 @@ describe('Sidebar subset of the Web graph', () => {
     expect(part.partial).toBe(true)
     expect(part.ids.size).toBeLessThan(WEB_SIDEBAR_NODE_LIMIT)
     expect(part.ids.has('skill_big_o')).toBe(true)
+  })
+})
+
+describe('Placing Web names', () => {
+  const label = (id: string, x: number, y: number, width = 80) => ({ id, x, y, radius: 5, width, height: 16 })
+  type Box = { left: number; top: number; right: number; bottom: number }
+  /** Where each name lands, from its dot and place, as the dot skin draws it. */
+  function boxes(labels: ReturnType<typeof label>[], places: ReadonlyMap<string, string>): Box[] {
+    return labels.map(item => {
+      const place = places.get(item.id)
+      const left = place === 'right' ? item.x + item.radius + 4 : place === 'left' ? item.x - item.radius - 4 - item.width : item.x - item.width / 2
+      const top = place === 'below' ? item.y + item.radius + 3 : place === 'above' ? item.y - item.radius - 3 - item.height : item.y - item.height / 2
+      return { left, top, right: left + item.width, bottom: top + item.height }
+    })
+  }
+  const overlapping = (all: Box[]) => all.some((a, i) => all.slice(i + 1).some(b => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom))
+
+  it('puts a name under its dot when there is room', () => {
+    expect([...webNamePlaces([label('a', 0, 0), label('b', 0, 200)])]).toEqual([['a', 'below'], ['b', 'below']])
+  })
+
+  it('moves a later name above, beside or to the other side of its dot so names in a cluster do not overlap', () => {
+    // Three dots in a close row and one under the middle: names under the row would collide.
+    const cluster = [label('first', 0, 0), label('second', 30, 0), label('third', 60, 0), label('fourth', 30, 30)]
+    const places = webNamePlaces(cluster)
+    expect(places.get('first')).toBe('below')
+    expect(overlapping(boxes(cluster, places))).toBe(false)
+  })
+
+  it('keeps names off other dots where there is room', () => {
+    // A dot sits right under the first one: its name goes above instead.
+    const places = webNamePlaces([label('first', 0, 0)], [{ x: 0, y: 16, radius: 5 }])
+    expect(places.get('first')).toBe('above')
+  })
+
+  it('keeps every name, under its dot, when no place is free', () => {
+    const crowd = Array.from({ length: 12 }, (_, index) => label(`n${index}`, index % 2, Math.floor(index / 2)))
+    const places = webNamePlaces(crowd)
+    expect(places.size).toBe(12)
+    expect([...places.values()].filter(place => place === 'below').length).toBeGreaterThan(0)
+  })
+})
+
+describe('Narrowing the Web graph around a skill', () => {
+  // one → two → three → four in a chain, one is related to five, and five to six.
+  const chain: WebGraph = {
+    nodes: ['one', 'two', 'three', 'four', 'five', 'six', 'seven'].map(id => ({ id, slot: 0 })),
+    prerequisites: [{ skill: 'two', prerequisite: 'one' }, { skill: 'three', prerequisite: 'two' }, { skill: 'four', prerequisite: 'three' }],
+    relations: [['one', 'five'], ['five', 'six']],
+  }
+  const sorted = (ids: ReadonlySet<string>) => [...ids].sort()
+
+  it('takes one to three steps along prerequisites and dependents, and along relations only when they are shown', () => {
+    expect(sorted(webNarrowedIds(chain, 'two', 1, true))).toEqual(['one', 'three', 'two'])
+    expect(sorted(webNarrowedIds(chain, 'two', 2, true))).toEqual(['five', 'four', 'one', 'three', 'two'])
+    expect(sorted(webNarrowedIds(chain, 'two', 3, true))).toEqual(['five', 'four', 'one', 'six', 'three', 'two'])
+    expect(sorted(webNarrowedIds(chain, 'two', 3, false))).toEqual(['four', 'one', 'three', 'two'])
+    expect(sorted(webNarrowedIds(chain, 'seven', 3, true))).toEqual(['seven'])
+  })
+
+  it('narrows to nothing around a skill the graph does not hold', () => {
+    expect(webNarrowedIds(chain, 'missing', 2, true).size).toBe(0)
   })
 })
 

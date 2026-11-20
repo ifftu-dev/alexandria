@@ -40,7 +40,7 @@ import { useI18n } from 'vue-i18n'
 import type { AtlasModel } from '@/utils/skillAtlas'
 import type { AtlasCamera } from '@/utils/skillAtlasView'
 import { createAtlasPresenter } from './atlasPresentation'
-import type { WebPoint } from './webGeometry'
+import { WEB_NAME_GAP, WEB_NAME_SIDE_GAP, type WebPoint } from './webGeometry'
 import { useWebGraph, WEB_NAMES_ZOOM, type WebDot } from './useWebGraph'
 import WebGraphDot from './WebGraphDot.vue'
 import WebGraphLines from './WebGraphLines.vue'
@@ -83,13 +83,14 @@ const web = useWebGraph(() => ({
   camera: camera => emit('update:camera', camera), drag: positions => emit('drag', positions),
 }, root)
 const { dots, lines, size } = web
-/** Rough on-screen box of a compact name (10px type, at most 110px wide, under the dot), in pixels. */
-const COMPACT_NAME = { charWidth: 5.6, maxWidth: 110, height: 13, gap: 3, margin: 2 }
+/** Rough on-screen box of a compact name (10px type, at most 110px wide, beside the dot on its chosen side), in pixels. */
+const COMPACT_NAME = { charWidth: 5.6, maxWidth: 110, height: 13, gap: WEB_NAME_GAP, sideGap: WEB_NAME_SIDE_GAP, margin: 2 }
 /**
  * In the compact graph, names of the lit set (not every name, which the
  * learner asked for with Names or by zooming in) are placed hovered dot
- * first, then the selection, then the rest, and a name that would overlap
- * one already placed is left out, so the small graph stays readable.
+ * first, then the selection, then the rest, and a name that would still
+ * overlap one already placed on the side the graph chose for it is left
+ * out, so the small graph stays readable.
  */
 const named = computed<ReadonlySet<string>>(() => {
   const labelled = dots.value.filter(dot => dot.labelled)
@@ -100,8 +101,10 @@ const named = computed<ReadonlySet<string>>(() => {
   const kept = new Set<string>()
   for (const dot of [...labelled].sort((a, b) => rank(a) - rank(b))) {
     const width = Math.min(COMPACT_NAME.maxWidth, dot.node.skill.name.length * COMPACT_NAME.charWidth)
-    const top = dot.y + dot.size / 2 + COMPACT_NAME.gap
-    const box = { left: dot.x - width / 2, right: dot.x + width / 2, top, bottom: top + COMPACT_NAME.height }
+    const r = dot.size / 2, h = COMPACT_NAME.height, place = dot.namePlace
+    const left = place === 'right' ? dot.x + r + COMPACT_NAME.sideGap : place === 'left' ? dot.x - r - COMPACT_NAME.sideGap - width : dot.x - width / 2
+    const top = place === 'below' ? dot.y + r + COMPACT_NAME.gap : place === 'above' ? dot.y - r - COMPACT_NAME.gap - h : dot.y - h / 2
+    const box = { left, right: left + width, top, bottom: top + h }
     const m = COMPACT_NAME.margin
     if (placed.some(other => box.left < other.right + m && other.left < box.right + m && box.top < other.bottom + m && other.top < box.bottom + m)) continue
     placed.push(box)
@@ -121,7 +124,7 @@ defineExpose({ focus: web.focus, zoomBy: web.zoomBy, panBy: web.panBy })
   <div ref="root" class="web-graph" :class="{ 'is-compact': compact }" role="group" :aria-label="label" :aria-describedby="describedBy" @keydown="web.keyDown" @keyup="web.keyUp" @focusin="web.focusIn" @focusout="web.focusOut" @pointerdown="web.pointerDown" @pointermove="web.pointerMove" @pointerup="web.pointerUp" @pointercancel="web.pointerUp" @lostpointercapture="web.pointerUp" @click.capture="web.clickCapture" @wheel="web.wheel">
     <svg class="web-canvas" :width="size.width" :height="size.height" :viewBox="`0 0 ${size.width} ${size.height}`" aria-hidden="true"><WebGraphLines :lines="lines" /></svg>
     <button v-for="dot in dots" :key="dot.id" class="web-node" type="button" :data-skill="dot.id" :tabindex="dot.roving ? 0 : -1" :aria-label="accessibleNames.get(dot.id)" :aria-pressed="dot.selected" :style="{ '--field': dot.color, '--hit': `${dot.hit}px`, transform: `translate(${dot.x - dot.hit / 2}px, ${dot.y - dot.hit / 2}px)` }" @click="web.dotClick(dot.id)" @pointerenter="web.hover(dot.id)" @pointerleave="web.hover(null)">
-      <WebGraphDot :state="dot.state" :size="dot.size" :name="dot.node.skill.name" :labelled="named.has(dot.id)" :selected="dot.selected" :faded="dot.faded" :compact="compact" />
+      <WebGraphDot :state="dot.state" :size="dot.size" :name="dot.node.skill.name" :labelled="named.has(dot.id)" :selected="dot.selected" :faded="dot.faded" :compact="compact" :place="dot.namePlace" />
     </button>
   </div>
 </template>

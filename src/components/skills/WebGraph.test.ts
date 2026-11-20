@@ -304,10 +304,13 @@ describe('Web graph', () => {
     expect(wrapper.emitted('update:camera')).toHaveLength(1)
   })
 
-  it('in compact form leaves out a lit name that would overlap one already shown, the hovered and selected first, but never with Names on', async () => {
+  it('in compact form leaves out a lit name that would overlap one already shown wherever it goes, the hovered and selected first, but never with Names on', async () => {
     const names = (wrapper: VueWrapper) => wrapper.findAll('.web-name').map(item => item.text()).sort()
-    // Bridges sits close enough to Algebra that their names would collide.
-    const crowded = new Map([...positions, ['b', { x: 20, y: 0 }]])
+    // Bridges sits on Algebra, with Calculus above and Essays to the right:
+    // every side of Bridges' dot is taken, so its name has nowhere to go.
+    const crowded: ReadonlyMap<string, WebPoint> = new Map([
+      ['a', { x: 0, y: 0 }], ['b', { x: 1, y: 0 }], ['c', { x: 0, y: -14 }], ['d', { x: 0, y: 80 }], ['e', { x: 30, y: 0 }],
+    ])
     const wrapper = setup({ compact: true, positions: crowded, selectedId: 'a' })
     expect(names(wrapper)).toEqual(['Algebra', 'Data'])
     await dot(wrapper, BRIDGES).trigger('pointerenter')

@@ -480,6 +480,78 @@ export function webNearestTo(point: WebPoint, positions: ReadonlyMap<string, Web
   return best?.id ?? null
 }
 
+/** Where a Web name sits around its dot. */
+export type WebNamePlace = 'below' | 'above' | 'right' | 'left'
+/** A dot names should keep off: its centre and radius in screen pixels. */
+export interface WebNameObstacle { x: number; y: number; radius: number }
+/** A name to place: its dot's centre and radius and the name's size, all in screen pixels. */
+export interface WebNameLabel { id: string; x: number; y: number; radius: number; width: number; height: number }
+/** Space between a dot's edge and its name, below or above, and beside it. */
+export const WEB_NAME_GAP = 3
+export const WEB_NAME_SIDE_GAP = 4
+/** Cell size of the grid that finds names near each other, in pixels. */
+const NAME_CELL = 96
+const PLACES: readonly WebNamePlace[] = ['below', 'above', 'right', 'left']
+
+/**
+ * Places names so that, where there is room, none overlaps another: each
+ * name, in the given order of priority, goes under its dot, or failing that
+ * above, to the right or to the left; when no place is free it stays under
+ * its dot. Names also keep off the `obstacles` (the dots) where they can.
+ * Every name keeps a place: a name is never hidden to make room.
+ */
+export function webNamePlaces(labels: readonly WebNameLabel[], obstacles: readonly WebNameObstacle[] = []): Map<string, WebNamePlace> {
+  type Box = { left: number; top: number; right: number; bottom: number }
+  const placed = new Map<string, Box[]>()
+  const cells = (box: Box) => {
+    const keys: string[] = []
+    for (let cx = Math.floor(box.left / NAME_CELL); cx <= Math.floor(box.right / NAME_CELL); cx++)
+      for (let cy = Math.floor(box.top / NAME_CELL); cy <= Math.floor(box.bottom / NAME_CELL); cy++) keys.push(`${cx},${cy}`)
+    return keys
+  }
+  const free = (box: Box) => cells(box).every(key => !(placed.get(key) ?? []).some(other =>
+    box.left < other.right && other.left < box.right && box.top < other.bottom && other.top < box.bottom))
+  const boxAt = ({ x, y, radius, width, height }: WebNameLabel, place: WebNamePlace): Box => {
+    const left = place === 'right' ? x + radius + WEB_NAME_SIDE_GAP : place === 'left' ? x - radius - WEB_NAME_SIDE_GAP - width : x - width / 2
+    const top = place === 'below' ? y + radius + WEB_NAME_GAP : place === 'above' ? y - radius - WEB_NAME_GAP - height : y - height / 2
+    return { left, top, right: left + width, bottom: top + height }
+  }
+  const add = (box: Box) => { for (const key of cells(box)) placed.set(key, [...placed.get(key) ?? [], box]) }
+  // A name never reaches its own dot (it sits past the dot's edge), so every dot can be an obstacle.
+  for (const { x, y, radius } of obstacles) add({ left: x - radius, top: y - radius, right: x + radius, bottom: y + radius })
+  const places = new Map<string, WebNamePlace>()
+  for (const label of labels) {
+    const place = PLACES.find(candidate => free(boxAt(label, candidate))) ?? 'below'
+    add(boxAt(label, place))
+    places.set(label.id, place)
+  }
+  return places
+}
+
+/** How far the Web graph can be narrowed around the selection, in steps. */
+export type WebNarrowingDepth = 1 | 2 | 3
+
+/**
+ * The skills within `depth` steps of `id`: along prerequisites in either
+ * direction and, when `related` is on (the dotted lines are shown), along
+ * relations. Empty when the graph does not hold `id`.
+ */
+export function webNarrowedIds(graph: WebGraph, id: string, depth: WebNarrowingDepth, related: boolean): Set<string> {
+  const steps = new Map<string, string[]>()
+  const link = (a: string, b: string) => { steps.set(a, [...steps.get(a) ?? [], b]); steps.set(b, [...steps.get(b) ?? [], a]) }
+  for (const { skill, prerequisite } of graph.prerequisites) link(skill, prerequisite)
+  if (related) for (const [a, b] of graph.relations) link(a, b)
+  if (!graph.nodes.some(node => node.id === id)) return new Set()
+  const ids = new Set([id])
+  let frontier = [id]
+  for (let step = 0; step < depth && frontier.length; step++) {
+    const next: string[] = []
+    for (const from of frontier) for (const to of steps.get(from) ?? []) if (!ids.has(to)) { ids.add(to); next.push(to) }
+    frontier = next
+  }
+  return ids
+}
+
 /**
  * The most skills the sidebar graph draws whole. Tuned so the bundled
  * taxonomy (about a hundred skills) always shows in full and the 1,500-skill

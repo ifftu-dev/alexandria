@@ -4,7 +4,7 @@ import SkillAtlasExplorer from '@/components/skills/SkillAtlasExplorer.vue'
 import { buildSkillAtlas } from '@/utils/skillAtlas'
 import type { AtlasFeedback, AtlasViewState } from '@/composables/useSkillAtlas'
 import { isSkillGraphView, type SkillGraphView } from '@/composables/useSkillGraphView'
-import type { SkillGraphEdge, SkillInfo, VerifiableCredential } from '@/types'
+import type { SkillGraphEdge, SkillGraphRelation, SkillInfo, VerifiableCredential } from '@/types'
 import taxonomy from '../../bootstrap/public_taxonomy.json'
 
 const params = new URLSearchParams(location.search)
@@ -33,13 +33,14 @@ if (params.get('scenario') === 'stress') {
   edges.push({ skill_id: 'fixture-unassigned', skill_name: 'Long-label skill', skill_bloom: 'evaluate',
     prerequisite_id: 'fixture-missing', prerequisite_name: 'An unloaded prerequisite', prerequisite_bloom: 'apply' })
 }
+const relations: SkillGraphRelation[] = taxonomy.skill_relations.map(({ skill_id, related_skill_id, relation_type }) => ({ skill_id, related_skill_id, relation_type }))
 const revision = ref(0)
 function credential(skillId: string, level: unknown): VerifiableCredential {
   return { '@context': [], type: [], issuer: 'did:fixture:issuer', validFrom: '2026-10-27T00:00:00Z',
     credentialSubject: { id: 'did:fixture:learner', skillId, level },
     proof: { type: '', cryptosuite: '', created: '', verificationMethod: '', proofPurpose: '', proofValue: '' } }
 }
-const model = computed(() => buildSkillAtlas({ skills, edges, subjectDid: 'did:fixture:learner', subjectFields: taxonomy.subject_fields,
+const model = computed(() => buildSkillAtlas({ skills, edges, relations, subjectDid: 'did:fixture:learner', subjectFields: taxonomy.subject_fields,
   activeCredentials: params.get('scenario') === 'empty-earned' ? [] : [
     ...skills.filter((_, index) => index % 3 === 0).map((skill, index) => credential(skill.id, Math.min(5, index % 6 + revision.value))),
     ...(params.get('scenario') === 'stress' ? [credential('fixture-unassigned', 'malformed')] : []),
@@ -49,7 +50,7 @@ const view = ref<AtlasViewState>({ selectedSkillId: null, focusedFieldId: null, 
   query: '', bloomEmphasis: null, neighborhood: 'none', neighborhoodDepth: 1, camera: null, inspectorCollapsed: false,
   webCamera: null, webNames: false, webArrows: false, webRelated: true, webNarrowed: false })
 const feedback = ref<AtlasFeedback | null>(null)
-// `view` opens the explorer in either view; like a profile that never chose, it defaults to Simple.
+// `view` opens the explorer in any of the three views; like a profile that never chose the page view, it defaults to Simple.
 const requestedView = params.get('view')
 const viewMode = ref<SkillGraphView>(isSkillGraphView(requestedView) ? requestedView : 'simple')
 const instance = ref(0)
