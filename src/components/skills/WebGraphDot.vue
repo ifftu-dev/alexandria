@@ -24,7 +24,9 @@ withDefaults(defineProps<{ state: WebDotState; size: number; name: string; label
 .web-skin { position: relative; display: grid; place-items: center; width: var(--dot); height: var(--dot); pointer-events: none; transition: opacity var(--transition-base); }
 .web-skin.is-faded { opacity: .16; }
 .web-dot { box-sizing: border-box; width: var(--dot); height: var(--dot); border-radius: 50%; background: color-mix(in srgb, var(--field) 30%, var(--app-background)); }
-.web-dot.is-earned { background: var(--field); }
+/* The small graph's pale dots take a stronger tint, so field colour reads at a few pixels. */
+.web-skin.is-compact .web-dot { background: color-mix(in srgb, var(--field) 48%, var(--app-background)); }
+.web-dot.is-earned, .web-skin.is-compact .web-dot.is-earned { background: var(--field); }
 .web-dot.is-ready-next { background: var(--app-background); border: 2px solid var(--field); }
 /* The primary-colour selection ring used by the other views. */
 .web-skin.is-selected .web-dot { box-shadow: 0 0 0 2px var(--app-background), 0 0 0 4px var(--app-primary); }

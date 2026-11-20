@@ -23,8 +23,9 @@ export const WEB_MIN_FIT_EXTENT = 160
 /** Size of the graph before it is measured (and in tests), in pixels. */
 export const WEB_DEFAULT_SIZE = { width: 800, height: 520 }
 export const WEB_COMPACT_DEFAULT_SIZE = { width: 260, height: 200 }
-/** Smallest dot drawn, and smallest pointer target around a dot, in pixels. */
+/** Smallest dot drawn in the full and the compact graph, and smallest pointer target around a dot, in pixels. */
 export const WEB_DOT_MIN_PIXELS = 4
+export const WEB_COMPACT_DOT_MIN_PIXELS = 6
 export const WEB_HIT_PIXELS = 14
 /** A press that moves this many pixels is a drag, not a click. */
 export const WEB_DRAG_THRESHOLD = 4
@@ -259,7 +260,7 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
     const drawn = shownNodes.value.map((node): WebDot => {
       const id = node.skill.id
       const screen = toScreen(positions.value.get(id)!)
-      const dotSize = Math.max(WEB_DOT_MIN_PIXELS, radiusOf(node) * 2 * at.zoom)
+      const dotSize = Math.max(input().compact ? WEB_COMPACT_DOT_MIN_PIXELS : WEB_DOT_MIN_PIXELS, radiusOf(node) * 2 * at.zoom)
       return {
         node, id, x: screen.x, y: screen.y, size: dotSize, hit: Math.max(WEB_HIT_PIXELS, dotSize),
         color: atlasFieldColor(model.value.fieldById.get(node.fieldId) ?? { id: node.fieldId, slot: null }),
