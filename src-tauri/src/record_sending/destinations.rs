@@ -148,7 +148,7 @@ pub async fn add<D: RecordDb>(
     })
     .await?
     {
-        return Err(SendError::Supervised(
+        return Err(SendError::GuardianApprovalRequired(
             "a supervised profile's records go only where its guardian can see the consent; a store you add yourself is not one of those"
                 .into(),
         ));

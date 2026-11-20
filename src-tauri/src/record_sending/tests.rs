@@ -684,7 +684,10 @@ async fn a_supervised_profile_cannot_add_a_destination() {
             .add(learner.request(&store, "learner-key", &[&learner.course]))
             .await
             .unwrap_err();
-        assert!(refused.starts_with("supervised:"), "{refused}");
+        assert!(
+            refused.starts_with("guardian_approval_required:"),
+            "{refused}"
+        );
         assert!(learner.destinations().is_empty());
     }
     assert!(store.statement_posts().is_empty());
