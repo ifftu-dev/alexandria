@@ -324,6 +324,14 @@ pub fn check(
     if record.terminated() {
         return Err(rule("the session was terminated"));
     }
+    // 9.7: a timestamp is in UTC. One the endpoint filled in always is.
+    if let Some(at) = statement["timestamp"].as_str() {
+        let utc =
+            DateTime::parse_from_rfc3339(at).is_ok_and(|at| at.offset().local_minus_utc() == 0);
+        if !utc {
+            return Err(rule("the timestamp is not in UTC"));
+        }
+    }
     if !same_agent(&statement["actor"], &facts.actor) {
         return Err(rule(
             "the actor is not the learner the unit was launched for",
@@ -365,6 +373,12 @@ pub fn check(
     if !defined {
         if !record.initialized() {
             return Err(rule("the first statement of a session must be initialized"));
+        }
+        if moveon_category {
+            // 9.6.2.2: only a cmi5 defined statement with an outcome.
+            return Err(rule(
+                "only a statement with success or completion carries the moveOn category",
+            ));
         }
         return Ok(Checked {
             verb: None,
@@ -477,6 +491,15 @@ pub fn check(
     } else {
         None
     };
+    // 9.6.3.2-2: a scored judgement names the mastery score it was judged
+    // against.
+    if let (Some(mastery), true) = (facts.mastery_score, judged && !score_value.is_null()) {
+        if context["extensions"][EXTENSION_MASTERY_SCORE].as_f64() != Some(mastery) {
+            return Err(rule(
+                "a scored passed or failed carries the session's mastery score",
+            ));
+        }
+    }
     if let (Some(mastery), Some(scaled)) = (facts.mastery_score, score_value["scaled"].as_f64()) {
         if verb == UnitVerb::Passed && scaled < mastery {
             return Err(rule("a passed score is at least the mastery score"));
@@ -497,6 +520,10 @@ pub fn check(
 fn normalised_score(score: &Value) -> Result<Option<f64>, Refusal> {
     if score.is_null() {
         return Ok(None);
+    }
+    // 9.5.1: a raw score comes with min and max, whatever else is there.
+    if !score["raw"].is_null() && (score["min"].is_null() || score["max"].is_null()) {
+        return Err(rule("a raw score comes with min and max around it"));
     }
     if let Some(scaled) = score["scaled"].as_f64() {
         if !(-1.0..=1.0).contains(&scaled) {
@@ -659,6 +686,37 @@ pub fn launch_data(facts: &SessionFacts, values: &LaunchValues<'_>) -> Value {
 /// is a comma-separated list of language tags, most preferred first.
 pub fn learner_preferences(languages: &str) -> Value {
     json!({ "languagePreference": languages, "audioPreference": "on" })
+}
+
+/// Whether a unit may store this as the learner preferences document
+/// (11.0, 11.1): a JSON object whose `languagePreference` is a
+/// comma-separated list of language tags and whose `audioPreference` is
+/// `on` or `off`.
+pub fn valid_learner_preferences(body: &[u8]) -> bool {
+    let Ok(Value::Object(document)) = serde_json::from_slice::<Value>(body) else {
+        return false;
+    };
+    let languages = document
+        .get("languagePreference")
+        .and_then(Value::as_str)
+        .is_some_and(|list| list.split(',').all(is_language_tag));
+    let audio = matches!(
+        document.get("audioPreference").and_then(Value::as_str),
+        Some("on" | "off")
+    );
+    languages && audio
+}
+
+/// The shape of an RFC 5646 language tag: subtags of one to eight letters
+/// or digits joined by hyphens, the first all letters.
+fn is_language_tag(tag: &str) -> bool {
+    let mut subtags = tag.split('-');
+    let first_ok = subtags
+        .next()
+        .is_some_and(|s| (1..=8).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphabetic()));
+    first_ok
+        && subtags
+            .all(|s| (1..=8).contains(&s.len()) && s.bytes().all(|b| b.is_ascii_alphanumeric()))
 }
 
 /// The `launched` statement the launching system records before the unit

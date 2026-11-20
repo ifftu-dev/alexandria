@@ -70,17 +70,21 @@ fn completed() -> Value {
         json!({ "completion": true, "duration": "PT1M" }),
     )
 }
+/// A judged statement with a scaled score carries the mastery score it was
+/// judged against (9.6.3.2-2).
+fn judged(verb: &str, success: bool, scaled: f64) -> Value {
+    let mut statement = defined(
+        verb,
+        json!({ "success": success, "duration": "PT2M", "score": { "scaled": scaled } }),
+    );
+    statement["context"]["extensions"][cmi5::EXTENSION_MASTERY_SCORE] = json!(0.8);
+    statement
+}
 fn passed(scaled: f64) -> Value {
-    defined(
-        "passed",
-        json!({ "success": true, "duration": "PT2M", "score": { "scaled": scaled } }),
-    )
+    judged("passed", true, scaled)
 }
 fn failed(scaled: f64) -> Value {
-    defined(
-        "failed",
-        json!({ "success": false, "duration": "PT2M", "score": { "scaled": scaled } }),
-    )
+    judged("failed", false, scaled)
 }
 fn terminated() -> Value {
     defined("terminated", json!({ "duration": "PT3M" }))
@@ -249,6 +253,96 @@ fn results_follow_the_verb_rules_and_the_mastery_score() {
     assert!(refused(
         &run(&mut SessionRecord::default(), &[initialized_with_moveon])[0]
     ));
+}
+
+#[test]
+fn a_timestamp_must_be_in_utc() {
+    // 9.7.0.0-2 (d).
+    let mut offset = allowed();
+    offset["timestamp"] = json!("2026-11-20T10:00:00.000-06:00");
+    let mut zero_offset = allowed();
+    zero_offset["timestamp"] = json!("2026-11-20T10:00:00.000+00:00");
+    let results = run(
+        &mut SessionRecord::default(),
+        &[initialized(), offset, zero_offset],
+    );
+    assert!(refused(&results[1]), "{results:?}");
+    assert!(results[2].is_ok(), "{results:?}");
+}
+
+#[test]
+fn a_scored_judgement_carries_the_mastery_score_it_was_judged_against() {
+    // 9.6.3.2-2 (d): missing, or not the session's.
+    let mut missing = passed(0.9);
+    missing["context"]["extensions"]
+        .as_object_mut()
+        .unwrap()
+        .remove(cmi5::EXTENSION_MASTERY_SCORE);
+    let mut other = failed(0.5);
+    other["context"]["extensions"][cmi5::EXTENSION_MASTERY_SCORE] = json!(0.6);
+    for statement in [missing, other] {
+        let results = run(&mut SessionRecord::default(), &[initialized(), statement]);
+        assert!(refused(&results[1]), "{results:?}");
+    }
+    // Without a score there is nothing to judge against.
+    let mut unscored = passed(0.9);
+    unscored["result"].as_object_mut().unwrap().remove("score");
+    unscored["context"]["extensions"]
+        .as_object_mut()
+        .unwrap()
+        .remove(cmi5::EXTENSION_MASTERY_SCORE);
+    let results = run(&mut SessionRecord::default(), &[initialized(), unscored]);
+    assert!(results[1].is_ok(), "{results:?}");
+}
+
+#[test]
+fn a_raw_score_needs_min_and_max_even_beside_a_scaled_one() {
+    // 9.5.1.0-3 (d1), (d2).
+    for drop in ["min", "max"] {
+        let mut statement = passed(0.9);
+        statement["result"]["score"] = json!({ "scaled": 0.9, "raw": 90, "min": 0, "max": 100 });
+        statement["result"]["score"]
+            .as_object_mut()
+            .unwrap()
+            .remove(drop);
+        let results = run(&mut SessionRecord::default(), &[initialized(), statement]);
+        assert!(refused(&results[1]), "{drop}: {results:?}");
+    }
+}
+
+#[test]
+fn only_a_judgement_or_completion_carries_the_move_on_category() {
+    // 9.6.2.2-2 (d): not on an allowed statement either.
+    let mut statement = allowed();
+    statement["context"]["contextActivities"]["category"] =
+        json!([{ "id": cmi5::CATEGORY_MOVEON }]);
+    let results = run(&mut SessionRecord::default(), &[initialized(), statement]);
+    assert!(refused(&results[1]), "{results:?}");
+}
+
+#[test]
+fn in_browse_or_review_mode_no_satisfaction_is_recorded() {
+    // 10.2.2.0-2 (d), 10.2.2.0-3 (d). The app launches only in Normal mode;
+    // the rules hold for the other two.
+    for mode in [LaunchMode::Browse, LaunchMode::Review] {
+        let facts = SessionFacts {
+            launch_mode: mode,
+            ..facts()
+        };
+        let mut record = SessionRecord::default();
+        let mut send = |statement: Value| {
+            let checked = cmi5::check(&statement, &facts, &record);
+            if let Ok(checked) = &checked {
+                record.apply(checked);
+            }
+            checked
+        };
+        assert!(send(initialized()).is_ok());
+        for statement in [completed(), failed(0.5), passed(0.9)] {
+            assert!(refused(&send(statement)), "{mode:?}");
+        }
+        assert!(send(terminated()).is_ok());
+    }
 }
 
 #[test]

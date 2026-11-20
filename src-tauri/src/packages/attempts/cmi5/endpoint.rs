@@ -122,6 +122,15 @@ pub(super) async fn handle<D: PackageDb>(
             "the X-Experience-API-Version header is required",
         );
     }
+    // cmi5 8.1.2: the token is good for nothing once the unit terminated.
+    if live
+        .record
+        .lock()
+        .expect("cmi5 session lock poisoned")
+        .ended()
+    {
+        return error(StatusCode::FORBIDDEN, "the session has ended");
+    }
     match resource {
         "statements" => statements(db, live, request).await,
         "activities/state" => documents(db, live, DocumentKind::State, request).await,
@@ -372,10 +381,10 @@ async fn documents<D: PackageDb>(
 ) -> Response<Vec<u8>> {
     let params = query(&request);
     if kind != DocumentKind::ActivityProfile {
-        let agent: Value = params
-            .get("agent")
-            .and_then(|agent| serde_json::from_str(agent).ok())
-            .unwrap_or(Value::Null);
+        let Some(agent) = params.get("agent") else {
+            return error(StatusCode::BAD_REQUEST, "agent is required");
+        };
+        let agent: Value = serde_json::from_str(agent).unwrap_or(Value::Null);
         if !rules::same_agent(&agent, &live.facts.actor) {
             return error(
                 StatusCode::FORBIDDEN,
@@ -394,6 +403,13 @@ async fn documents<D: PackageDb>(
         DocumentKind::State => params.get("registration").cloned().unwrap_or_default(),
         _ => String::new(),
     };
+    // cmi5 8.1.4: state requests name the registration the unit was given.
+    if kind == DocumentKind::State && registration != live.facts.registration {
+        return error(
+            StatusCode::FORBIDDEN,
+            "state belongs to the session's registration",
+        );
+    }
     let id_name = if kind == DocumentKind::State {
         "stateId"
     } else {
@@ -453,6 +469,25 @@ async fn documents<D: PackageDb>(
                 }
                 None => error(StatusCode::NOT_FOUND, "no such document"),
             });
+        }
+        // cmi5 11: the learner preferences document keeps its shape.
+        let preferences = kind == DocumentKind::AgentProfile
+            && document_id == rules::LEARNER_PREFERENCES_PROFILE_ID;
+        let refused = || {
+            error(
+                StatusCode::FORBIDDEN,
+                "the learner preferences are a JSON object with languagePreference and audioPreference",
+            )
+        };
+        // Checked before the preconditions: a malformed document is refused
+        // whatever is stored.
+        let writing = matches!(method, Method::PUT | Method::POST);
+        if preferences
+            && writing
+            && (!content_type.starts_with("application/json")
+                || (method == Method::PUT && !rules::valid_learner_preferences(&body)))
+        {
+            return Ok(refused());
         }
         let existing = if document_id.is_empty() {
             None
@@ -514,6 +549,9 @@ async fn documents<D: PackageDb>(
                         body
                     }
                 };
+                if preferences && !rules::valid_learner_preferences(&merged) {
+                    return Ok(refused());
+                }
                 store::put_document(conn, &key, "application/json", &merged)?;
                 Ok(empty(StatusCode::NO_CONTENT))
             }
