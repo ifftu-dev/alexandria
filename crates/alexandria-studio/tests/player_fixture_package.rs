@@ -2,7 +2,8 @@
 //! `tests/desktop-ui/package-player/package/` and hand the player the package
 //! description in `description.json` beside it, as the host would. This test
 //! keeps the two honest: the description is exactly what import makes of the
-//! package. After changing the package, regenerate the description with
+//! package. The cmi5 fixture under `cmi5/` is kept the same way. After
+//! changing a package, regenerate the description with
 //! `UPDATE_PLAYER_FIXTURE=1 cargo test -p alexandria-studio --test player_fixture_package`.
 
 use std::io::Cursor;
@@ -38,10 +39,11 @@ fn files(dir: &Path, prefix: &str, out: &mut Vec<(String, Vec<u8>)>) {
     }
 }
 
-#[test]
-fn the_player_fixture_description_is_what_import_makes_of_the_fixture_package() {
+/// Imports the package under `<dir>/package` and compares the description
+/// with `<dir>/description.json`, rewriting it when asked.
+fn assert_description(dir: &Path) {
     let mut entries = Vec::new();
-    files(&fixture_dir().join("package"), "", &mut entries);
+    files(&dir.join("package"), "", &mut entries);
     let archive = fixture::zip(
         &entries
             .iter()
@@ -52,7 +54,7 @@ fn the_player_fixture_description_is_what_import_makes_of_the_fixture_package() 
         import_package(Cursor::new(archive), &Limits::default()).expect("the fixture imports");
     let rendered = serde_json::to_string_pretty(&description).expect("serialise") + "\n";
 
-    let golden = fixture_dir().join("description.json");
+    let golden = dir.join("description.json");
     if std::env::var_os("UPDATE_PLAYER_FIXTURE").is_some() {
         std::fs::write(&golden, &rendered).expect("write description");
     }
@@ -61,4 +63,16 @@ fn the_player_fixture_description_is_what_import_makes_of_the_fixture_package() 
         stored, rendered,
         "description.json is stale; regenerate it (see this file's header)"
     );
+}
+
+#[test]
+fn the_player_fixture_description_is_what_import_makes_of_the_fixture_package() {
+    assert_description(&fixture_dir());
+}
+
+/// The cmi5 fixture (`cmi5/package/`, `cmi5/description.json`): a block of
+/// two units and a unit that asks for its own window.
+#[test]
+fn the_cmi5_fixture_description_is_what_import_makes_of_the_cmi5_fixture_package() {
+    assert_description(&fixture_dir().join("cmi5"));
 }

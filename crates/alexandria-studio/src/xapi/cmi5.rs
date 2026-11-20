@@ -72,6 +72,24 @@ impl LaunchMode {
     }
 }
 
+/// Context string for the registration key. Never change it: units have seen
+/// registrations derived under it.
+const REGISTRATION_CONTEXT: &str = "alexandria 2026-11-20 cmi5 registration v1";
+
+/// The registration UUID a unit is given for a package attempt: a keyed hash
+/// of the attempt's local id under a key derived from the learner's own key.
+/// Stable for the attempt, unlinkable to the local id or to the learner's
+/// records anywhere else.
+pub fn registration(learner_key: &[u8; 32], attempt_id: &str) -> String {
+    let key = blake3::derive_key(REGISTRATION_CONTEXT, learner_key);
+    let digest = blake3::keyed_hash(&key, attempt_id.as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest.as_bytes()[..16]);
+    uuid::Builder::from_random_bytes(bytes)
+        .into_uuid()
+        .to_string()
+}
+
 /// The actor a unit is given: an agent with an account (9.2), named by the
 /// pseudonymous learner identifier under the app's account home page.
 pub fn actor(learner_id: &str) -> Value {

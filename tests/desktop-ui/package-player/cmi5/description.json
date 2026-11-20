@@ -1,0 +1,65 @@
+{
+  "standard": "cmi5",
+  "identifier": "https://example.org/cmi5/forklift",
+  "title": "Forklift basics",
+  "tree": {
+    "id": "https://example.org/cmi5/forklift",
+    "title": "Forklift basics",
+    "visible": true,
+    "children": [
+      {
+        "id": "https://example.org/cmi5/forklift/before-you-drive",
+        "title": "Before you drive",
+        "visible": true,
+        "children": [
+          {
+            "id": "https://example.org/cmi5/forklift/walkaround",
+            "title": "Walkaround",
+            "visible": true,
+            "launch": {
+              "path": "au/walkaround.html",
+              "parameters": "?paramA=1",
+              "kind": "assignable_unit"
+            },
+            "cmi5": {
+              "move_on": "completed",
+              "launch_method": "any_window"
+            }
+          },
+          {
+            "id": "https://example.org/cmi5/forklift/check",
+            "title": "Safety check",
+            "visible": true,
+            "launch": {
+              "path": "au/check.html",
+              "kind": "assignable_unit",
+              "launch_data": "route=b",
+              "mastery_score": 0.8
+            },
+            "cmi5": {
+              "move_on": "passed",
+              "launch_method": "any_window"
+            }
+          }
+        ],
+        "cmi5": {}
+      },
+      {
+        "id": "https://example.org/cmi5/forklift/handbook",
+        "title": "Handbook",
+        "visible": true,
+        "launch": {
+          "path": "handbook/index.html",
+          "kind": "assignable_unit"
+        },
+        "cmi5": {
+          "move_on": "not_applicable",
+          "launch_method": "own_window"
+        }
+      }
+    ]
+  },
+  "files": 5,
+  "uncompressed_bytes": 8629,
+  "cmi5": {}
+}

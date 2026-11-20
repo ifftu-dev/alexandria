@@ -16,6 +16,7 @@
 //! The standard-specific reading of run-time data and the rollup rule live
 //! in [`alexandria_studio::package::progress`]; this module adds storage.
 
+pub mod cmi5;
 mod rows;
 
 #[cfg(test)]

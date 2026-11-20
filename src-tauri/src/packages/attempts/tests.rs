@@ -17,7 +17,7 @@ use crate::domain::package_attempt::{PackageAttemptProgress, PackageAttemptStatu
 use crate::package_serving::Launches;
 use crate::packages::{self, PackageDirs};
 
-mod fixture {
+pub(super) mod fixture {
     //! A stored-only zip writer, enough for well-formed test packages.
 
     fn crc32(data: &[u8]) -> u32 {
