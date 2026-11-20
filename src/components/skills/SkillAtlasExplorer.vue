@@ -10,7 +10,7 @@ import { animateMotion, motionDuration, useMotion } from '@/composables/useMotio
 import type { SkillGraphView } from '@/composables/useSkillGraphView'
 import { BLOOM_ORDER } from '@/utils/bloom'
 import { createAtlasViewState, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
-import { isBloomRank, type AtlasField, type AtlasModel, type AtlasNode } from '@/utils/skillAtlas'
+import { isBloomRank, type AtlasField, type AtlasModel, type AtlasNode, type SkillRelationType } from '@/utils/skillAtlas'
 import type { AtlasFeedback } from '@/composables/useSkillAtlas'
 
 const props = withDefaults(defineProps<{ model: AtlasModel; view: AtlasViewState; viewMode?: SkillGraphView; feedback?: AtlasFeedback | null; reducedMotion?: boolean }>(), { viewMode: 'simple' })
@@ -313,14 +313,20 @@ const bloomOptions = computed(() => {
   return BLOOM_ORDER.map((level, rank) => ({ rank, label: present.bloomLabel(level) }))
 })
 /** An inspector relation's state, from its node when loaded: earned, Ready next or Ready. */
-function relationNode(relation: AtlasNode['prerequisites'][number]): Pick<AtlasNode, 'status' | 'readyNext'> {
+function relationNode(relation: { skillId: string; earned?: boolean }): Pick<AtlasNode, 'status' | 'readyNext'> {
   return nodesById.value.get(relation.skillId) ?? { status: relation.earned ? 'earned' : 'ready', readyNext: false }
 }
-function relationLabel(relation: AtlasNode['prerequisites'][number]): string {
+function relationLabel(relation: { skillId: string; name: string; earned?: boolean }): string {
   const node = relationNode(relation)
   const key = node.status === 'earned' ? 'skills.atlas.inspectEarned' : node.readyNext ? 'skills.atlas.inspectReadyNext' : 'skills.atlas.inspectReady'
   return t(key, { name: relation.name })
 }
+const RELATION_TYPE_KEYS = {
+  related: 'skills.atlas.relationRelated',
+  complementary: 'skills.atlas.relationComplementary',
+  alternative: 'skills.atlas.relationAlternative',
+} as const satisfies Record<SkillRelationType, string>
+function relationTypeText(type: SkillRelationType): string { return t(RELATION_TYPE_KEYS[type]) }
 function color(fieldId: string | null): string { return atlasFieldColor(props.model.fieldById.get(fieldId) ?? { id: fieldId, slot: null }) }
 function update(patch: Partial<AtlasViewState>): void { emit('update:view', { ...props.view, ...patch }) }
 function preserveOverviewFocus(): void {
@@ -689,6 +695,11 @@ function setBloom(event: Event): void {
               <h3>{{ t(`skills.atlas.${direction}`) }} <span>{{ selected[direction].length }}</span></h3>
               <ul><li v-for="relation in selected[direction]" :key="relation.skillId"><button v-if="relation.loaded" type="button" :aria-label="relationLabel(relation)" @click="select(relation.skillId, true)"><strong dir="auto">{{ relation.name }}</strong><small>{{ fieldName(nodesById.get(relation.skillId)?.fieldId ?? null) }} · {{ present.state(relationNode(relation)) }}</small></button><p v-else>{{ relation.name }} · {{ t('skills.atlas.notLoaded') }}</p></li></ul>
               <p v-if="!selected[direction].length" class="atlas-muted">{{ t('skills.atlas.noRelations') }}</p>
+            </section>
+            <section class="inspector-relations">
+              <h3>{{ t('skills.atlas.relatedSkills') }} <span>{{ selected.relations.length }}</span></h3>
+              <ul><li v-for="relation in selected.relations" :key="relation.skillId"><button v-if="relation.loaded" type="button" :aria-label="`${relationLabel(relation)}, ${relationTypeText(relation.type)}`" @click="select(relation.skillId, true)"><strong dir="auto">{{ relation.name }}</strong><small>{{ fieldName(nodesById.get(relation.skillId)?.fieldId ?? null) }} · {{ present.state(relationNode(relation)) }} · {{ relationTypeText(relation.type) }}</small></button><p v-else>{{ relation.name }} · {{ t('skills.atlas.notLoaded') }} · {{ relationTypeText(relation.type) }}</p></li></ul>
+              <p v-if="!selected.relations.length" class="atlas-muted">{{ t('skills.atlas.noRelations') }}</p>
             </section>
           </template>
           <p v-else class="inspector-prompt">{{ t('skills.atlas.selectPrompt') }}</p>

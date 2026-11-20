@@ -1,5 +1,5 @@
 import { mount, type VueWrapper } from '@vue/test-utils'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
 import en from '@/locales/en'
@@ -420,6 +420,42 @@ describe('personal atlas explorer public interactions', () => {
     expect(inspector.findAll('.inspector-relations button').map(item => item.attributes('aria-label'))).toEqual(['Inspect Algebra, earned'])
     await button(wrapper, 'Inspect Algebra, earned').trigger('click')
     expect(inspector.findAll('.inspector-relations button').map(item => item.attributes('aria-label'))).toEqual(['Inspect Bridges, not yet earned, Ready'])
+  })
+
+  it.each(['detailed', 'simple'] as const)('lists related, complementary and alternative skills after the dependents in %s, and choosing one selects it', async (viewMode) => {
+    const related = buildSkillAtlas({
+      skills: [skill('a', 'Algebra', 'Mathematics'), skill('b', 'Bridges', 'Engineering'), skill('c', 'Craft', null), skill('d', 'Drafting', 'Engineering')],
+      edges: [{ skill_id: 'b', skill_name: 'Bridges', skill_bloom: 'create', prerequisite_id: 'a', prerequisite_name: 'Algebra', prerequisite_bloom: 'create' }],
+      relations: [
+        { skill_id: 'c', related_skill_id: 'a', relation_type: 'alternative' },
+        { skill_id: 'a', related_skill_id: 'd', relation_type: 'complementary' },
+        { skill_id: 'b', related_skill_id: 'a', relation_type: 'related' },
+        { skill_id: 'a', related_skill_id: 'gone', relation_type: 'related' },
+      ],
+      activeCredentials: [credential('a', 3), credential('c', 'invalid')], subjectDid: 'did:me',
+    })
+    const revealed: (string | null | undefined)[] = []
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (this: Element) { revealed.push(this.closest('[data-skill]')?.getAttribute('data-skill')) }
+    onTestFinished(() => { Element.prototype.scrollIntoView = original })
+    const wrapper = setup({ ...initialView(), selectedSkillId: 'a' }, true, null, undefined, viewMode)
+    await wrapper.setProps({ model: related })
+    const groups = () => wrapper.get('[aria-label="Skill inspector"]').findAll('.inspector-relations')
+    expect(groups().map(group => group.get('h3').text())).toEqual(['Prerequisites 0', 'Dependents 1', 'Related skills 4'])
+    const relatedGroup = groups()[2]!
+    expect(relatedGroup.findAll('button').map(item => item.attributes('aria-label'))).toEqual([
+      'Inspect Bridges, not yet earned, Ready, related',
+      'Inspect Craft, earned, an alternative to this',
+      'Inspect Drafting, not yet earned, Ready, goes well with this',
+    ])
+    expect(relatedGroup.text()).toContain('gone · Not loaded')
+    await button(wrapper, 'Inspect Craft, earned, an alternative to this').trigger('click')
+    expect(wrapper.props('view')).toMatchObject({ selectedSkillId: 'c' })
+    await nextTick()
+    // Simple brings a skill chosen off the map into view; Detailed moves its camera instead.
+    expect(revealed).toEqual(viewMode === 'simple' ? ['c'] : [])
+    expect(groups()[2]!.findAll('button').map(item => item.attributes('aria-label'))).toEqual(['Inspect Algebra, earned, an alternative to this'])
+    expect(wrapper.emitted('open-skill')).toBeUndefined()
   })
 
   it('restores view props across remount and resets all exploration controls through the public event', async () => {

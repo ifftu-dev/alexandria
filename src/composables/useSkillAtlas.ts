@@ -5,7 +5,7 @@ import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { onProfileLocked, onProfileReady, useProfiles } from '@/composables/useProfiles'
 import { CREDENTIALS_CHANGED } from '@/composables/credentialEvents'
-import type { SkillGraphEdge, SkillInfo, SubjectFieldInfo, VerifiableCredential } from '@/types'
+import type { SkillGraphEdge, SkillGraphRelation, SkillInfo, SubjectFieldInfo, VerifiableCredential } from '@/types'
 import { buildSkillAtlas, type AtlasModel } from '@/utils/skillAtlas'
 import { createAtlasViewState, type AtlasViewState } from '@/utils/skillAtlasView'
 import { errorMessage } from '@/utils/errorMessage'
@@ -122,14 +122,16 @@ async function load(): Promise<void> {
   try {
     const did = await invoke<string | null>('get_local_did')
     if (!current(ticket, profileId)) return
-    const [skills, edges, credentials, subjectFields] = await Promise.all([
+    const [skills, edges, relations, credentials, subjectFields] = await Promise.all([
       invoke<SkillInfo[]>('list_skills'),
       invoke<SkillGraphEdge[]>('list_skill_graph_edges'),
+      // Relations only add connections; without them the graph still works.
+      invoke<SkillGraphRelation[]>('list_skill_graph_relations').catch((): SkillGraphRelation[] => []),
       did ? invoke<VerifiableCredential[]>('list_credentials', { subject: did, activeOnly: true }) : Promise.resolve([]),
       invoke<SubjectFieldInfo[]>('list_subject_fields'),
     ])
     if (!current(ticket, profileId)) return
-    const nextModel = buildSkillAtlas({ skills, edges, activeCredentials: credentials, subjectDid: did, subjectFields })
+    const nextModel = buildSkillAtlas({ skills, edges, relations, activeCredentials: credentials, subjectDid: did, subjectFields })
     const improvedIds: string[] = []
     const newlyEarned: string[] = []
     clearFeedback()

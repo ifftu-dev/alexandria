@@ -53,6 +53,7 @@ async function backend(command: string, args?: Record<string, unknown>): Promise
     case 'list_skills': return [skill]
     case 'list_subject_fields': return [field]
     case 'list_skill_graph_edges': return []
+    case 'list_skill_graph_relations': return [{ skill_id: 'other', related_skill_id: 's', relation_type: 'complementary' }]
     case 'list_credentials':
       if (args?.subject !== did || args?.activeOnly !== true) throw new Error('Expected subject-bound active listing')
       return credentials
@@ -95,6 +96,18 @@ describe('shared skill atlas state', () => {
     expect(atlas.model.value?.nodes[0]?.earnedBloom).toEqual({ rank: 1, name: 'understand' })
     expect(atlas.model.value?.fields[0]?.name).toBe('Field')
     expect(atlas.feedback.value).toBeNull()
+  })
+  it('loads relations beside the prerequisite edges, and a failed relations load leaves the graph without them', async () => {
+    const { atlas } = await setup()
+    await atlas.ensureLoaded()
+    expect(atlas.model.value?.nodes[0]?.relations).toEqual([{ skillId: 'other', name: 'other', type: 'complementary', loaded: false }])
+    ipc.mockImplementation((command, args) => command === 'list_skill_graph_relations' ? Promise.reject(new Error('No relations')) : backend(command, args))
+    credentials = [vc(3)]
+    await atlas.refresh('retry')
+    expect(atlas.phase.value).toBe('ready')
+    expect(atlas.error.value).toBeNull()
+    expect(atlas.model.value?.nodes[0]?.earnedBloom?.rank).toBe(3)
+    expect(atlas.model.value?.nodes[0]?.relations).toEqual([])
   })
   it('lets a new profile load while an old credential request is still pending', async () => {
     const { atlas, profiles } = await setup()
