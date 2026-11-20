@@ -284,6 +284,7 @@ impl<R: Read + Seek> Walk<'_, '_, R> {
             hide_lms_ui: Vec::new(),
             shared_data: Vec::new(),
             children,
+            cmi5: None,
             id,
         };
         self.version.read(element, &mut activity)?;

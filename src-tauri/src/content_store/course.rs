@@ -335,6 +335,33 @@ mod tests {
     }
 
     #[test]
+    fn a_package_element_signs_and_verifies_without_a_new_document_version() {
+        let key = make_signing_key();
+        let mut payload = make_payload(&key);
+        payload.chapters[0].elements.push(DocumentElement {
+            id: "el_003".to_string(),
+            position: 2,
+            title: "Warehouse induction".to_string(),
+            element_type: crate::domain::course_document::PACKAGE_ELEMENT_TYPE.to_string(),
+            content_hash: Some("b".repeat(64)),
+            duration_seconds: None,
+            video_chapters: vec![],
+        });
+
+        let signed = sign_course_document(&payload, &key).unwrap();
+        verify_course_document(&signed).unwrap();
+
+        let read_back = signed.payload();
+        assert_eq!(read_back.version, 2);
+        let element = &read_back.chapters[0].elements[2];
+        assert_eq!(element.element_type, "package");
+        assert_eq!(
+            element.content_hash.as_deref(),
+            Some("b".repeat(64).as_str())
+        );
+    }
+
+    #[test]
     fn version_two_signs_immutable_completion_policy() {
         let author_key = make_signing_key();
         let attestor_key = make_signing_key();

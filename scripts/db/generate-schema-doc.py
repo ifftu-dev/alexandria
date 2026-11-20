@@ -63,6 +63,7 @@ DOMAINS = [
     ("Instructor studio", r"^(studio_|course_tutor_policies$|course_lesson_feedback$)"),
     ("AI chat", r"^(chat_|learning_memory$|ai_connection_approvals$)"),
     ("Notifications", r"^(notification|push_)"),
+    ("Standards packages", r"^packages$"),
 ]
 
 

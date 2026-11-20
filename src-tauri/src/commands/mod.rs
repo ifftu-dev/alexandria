@@ -48,6 +48,7 @@ pub mod interview;
 mod live_demo;
 pub mod notifications;
 pub mod opinions;
+pub mod packages;
 pub mod personhood_lab;
 pub mod personhood_receipts;
 pub mod pinning;
