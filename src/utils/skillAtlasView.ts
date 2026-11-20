@@ -8,7 +8,8 @@ export interface AtlasViewState {
   query: string
   bloomEmphasis: BloomRank | null
   neighborhood: 'none' | 'prerequisites' | 'dependents'
-  neighborhoodDepth: 1 | 2
+  /** Steps out from the selection, for the inspector's focus and for Web narrowing. */
+  neighborhoodDepth: 1 | 2 | 3
   camera: AtlasCamera | null
   inspectorCollapsed: boolean
   /** The Web view's camera, apart from the Detailed `camera`; null fits what is shown. */

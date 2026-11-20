@@ -5,7 +5,7 @@ import type { SkillGraphEdge, SkillInfo } from '@/types'
 import { buildSkillAtlas } from '@/utils/skillAtlas'
 import {
   WEB_MIN_DISTANCE, WEB_SIDEBAR_NODE_LIMIT, continueWebLayout, webDotRadius, webLayout, webNearestInDirection, webNearestTo, webSidebarSubset,
-  webGraphFromAtlas,
+  webGraphFromAtlas, webNarrowedIds,
   type WebGraph,
 } from './webGeometry'
 
@@ -269,6 +269,28 @@ describe('Sidebar subset of the Web graph', () => {
     expect(part.partial).toBe(true)
     expect(part.ids.size).toBeLessThan(WEB_SIDEBAR_NODE_LIMIT)
     expect(part.ids.has('skill_big_o')).toBe(true)
+  })
+})
+
+describe('Narrowing the Web graph around a skill', () => {
+  // one → two → three → four in a chain, one is related to five, and five to six.
+  const chain: WebGraph = {
+    nodes: ['one', 'two', 'three', 'four', 'five', 'six', 'seven'].map(id => ({ id, slot: 0 })),
+    prerequisites: [{ skill: 'two', prerequisite: 'one' }, { skill: 'three', prerequisite: 'two' }, { skill: 'four', prerequisite: 'three' }],
+    relations: [['one', 'five'], ['five', 'six']],
+  }
+  const sorted = (ids: ReadonlySet<string>) => [...ids].sort()
+
+  it('takes one to three steps along prerequisites and dependents, and along relations only when they are shown', () => {
+    expect(sorted(webNarrowedIds(chain, 'two', 1, true))).toEqual(['one', 'three', 'two'])
+    expect(sorted(webNarrowedIds(chain, 'two', 2, true))).toEqual(['five', 'four', 'one', 'three', 'two'])
+    expect(sorted(webNarrowedIds(chain, 'two', 3, true))).toEqual(['five', 'four', 'one', 'six', 'three', 'two'])
+    expect(sorted(webNarrowedIds(chain, 'two', 3, false))).toEqual(['four', 'one', 'three', 'two'])
+    expect(sorted(webNarrowedIds(chain, 'seven', 3, true))).toEqual(['seven'])
+  })
+
+  it('narrows to nothing around a skill the graph does not hold', () => {
+    expect(webNarrowedIds(chain, 'missing', 2, true).size).toBe(0)
   })
 })
 

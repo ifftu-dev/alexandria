@@ -480,6 +480,30 @@ export function webNearestTo(point: WebPoint, positions: ReadonlyMap<string, Web
   return best?.id ?? null
 }
 
+/** How far the Web graph can be narrowed around the selection, in steps. */
+export type WebNarrowingDepth = 1 | 2 | 3
+
+/**
+ * The skills within `depth` steps of `id`: along prerequisites in either
+ * direction and, when `related` is on (the dotted lines are shown), along
+ * relations. Empty when the graph does not hold `id`.
+ */
+export function webNarrowedIds(graph: WebGraph, id: string, depth: WebNarrowingDepth, related: boolean): Set<string> {
+  const steps = new Map<string, string[]>()
+  const link = (a: string, b: string) => { steps.set(a, [...steps.get(a) ?? [], b]); steps.set(b, [...steps.get(b) ?? [], a]) }
+  for (const { skill, prerequisite } of graph.prerequisites) link(skill, prerequisite)
+  if (related) for (const [a, b] of graph.relations) link(a, b)
+  if (!graph.nodes.some(node => node.id === id)) return new Set()
+  const ids = new Set([id])
+  let frontier = [id]
+  for (let step = 0; step < depth && frontier.length; step++) {
+    const next: string[] = []
+    for (const from of frontier) for (const to of steps.get(from) ?? []) if (!ids.has(to)) { ids.add(to); next.push(to) }
+    frontier = next
+  }
+  return ids
+}
+
 /**
  * The most skills the sidebar graph draws whole. Tuned so the bundled
  * taxonomy (about a hundred skills) always shows in full and the 1,500-skill
