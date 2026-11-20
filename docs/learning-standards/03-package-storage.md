@@ -45,3 +45,10 @@ Proposed doc edits, not made here:
 - `docs/multi-user-profiles.md` and `docs/architecture.md`: add `packages/` and `packagecache/` to the per-profile layout, and say the package cache survives a lock while the video cache does not.
 - `docs/protocol-specification.md`: list `package` among the course document element types; its content hash is the archive hash.
 - `src-tauri/src/db/schema.rs` baseline comment on `course_elements.element_type` lists the old types; it cannot change in an applied migration, so the schema document's description stays stale until a later baseline.
+
+### Review (2026-11-21)
+
+- Packages now reach other devices. `packages::get_or_receive` returns the record, or, when the hash is a package element of a published course on this device and the archive is missing, fetches it through the content resolver (local store, then the providers of the hash over iroh, BLAKE3-verified), checks it with `register_stored` and pins it as `course` content with `auto_unpin = 1` (evictable once no active enrolment needs it; a record whose archive was evicted is fetched again). A hash outside any published course is never fetched. `package_get` uses it; `enroll` prefetches a course's packages in the background. Test: `a_course_published_on_one_device_plays_its_package_on_another`. Gaps: an encrypted (private course) blob is still refused as `not_an_archive`; `package_get` waits on the network while the player shows its loading state.
+- Known deviation (spec "the first lesson can start once its own files are extracted"): `ensure_extracted` still extracts the whole archive before the launch opens. Launch-file-first extraction needs the scheme handler to wait on files not yet landed; not done in the review.
+- Draft archives a cancelled or replaced pick left are swept at profile start (`sweep_unused_drafts`: draft packages no element and no attempt refers to, with their archive and extracted files).
+- `rows` and `draft` return `PackageError` (new `NoIdentity` variant); database steps go through `run_step`. `ArchiveLocation` is renamed `PackageArchiveLocation` to match the TypeScript mirror.
