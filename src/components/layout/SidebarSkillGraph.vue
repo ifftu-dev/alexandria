@@ -115,9 +115,15 @@ function fieldKey(field: AtlasField): string { return field.id ?? 'unassigned' }
 .sidebar-web { position: relative; margin-block-start: 6px; border: 1px solid var(--app-border); border-radius: 8px; overflow: hidden; --web-graph-height: 180px; }
 .sidebar-atlas .web-reset { position: absolute; inset-block-start: 4px; inset-inline-end: 4px; width: auto; min-height: 24px; padding: 2px 8px; border: 1px solid var(--app-border); border-radius: 999px; background: var(--app-background); color: var(--app-muted-foreground); font-size: 11px; line-height: 1.2; }
 .sidebar-atlas .web-reset:hover { background: var(--app-muted); color: var(--app-foreground); }
-.sidebar-fields { list-style: none; margin: 4px 0 0; padding: 0; }
-.field-name { display: flex; align-items: center; gap: 6px; }
+.sidebar-caption { margin-block: 4px; }
+.sidebar-caption .caption-skill { display: flex; flex-wrap: wrap; column-gap: 6px; }
+.caption-name { min-width: 0; color: var(--app-foreground); font-weight: 600; font-size: 12px; overflow-wrap: anywhere; }
+.caption-actions { display: flex; gap: 4px; margin: 2px 6px 0; }
+.sidebar-atlas .caption-actions button { width: auto; min-height: 28px; padding: 3px 10px; border: 1px solid var(--app-border); font-weight: 600; }
+.sidebar-fields { list-style: none; margin: 2px 0 0; padding: 0; max-height: 7.75rem; overflow-y: auto; }
+.sidebar-atlas .field-name { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 6px; }
 .field-name > span { flex: 1; min-width: 0; font-weight: 600; }
 .field-name small { color: var(--app-muted-foreground); font-size: 11px; white-space: nowrap; }
+.sidebar-atlas .field-name[aria-pressed="true"] { background: color-mix(in srgb, var(--field) 16%, transparent); box-shadow: inset 2px 0 0 var(--field); }
 .field-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--field); }
 </style>
