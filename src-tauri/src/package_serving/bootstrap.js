@@ -193,17 +193,28 @@
       });
     });
 
-    // A new window opens in the frame that asked for it.
+    // A new window opens in the frame that asked for it. The timer is taken
+    // now, before content can replace it.
+    var later = win.setTimeout.bind(win);
     try {
       Object.defineProperty(win, 'open', {
         value: function (url) {
           if (url === undefined || url === null || String(url) === '') return null;
+          var target;
           try {
-            win.location.assign(new win.URL(String(url), win.document.baseURI).href);
+            target = new win.URL(String(url), win.document.baseURI).href;
           } catch (_) {
             return null;
           }
+          // The host is told first and the frame navigates a task later: a
+          // message from a document already on its way out can arrive with
+          // no source, and the host drops messages it cannot place.
           blocked(win, 'popup');
+          later(function () {
+            try {
+              win.location.assign(target);
+            } catch (_) {}
+          }, 0);
           return win;
         },
         writable: false,
