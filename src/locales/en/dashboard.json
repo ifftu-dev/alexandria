@@ -257,6 +257,9 @@
       "label": "Log size",
       "records": "{count} record | {count} records",
       "used": "{used} of {limit}",
+      "bytes": "{size} B",
+      "kilobytes": "{size} KB",
+      "megabytes": "{size} MB",
       "interactions": "Responses from packages: {count}",
       "explain": "Past the limit, the oldest responses from packages are removed first, then each attempt at an activity is kept as one summary."
     },
