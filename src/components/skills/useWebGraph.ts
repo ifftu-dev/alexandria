@@ -43,6 +43,8 @@ export interface WebDot {
   roving: boolean
   /** Outside the lit neighbourhood, or not matching the search or field focus. */
   faded: boolean
+  /** Its name shows under the dot. */
+  labelled: boolean
 }
 
 /** What a Web graph draws and how; the component's props, read through a getter so the composable sees changes. */
@@ -191,7 +193,8 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
     return webDotRadius(node.status === 'earned' ? node.earnedBloom?.rank : null)
   }
   const dots = computed<WebDot[]>(() => {
-    const at = camera.value, selected = input().selectedId
+    const at = camera.value, { selectedId: selected, names, narrowed } = input()
+    const everyName = names || narrowed || at.zoom >= WEB_NAMES_ZOOM
     return shownNodes.value.map(node => {
       const id = node.skill.id
       const screen = toScreen(positions.value.get(id)!)
@@ -201,6 +204,7 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
         color: atlasFieldColor(model.value.fieldById.get(node.fieldId) ?? { id: node.fieldId, slot: null }),
         state: node.status === 'earned' ? 'earned' : node.readyNext ? 'ready-next' : 'ready',
         selected: id === selected, roving: id === rovingId.value, faded: faded(id),
+        labelled: everyName || namedIds.value.has(id),
       }
     })
   })
