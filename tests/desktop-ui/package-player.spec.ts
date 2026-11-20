@@ -159,6 +159,22 @@ test('a lesson left without finishing still hands over its state when the player
   expect((await commits(page)).slice(-1)[0]?.runtime.cmi).toMatchObject({ core: { lesson_location: 'page-2' } })
 })
 
+test('pending state is handed over at once when the app goes to the background', async ({ page }) => {
+  await open(page)
+  await seen(page)
+  await lesson(page).locator('#next').click()
+
+  const wrapper = page.frames().find(frame => frame.url().endsWith('/_alexandria/wrapper.html'))
+  expect(wrapper).toBeTruthy()
+  await wrapper!.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  // Well inside the two-second coalescing interval.
+  await expect.poll(async () => (await commits(page)).length, { timeout: 1000 }).toBe(1)
+  expect((await commits(page))[0]).toMatchObject({ activity_id: 'welcome', session_ended: false })
+})
+
 test('the package completes through the player, its result is labelled self-reported, and no credential is claimed', async ({ page }) => {
   const { refused } = await open(page)
   await seen(page)
