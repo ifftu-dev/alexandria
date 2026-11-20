@@ -244,6 +244,7 @@
     },
     "share": {
       "heading": "Learning records",
+      "pairwiseNote": "Made only for {recipient}. Shares are signed with your own identifier, so {recipient} can tell these records are yours.",
       "undoStops": "Nothing more is sent, and {org}'s Alexandria Cloud deletes the records it received under this share.",
       "undoCannot": "Records it already passed on to its own systems stay there; it is asked to void them.",
       "approve": "Approve and share",
