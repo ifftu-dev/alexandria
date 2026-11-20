@@ -1,9 +1,9 @@
-import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
-import { useMotion } from '@/composables/useMotion'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
+import { motionDuration, useMotion } from '@/composables/useMotion'
 import type { AtlasModel, AtlasNode } from '@/utils/skillAtlas'
 import type { AtlasCamera } from '@/utils/skillAtlasView'
 import { atlasFieldColor } from './atlasPresentation'
-import { webDotRadius, webGraphFromAtlas, webNearestInDirection, webNearestTo, type WebDirection, type WebPoint } from './webGeometry'
+import { continueWebLayout, webDotRadius, webGraphFromAtlas, webNearestInDirection, webNearestTo, type WebDirection, type WebPoint } from './webGeometry'
 
 // Camera and drawing constants. Positions and dot radii are layout units; the
 // camera's zoom is screen pixels per layout unit. Lines, arrowheads and names
@@ -24,6 +24,8 @@ export const WEB_COMPACT_DEFAULT_SIZE = { width: 260, height: 200 }
 /** Smallest dot drawn, and smallest pointer target around a dot, in pixels. */
 export const WEB_DOT_MIN_PIXELS = 4
 export const WEB_HIT_PIXELS = 14
+/** A press that moves this many pixels is a drag, not a click. */
+export const WEB_DRAG_THRESHOLD = 4
 
 /** Length of an arrowhead, in pixels. */
 export const WEB_ARROW_PIXELS = 7
@@ -127,7 +129,9 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
   })
   onBeforeUnmount(() => observer?.disconnect())
 
-  const positions = computed(() => input().positions)
+  /** Positions during a live drag, until the owner's catch up through the drag event and the run stops. */
+  const working = shallowRef<ReadonlyMap<string, WebPoint> | null>(null)
+  const positions = computed(() => working.value ?? input().positions)
   /** Every dot drawn, in model order. */
   const shownNodes = computed(() => {
     const shown = input().shownIds
@@ -142,7 +146,14 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
     const points = ids.flatMap(id => { const point = positions.value.get(id); return point ? [point] : [] })
     return webFitCamera(points, size.value.width, size.value.height, input().compact ? WEB_COMPACT_FIT_PADDING : WEB_FIT_PADDING)
   })
-  const camera = computed<AtlasCamera>(() => input().camera ?? fitCamera.value)
+  /** A camera this graph moved to and has emitted, until the owner's camera changes. */
+  const localCamera = shallowRef<AtlasCamera | null>(null)
+  watch(() => input().camera, () => { localCamera.value = null })
+  const camera = computed<AtlasCamera>(() => localCamera.value ?? input().camera ?? fitCamera.value)
+  function setCamera(next: AtlasCamera): void {
+    localCamera.value = next
+    events.camera(next)
+  }
   function toScreen(point: WebPoint): WebPoint {
     const at = camera.value
     return { x: (point.x - at.x) * at.zoom + size.value.width / 2, y: (point.y - at.y) * at.zoom + size.value.height / 2 }
@@ -258,6 +269,110 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
     return { prerequisites: join(out.prerequisites), relations: join(out.relations), heads: join(out.heads) }
   })
 
+  // Dragging. With full motion a live run of the layout's forces lets the
+  // neighbours follow and stops within the emphasis duration of release;
+  // with reduced or off motion only the held dot moves. At rest nothing runs.
+  let held: { id: string; point: WebPoint } | null = null
+  let frame: number | null = null
+  let stopTimer: ReturnType<typeof setTimeout> | undefined
+  const nextFrame = (run: () => void): number => typeof requestAnimationFrame === 'function' ? requestAnimationFrame(run) : Number(setTimeout(run, 16))
+  const cancelFrame = (handle: number): void => { if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(handle); else clearTimeout(handle) }
+  function liveFrame(): void {
+    frame = null
+    if (!held) return
+    const base = new Map(positions.value)
+    base.set(held.id, held.point)
+    const next = continueWebLayout(graph.value, base, { pinned: new Set([held.id]) })
+    working.value = next
+    events.drag(next)
+    frame = nextFrame(liveFrame)
+  }
+  function moveHeld(id: string, point: WebPoint): void {
+    held = { id, point }
+    if (motionReduced.value) {
+      const next = new Map(positions.value)
+      next.set(id, point)
+      working.value = next
+      events.drag(next)
+      return
+    }
+    if (stopTimer !== undefined) { clearTimeout(stopTimer); stopTimer = undefined }
+    if (frame === null) frame = nextFrame(liveFrame)
+  }
+  function stopDrag(): void {
+    if (frame !== null) cancelFrame(frame)
+    if (stopTimer !== undefined) clearTimeout(stopTimer)
+    frame = null
+    stopTimer = undefined
+    held = null
+    working.value = null
+  }
+  function releaseHeld(): void {
+    if (!held) return
+    if (motionReduced.value || frame === null) stopDrag()
+    else stopTimer = setTimeout(stopDrag, motionDuration('emphasis'))
+  }
+  onBeforeUnmount(stopDrag)
+
+  // Pointer gestures: press a dot to drag it, the background to pan.
+  type Gesture =
+    | { kind: 'press'; pointerId: number; id: string | null; start: WebPoint }
+    | { kind: 'dot'; pointerId: number; id: string; offset: WebPoint }
+    | { kind: 'pan'; pointerId: number; start: WebPoint; camera: AtlasCamera }
+  let gesture: Gesture | null = null
+  let suppressClick = false
+  function local(event: PointerEvent): WebPoint {
+    const box = root.value?.getBoundingClientRect()
+    return { x: event.clientX - (box?.left ?? 0), y: event.clientY - (box?.top ?? 0) }
+  }
+  function toWorld(point: WebPoint): WebPoint {
+    const at = camera.value
+    return { x: (point.x - size.value.width / 2) / at.zoom + at.x, y: (point.y - size.value.height / 2) / at.zoom + at.y }
+  }
+  function pointerDown(event: PointerEvent): void {
+    if (event.pointerType === 'mouse' && event.button !== 0) return
+    pressStart()
+    suppressClick = false
+    gesture = { kind: 'press', pointerId: event.pointerId, id: skillOf(event.target), start: local(event) }
+  }
+  function pointerMove(event: PointerEvent): void {
+    if (!gesture || gesture.pointerId !== event.pointerId) return
+    const at = local(event)
+    if (gesture.kind === 'press') {
+      if (Math.hypot(at.x - gesture.start.x, at.y - gesture.start.y) < WEB_DRAG_THRESHOLD) return
+      suppressClick = true
+      root.value?.setPointerCapture?.(event.pointerId)
+      // Whatever the camera shows when a gesture starts, it holds still while dots move.
+      if (!localCamera.value && !input().camera) setCamera(camera.value)
+      const point = gesture.id ? positions.value.get(gesture.id) : undefined
+      if (gesture.id && point) {
+        const grabbed = toWorld(gesture.start)
+        gesture = { kind: 'dot', pointerId: gesture.pointerId, id: gesture.id, offset: { x: grabbed.x - point.x, y: grabbed.y - point.y } }
+      } else gesture = { kind: 'pan', pointerId: gesture.pointerId, start: gesture.start, camera: camera.value }
+    }
+    if (gesture.kind === 'dot') {
+      const world = toWorld(at)
+      moveHeld(gesture.id, { x: world.x - gesture.offset.x, y: world.y - gesture.offset.y })
+    } else if (gesture.kind === 'pan') {
+      const from = gesture.camera
+      setCamera({ ...from, x: from.x - (at.x - gesture.start.x) / from.zoom, y: from.y - (at.y - gesture.start.y) / from.zoom })
+    }
+  }
+  function pointerUp(event: PointerEvent): void {
+    pressEnd()
+    if (!gesture || gesture.pointerId !== event.pointerId) return
+    if (gesture.kind === 'dot') releaseHeld()
+    gesture = null
+    if (root.value?.hasPointerCapture?.(event.pointerId)) root.value.releasePointerCapture(event.pointerId)
+  }
+  /** A click that ends a drag or a pan selects nothing. Keyboard clicks (detail 0) always pass. */
+  function clickCapture(event: MouseEvent): void {
+    if (!suppressClick || event.detail === 0) return
+    suppressClick = false
+    event.stopPropagation()
+    event.preventDefault()
+  }
+
   function dotClick(id: string): void { events.select(id) }
 
   function skillOf(target: EventTarget | null): string | null {
@@ -315,6 +430,6 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
 
   return {
     size, camera, dots, lines, graph, motionReduced, rovingId, namedIds, litIds,
-    dotClick, focus, focusIn, focusOut, keyDown, keyUp, hover, pressStart, pressEnd,
+    dotClick, pointerDown, pointerMove, pointerUp, clickCapture, focus, focusIn, focusOut, keyDown, keyUp, hover, pressStart, pressEnd,
   }
 }

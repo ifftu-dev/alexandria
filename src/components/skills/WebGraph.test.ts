@@ -8,6 +8,9 @@ import type { AtlasCamera } from '@/utils/skillAtlasView'
 import type { SkillInfo, VerifiableCredential } from '@/types'
 import type { WebPoint } from './webGeometry'
 import WebGraph from './WebGraph.vue'
+import { motionDuration } from '@/composables/useMotion'
+
+const motionDurationForTest = () => motionDuration('emphasis')
 
 const skill = (id: string, name: string, field: string | null, overrides: Partial<SkillInfo> = {}): SkillInfo => ({
   id, name, description: '', subject_id: 'subject', subject_name: 'Subject',
@@ -91,6 +94,15 @@ const key = async (wrapper: VueWrapper, name: string) => {
 /** Line segments drawn by the paths matching a selector: each starts with a move. */
 const segments = (wrapper: VueWrapper, selector: string) => wrapper.findAll(selector).reduce((sum, path) => sum + (path.attributes('d')?.match(/M/g)?.length ?? 0), 0)
 const places = (wrapper: VueWrapper) => dots(wrapper).map(item => `${item.attributes('data-skill')} ${item.attributes('style')}`)
+
+/** A pointer event as the browser sends it, on an element of the graph. */
+async function pointer(target: Element, name: string, x: number, y: number, pointerId = 1, pointerType = 'mouse') {
+  const event = new MouseEvent(name, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y })
+  Object.defineProperties(event, { pointerId: { value: pointerId }, pointerType: { value: pointerType } })
+  target.dispatchEvent(event)
+  await nextTick()
+}
+const dragged = (wrapper: VueWrapper) => (wrapper.emitted('drag') ?? []).map(([next]) => next as ReadonlyMap<string, WebPoint>)
 
 describe('Web graph', () => {
   it('draws every skill as a dot named as in the other views, behind one Tab stop at the selection', () => {
@@ -194,5 +206,52 @@ describe('Web graph', () => {
     // Without Related, a relation is not a step: hovering Algebra leaves Data faded.
     await dot(wrapper, ALGEBRA).trigger('pointerenter')
     expect(faded(wrapper)).toEqual(['c', 'd', 'e'])
+  })
+
+  it('drags a dot without selecting it, and with reduced motion moves only the held dot', async () => {
+    const wrapper = setup({ reducedMotion: true })
+    const held = dot(wrapper, BRIDGES).element
+    await pointer(held, 'pointerdown', 450, 210)
+    await pointer(held, 'pointermove', 470, 220)
+    await pointer(held, 'pointermove', 480, 250)
+    await pointer(held, 'pointerup', 480, 250)
+    held.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
+    await nextTick()
+    expect(wrapper.emitted('select')).toBeUndefined()
+    const moves = dragged(wrapper)
+    expect(moves).toHaveLength(2)
+    expect(moves.at(-1)!.get('b')).toEqual({ x: 130, y: 40 })
+    for (const id of ['a', 'c', 'd', 'e']) expect(moves.at(-1)!.get(id)).toEqual(positions.get(id))
+    // The owner stores the drag; the dot is drawn where it was dropped.
+    expect(wrapper.props('positions')).toEqual(moves.at(-1))
+    // A press without movement is a click, and selects.
+    await pointer(held, 'pointerdown', 480, 250)
+    await pointer(held, 'pointerup', 480, 250)
+    held.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
+    await nextTick()
+    expect(wrapper.emitted('select')).toEqual([['b']])
+  })
+
+  it('lets neighbours follow a dragged dot in a live run that stops within the emphasis duration of release', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'] })
+    const wrapper = setup()
+    const held = dot(wrapper, BRIDGES).element
+    await pointer(held, 'pointerdown', 450, 210)
+    await pointer(held, 'pointermove', 550, 210)
+    vi.advanceTimersByTime(500)
+    await nextTick()
+    const live = dragged(wrapper)
+    expect(live.length).toBeGreaterThan(5)
+    expect(live.at(-1)!.get('b')).toEqual({ x: 200, y: 0 })
+    // Calculus, which builds on Bridges, is pushed or pulled along.
+    expect(live.at(-1)!.get('c')).not.toEqual(positions.get('c'))
+    await pointer(held, 'pointerup', 550, 210)
+    vi.advanceTimersByTime(motionDurationForTest())
+    await nextTick()
+    const settled = dragged(wrapper).length
+    vi.advanceTimersByTime(2000)
+    await nextTick()
+    expect(dragged(wrapper).length).toBe(settled)
+    expect(dragged(wrapper).at(-1)!.get('b')).toEqual({ x: 200, y: 0 })
   })
 })
