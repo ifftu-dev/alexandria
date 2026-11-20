@@ -249,6 +249,18 @@ describe('CredentialDetail provenance', () => {
     expect(section.text()).toContain('credentials.detail.trustProvenance.sessionBound')
   })
 
+  it('says a paired phone was present, as a self-reported credential, never device-attested', async () => {
+    const section = await openWithTrust(trustView({
+      provenance: {
+        kind: 'self_reported',
+        attestation: { outcome: 'verified_credential_bound', platform: 'ios', companion: true },
+      },
+    }))
+    expect(section.get('[data-provenance]').text()).toBe('credentials.detail.trustProvenance.selfReported')
+    expect(section.text()).toContain('credentials.detail.trustProvenance.companion')
+    expect(section.text()).not.toContain('credentials.detail.trustProvenance.deviceAttested')
+  })
+
   it('says what device attestation proves and what it does not', async () => {
     const section = await openWithTrust(trustView({
       provenance: { kind: 'device_attested', platform: 'android' },

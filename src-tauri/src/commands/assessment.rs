@@ -27,6 +27,9 @@ use crate::assessment::policy::{
 use crate::assessment::randomizer::{draw, DifficultyBand, DrawContext, QuestionMeta};
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
+use crate::sentinel::attestation::{require_verified_device, AttemptDevice};
+#[cfg(test)]
+use crate::sentinel::attestation::{DeviceKind, VERIFIED_DEVICE_REQUIRED};
 use crate::sentinel::trust_profile::{self, PolicyFloor};
 use crate::settings::{registry::keys, SettingsStore};
 use crate::AppState;
@@ -80,6 +83,10 @@ pub struct AttemptRoleTarget {
     /// connection (`llm` probe policy). The learner is asked before the
     /// attempt whether their chosen answers may leave the device for that.
     pub generated_probes: bool,
+    /// True when the role requires `device_attested`: the attempt must be
+    /// taken on a phone that can attest itself, and a desktop refuses to
+    /// start it ([`require_verified_device`]).
+    pub verified_device_required: bool,
 }
 
 /// `(id, question_ids, option_orders, draft_answers_json, role_assessment_id,
@@ -100,7 +107,7 @@ struct RoleRow {
 }
 
 const ROLE_ROW_SELECT: &str = "SELECT ra.id, ra.role_title, o.name, ra.issuance_policy_json, \
-                                     ra.status, ra.skill_ids \
+                                     ra.status, ra.skill_ids, ra.required_assurance_level \
                                 FROM role_assessments ra \
                                 JOIN organizations o ON o.id = ra.org_id";
 
@@ -122,6 +129,15 @@ fn map_role_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleRow> {
     let floor = policy.as_ref().and_then(|p| p.min_trust_profile);
     let generated_probes = policy.as_ref().and_then(|p| p.probe_policy)
         == Some(crate::assessment::probes::ProbePolicy::Llm);
+    // The role's column overrides its policy's level at issuance
+    // (`role_assessment`), so it does here too.
+    let required_level = r.get::<_, Option<String>>(6)?.or_else(|| {
+        policy
+            .as_ref()
+            .and_then(|p| p.required_assurance_level.clone())
+    });
+    let verified_device_required =
+        require_verified_device(required_level.as_deref(), AttemptDevice::DESKTOP).is_err();
     Ok(RoleRow {
         target: AttemptRoleTarget {
             role_assessment_id: r.get(0)?,
@@ -130,6 +146,7 @@ fn map_role_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleRow> {
             camera_required: floor
                 .is_some_and(|f| f.includes(crate::sentinel::scoring::ProfileSignal::Camera)),
             generated_probes,
+            verified_device_required,
         },
         status: r.get(4)?,
         skill_ids: r
@@ -585,6 +602,7 @@ pub(crate) fn start_attempt_with_consent_db(
         attempt_id,
         now,
         llm_probe_consent,
+        AttemptDevice::current(),
     )
 }
 
@@ -613,6 +631,30 @@ pub(crate) fn start_request_attempt_db(
         attempt_id,
         now,
         false,
+        AttemptDevice::current(),
+    )
+}
+
+/// Start an attempt as `device`, without generated-probe consent. Tests only:
+/// the commands start on this device.
+#[cfg(test)]
+fn start_attempt_on_db(
+    db: &crate::db::Database,
+    skill_id: String,
+    integrity_session_id: Option<String>,
+    source: AttemptPolicySource<'_>,
+    device: AttemptDevice,
+) -> Result<StartedAttempt, String> {
+    start_attempt_core(
+        db,
+        skill_id,
+        integrity_session_id,
+        source,
+        7,
+        "att_device".into(),
+        "2026-10-09T00:00:00Z".into(),
+        false,
+        device,
     )
 }
 
@@ -633,6 +675,7 @@ fn start_attempt_core(
     attempt_id: String,
     now: String,
     llm_probe_consent: bool,
+    device: AttemptDevice,
 ) -> Result<StartedAttempt, String> {
     let (role_assessment_id, request_policy) = match source {
         AttemptPolicySource::Role(role) => (role, None),
@@ -803,8 +846,19 @@ fn start_attempt_core(
         let role = stored_role_target(conn, stored_role_id.as_deref())?;
         // A request's policy stays the one the attempt was started under; an
         // open attempt a request picks up takes the request's from here on.
+        let stored_request_policy = stored_request_policy
+            .as_deref()
+            .map(parse_request_policy)
+            .transpose()?;
+        // Refused on a device that cannot reach a required `device_attested`,
+        // before the attempt is picked up or any item is served.
+        require_device_for(
+            role.as_ref(),
+            stored_request_policy.as_ref().or(request_policy),
+            device,
+        )?;
         let request_floor = match (stored_request_policy, request_policy) {
-            (Some(json), _) => parse_request_policy(&json)?.min_trust_profile,
+            (Some(policy), _) => policy.min_trust_profile,
             (None, Some(policy)) => {
                 conn.execute(
                     "UPDATE assessment_attempts SET request_policy_json = ?2 WHERE id = ?1",
@@ -842,6 +896,8 @@ fn start_attempt_core(
             .as_deref()
             .map(|id| resolve_role_target(conn, &skill_id, id))
             .transpose()?;
+        // A required verified device is judged before anything is drawn too.
+        require_device_for(role.as_ref(), request_policy, device)?;
         let floor = match &role {
             Some(role) => trust_profile::role_floor(conn, &role.role_assessment_id)?,
             None => request_policy.and_then(|p| p.min_trust_profile),
@@ -928,6 +984,26 @@ fn start_attempt_core(
         role,
         policy_floor,
     })
+}
+
+/// [`require_verified_device`] for an attempt's role, or else the credential
+/// request it answers.
+fn require_device_for(
+    role: Option<&AttemptRoleTarget>,
+    request_policy: Option<&crate::credentials::IssuancePolicy>,
+    device: AttemptDevice,
+) -> Result<(), String> {
+    match role {
+        Some(role) if role.verified_device_required => require_verified_device(
+            Some(crate::sentinel::attestation::ASSURANCE_DEVICE_ATTESTED),
+            device,
+        ),
+        Some(_) => Ok(()),
+        None => require_verified_device(
+            request_policy.and_then(|p| p.required_assurance_level.as_deref()),
+            device,
+        ),
+    }
 }
 
 fn request_policy_json(policy: &crate::credentials::IssuancePolicy) -> Result<String, String> {
@@ -3295,6 +3371,98 @@ mod role_target_tests {
         assert!(started.policy_floor.satisfied);
         assert_eq!(started.policy_floor.required, None);
         assert_eq!(started.policy_floor.profile, Some(TrustProfile::Core));
+    }
+
+    fn verified_device_role(conn: &rusqlite::Connection, org_id: &str) -> String {
+        let req = CreateRoleAssessmentRequest {
+            org_id: org_id.into(),
+            role_title: "Verified device".into(),
+            job_description: None,
+            course_id: None,
+            skill_ids: vec!["skill_rust".into()],
+            issuance_policy: None,
+            required_assurance_level: Some("device_attested".into()),
+        };
+        let ra = create_role_assessment_impl(conn, &req, NOW).unwrap();
+        set_role_assessment_status_impl(conn, &ra.id, "published", NOW).unwrap();
+        ra.id
+    }
+
+    fn attempts(db: &Database) -> i64 {
+        db.conn()
+            .query_row("SELECT COUNT(*) FROM assessment_attempts", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn a_role_requiring_a_verified_device_is_refused_on_a_desktop_before_any_item() {
+        let db = setup();
+        let org = create_organization_impl(db.conn(), "Acme", "stake_owner", None, NOW).unwrap();
+        let role = verified_device_role(db.conn(), &org.id);
+        // The learner sees the requirement before choosing the role.
+        assert!(open_roles_for_skill(db.conn(), "skill_rust")
+            .unwrap()
+            .iter()
+            .any(|r| r.role_assessment_id == role && r.verified_device_required));
+
+        let start = |device: AttemptDevice| {
+            start_attempt_on_db(
+                &db,
+                "skill_rust".into(),
+                Some("isess_live".into()),
+                AttemptPolicySource::Role(Some(role.clone())),
+                device,
+            )
+        };
+        let err = start(AttemptDevice::DESKTOP).unwrap_err();
+        assert!(err.starts_with("verified_device_required:iphone:"), "{err}");
+        assert_eq!(attempts(&db), 0, "refused before anything is drawn");
+        // With Android attestation enabled, any attesting phone will do.
+        let err = start(AttemptDevice {
+            android_attestation: true,
+            ..AttemptDevice::DESKTOP
+        })
+        .unwrap_err();
+        assert!(err.starts_with("verified_device_required:phone:"), "{err}");
+        // An Android phone cannot reach `device_attested` until then.
+        let err = start(AttemptDevice {
+            kind: DeviceKind::Android,
+            android_attestation: false,
+        })
+        .unwrap_err();
+        assert!(err.starts_with("verified_device_required:iphone:"), "{err}");
+        assert_eq!(attempts(&db), 0);
+
+        let started = start(AttemptDevice {
+            kind: DeviceKind::Iphone,
+            android_attestation: false,
+        })
+        .unwrap();
+        assert!(!started.questions.is_empty());
+        assert!(started.role.unwrap().verified_device_required);
+    }
+
+    #[test]
+    fn a_request_requiring_a_verified_device_is_refused_on_a_desktop_and_a_lower_one_is_not() {
+        let db = setup();
+        let policy = |level: &str| IssuancePolicy {
+            required_assurance_level: Some(level.into()),
+            ..Default::default()
+        };
+        let start = |policy: &IssuancePolicy, device: AttemptDevice| {
+            start_attempt_on_db(
+                &db,
+                "skill_rust".into(),
+                Some("isess_live".into()),
+                AttemptPolicySource::Request(Some(policy)),
+                device,
+            )
+        };
+        let err = start(&policy("device_attested"), AttemptDevice::DESKTOP).unwrap_err();
+        assert!(err.starts_with(VERIFIED_DEVICE_REQUIRED), "{err}");
+        assert_eq!(attempts(&db), 0);
+        // A paired phone meets `companion_attested`, so a desktop may start.
+        assert!(start(&policy("companion_attested"), AttemptDevice::DESKTOP).is_ok());
     }
 
     #[test]

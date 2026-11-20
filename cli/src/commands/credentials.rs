@@ -492,6 +492,13 @@ pub(crate) fn trust_summary(
                 "Self-reported ({} attestation covers the session, not this credential)",
                 platform(*p)
             ),
+            AttestationOutcome::VerifiedCredentialBound {
+                platform: p,
+                companion: true,
+            } => format!(
+                "Self-reported (a paired {} phone was present; nothing is claimed about the desktop)",
+                platform(*p)
+            ),
             AttestationOutcome::Unverifiable { platform: p } => format!(
                 "Self-reported ({} attestation evidence cannot be checked here)",
                 platform(*p)
@@ -563,6 +570,21 @@ mod tests {
             )),
             "Self-reported (Apple attestation covers the session, not this credential) · \
              names no suspension list"
+        );
+        assert_eq!(
+            trust_summary(&view(
+                serde_json::json!({
+                    "kind": "self_reported",
+                    "attestation": {
+                        "outcome": "verified_credential_bound",
+                        "platform": "ios",
+                        "companion": true,
+                    },
+                }),
+                "no_list",
+            )),
+            "Self-reported (a paired Apple phone was present; nothing is claimed about the \
+             desktop) · names no suspension list"
         );
         assert_eq!(
             trust_summary(&view(serde_json::Value::Null, "not_suspended")),

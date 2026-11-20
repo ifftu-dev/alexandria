@@ -286,9 +286,11 @@ describe('standalone assessment monitoring', () => {
 describe('role targeting', () => {
   const plainRole: AttemptRoleTarget = {
     role_assessment_id: 'role-plain', role_title: 'Analyst', org_name: 'Acme', camera_required: false, generated_probes: false,
+    verified_device_required: false,
   }
   const cameraRole: AttemptRoleTarget = {
     role_assessment_id: 'role-cam', role_title: 'SRE', org_name: 'Acme', camera_required: true, generated_probes: false,
+    verified_device_required: false,
   }
 
   function mockCamera(impl: () => Promise<MediaStream>) {
@@ -413,6 +415,40 @@ describe('role targeting', () => {
     expect(mocks.startAttempt).toHaveBeenCalledExactlyOnceWith('skill_test', 'session-1', 'role-gen', true)
   })
 
+  const deviceRole: AttemptRoleTarget = { ...plainRole, role_assessment_id: 'role-device', verified_device_required: true }
+  const desktop = { platform_attestation: false, companion_phone: true, android_attestation: false, verified_device: false }
+
+  it('names a role that requires a verified device and blocks it on a desktop before monitoring', async () => {
+    mocks.openRoles.mockResolvedValue([plainRole, deviceRole])
+    mocks.invoke.mockImplementation(async (command: string) => command === 'integrity_device_support' ? desktop : null)
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="role-chooser"]').text()).toContain('learn.assessment.verifiedDeviceBadge.iphone')
+    await wrapper.get('[data-testid="role-role-device"]').setValue(true)
+    expect(wrapper.get('[data-testid="verified-device-gate"]').text()).toContain('learn.assessment.verifiedDeviceNote.iphone')
+    expect((wrapper.get('[data-testid="start-attempt"]').element as HTMLButtonElement).disabled).toBe(true)
+    // Another role starts as before.
+    await wrapper.get('[data-testid="role-role-plain"]').setValue(true)
+    expect(wrapper.find('[data-testid="verified-device-gate"]').exists()).toBe(false)
+    expect((wrapper.get('[data-testid="start-attempt"]').element as HTMLButtonElement).disabled).toBe(false)
+    expect(mocks.start).not.toHaveBeenCalled()
+  })
+
+  it('turns the backend refusal into taking the attempt on a phone', async () => {
+    mocks.openRoles.mockResolvedValue([deviceRole])
+    mocks.startAttempt.mockRejectedValue(
+      'verified_device_required:phone: this requires a verified device; take the attempt in Alexandria on an iPhone or Android phone',
+    )
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('[data-testid="role-role-device"]').setValue(true)
+    await wrapper.get('[data-testid="start-attempt"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="verified-device-gate"]').text()).toContain('learn.assessment.verifiedDeviceNote.phone')
+    expect(wrapper.text()).not.toContain('verified_device_required:')
+    expect(mocks.stop).toHaveBeenCalled()
+  })
+
   it('lets the learner decline a role and starts without one', async () => {
     mocks.openRoles.mockResolvedValue([plainRole])
     const wrapper = render()
@@ -524,6 +560,14 @@ describe('answering a credential request', () => {
     expect(wrapper.find('[data-testid="camera-gate"]').text()).toContain('learn.assessment.requestCameraNote')
     expect(wrapper.find('[data-testid="role-none"]').exists()).toBe(false)
     expect((wrapper.get('[data-testid="start-attempt"]').element as HTMLButtonElement).disabled).toBe(true)
+    expect(mocks.start).not.toHaveBeenCalled()
+  })
+
+  it('says before starting that a request requiring a verified device is taken on a phone', async () => {
+    armRequest(target({ issuance_policy: { required_assurance_level: 'device_attested' } }))
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="verified-device-gate"]').text()).toContain('learn.assessment.verifiedDeviceNote.iphone')
     expect(mocks.start).not.toHaveBeenCalled()
   })
 

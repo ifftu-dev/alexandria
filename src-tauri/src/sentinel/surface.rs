@@ -280,7 +280,7 @@ pub(crate) fn session_review(
     let surface = session_surface(
         conn,
         session_id,
-        assurance == "device_attested",
+        crate::sentinel::attestation::credits_attestation_signal(&assurance),
         manifest,
         None,
     )?;

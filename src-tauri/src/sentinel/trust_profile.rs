@@ -182,7 +182,7 @@ pub(crate) fn select_for_session(
     let companion = attestation
         .as_deref()
         .filter(|_| paired && req.consent.companion_phone);
-    let device_attested = assurance == crate::sentinel::attestation::ASSURANCE_DEVICE_ATTESTED
+    let device_attested = crate::sentinel::attestation::credits_attestation_signal(&assurance)
         && (!paired || req.consent.companion_phone);
     let inputs = SelectionInputs {
         device_attested,
@@ -283,9 +283,9 @@ pub(crate) fn record_policy_floor(
     let result = evaluate_floor(
         profile,
         floor,
-        &attestation_uncredited(
-            assurance == crate::sentinel::attestation::ASSURANCE_DEVICE_ATTESTED,
-        ),
+        &attestation_uncredited(crate::sentinel::attestation::credits_attestation_signal(
+            &assurance,
+        )),
     );
     let json = serde_json::to_string(&result).map_err(|e| e.to_string())?;
     conn.execute(

@@ -28,7 +28,7 @@ describe('request policy requirements', () => {
 })
 
 describe('floor reach', () => {
-  const known = { platform_attestation: false, companion_phone: false }
+  const known = { platform_attestation: false, companion_phone: false, android_attestation: false, verified_device: false }
 
   it('names a missing camera and missing attestation only when known', () => {
     expect(floorReach('full', { camera: false, support: known })).toEqual({ blockers: ['no_camera', 'no_attestation'], pairPhone: false })
@@ -37,9 +37,9 @@ describe('floor reach', () => {
   })
 
   it('offers a paired phone where one can lend the attestation', () => {
-    expect(floorReach('attested', { camera: false, support: { platform_attestation: false, companion_phone: true } }))
+    expect(floorReach('attested', { camera: false, support: { platform_attestation: false, companion_phone: true, android_attestation: false, verified_device: false } }))
       .toEqual({ blockers: [], pairPhone: true })
-    expect(floorReach('attested', { camera: false, support: { platform_attestation: true, companion_phone: false } }))
+    expect(floorReach('attested', { camera: false, support: { platform_attestation: true, companion_phone: false, android_attestation: false, verified_device: true } }))
       .toEqual({ blockers: [], pairPhone: false })
   })
 

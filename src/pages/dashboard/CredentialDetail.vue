@@ -229,6 +229,8 @@ const provenanceLines = computed((): string[] => {
       const attestation = provenance.attestation
       if (attestation.outcome === 'verified_session_bound') {
         lines.push(t('credentials.detail.trustProvenance.sessionBound', { platform: platformLabel(attestation.platform) }))
+      } else if (attestation.outcome === 'verified_credential_bound' && attestation.companion) {
+        lines.push(t('credentials.detail.trustProvenance.companion', { platform: platformLabel(attestation.platform) }))
       } else if (attestation.outcome === 'unverifiable') {
         lines.push(t('credentials.detail.trustProvenance.unverifiable', { platform: platformLabel(attestation.platform) }))
       }
@@ -577,6 +579,7 @@ const decisionVariant = computed(() => {
           {{ $t('credentials.detail.integrityNote') }}
           <span v-if="credential.integrity.assuranceLevel === 'local'">{{ $t('credentials.detail.integrityLocal') }}</span>
           <span v-else-if="credential.integrity.assuranceLevel === 'device_attested'">{{ $t('credentials.detail.integrityDeviceAttested') }}</span>
+          <span v-else-if="credential.integrity.assuranceLevel === 'companion_attested'">{{ $t('credentials.detail.integrityCompanionAttested') }}</span>
         </p>
       </section>
 

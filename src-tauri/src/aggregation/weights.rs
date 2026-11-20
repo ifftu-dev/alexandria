@@ -1,6 +1,6 @@
 //! Per-evidence weight components (§14.3–§14.8).
 
-use alexandria_verify::attestation::AttestationOutcome;
+use alexandria_verify::attestation::{AttestationOutcome, VerifiedAssuranceLevel};
 
 use crate::crypto::did::Did;
 use crate::domain::vc::CredentialType;
@@ -36,8 +36,11 @@ pub fn type_weight(credential_type: CredentialType, config: &AggregationConfig) 
 /// Weight follows who signed, not the type a credential declares. A
 /// self-issued credential (its issuer is its subject) is the holder's word,
 /// so it takes the `SelfAssertion` weight whatever type it names, or
-/// `attested_weight` when its attestation evidence verified credential-bound;
-/// an issuer-signed credential takes its declared type's weight.
+/// `attested_weight` when its attestation evidence verified `device_attested`
+/// (credential-bound, from the device the attempt ran on); an issuer-signed
+/// credential takes its declared type's weight. A paired phone's evidence
+/// (`companion_attested`) vouches for the phone, not the desktop that
+/// produced the figures, so it takes the plain self-claim weight.
 ///
 /// Inputs the session-status rule rules out never reach here: they are left
 /// out where verified inputs become aggregation inputs
@@ -46,26 +49,25 @@ pub fn provenance_weight(evidence: &AggregationInput, config: &AggregationConfig
     if !evidence.self_issued {
         return type_weight(evidence.credential_type, config);
     }
-    if credential_bound(&evidence.attestation) {
+    if device_attested(&evidence.attestation) {
         config.attested_weight.max(0.0)
     } else {
         type_weight(CredentialType::SelfAssertion, config)
     }
 }
 
-/// Whether the platform vouched for this credential's own content.
-fn credential_bound(attestation: &AttestationOutcome) -> bool {
-    matches!(
-        attestation,
-        AttestationOutcome::VerifiedCredentialBound { .. }
-    )
+/// Whether the platform of the device the attempt ran on vouched for this
+/// credential's own content. A paired phone's credential-bound evidence does
+/// not: the phone signs whatever digest the desktop hands it.
+fn device_attested(attestation: &AttestationOutcome) -> bool {
+    attestation.verified_assurance_level() == VerifiedAssuranceLevel::DeviceAttested
 }
 
 /// The session-status rule, shared by derived states and reputation.
 ///
 /// Status matters only where a reader can rely on it: an issuer-signed
 /// credential (the issuer vouches for it) or one whose attestation evidence
-/// verified credential-bound (the platform vouches for the content that
+/// verified `device_attested` (the platform vouches for the content that
 /// states it). For these, a `suspended` or `flagged` session counts for
 /// nothing and every other status, `review` included, counts in full. For
 /// any other credential the status is the holder's word either way, so it
@@ -76,7 +78,7 @@ pub fn session_status_counts(
     attestation: &AttestationOutcome,
     session_status: Option<&str>,
 ) -> bool {
-    let reliable = !self_issued || credential_bound(attestation);
+    let reliable = !self_issued || device_attested(attestation);
     !(reliable && matches!(session_status, Some("suspended" | "flagged")))
 }
 

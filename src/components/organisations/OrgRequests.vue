@@ -40,6 +40,7 @@ import OrgBadge from './OrgBadge.vue'
 import RequestPolicy from './RequestPolicy.vue'
 import { bloomName } from '@/utils/bloom'
 import { floorNeedsDevice, type DeviceAbility } from '@/utils/requestPolicy'
+import { needsVerifiedDevice } from '@/utils/verifiedDevice'
 import type {
   AccessRequestItem,
   CloudPull,
@@ -94,7 +95,8 @@ const preview = ref<SignedCredentialShare | null>(null)
 const receipts = ref<Record<string, string>>({})
 const chosenCredential = computed(() => credentials.value.find((c) => c.id === credentialId.value) ?? null)
 
-/** What this device can run of a request's trust profile floor; asked only when a floor needs it. */
+/** What this device can run of a request's trust profile floor, and whether it can reach a
+ *  required `device_attested`; asked only when a policy needs it. */
 const device = ref<DeviceAbility>({ camera: null, support: null })
 let deviceAsked = false
 
@@ -267,7 +269,9 @@ async function refresh() {
     if (!picked.value[key]) picked.value[key] = item.skills.filter((s) => s.hasEvidence).map((s) => s.skillId)
   }
   void nameSkills()
-  if (assessments.value.some((item) => floorNeedsDevice(item.request.issuance_policy?.min_trust_profile))) {
+  if (assessments.value.some((item) =>
+    floorNeedsDevice(item.request.issuance_policy?.min_trust_profile)
+    || needsVerifiedDevice(item.request.issuance_policy?.required_assurance_level))) {
     void detectDevice()
   }
   loading.value = false

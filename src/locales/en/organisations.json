@@ -70,14 +70,19 @@
         "maxWarning": "No more than {count} warnings",
         "noWarning": "No warnings",
         "assuranceLocal": "Any device",
-        "assuranceAttested": "A device that proves it runs a genuine, unmodified app, with that proof bound to the credential",
+        "assuranceAttested": "Taken on a phone that proves it runs a genuine, unmodified app, with that proof bound to the credential. A computer with a paired phone does not count.",
+        "assuranceCompanion": "A genuine phone present and attested during the attempt; a paired phone counts",
         "assuranceOther": "Assurance level: {level}",
         "floor": "At least the {profile} monitoring profile",
         "rung": "Verification at least: {rung}",
         "probes": "Follow-up questions after you submit: {policy}",
         "noCamera": "This device has no camera, so it cannot run the {profile} profile.",
         "noAttestation": "This device cannot prove it runs a genuine app, so it cannot run the {profile} profile on its own.",
-        "pairPhone": "Pair an attested phone before you start to meet it from this device."
+        "pairPhone": "Pair an attested phone before you start to meet it from this device.",
+        "verifiedDevice": {
+          "iphone": "Open this request in Alexandria on your iPhone to take it. It cannot be started on this device, even with a paired phone.",
+          "phone": "Open this request in Alexandria on your iPhone or Android phone to take it. It cannot be started on this device, even with a paired phone."
+        }
       },
       "meetsPolicy": "This credential meets their requirements.",
       "refusedOption": "does not meet their requirements: {reason}",

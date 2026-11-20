@@ -42,11 +42,13 @@ pub struct CredentialTrustView {
 pub enum Provenance {
     /// An organisation's domain lists the key that signed the credential.
     Organisation { name: String, domain: String },
-    /// Platform attestation evidence bound to this credential verified.
+    /// Platform attestation evidence bound to this credential verified, from
+    /// the device the attempt ran on (`device_attested`).
     DeviceAttested { platform: Platform },
     /// Nothing beyond the signature backs the figures. `attestation` says
     /// what the credential's evidence, if any, did prove, so the view can say
-    /// why it reads as self-reported.
+    /// why it reads as self-reported (a paired phone's evidence verifies
+    /// credential-bound with `companion` set).
     SelfReported { attestation: AttestationOutcome },
 }
 

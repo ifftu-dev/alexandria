@@ -652,6 +652,23 @@ mod tests {
         assert_eq!(state.unique_issuer_clusters, 0, "still no issuer cluster");
     }
 
+    #[test]
+    fn a_companion_attested_self_claim_weighs_as_a_plain_self_claim() {
+        // A paired phone vouches for itself, not for the desktop that
+        // produced the figures: the self-claim weight (mass 0.8 · 0.25), and
+        // the session status stays the holder's word.
+        let completed = attested_state(&[own("completed", Evidence::CompanionBound)]).unwrap();
+        assert!(
+            (completed.evidence_mass - 0.8 * 0.25).abs() < 1e-9,
+            "mass {}",
+            completed.evidence_mass
+        );
+        for status in ["suspended", "flagged"] {
+            let state = attested_state(&[own(status, Evidence::CompanionBound)]).unwrap();
+            assert_same_score(&state, &completed, status);
+        }
+    }
+
     fn organisation(session_status: &str) -> Held<'_> {
         static ORGANISATION: std::sync::OnceLock<SigningKey> = std::sync::OnceLock::new();
         Held {

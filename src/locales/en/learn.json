@@ -16,6 +16,14 @@
     "roleNone": "No specific role",
     "roleCameraRequired": "Camera required",
     "roleCameraNote": "This role requires the camera for the whole attempt. Turn it on to start; the credential is refused if coverage falls short.",
+    "verifiedDeviceBadge": {
+      "iphone": "iPhone only",
+      "phone": "Phone only"
+    },
+    "verifiedDeviceNote": {
+      "iphone": "This must be taken in Alexandria on your iPhone, where the device proves it runs a genuine app. It cannot be started on a computer, even with a paired phone.",
+      "phone": "This must be taken in Alexandria on your iPhone or Android phone, where the device proves it runs a genuine app. It cannot be started on a computer, even with a paired phone."
+    },
     "cameraReady": "Camera is on.",
     "cameraEnable": "Turn on camera",
     "startAttempt": "Start assessment",

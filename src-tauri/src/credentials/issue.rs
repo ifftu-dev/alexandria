@@ -140,7 +140,7 @@ pub(crate) fn build_integrity_assertion(
     trust: &crate::sentinel::attestation::TrustConfig,
 ) -> Result<(IntegrityAssertion, SessionFacts), CredentialError> {
     use crate::sentinel::attestation::{
-        effective_assurance, SessionAttestationFacts, ASSURANCE_DEVICE_ATTESTED,
+        credits_attestation_signal, effective_assurance, SessionAttestationFacts,
     };
     use crate::sentinel::scoring::{active_certification, active_manifest};
     let row = conn
@@ -198,7 +198,7 @@ pub(crate) fn build_integrity_assertion(
     let surface = crate::sentinel::surface::session_surface(
         conn,
         session_id,
-        assurance_level == ASSURANCE_DEVICE_ATTESTED,
+        credits_attestation_signal(&assurance_level),
         &active_manifest(),
         certification.as_ref().map(|(c, d)| (c, d.as_str())),
     )

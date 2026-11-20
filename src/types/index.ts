@@ -768,7 +768,11 @@ export interface IntegritySession {
   warning_count: number
   started_at: string
   ended_at: string | null
-  /** `local`, or `device_attested` once a platform attestation verified. */
+  /**
+   * `local`; `device_attested` once this device's platform attestation
+   * verified; `companion_attested` once a paired phone's did (a genuine phone
+   * was present, nothing is claimed about this computer).
+   */
   assurance_level: string
   /** Items whose first visit arrived with response-process timing. */
   response_items: number
@@ -2303,7 +2307,10 @@ export type CredentialTrust =
 export type Provenance =
   | { kind: 'organisation'; name: string; domain: string }
   | { kind: 'device_attested'; platform: AttestationPlatform }
-  /** `attestation` says what the credential's evidence, if any, did prove. */
+  /**
+   * `attestation` says what the credential's evidence, if any, did prove; a
+   * paired phone's evidence verifies credential-bound with `companion` set.
+   */
   | { kind: 'self_reported'; attestation: AttestationOutcome }
 
 /** Mirrors `domain::credential_trust::SuspensionState`, read from the suspension list. */
@@ -2749,6 +2756,9 @@ export interface AttemptRoleTarget {
    *  learner is asked before the attempt whether their answers may leave the
    *  device for that. */
   generated_probes: boolean
+  /** The role requires `device_attested`: it is taken on a phone that attests
+   *  itself, and a desktop refuses to start it (`verified_device_required`). */
+  verified_device_required: boolean
 }
 
 /** One submitted answer: the served option positions the learner selected. */
@@ -3085,7 +3095,15 @@ export interface RequestAttemptTarget {
 /** What this device can contribute to a trust profile floor (`integrity_device_support`). */
 export interface DeviceSupport {
   platform_attestation: boolean
+  /** A phone can be paired (desktop builds). It is present and attested
+   *  during the session; it does not verify this computer. */
   companion_phone: boolean
+  /** Android phones can reach `device_attested` on this build; until then
+   *  only an iPhone can. */
+  android_attestation: boolean
+  /** This device can reach `device_attested`, so it can start an attempt
+   *  whose policy requires a verified device. */
+  verified_device: boolean
 }
 
 export interface InterviewInvite {

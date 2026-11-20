@@ -12,7 +12,8 @@ pub struct AggregationConfig {
     pub version: String,
     pub type_weights: HashMap<CredentialType, f64>,
     /// Class weight of a self-issued credential whose attestation evidence
-    /// verified credential-bound (see [`super::weights::provenance_weight`]).
+    /// verified `device_attested` (see [`super::weights::provenance_weight`]).
+    /// A `companion_attested` credential takes the `SelfAssertion` weight.
     /// It sits above the `SelfAssertion` weight and below every issuer-signed
     /// evidence class.
     pub attested_weight: f64,
@@ -83,7 +84,10 @@ impl Default for AggregationConfig {
             // 1.4: verified credential-bound attestation evidence raises a
             // self-issued credential to `attested_weight`, and session status
             // counts where a reader can rely on it.
-            version: "1.4".into(),
+            // 1.5: only `device_attested` evidence takes `attested_weight` and
+            // makes session status count; a paired phone's evidence
+            // (`companion_attested`) weighs as a plain self-claim.
+            version: "1.5".into(),
             type_weights,
             // 0.30: credential-bound evidence shows a genuine build on a
             // genuine device produced this credential's content, which is more
