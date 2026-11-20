@@ -12,6 +12,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { floorReach, policyRequirements, type DeviceAbility, type Requirement } from '@/utils/requestPolicy'
 import { needsVerifiedDevice, verifiedPhones } from '@/utils/verifiedDevice'
+import { secondDeviceNote } from '@/utils/sentinel/secondDevice'
 import type { IssuancePolicy, TrustProfile } from '@/types'
 
 const props = defineProps<{ policy: IssuancePolicy; org: string; device: DeviceAbility }>()
@@ -26,6 +27,8 @@ const verifiedDeviceBlocked = computed(
   () => needsVerifiedDevice(props.policy.required_assurance_level) && props.device.support?.verified_device === false,
 )
 const phones = computed(() => verifiedPhones(props.device.support))
+/** Below a required `live` rung: a second device or person is not ruled out. */
+const secondDevice = computed(() => secondDeviceNote(props.policy.min_verification_rung))
 
 function label(r: Requirement): string {
   switch (r.kind) {
@@ -64,6 +67,7 @@ function label(r: Requirement): string {
         <li v-for="r in items" :key="r.kind" :data-testid="`requirement-${r.kind}`">{{ label(r) }}</li>
       </ul>
     </template>
+    <p v-if="secondDevice" class="text-muted-foreground" data-testid="second-device">{{ secondDevice }}</p>
     <p v-if="verifiedDeviceBlocked" class="font-medium text-warning" data-testid="verified-device-blocker">
       {{ t(`organisations.requests.assessment.policy.verifiedDevice.${phones}`) }}
     </p>

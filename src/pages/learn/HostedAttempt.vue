@@ -37,6 +37,7 @@ import TrustProfileNotice from '@/components/integrity/TrustProfileNotice.vue'
 import PluginHost from '@/components/plugin/PluginHost.vue'
 import { needsVerifiedDevice, verifiedDeviceRefusal, verifiedPhones, type VerifiedPhones } from '@/utils/verifiedDevice'
 import { hostedAttemptError, isDisconnected, isGone } from '@/utils/hostedAttempt'
+import { secondDeviceNote } from '@/utils/sentinel/secondDevice'
 import { errorMessage } from '@/utils/errorMessage'
 import type {
   DeviceSupport,
@@ -117,6 +118,9 @@ const canStart = computed(() =>
   && !(cameraRequired.value && !cameraStream.value)
   && !verifiedDeviceBlocked.value,
 )
+/** Below a required `live` rung, the result says a second device or person
+ *  is not ruled out: only a live segment rules it out. */
+const secondDevice = computed(() => secondDeviceNote(target.value?.issuance_policy?.min_verification_rung))
 const retakeRule = computed(() => {
   const r = terms.value?.terms.retakes
   if (!r) return ''
@@ -615,6 +619,7 @@ async function checkAgain() {
       <p v-if="outcome.result.probes.asked > 0" class="text-sm text-muted-foreground">
         {{ $t('learn.hosted.probes', { passed: outcome.result.probes.passed, asked: outcome.result.probes.asked }) }}
       </p>
+      <p v-if="secondDevice" class="text-sm text-muted-foreground" data-testid="hosted-second-device">{{ secondDevice }}</p>
 
       <div v-if="outcome.issuance.state === 'issued'" class="rounded-lg border border-success/40 bg-success/5 p-3 text-sm" data-testid="hosted-issued">
         <p class="font-medium text-success">{{ $t('learn.hosted.issued') }}</p>

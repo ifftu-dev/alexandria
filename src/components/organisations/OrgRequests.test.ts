@@ -243,6 +243,21 @@ describe('OrgRequests', () => {
     expect(policy.find('[data-testid=verified-device-blocker]').text()).toBe('organisations.requests.assessment.policy.verifiedDevice.iphone')
   })
 
+  it('says below a required live rung that a second device or person is not ruled out', async () => {
+    const line = 'Whether a second device or person helped: not ruled out. Only a live segment, where a person asks unscripted questions, rules it out.'
+    const probed = assessmentItem()
+    probed.request.issuance_policy = { min_verification_rung: 'probed' }
+    arm({ assessments: [probed] })
+    let wrapper = mount(OrgRequests); await flushPromises()
+    expect(wrapper.find('[data-testid=request-policy] [data-testid=second-device]').text()).toBe(line)
+
+    const live = assessmentItem()
+    live.request.issuance_policy = { min_verification_rung: 'live' }
+    arm({ assessments: [live] })
+    wrapper = mount(OrgRequests); await flushPromises()
+    expect(wrapper.find('[data-testid=request-policy] [data-testid=second-device]').exists()).toBe(false)
+  })
+
   it('shows no requirements for a request without a policy and never asks about the device', async () => {
     arm({ assessments: [assessmentItem()] })
     const wrapper = mount(OrgRequests); await flushPromises()
