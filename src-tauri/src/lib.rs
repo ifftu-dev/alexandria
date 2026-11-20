@@ -28,6 +28,7 @@ pub mod network_profile;
 pub mod notifications;
 pub mod org_trust;
 pub mod p2p;
+pub mod packages;
 pub mod plugins;
 pub mod profile;
 pub mod ratelimit;
@@ -314,6 +315,27 @@ impl AppState {
                     Err(e) => log::warn!("skill-state recompute on unlock failed: {e}"),
                 }
             }
+        }
+
+        // 6c. Package cache: clear what an interrupted import or extraction
+        // left behind, then drop extracted files not launched within the idle
+        // period. Archives are kept. Runs before commands are admitted, so no
+        // extraction is under way. Best-effort.
+        let package_dirs = packages::PackageDirs::for_profile(&paths);
+        match package_dirs
+            .ensure()
+            .map_err(packages::PackageError::from)
+            .and_then(|()| packages::clear_scratch(&package_dirs))
+        {
+            Ok(()) => match packages::drop_idle(&*self.db, &package_dirs, chrono::Utc::now()).await
+            {
+                Ok(dropped) if !dropped.is_empty() => {
+                    log::info!("dropped extracted files of {} idle packages", dropped.len())
+                }
+                Ok(_) => {}
+                Err(e) => log::warn!("package idle check failed: {e}"),
+            },
+            Err(e) => log::warn!("package cache cleanup failed: {e}"),
         }
 
         self.start_registry_refresh().await;
@@ -1608,6 +1630,11 @@ pub fn run() {
             commands::enrollment::get_progress,
             commands::enrollment::record_element_submission,
             commands::enrollment::get_element_submission,
+            // Standards packages
+            commands::packages::package_import,
+            commands::packages::package_open_file,
+            commands::packages::package_get,
+            commands::packages::package_extract,
             // Content (iroh blob store)
             commands::content::content_add,
             commands::content::content_get_text,
