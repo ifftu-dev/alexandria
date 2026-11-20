@@ -45,7 +45,7 @@ watch(() => props.visible, (visible, _old, onCleanup) => {
     <p v-if="actionError" role="alert">{{ actionError }}</p>
     <div v-if="shownError" role="alert"><p>{{ shownError }}</p><button type="button" @click="retry">{{ $t('common.actions.retry') }}</button></div>
     <SkillAtlasExplorer v-if="visible && model" v-model:view-mode="viewMode" :model="model" :view="modalView" :feedback="atlas.feedbackFor('modal')"
-      :web-positions="atlas.webPositions.value" @web-drag="atlas.setWebPositions" @web-reset="atlas.resetWebPositions"
+      :web-positions="viewMode === 'web' ? atlas.webPositions.value : null" @web-drag="atlas.setWebPositions" @web-reset="atlas.resetWebPositions"
       @update:view="atlas.updateView('modal', $event)" @open-skill="openSkill"
       @learn-skill="learnSkill" @feedback-consumed="atlas.acknowledgeFeedback" />
   </AppModal>

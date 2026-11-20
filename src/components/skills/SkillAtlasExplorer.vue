@@ -353,7 +353,8 @@ const webGraph = useWebGraph(() => ({
   model: props.model,
   positions: webMode.value ? webPositions.value : EMPTY_POSITIONS,
   selectedId: webMode.value ? selectedId.value : null,
-  focusIds: webMode.value && neighborhoodIds.value.size > 0 ? neighborhoodIds.value : null,
+  // The inspector's focus lights its neighbourhood; narrowed, everything shown is lit, so no shown name fades.
+  focusIds: !webMode.value ? null : neighborhoodIds.value.size > 0 ? neighborhoodIds.value : webShownIds.value,
   matchIds: webMatchIds.value,
   shownIds: webShownIds.value,
   fitIds: webMode.value ? fieldIds.value : null,
@@ -363,12 +364,12 @@ const webGraph = useWebGraph(() => ({
 }), {
   select: skillId => { if (skillId) select(skillId); else clearWebSelection() },
   active: () => {},
-  camera: camera => update({ webCamera: camera }),
+  camera: webCameraMoved,
   drag: positions => {
     if (!props.webPositions) ownWebDragged.value = { model: props.model, positions }
     emit('web-drag', positions)
   },
-}, mapElement)
+}, computed(() => webMode.value ? mapElement.value : undefined))
 const webDotById = computed(() => new Map(webGraph.dots.value.map(dot => [dot.id, dot])))
 function webDot(node: AtlasNode): WebDot | undefined { return webMode.value ? webDotById.value.get(node.skill.id) : undefined }
 // The Web lines and zoom tools follow every pan and zoom. Read through getters
@@ -379,6 +380,26 @@ const webZoomLayer = { get items() { return webMode.value ? [webGraph.camera.val
 watch(() => webMode.value ? webGraph.camera.value : null, at => {
   if (at && mapElement.value) mapElement.value.dataset.camera = `${at.x} ${at.y} ${at.zoom}`
 }, { flush: 'post' })
+// The Web graph draws a moved camera at once; the view hears of it when the
+// gesture ends (or when idle, for the wheel and the zoom buttons), so a pan
+// re-renders the graph and not the explorer and its owner on every frame.
+let pendingWebCamera: AtlasCamera | null = null
+/** Pointers pressed on the Web map. */
+const webPointers = new Set<number>()
+let webCameraScheduled = false
+function webCameraMoved(at: AtlasCamera): void {
+  pendingWebCamera = at
+  if (webPointers.size > 0 || webCameraScheduled) return
+  webCameraScheduled = true
+  whenIdle(() => { webCameraScheduled = false; if (webPointers.size === 0) publishWebCamera() })
+}
+function publishWebCamera(): void {
+  const at = pendingWebCamera
+  pendingWebCamera = null
+  if (at) update({ webCamera: at })
+}
+watch(() => props.viewMode, publishWebCamera, { flush: 'sync' })
+onBeforeUnmount(publishWebCamera)
 function clearWebSelection(): void {
   update({ selectedSkillId: null, webNarrowed: false, ...(props.view.webNarrowed ? { webCamera: null } : {}) })
 }
@@ -435,7 +456,12 @@ const RELATION_TYPE_KEYS = {
 } as const satisfies Record<SkillRelationType, string>
 function relationTypeText(type: SkillRelationType): string { return t(RELATION_TYPE_KEYS[type]) }
 function color(fieldId: string | null): string { return atlasFieldColor(props.model.fieldById.get(fieldId) ?? { id: fieldId, slot: null }) }
-function update(patch: Partial<AtlasViewState>): void { emit('update:view', { ...props.view, ...patch }) }
+function update(patch: Partial<AtlasViewState>): void {
+  // A camera set on purpose (Fit, Reset, a field, narrowing) replaces one a gesture has not published yet.
+  if ('webCamera' in patch) pendingWebCamera = null
+  emit('update:view', { ...props.view, ...(pendingWebCamera ? { webCamera: pendingWebCamera } : {}), ...patch })
+  if (!('webCamera' in patch)) pendingWebCamera = null
+}
 function preserveOverviewFocus(): void {
   if (!viewport.value?.querySelector('.atlas-overview')?.contains(document.activeElement)) return
   void nextTick(() => {
@@ -513,7 +539,7 @@ function stopDrag(): void {
   if (wasMoving) void nextTick(() => placeCanvas(camera.value))
 }
 function pointerDown(event: PointerEvent): void {
-  if (webMode.value) { webGraph.pointerDown(event); return }
+  if (webMode.value) { if (event.pointerType !== 'mouse' || event.button === 0) webPointers.add(event.pointerId); webGraph.pointerDown(event); return }
   if (simple.value) return
   // Native vertical scrolling and browser pinch zoom stay available on touch.
   if (event.isPrimary === false) { stopDrag(); return }
@@ -538,7 +564,11 @@ function pointerMove(event: PointerEvent): void {
   followDrag()
 }
 function pointerEnd(event: PointerEvent): void {
-  if (webMode.value) { webGraph.pointerUp(event); return }
+  if (webMode.value) {
+    webGraph.pointerUp(event)
+    if (webPointers.delete(event.pointerId) && webPointers.size === 0) publishWebCamera()
+    return
+  }
   if (drag?.id !== event.pointerId) return
   const moved = drag.target
   stopDrag()
@@ -823,7 +853,7 @@ function setBloom(event: Event): void {
                       <template v-if="simple">
                         <span class="node-disc" aria-hidden="true">{{ node.status === 'earned' && node.earnedBloom ? node.earnedBloom.rank + 1 : '' }}</span><span class="node-label" :class="{ 'is-label-quiet': labelQuiet(node) }" dir="auto">{{ node.skill.name }}</span>
                       </template>
-                      <WebGraphDot v-else-if="webMode && webDot(node)" :state="webDot(node)!.state" :size="webDot(node)!.size" :name="node.skill.name" :labelled="webDot(node)!.labelled" :selected="webDot(node)!.selected" :faded="webDot(node)!.faded" />
+                      <WebGraphDot v-else-if="webMode && webDot(node)" :state="webDot(node)!.state" :size="webDot(node)!.size" :name="node.skill.name" :labelled="webDot(node)!.labelled" :selected="webDot(node)!.selected" :faded="webDot(node)!.faded" :place="webDot(node)!.namePlace" />
                       <template v-else>
                         <span class="skill-name" dir="auto">{{ node.skill.name }}</span><span class="node-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓</span><span v-else-if="node.readyNext" aria-hidden="true">◎</span><span v-else aria-hidden="true">○</span><span>{{ nodeText(node).evidence }}</span></span>
                       </template>
@@ -1072,6 +1102,8 @@ function setBloom(event: Event): void {
   .atlas-fields { flex-wrap: nowrap; overflow-x: auto; padding-block-end: 4px; }
   .atlas-fields button { flex-shrink: 0; max-width: 230px; }
   .atlas-overview { max-height: 560px; }
+  /* The whole web is wider than tall: a shorter map wastes less of a phone screen. */
+  .atlas-map.is-web { height: min(440px, 56vh); }
   .atlas-inspector { position: sticky; top: auto; bottom: 0; z-index: 2; border-radius: 18px 18px 0 0; box-shadow: 0 -4px 22px color-mix(in srgb, var(--app-foreground) 10%, transparent); }
   .inspector-content { max-height: 45vh; padding: 16px; }
   .atlas-inspector.is-collapsed { margin-block-start: 0; }

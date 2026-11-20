@@ -841,6 +841,20 @@ describe('Web view', () => {
     await node(wrapper, W_CALCULUS).trigger('pointerleave')
     expect(fadedSkills(wrapper)).toEqual(['a', 'e', 'f'])
     expect(namedSkills(wrapper)).toEqual(['b', 'c', 'd'])
+    // The arrow keys move focus to another dot's button, which becomes the one Tab stop.
+    const roving = () => wrapper.findAll('.map-node').find(item => item.attributes('tabindex') === '0')!.element as HTMLElement
+    const first = roving()
+    first.focus()
+    for (const key of ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp']) {
+      if (document.activeElement !== first) break
+      first.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+      await nextTick()
+    }
+    expect(document.activeElement).not.toBe(first)
+    expect(document.activeElement?.classList.contains('map-node')).toBe(true)
+    expect(document.activeElement).toBe(roving())
+    ;(document.activeElement as HTMLElement).blur()
+    await nextTick()
     // The inspector's dependent focus lights its own neighbourhood.
     await button(wrapper, 'Focus dependents').trigger('click')
     expect(fadedSkills(wrapper)).toEqual(['a', 'b', 'e', 'f'])
@@ -890,8 +904,9 @@ describe('Web view', () => {
     const depth = () => wrapper.get('.web-tools select')
     expect(depth().findAll('option').map(option => option.text())).toEqual(['1 step', '2 steps', '3 steps'])
     await depth().setValue('2')
-    // Two steps reach Dynamics and, through Algebra's dotted line, Essays.
+    // Two steps reach Dynamics and, through Algebra's dotted line, Essays; nothing shown fades.
     expect(shownSkills(wrapper)).toEqual(['a', 'b', 'c', 'd', 'e'])
+    expect(fadedSkills(wrapper)).toEqual([])
     await button(wrapper, 'Related').trigger('click')
     expect(shownSkills(wrapper)).toEqual(['a', 'b', 'c', 'd'])
     await depth().setValue('3')
@@ -975,6 +990,31 @@ describe('Web view', () => {
     await button(wrapper, 'Simple').trigger('click')
     expect(wrapper.get('.atlas-map').classes()).not.toContain('is-switching')
     expect(vi.getTimerCount()).toBe(pending)
+  })
+
+  it('pans the Web graph live by dragging the background and publishes the camera once, when the drag ends', async () => {
+    const wrapper = await web()
+    const map = wrapper.get('.atlas-map').element
+    const cameras = () => (wrapper.emitted('update:view') ?? []).map(([next]) => (next as AtlasViewState).webCamera)
+    const before = cameras().length
+    const place = () => wrapper.get('[data-skill="a"]').attributes('x')
+    const start = place()
+    for (const [name, x] of [['pointerdown', 400], ['pointermove', 420], ['pointermove', 460]] as const) {
+      const event = new MouseEvent(name, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: 5 })
+      Object.defineProperties(event, { pointerId: { value: 7 }, pointerType: { value: 'mouse' } })
+      map.dispatchEvent(event)
+      await nextTick()
+    }
+    // The dots moved with the pointer, and the view has not heard of it yet.
+    expect(Number(place())).toBeCloseTo(Number(start) + 60, 0)
+    expect(cameras().length).toBe(before)
+    const up = new MouseEvent('pointerup', { bubbles: true, cancelable: true, button: 0, clientX: 460, clientY: 5 })
+    Object.defineProperties(up, { pointerId: { value: 7 }, pointerType: { value: 'mouse' } })
+    map.dispatchEvent(up)
+    await nextTick()
+    expect(cameras().length).toBe(before + 1)
+    expect(wrapper.props('view').webCamera).toEqual({ x: -60, y: 0, zoom: 1 })
+    expect(Number(place())).toBeCloseTo(Number(start) + 60, 0)
   })
 
   it('travels between Web and the other views with the edges hidden, and announces the switch', async () => {
