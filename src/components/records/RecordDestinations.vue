@@ -20,6 +20,7 @@ import { AppButton, AppInput, ConfirmDialog } from '@/components/ui'
 import RecordConsent from './RecordConsent.vue'
 import RecordSendLog from './RecordSendLog.vue'
 import { useRecordSendLog } from '@/composables/useRecordSendLog'
+import { formatDateTime } from '@/utils/formatDateTime'
 import type { DestinationPreview, RecordConsentDecision, RecordDestination, RemovalReport } from '@/types'
 
 withDefaults(defineProps<{ showLog?: boolean }>(), { showLog: false })
@@ -41,12 +42,7 @@ const removing = ref<RecordDestination | null>(null)
 const removingBusy = ref(false)
 const sendLog = useRecordSendLog()
 
-function when(iso: string | null): string {
-  if (!iso) return ''
-  const parsed = new Date(iso)
-  if (Number.isNaN(parsed.getTime())) return iso
-  return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(parsed)
-}
+const when = (iso: string | null) => formatDateTime(iso, locale.value)
 
 async function refresh() {
   error.value = ''

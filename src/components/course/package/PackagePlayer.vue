@@ -28,6 +28,7 @@ import {
   type SequencingNode,
 } from './packageSession'
 import { previewInvoke } from './packagePreview'
+import { launchables, outline } from './packageTree'
 
 // A package element: a SCORM package running in the wrapper at the package
 // origin, or cmi5 units framed by it, under a label the app draws. Results come from the package's own
@@ -98,16 +99,8 @@ const sequencedPhase = ref<Sequenced>('running')
 const endedReason = ref<string | null>(null)
 const confirmingExit = ref(false)
 
-const sequencedRows = computed<SequencedRow[]>(() => {
-  const out: SequencedRow[] = []
-  const walk = (node: SequencingNode, depth: number) => {
-    if (!node.visible) return
-    out.push({ node, depth, lesson: node.children.length === 0 })
-    for (const child of node.children) walk(child, depth + 1)
-  }
-  for (const child of navigation.value?.tree?.children ?? []) walk(child, 0)
-  return out
-})
+const sequencedRows = computed<SequencedRow[]>(() =>
+  outline(navigation.value?.tree?.children).map(({ item, depth }) => ({ node: item, depth, lesson: item.children.length === 0 })))
 const sequencedLessonCount = computed(() => sequencedRows.value.filter(row => row.lesson).length)
 const hidden = (control: string) => navigation.value?.hidden.includes(control) ?? false
 
@@ -117,26 +110,10 @@ function request(kind: NavigationRequest, target?: string) {
 }
 
 /** The table of contents: visible activities in order, headings included. */
-const rows = computed<Row[]>(() => {
-  const out: Row[] = []
-  const walk = (activity: PackageActivity, depth: number) => {
-    if (!activity.visible) return
-    out.push({ activity, depth })
-    for (const child of activity.children ?? []) walk(child, depth + 1)
-  }
-  for (const child of pkg.value?.description.tree.children ?? []) walk(child, 0)
-  return out
-})
+const rows = computed<Row[]>(() =>
+  outline(pkg.value?.description.tree.children).map(({ item, depth }) => ({ activity: item, depth })))
 
-const lessons = computed<PackageActivity[]>(() => {
-  const out: PackageActivity[] = []
-  const walk = (activity: PackageActivity) => {
-    if (activity.launch) out.push(activity)
-    for (const child of activity.children ?? []) walk(child)
-  }
-  if (pkg.value) walk(pkg.value.description.tree)
-  return out
-})
+const lessons = computed<PackageActivity[]>(() => launchables(pkg.value?.description.tree))
 
 const currentIndex = computed(() => lessons.value.findIndex(lesson => lesson.id === currentId.value))
 const resultFor = (id: string) => results.value.find(result => result.activity_id === id)

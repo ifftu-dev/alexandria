@@ -33,6 +33,7 @@ import type {
   PackageStandard,
 } from '@/types'
 import type { TauriCommand } from '@/generated/tauri-commands'
+import { launchables } from './packageTree'
 import { sequencingSettings } from './scorm2004Sequencing'
 
 /** The host bridge the session calls: `useLocalApi().invoke`, or a preview adapter over it. */
@@ -65,13 +66,17 @@ export interface PackageSessionEvents {
   sessionEnded?: (reason: string) => void
 }
 
+const COMPLETIONS = ['completed', 'incomplete', 'not attempted', 'unknown'] as const
+/** A SCORM 2004 activity's completion status, as the engine tracks it. */
+export type ActivityCompletion = typeof COMPLETIONS[number]
+
 /** One activity of the SCORM 2004 engine's tree, as plain data. */
 export interface SequencingNode {
   id: string
   title: string
   visible: boolean
-  /** The engine's completion status for the activity. */
-  completion: string
+  /** The engine's completion status for the activity (`unknown` for anything else it reports). */
+  completion: ActivityCompletion
   /** A choice request for it is valid now. */
   choosable: boolean
   children: SequencingNode[]
@@ -118,7 +123,7 @@ function sequencingNode(value: unknown): SequencingNode | null {
     id: value.id,
     title: typeof value.title === 'string' ? value.title : '',
     visible: value.visible !== false,
-    completion: typeof value.completion === 'string' ? value.completion : 'unknown',
+    completion: COMPLETIONS.find(known => known === value.completion) ?? 'unknown',
     choosable: value.choosable === true,
     children: children.map(sequencingNode).filter((node): node is SequencingNode => node !== null),
   }
@@ -506,13 +511,7 @@ export function createPackageSession(options: PackageSessionOptions) {
    * says what it delivered.
    */
   async function startSequencing(tree: PackageActivity): Promise<void> {
-    const lessons = new Map<string, PackageActivity>()
-    const walk = (activity: PackageActivity) => {
-      if (activity.launch) lessons.set(activity.id, activity)
-      for (const child of activity.children ?? []) walk(child)
-    }
-    walk(tree)
-    delivering = lessons
+    delivering = new Map(launchables(tree).map(activity => [activity.id, activity]))
     const snapshot = await invoke<string | null>('package_attempt_sequencing', { attemptId })
     post({
       type: 'sequence',

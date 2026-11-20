@@ -8,16 +8,13 @@
 import { onMounted, type DeepReadonly } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRecordSendLog } from '@/composables/useRecordSendLog'
+import { formatDateTime } from '@/utils/formatDateTime'
 import type { RecordAccessEntry } from '@/types'
 
 const { t, locale } = useI18n()
 const { entries, error, refresh } = useRecordSendLog()
 
-function when(iso: string): string {
-  const parsed = new Date(iso)
-  if (Number.isNaN(parsed.getTime())) return iso
-  return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(parsed)
-}
+const when = (iso: string) => formatDateTime(iso, locale.value)
 
 function line(e: DeepReadonly<RecordAccessEntry>): string {
   const values = { count: e.record_count, recipient: e.recipient_name, identifier: e.identifier, detail: e.detail ?? '' }
