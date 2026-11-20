@@ -311,6 +311,7 @@ if (screen === 'motion') {
     endpoint: backend.endpoint,
     statements: backend.statements,
     called: backend.called,
+    notEndedByPlayer: backend.notEndedByPlayer,
     navigate: (path: string) => router.push(path),
   } })
 } else if (screen === 'skill-atlas') {

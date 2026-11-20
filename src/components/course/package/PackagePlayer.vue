@@ -71,6 +71,9 @@ const blocked = ref<Blocked[]>([])
 const focus = ref(false)
 const confirmingFresh = ref(false)
 const busy = ref(false)
+/** A lesson is opening: the lesson controls wait for it. */
+const opening = ref(false)
+let openings = 0
 /** cmi5: the running unit's own window, while it is open (desktop). */
 const unitWindow = ref<Cmi5Launch | null>(null)
 /** cmi5: the running unit returned to its return page. */
@@ -262,14 +265,20 @@ async function openLesson(activity: PackageActivity) {
   if (!session || !activity.launch) return
   currentId.value = activity.id
   unitExited.value = false
+  const request = ++openings
+  opening.value = true
   try {
     const opened = await session.openLesson(activity)
+    // A later pick overtook this one; it sets up the player itself.
+    if (!opened) return
     focusForced.value = 'focus_forced' in opened && opened.focus_forced
     if (focusForced.value) focus.value = true
     void refreshResults()
   } catch (error) {
     loadError.value = String(error)
     phase.value = 'error'
+  } finally {
+    if (request === openings) opening.value = false
   }
 }
 
@@ -475,7 +484,7 @@ onBeforeUnmount(() => {
             :data-activity="row.activity.id"
             :data-complete="resultFor(row.activity.id)?.complete ? 'true' : 'false'"
             :aria-current="row.activity.id === currentId ? 'true' : undefined"
-            :disabled="phase !== 'ready' || busy"
+            :disabled="phase !== 'ready' || busy || opening"
             class="pressable selection-indicator flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm hover:bg-muted/50 aria-[current=true]:bg-primary/10 aria-[current=true]:font-medium"
             :style="{ paddingInlineStart: `${0.5 + row.depth * 0.75}rem` }"
             @click="openLesson(row.activity)"
@@ -553,10 +562,10 @@ onBeforeUnmount(() => {
             </AppButton>
           </template>
           <template v-else-if="lessons.length > 1">
-            <AppButton size="xs" variant="ghost" :disabled="phase !== 'ready' || currentIndex <= 0" @click="step(-1)">
+            <AppButton size="xs" variant="ghost" :disabled="phase !== 'ready' || opening || currentIndex <= 0" @click="step(-1)">
               {{ t('learn.package.previousLesson') }}
             </AppButton>
-            <AppButton size="xs" variant="ghost" :disabled="phase !== 'ready' || currentIndex < 0 || currentIndex >= lessons.length - 1" @click="step(1)">
+            <AppButton size="xs" variant="ghost" :disabled="phase !== 'ready' || opening || currentIndex < 0 || currentIndex >= lessons.length - 1" @click="step(1)">
               {{ t('learn.package.nextLesson') }}
             </AppButton>
           </template>

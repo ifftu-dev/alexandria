@@ -181,6 +181,8 @@ export function createPackageSession(options: PackageSessionOptions) {
   let closed = false
   /** cmi5: the running unit's session. */
   let unitSession: Cmi5Launch | null = null
+  /** cmi5: the unit opening in progress, if any; openings run one at a time. */
+  let unitOpening: Promise<void> = Promise.resolve()
   /** Counts lesson requests; only the latest one launches. */
   let requests = 0
   /** SCORM 2004: the package's lessons by activity id, once sequencing started. */
@@ -410,32 +412,55 @@ export function createPackageSession(options: PackageSessionOptions) {
     return invoke<boolean>('package_cmi5_focus', { sessionId: unitSession.session_id })
   }
 
-  /** cmi5: opens `activity`'s session and frames its launch URL (or its own window opened). */
-  async function openUnit(activity: PackageActivity): Promise<Cmi5Launch> {
-    await endLesson()
-    const unit = await invoke<Cmi5Launch>('package_cmi5_launch', {
-      attemptId,
-      activityId: activity.id,
-      prefix: launch.prefix,
-    })
-    unitSession = unit
-    if (unit.own_window) {
-      events.unitWindow?.(unit)
+  /**
+   * cmi5: opens `activity`'s session and frames its launch URL (or its own
+   * window opened). Openings run one after another, so a unit's session is
+   * known before the next one ends it; only the latest request launches, and
+   * a session a newer request overtook is ended at once. `null` when this
+   * request was overtaken.
+   */
+  async function openUnit(activity: PackageActivity, request: number): Promise<Cmi5Launch | null> {
+    const previous = unitOpening
+    let finished = () => {}
+    unitOpening = new Promise<void>((resolve) => { finished = resolve })
+    try {
+      await previous
+      if (request !== requests || closed) return null
+      await endLesson()
+      if (request !== requests || closed) return null
+      const unit = await invoke<Cmi5Launch>('package_cmi5_launch', {
+        attemptId,
+        activityId: activity.id,
+        prefix: launch.prefix,
+      })
+      unitSession = unit
+      if (request !== requests || closed) {
+        await endUnit()
+        return null
+      }
+      if (unit.own_window) {
+        events.unitWindow?.(unit)
+        return unit
+      }
+      lessonId = activity.id
+      post({ type: 'launch', standard, activityId: activity.id, title: activity.title, url: unit.url })
       return unit
+    } finally {
+      finished()
     }
-    lessonId = activity.id
-    post({ type: 'launch', standard, activityId: activity.id, title: activity.title, url: unit.url })
-    return unit
   }
 
-  /** Starts `activity` in a fresh API session with its stored state. */
-  async function openLesson(activity: PackageActivity): Promise<PackageLaunchInit | Cmi5Launch> {
-    if (standard === 'cmi5') return openUnit(activity)
+  /**
+   * Starts `activity` in a fresh API session with its stored state. Only the
+   * latest request launches: `null` when the learner picked another lesson
+   * while this one was starting.
+   */
+  async function openLesson(activity: PackageActivity): Promise<PackageLaunchInit | Cmi5Launch | null> {
     const request = ++requests
+    if (standard === 'cmi5') return openUnit(activity, request)
     await endLesson()
     const init = await invoke<PackageLaunchInit>('package_attempt_initialise', { attemptId, activityId: activity.id })
-    // The learner picked another lesson while this one was starting.
-    if (request !== requests) return init
+    if (request !== requests) return null
     lessonId = activity.id
     post({
       type: 'launch',
@@ -502,6 +527,7 @@ export function createPackageSession(options: PackageSessionOptions) {
     if (closed) return null
     closed = true
     try {
+      await unitOpening
       if (delivering) await suspendForClose()
       else await endLesson()
       const helper = frame.isConnected ? null : document.createElement('iframe')
