@@ -1,5 +1,5 @@
 {
-  "description": "`issuer` answer custody is required and the assertion states it.",
+  "description": "`issuer` answer custody is required and the assertion states it, with no hosted attempt entry to stand on. Anyone can sign an assertion stating `issuer` (a candidate with a second key, say): only a hosted attempt entry proves it, so the rule credits `device`.",
   "policy": {
     "min_integrity": null,
     "max_critical": null,
@@ -43,6 +43,10 @@
     "outcome": "not_supplied"
   },
   "expect": {
-    "refusal": null
+    "refusal": {
+      "code": "custody_below_required",
+      "custody": "device",
+      "required": "issuer"
+    }
   }
 }

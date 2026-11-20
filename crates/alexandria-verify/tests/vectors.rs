@@ -871,6 +871,7 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                     companion: false,
                 },
             )
+            .with_score(0.75)
         };
         // A self-issued credential: the learner signs about themselves.
         let self_issued = |custody: AnswerCustody, evidence: Vec<HostedAttemptEvidence>| {
@@ -957,6 +958,35 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 AnswerCustody::Issuer,
                 HostedAttemptEvidence {
                     graded_by: Grader::Device,
+                    ..hosted()
+                },
+            ),
+        );
+        // A candidate's second key signing about the candidate: not
+        // self-issued by the DID test, yet nobody but the candidate stands
+        // behind it.
+        let second_key = key("vector-second-key");
+        let second = derive_did_key(&second_key);
+        let mut unproven = skeleton(second.clone(), learner.clone(), None);
+        unproven.integrity = Some(stating(&core_probed, AnswerCustody::Issuer));
+        unproven.related_resource = vec![coverage::related_resource(&core_probed, None)];
+        push(
+            "30-issuer-custody-unproven",
+            "A credential signed by a key other than its subject's (a candidate's second \
+             key, say) whose integrity assertion states answerCustody `issuer` with no \
+             HostedAttemptEvidence entry. Only a hosted attempt entry shows the issuer \
+             held the answers: rejected with custodyDefects [issuer_custody_unproven].",
+            signed(unproven, &second_key, &second),
+        );
+        push(
+            "31-hosted-attempt-score-out-of-range",
+            "An issuer-signed credential whose HostedAttemptEvidence entry states a score \
+             above 1. The issuer's score is a fraction in [0,1]: rejected with \
+             custodyDefects [hosted_attempt_invalid].",
+            org_issued(
+                AnswerCustody::Issuer,
+                HostedAttemptEvidence {
+                    score: Some(1.5),
                     ..hosted()
                 },
             ),
@@ -1209,6 +1239,16 @@ fn custody_vectors_assert_the_custody_rules() {
             Reject,
             vec![D::HostedAttemptInvalid],
         ),
+        (
+            "31-hosted-attempt-score-out-of-range",
+            Reject,
+            vec![D::HostedAttemptInvalid],
+        ),
+        (
+            "30-issuer-custody-unproven",
+            Reject,
+            vec![D::IssuerCustodyUnproven],
+        ),
     ] {
         let v = get(name);
         assert!(v.expect.valid_signature, "{name}: the signature verifies");
@@ -1233,6 +1273,8 @@ fn custody_vectors_assert_the_custody_rules() {
     assert_eq!(wire["attemptId"], "hatt_vector");
     assert_eq!(wire["answerCustody"], "issuer");
     assert_eq!(wire["gradedBy"], "issuer");
+    assert_eq!(wire["score"], 0.75);
+    assert_eq!(entry.score, Some(0.75));
     assert_eq!(wire["probe"]["outcome"], "satisfied");
     assert_eq!(wire["attestation"]["outcome"], "verified_credential_bound");
     assert_eq!(wire["verifiedAssuranceLevel"], "device_attested");
