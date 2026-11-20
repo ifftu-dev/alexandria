@@ -46,6 +46,133 @@ pub struct AccessRequest {
     pub network_id: String,
     pub created_at: i64,
     pub expires_at: i64,
+    /// Learning records asked for, beside or instead of skills. Omitted from
+    /// the JSON when absent, so a request without it keeps its bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub records: Option<RecordScope>,
+}
+
+/// The kinds of learning record a share can cover.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "lowercase")]
+pub enum RecordKind {
+    /// Launch, progress, completion, pass, fail and score.
+    Completion,
+    /// The individual responses a package reported. Only ever beside
+    /// `completion`, and only when the learner chose it.
+    Interaction,
+}
+
+/// The xAPI account (`homePage`, `name`) statements under a share name the
+/// learner by.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecordAccount {
+    pub home_page: String,
+    pub name: String,
+}
+
+/// A record share: which courses' learning records, of which kinds.
+///
+/// In a request, `account` is the identifier the organisation proposes (its
+/// own systems' id for the learner), or absent. In a grant it is required
+/// and is the account the records will carry: the proposed one if the
+/// learner approved it, otherwise the one the learner's app derived for this
+/// organisation (or the learner's own DID, if they chose that).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RecordScope {
+    pub course_ids: Vec<String>,
+    pub kinds: Vec<RecordKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<RecordAccount>,
+}
+
+/// The most courses one record scope may name.
+pub const MAX_COURSES: usize = 64;
+
+/// The longest account name (the longest any tested xAPI store keeps).
+pub const MAX_ACCOUNT_NAME_LEN: usize = 50;
+
+/// The longest account home page (the xAPI IRI cap Alexandria uses).
+pub const MAX_ACCOUNT_HOME_PAGE_LEN: usize = 2083;
+
+impl RecordScope {
+    /// Shape only: 1 to [`MAX_COURSES`] distinct, non-empty course ids;
+    /// distinct kinds including `completion`; a well-formed account if any.
+    pub fn validate(&self) -> Result<(), AccessError> {
+        let bad = |what: &str| Err(AccessError::Malformed(format!("record scope: {what}")));
+        if self.course_ids.is_empty() {
+            return bad("names no course");
+        }
+        if self.course_ids.len() > MAX_COURSES {
+            return bad("too many courses");
+        }
+        if self
+            .course_ids
+            .iter()
+            .any(|id| id.trim().is_empty() || id.len() > 128)
+        {
+            return bad("course id");
+        }
+        let mut seen = std::collections::HashSet::new();
+        if !self.course_ids.iter().all(|id| seen.insert(id)) {
+            return bad("duplicate course");
+        }
+        let mut kinds = std::collections::HashSet::new();
+        if !self.kinds.iter().all(|k| kinds.insert(k)) {
+            return bad("duplicate kind");
+        }
+        if !kinds.contains(&RecordKind::Completion) {
+            return bad("completion records are always part of a share");
+        }
+        if let Some(account) = &self.account {
+            if account.home_page.trim().is_empty()
+                || account.home_page.len() > MAX_ACCOUNT_HOME_PAGE_LEN
+                || account.home_page.chars().any(char::is_control)
+            {
+                return bad("account home page");
+            }
+            if account.name.trim().is_empty()
+                || account.name.chars().count() > MAX_ACCOUNT_NAME_LEN
+                || account.name.chars().any(char::is_control)
+            {
+                return bad("account name");
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether every course and kind here is also in `wider`.
+    pub fn within(&self, wider: &RecordScope) -> bool {
+        self.course_ids.iter().all(|c| wider.course_ids.contains(c))
+            && self.kinds.iter().all(|k| wider.kinds.contains(k))
+    }
+
+    pub fn includes(&self, kind: RecordKind) -> bool {
+        self.kinds.contains(&kind)
+    }
+}
+
+/// Check a request's shape: it asks for 1 to [`MAX_SKILLS`] distinct skills,
+/// a well-formed record scope, or both.
+pub fn validate_request(request: &AccessRequest) -> Result<(), AccessError> {
+    if request.skill_ids.is_empty() && request.records.is_none() {
+        return Err(AccessError::Malformed(
+            "asks for no skills and no records".into(),
+        ));
+    }
+    if request.skill_ids.len() > MAX_SKILLS {
+        return Err(AccessError::Malformed("too many skills".into()));
+    }
+    let mut seen = std::collections::HashSet::new();
+    if !request.skill_ids.iter().all(|id| seen.insert(id)) {
+        return Err(AccessError::Malformed("duplicate skill".into()));
+    }
+    match &request.records {
+        Some(scope) => scope.validate(),
+        None => Ok(()),
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -75,6 +202,11 @@ pub struct GrantStatement {
     pub sync: bool,
     /// Unix seconds.
     pub created: i64,
+    /// The learning records the organisation may receive. A subset of what
+    /// it asked for; omitted from the JSON when absent. A revoke carries
+    /// none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub records: Option<RecordScope>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -154,8 +286,18 @@ pub fn verify(signed: &SignedGrantStatement, now: i64) -> Result<(), AccessError
     if s.grant_id.trim().is_empty() || s.grant_id.len() > 128 {
         return Err(AccessError::Malformed("grant id".into()));
     }
-    if s.action != GrantAction::Revoke && s.skill_ids.is_empty() {
-        return Err(AccessError::Malformed("grants no skills".into()));
+    if s.action != GrantAction::Revoke && s.skill_ids.is_empty() && s.records.is_none() {
+        return Err(AccessError::Malformed(
+            "grants no skills and no records".into(),
+        ));
+    }
+    if let Some(scope) = &s.records {
+        scope.validate()?;
+        if scope.account.is_none() {
+            return Err(AccessError::Malformed(
+                "record scope: a grant names the account its records carry".into(),
+            ));
+        }
     }
     if s.skill_ids.len() > MAX_SKILLS {
         return Err(AccessError::Malformed("too many skills".into()));
@@ -211,6 +353,19 @@ pub fn check_answers(
             "grants a skill that was not asked for",
         ));
     }
+    // The learner may share fewer courses and kinds than were asked for,
+    // never more. The account is the learner's choice: the one proposed, or
+    // their own; nothing here can tell a derived one from any other.
+    match (&statement.records, &request.records) {
+        (None, _) => {}
+        (Some(_), None) => return Err(AccessError::Mismatch("records were not asked for")),
+        (Some(granted), Some(asked)) if !granted.within(asked) => {
+            return Err(AccessError::Mismatch(
+                "shares records that were not asked for",
+            ))
+        }
+        _ => {}
+    }
     if now >= request.expires_at {
         return Err(AccessError::Expired);
     }
@@ -240,6 +395,24 @@ pub fn check_follows(current: &GrantStatement, next: &GrantStatement) -> Result<
             .all(|id| current.skill_ids.contains(id))
     {
         return Err(AccessError::Mismatch("an update cannot widen a grant"));
+    }
+    if next.action == GrantAction::Update {
+        match (&next.records, &current.records) {
+            (None, _) => {}
+            (Some(_), None) => return Err(AccessError::Mismatch("an update cannot widen a grant")),
+            (Some(narrowed), Some(held)) => {
+                if !narrowed.within(held) {
+                    return Err(AccessError::Mismatch("an update cannot widen a grant"));
+                }
+                // Records already sent carry the account; a new one would
+                // split the learner in two at the organisation.
+                if narrowed.account != held.account {
+                    return Err(AccessError::Mismatch(
+                        "an update cannot change the account records carry",
+                    ));
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -301,6 +474,7 @@ mod tests {
             network_id: "preprod".into(),
             created_at: NOW - 60,
             expires_at: NOW + 86_400,
+            records: None,
         }
     }
 
@@ -317,7 +491,272 @@ mod tests {
             skill_ids: skills.iter().map(|s| s.to_string()).collect(),
             sync: true,
             created: NOW,
+            records: None,
         }
+    }
+
+    const COURSE_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const COURSE_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const COURSE_C: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+
+    fn hr_account() -> RecordAccount {
+        RecordAccount {
+            home_page: "https://hr.example.org".into(),
+            name: "E-1042".into(),
+        }
+    }
+
+    fn pairwise_account() -> RecordAccount {
+        RecordAccount {
+            home_page: "urn:uuid:044eac38-2871-47c7-a8d8-5c25a8a9479c".into(),
+            name: "z6MkpairwiseIdentifierMadeOnlyForThisOrganisatio".into(),
+        }
+    }
+
+    fn records(
+        courses: &[&str],
+        kinds: &[RecordKind],
+        account: Option<RecordAccount>,
+    ) -> RecordScope {
+        RecordScope {
+            course_ids: courses.iter().map(|c| c.to_string()).collect(),
+            kinds: kinds.to_vec(),
+            account,
+        }
+    }
+
+    /// An organisation asks for completion and per-answer records from two
+    /// courses, proposing its HR identifier, and no skills.
+    fn records_request() -> AccessRequest {
+        AccessRequest {
+            skill_ids: Vec::new(),
+            records: Some(records(
+                &[COURSE_A, COURSE_B],
+                &[RecordKind::Completion, RecordKind::Interaction],
+                Some(hr_account()),
+            )),
+            ..request()
+        }
+    }
+
+    fn records_grant(scope: RecordScope) -> GrantStatement {
+        GrantStatement {
+            skill_ids: Vec::new(),
+            records: Some(scope),
+            ..grant(&[])
+        }
+    }
+
+    fn malformed(statement: &GrantStatement, now: i64) -> bool {
+        matches!(
+            verify(&sign(statement, &key()).unwrap(), now),
+            Err(AccessError::Malformed(_))
+        )
+    }
+
+    #[test]
+    fn a_record_only_share_verifies_and_may_narrow_what_was_asked() {
+        let request = records_request();
+        validate_request(&request).unwrap();
+        // One course, completion level only, under the identifier made for
+        // this organisation rather than the one it proposed.
+        let narrower = records_grant(records(
+            &[COURSE_A],
+            &[RecordKind::Completion],
+            Some(pairwise_account()),
+        ));
+        verify(&sign(&narrower, &key()).unwrap(), NOW).unwrap();
+        check_answers(&request, &narrower, NOW).unwrap();
+        // Or everything, under the identifier the organisation proposed.
+        let proposed = records_grant(records(
+            &[COURSE_A, COURSE_B],
+            &[RecordKind::Completion, RecordKind::Interaction],
+            Some(hr_account()),
+        ));
+        check_answers(&request, &proposed, NOW).unwrap();
+    }
+
+    #[test]
+    fn a_record_share_cannot_reach_past_what_was_asked() {
+        let skills_only = request();
+        let request = records_request();
+        let wider = records_grant(records(
+            &[COURSE_A, COURSE_C],
+            &[RecordKind::Completion],
+            Some(pairwise_account()),
+        ));
+        assert!(matches!(
+            check_answers(&request, &wider, NOW),
+            Err(AccessError::Mismatch(_))
+        ));
+        let completion_only = AccessRequest {
+            records: Some(records(&[COURSE_A], &[RecordKind::Completion], None)),
+            ..records_request()
+        };
+        let with_answers = records_grant(records(
+            &[COURSE_A],
+            &[RecordKind::Completion, RecordKind::Interaction],
+            Some(pairwise_account()),
+        ));
+        assert!(matches!(
+            check_answers(&completion_only, &with_answers, NOW),
+            Err(AccessError::Mismatch(_))
+        ));
+        // A request for skills alone cannot be answered with records.
+        let skills_and_records = GrantStatement {
+            skill_ids: vec!["skill_big_o".into()],
+            ..with_answers
+        };
+        assert!(matches!(
+            check_answers(&skills_only, &skills_and_records, NOW),
+            Err(AccessError::Mismatch(_))
+        ));
+    }
+
+    #[test]
+    fn a_grant_names_skills_or_records_and_a_record_scope_is_well_formed() {
+        let nothing = GrantStatement {
+            skill_ids: Vec::new(),
+            ..grant(&[])
+        };
+        assert!(malformed(&nothing, NOW));
+        for bad in [
+            records(&[], &[RecordKind::Completion], Some(pairwise_account())),
+            records(
+                &[COURSE_A, COURSE_A],
+                &[RecordKind::Completion],
+                Some(pairwise_account()),
+            ),
+            records(&[COURSE_A], &[], Some(pairwise_account())),
+            records(
+                &[COURSE_A],
+                &[RecordKind::Interaction],
+                Some(pairwise_account()),
+            ),
+            records(
+                &[COURSE_A],
+                &[RecordKind::Completion, RecordKind::Completion],
+                Some(pairwise_account()),
+            ),
+            // A grant says which account the records will carry.
+            records(&[COURSE_A], &[RecordKind::Completion], None),
+            records(
+                &[COURSE_A],
+                &[RecordKind::Completion],
+                Some(RecordAccount {
+                    home_page: String::new(),
+                    name: "x".into(),
+                }),
+            ),
+            records(
+                &[COURSE_A],
+                &[RecordKind::Completion],
+                Some(RecordAccount {
+                    home_page: "https://hr.example.org".into(),
+                    name: "n".repeat(MAX_ACCOUNT_NAME_LEN + 1),
+                }),
+            ),
+        ] {
+            assert!(malformed(&records_grant(bad.clone()), NOW), "{bad:?}");
+        }
+        // A request names what it asks for, too; its account is optional.
+        validate_request(&request()).unwrap();
+        assert!(validate_request(&AccessRequest {
+            records: None,
+            ..records_request()
+        })
+        .is_err());
+        assert!(validate_request(&AccessRequest {
+            records: Some(records(&[], &[RecordKind::Completion], None)),
+            ..records_request()
+        })
+        .is_err());
+        validate_request(&AccessRequest {
+            records: Some(records(&[COURSE_A], &[RecordKind::Completion], None)),
+            ..records_request()
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_record_share_narrows_on_update_and_keeps_its_identifier() {
+        let current = records_grant(records(
+            &[COURSE_A, COURSE_B],
+            &[RecordKind::Completion, RecordKind::Interaction],
+            Some(pairwise_account()),
+        ));
+        let narrow = GrantStatement {
+            action: GrantAction::Update,
+            created: NOW + 10,
+            records: Some(records(
+                &[COURSE_B],
+                &[RecordKind::Completion],
+                Some(pairwise_account()),
+            )),
+            ..current.clone()
+        };
+        check_follows(&current, &narrow).unwrap();
+        verify(&sign(&narrow, &key()).unwrap(), NOW + 10).unwrap();
+
+        let widen = GrantStatement {
+            records: Some(records(
+                &[COURSE_B, COURSE_C],
+                &[RecordKind::Completion],
+                Some(pairwise_account()),
+            )),
+            ..narrow.clone()
+        };
+        assert!(check_follows(&current, &widen).is_err());
+        let more_kinds = GrantStatement {
+            records: Some(records(
+                &[COURSE_B],
+                &[RecordKind::Completion, RecordKind::Interaction],
+                Some(pairwise_account()),
+            )),
+            ..narrow.clone()
+        };
+        assert!(check_follows(&narrow, &more_kinds).is_err());
+        let other_identifier = GrantStatement {
+            records: Some(records(
+                &[COURSE_B],
+                &[RecordKind::Completion],
+                Some(hr_account()),
+            )),
+            ..narrow.clone()
+        };
+        assert!(check_follows(&current, &other_identifier).is_err());
+
+        // A skills grant cannot grow a record scope later.
+        let skills = grant(&["skill_big_o"]);
+        let grown = GrantStatement {
+            action: GrantAction::Update,
+            created: NOW + 10,
+            records: Some(records(
+                &[COURSE_A],
+                &[RecordKind::Completion],
+                Some(pairwise_account()),
+            )),
+            ..skills.clone()
+        };
+        assert!(check_follows(&skills, &grown).is_err());
+
+        // A revoke carries no scope and ends the share.
+        let revoke = GrantStatement {
+            action: GrantAction::Revoke,
+            created: NOW + 20,
+            records: None,
+            ..narrow.clone()
+        };
+        check_follows(&narrow, &revoke).unwrap();
+        verify(&sign(&revoke, &key()).unwrap(), NOW + 20).unwrap();
+    }
+
+    #[test]
+    fn a_statement_without_a_record_scope_signs_the_bytes_it_always_did() {
+        // Statements made before record shares never carried the field;
+        // leaving it out keeps their canonical bytes and their signatures.
+        let bytes = signing_bytes(&grant(&["skill_big_o"])).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("records"));
     }
 
     #[test]
