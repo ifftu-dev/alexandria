@@ -39,3 +39,40 @@ test('a 1,500-skill atlas pans without a main-thread task over 50 ms', async ({ 
   console.log(`atlas pan: ${longTasks.length} long tasks, longest ${longest.toFixed(1)} ms`)
   expect(longest).toBeLessThanOrEqual(LONG_TASK_BUDGET_MS)
 })
+
+test('a 1,500-skill Web view pans and zooms without a main-thread task over 50 ms', async ({ page, browserName }, testInfo) => {
+  test.skip(browserName !== 'chromium', 'The Long Tasks API (PerformanceObserver "longtask") exists only in Chromium.')
+  await page.goto('/tests/desktop-ui/?screen=personal-atlas&view=web&scenario=scale')
+  await page.getByRole('tab', { name: 'My Graph', exact: true }).click()
+  const atlas = page.locator('.fixture-page .atlas')
+  await expect(atlas.getByRole('heading', { name: /1,?500 loaded skills/ })).toBeVisible()
+  const map = atlas.locator('.atlas-map.is-web')
+  await expect(map.locator('.web-dot')).toHaveCount(1500)
+  await map.scrollIntoViewIfNeeded()
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+  await page.evaluate(() => {
+    window.atlasLongTasks = []
+    new PerformanceObserver(list => { for (const entry of list.getEntries()) window.atlasLongTasks!.push(entry.duration) })
+      .observe({ type: 'longtask' })
+  })
+  const box = await map.boundingBox()
+  if (!box) throw new Error('The Web map has no box')
+  // A fitted camera leaves a margin, so a corner is background: dragging it pans.
+  const corner = { x: box.x + 8, y: box.y + 8 }
+  const startCamera = await map.getAttribute('data-camera')
+  for (const [dx, dy] of [[200, 120], [240, 60], [120, 200]]) {
+    await page.mouse.move(corner.x, corner.y)
+    await page.mouse.down()
+    await page.mouse.move(corner.x + dx!, corner.y + dy!, { steps: 24 })
+    await page.mouse.up()
+  }
+  await atlas.getByRole('button', { name: 'Zoom in', exact: true }).click()
+  await atlas.getByRole('button', { name: 'Zoom out', exact: true }).click()
+  await page.evaluate(() => new Promise<void>(resolve => setTimeout(resolve, 250)))
+  expect(await map.getAttribute('data-camera')).not.toBe(startCamera)
+  const longTasks = await page.evaluate(() => window.atlasLongTasks ?? [])
+  const longest = Math.max(0, ...longTasks)
+  testInfo.annotations.push({ type: 'longest Web pan task (ms)', description: longest.toFixed(1) })
+  console.log(`atlas Web pan: ${longTasks.length} long tasks, longest ${longest.toFixed(1)} ms`)
+  expect(longest).toBeLessThanOrEqual(LONG_TASK_BUDGET_MS)
+})

@@ -67,10 +67,12 @@ if (screen === 'motion') {
   const { atlasBackend } = await import('./atlasBackend')
   const scenario = params.get('scenario')
   const { isSkillGraphView } = await import('@/composables/useSkillGraphView')
-  const view = params.get('view')
-  // `view` seeds the first profile's remembered skill graph view.
-  const backend = atlasBackend(scenario === 'stress' || scenario === 'scale' ? scenario : null,
-    { views: isSkillGraphView(view) ? { 'profile-a': view } : {} })
+  const view = params.get('view'), expanded = params.get('expanded')
+  // `view` seeds the first profile's remembered page view, `expanded` its expanded graph's view.
+  const backend = atlasBackend(scenario === 'stress' || scenario === 'scale' ? scenario : null, {
+    views: isSkillGraphView(view) ? { 'profile-a': view } : {},
+    expandedViews: isSkillGraphView(expanded) ? { 'profile-a': expanded } : {},
+  })
   Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
   Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
     invoke: backend.invoke, transformCallback: () => 1, unregisterCallback: () => {},

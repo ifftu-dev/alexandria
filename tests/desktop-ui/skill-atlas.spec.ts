@@ -218,3 +218,66 @@ for (const width of [1280, 390]) {
     await shootWhole(page, testInfo.outputPath(`simple-stress-${width}.png`))
   })
 }
+
+/** Screenshots the screen with the top of the map in view: the Web map's height follows the viewport, so it is never stretched for a whole-page shot. */
+async function shootMap(page: Page, path: string) {
+  await page.getByRole('group', { name: 'Skill map' }).evaluate(element => element.scrollIntoView({ block: 'center' }))
+  await page.screenshot({ animations: 'disabled', path })
+}
+
+for (const theme of ['light', 'dark']) {
+  for (const width of [1280, 390]) {
+    test(`${theme} Web view at ${width}px fits the whole taxonomy, lights a neighbourhood and narrows to it`, async ({ page }, testInfo) => {
+      const errors: string[] = []
+      page.on('pageerror', error => errors.push(error.message))
+      await page.setViewportSize({ width, height: 844 })
+      await page.goto(`/tests/desktop-ui/?screen=skill-atlas&view=web&theme=${theme}`)
+      await expect(page.getByRole('group', { name: 'Graph view' }).getByRole('button')).toHaveText(['Web', 'Simple', 'Detailed'])
+      await expect(page.getByRole('button', { name: 'Web', exact: true })).toHaveAttribute('aria-pressed', 'true')
+      const map = page.getByRole('group', { name: 'Skill map' })
+      await expect(map.getByRole('button')).toHaveCount(103)
+      // Every dot sits inside the map: the whole taxonomy on one screen.
+      const bounds = (await map.boundingBox())!
+      expect(await map.locator('.web-dot').evaluateAll((dots, box) => dots.filter(dot => {
+        const rect = dot.getBoundingClientRect()
+        return rect.left < box.x - 1 || rect.right > box.x + box.width + 1 || rect.top < box.y - 1 || rect.bottom > box.y + box.height + 1
+      }).length, bounds)).toBe(0)
+      await expect(map.locator('[tabindex="0"]')).toHaveCount(1)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
+      await shootMap(page, testInfo.outputPath(`web-${theme}-${width}.png`))
+      await page.getByRole('searchbox', { name: 'Search all skills' }).fill('Big-O')
+      await page.getByRole('list', { name: 'Full-label skill list' }).getByRole('button').first().click()
+      await expect(page.getByRole('complementary', { name: 'Skill inspector' }).getByRole('heading', { name: 'Big-O Analysis' })).toBeVisible()
+      await page.getByRole('searchbox', { name: 'Search all skills' }).fill('')
+      await expect(map.locator('.web-name')).not.toHaveCount(0)
+      await shootMap(page, testInfo.outputPath(`web-selected-${theme}-${width}.png`))
+      await page.getByRole('button', { name: 'Around selection', exact: true }).click()
+      await page.locator('.web-tools select').selectOption('2')
+      const shown = await map.getByRole('button').count()
+      expect(shown).toBeGreaterThan(1)
+      expect(shown).toBeLessThan(103)
+      await expect(map.locator('.web-name')).toHaveCount(shown)
+      await shootMap(page, testInfo.outputPath(`web-narrowed-${theme}-${width}.png`))
+      await page.getByRole('button', { name: 'Whole graph', exact: true }).click()
+      await expect(map.getByRole('button')).toHaveCount(103)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
+      expect(errors).toEqual([])
+    })
+  }
+}
+
+test('Web keyboard roving lights a dot\'s neighbours and Enter selects it', async ({ page }) => {
+  await page.goto('/tests/desktop-ui/?screen=skill-atlas&view=web&theme=light')
+  const map = page.getByRole('group', { name: 'Skill map' })
+  await map.locator('[tabindex="0"]').focus()
+  await page.keyboard.press('ArrowRight')
+  const active = page.locator(':focus')
+  await expect(active).toHaveAttribute('tabindex', '0')
+  const name = (await active.getAttribute('aria-label'))!
+  await expect(map.locator('.web-skin.is-faded')).not.toHaveCount(0)
+  await page.keyboard.press('Enter')
+  const inspector = page.getByRole('complementary', { name: 'Skill inspector' })
+  await expect(inspector.getByRole('heading', { level: 2 })).toHaveText(name.split(',')[0]!)
+  await page.keyboard.press('Escape')
+  await expect(inspector).toContainText('Select a skill')
+})
