@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Unit finished</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #fff; }
+</style>
+<script>
+  // A cmi5 unit's returnURL. The unit redirects its frame here when it
+  // exits; the player hears about it and ends the unit's session. In a unit's
+  // own window the app closes the window when this page loads.
+  try {
+    window.top.postMessage({ source: 'alexandria-package', type: 'au-exited' }, '*');
+  } catch (_) {}
+</script>
+</head>
+<body></body>
+</html>

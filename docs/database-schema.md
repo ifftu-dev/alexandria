@@ -9,8 +9,8 @@ Status: live
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 47 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 149 tables, 135 indexes, 1 view, 10 triggers.
+**Schema**: 48 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 152 tables, 137 indexes, 1 view, 10 triggers.
 
 ---
 
@@ -70,6 +70,7 @@ and requires a database's history to be an exact prefix of this list:
 45. `package_attempts`
 46. `learning_records`
 47. `record_sending`
+48. `cmi5_sessions`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -1895,6 +1896,43 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `include_interactions` INTEGER NOT NULL default `0` — scope: 1 also sends interaction-level records (individual responses)
 - `created_at` TEXT NOT NULL — when the learner approved it
 
+### cmi5 sessions (3)
+
+#### `cmi5_sessions`
+
+- `id` TEXT PK — the session identifier the unit was given (UUID)
+- `attempt_id` TEXT NOT NULL → `package_attempts.id`
+- `activity_id` TEXT NOT NULL — the unit's identifier in the course structure
+- `status` TEXT NOT NULL default `'open'`
+- `launched_at` TEXT NOT NULL
+- `last_statement_at` TEXT — when the unit last sent a statement that was accepted
+- `ended_at` TEXT
+
+#### `cmi5_statements`
+
+- `seq` INTEGER PK — the order statements were stored in
+- `id` TEXT NOT NULL — the statement id (UUID)
+- `attempt_id` TEXT NOT NULL → `package_attempts.id`
+- `session_id` TEXT NOT NULL
+- `activity_id` TEXT NOT NULL — the unit, block or course the statement is about, by course structure identifier
+- `verb` TEXT — the cmi5 defined verb (launched, initialized, completed, passed, failed, terminated, abandoned, satisfied); NULL for a cmi5 allowed statement
+- `score` REAL — a passed or failed statement's score, normalised
+- `duration_seconds` REAL
+- `statement_json` TEXT NOT NULL
+- `stored_at` TEXT NOT NULL
+
+#### `xapi_documents`
+
+- `package_hash` TEXT PK
+- `kind` TEXT PK
+- `activity_id` TEXT PK default `''` — '' for an agent profile document
+- `registration` TEXT PK default `''` — state documents only; '' when none was named
+- `document_id` TEXT PK — the stateId or profileId
+- `content_type` TEXT NOT NULL
+- `body` BLOB NOT NULL
+- `etag` TEXT NOT NULL — SHA-256 of the body, quoted, for concurrency control
+- `updated_at` TEXT NOT NULL
+
 ---
 
 ## View and triggers
@@ -1950,6 +1988,8 @@ erDiagram
     classrooms ||--o{ classroom_join_requests : classroom_id
     classrooms ||--o{ classroom_members : classroom_id
     classroom_channels ||--o{ classroom_messages : channel_id
+    package_attempts ||--o{ cmi5_sessions : attempt_id
+    package_attempts ||--o{ cmi5_statements : attempt_id
     enrollments ||--o{ completion_claims : enrollment_id
     completion_claims ||--o{ completion_witness_requests : claim_id
     courses ||--o{ course_chapters : course_id

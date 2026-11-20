@@ -86,6 +86,12 @@ serde_json_canonicalizer = "0.3"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+# The cmi5 session endpoint: a per-session HTTP/1.1 listener on 127.0.0.1
+# (`packages::attempts::cmi5`). Already in the tree through reqwest.
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+percent-encoding = "2"
 
 # Cryptography (always available — needed for wallet on all platforms)
 ed25519-dalek = { version = "2", features = ["serde", "rand_core", "zeroize"] }
