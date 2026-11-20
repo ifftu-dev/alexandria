@@ -265,7 +265,7 @@ export interface PackageLaunch {
   path: string
   /** Starts with '?' or '#'; appended verbatim after the path. */
   parameters?: string
-  kind: 'sco' | 'asset'
+  kind: 'sco' | 'asset' | 'assignable_unit'
   launch_data?: string
   /** On the scale of the package's own standard. */
   mastery_score?: number
