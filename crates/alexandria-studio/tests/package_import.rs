@@ -600,30 +600,17 @@ fn scorm2004_manifest(schemaversion: &str) -> String {
 }
 
 #[test]
-fn scorm_2004_is_recognised_with_its_edition_and_refused_as_unsupported() {
-    use alexandria_studio::package::Edition;
-
-    let editions = [
-        ("CAM 1.3", Some(Edition::Second)),
-        ("2004 3rd Edition", Some(Edition::Third)),
-        ("2004 4th Edition", Some(Edition::Fourth)),
-        // An edition this code has never heard of is still SCORM 2004.
-        ("2004 9th Edition", None),
-    ];
-    for (schemaversion, edition) in editions {
-        let refused = refusal(&[
-            file("imsmanifest.xml", scorm2004_manifest(schemaversion)),
-            file("index.html", ""),
-        ]);
-        assert_eq!(refused.code, RefusalCode::UnsupportedStandard);
-        assert_eq!(refused.code.as_str(), "unsupported_standard");
-        assert_eq!(
-            refused.standard,
-            Some(Standard::Scorm2004),
-            "{schemaversion}"
-        );
-        assert_eq!(refused.edition, edition, "{schemaversion}");
-    }
+fn an_edition_of_scorm_2004_this_build_does_not_know_is_refused_as_unsupported() {
+    // The editions it does know import: `scorm2004_import.rs`.
+    let refused = refusal(&[
+        file("imsmanifest.xml", scorm2004_manifest("2004 9th Edition")),
+        file("index.html", ""),
+    ]);
+    assert_eq!(refused.code, RefusalCode::UnsupportedStandard);
+    assert_eq!(refused.code.as_str(), "unsupported_standard");
+    // An edition this code has never heard of is still SCORM 2004.
+    assert_eq!(refused.standard, Some(Standard::Scorm2004));
+    assert_eq!(refused.edition, None);
 }
 
 #[test]
