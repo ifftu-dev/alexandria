@@ -38,8 +38,10 @@ export function scaleTaxonomy() {
 }
 
 export interface AtlasBackendOptions {
-  /** Remembered skill graph view per profile; a profile left out has never chosen. */
+  /** The skills page's remembered view per profile; a profile left out has never chosen. */
   views?: Partial<Record<string, SkillGraphView>>
+  /** The expanded graph's remembered view per profile; a profile left out has never chosen. */
+  expandedViews?: Partial<Record<string, SkillGraphView>>
 }
 
 /**
@@ -102,14 +104,17 @@ export function atlasBackend(scenario: AtlasScenario | null = null, options: Atl
     { key: 'learner.targets', kind: 'json', default_value: '[]' },
     { key: 'instructor.graph_prefs', kind: 'json', default_value: '{}' },
     { key: 'ui.skill_graph_view', kind: 'string', default_value: 'simple' },
+    { key: 'ui.skill_graph_expanded_view', kind: 'string', default_value: 'web' },
   ]
   const settingsByProfile = new Map<string, SettingEntry[]>()
   function settingsOf(profile: string): SettingEntry[] {
     let entries = settingsByProfile.get(profile)
     if (!entries) {
-      const view = options.views?.[profile]
+      const seeded: Record<string, string | undefined> = {
+        'ui.skill_graph_view': options.views?.[profile], 'ui.skill_graph_expanded_view': options.expandedViews?.[profile],
+      }
       entries = settingDefaults.map(({ key, kind, default_value }) => {
-        const current_value = key === 'ui.skill_graph_view' && view ? view : default_value
+        const current_value = seeded[key] ?? default_value
         return { key, scope: 'sync', category: '', label: key, description: '', kind, default_value, current_value, is_default: current_value === default_value }
       })
       settingsByProfile.set(profile, entries)
