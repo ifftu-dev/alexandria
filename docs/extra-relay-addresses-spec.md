@@ -1,8 +1,8 @@
 # Extra relays: dialable addresses
 
-Status: active
+Status: implemented
 Updated: 2026-11-21
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 
 ## Problem Statement
@@ -56,3 +56,12 @@ resolved IPs, never `/dns4`. Manual: a dev build with the staging relay
 added gets a reservation from it (relay rehearsal items 3 and 7).
 
 ## Notes
+
+- 2026-11-21: Implemented. Verified against the relay's staging app with a
+  throwaway node test (not committed) that started the real node with the
+  staging relay as its only extra relay. A DNS host resolved to the
+  relay's IPv4 and IPv6 addresses, an IPv4-literal host to itself; the node
+  connected, got a reservation, and Identify reported the machine's real
+  public addresses. That closed the relay rehearsal's items 3 and 7. The
+  settings screen was not driven; the test applies the setting through the
+  same `apply_extra_relays` call and starts the same swarm.
