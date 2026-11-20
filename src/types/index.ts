@@ -697,6 +697,19 @@ export interface RecordAccessEntry {
 }
 
 /**
+ * A record a recipient refused at its last try
+ * (src-tauri/src/record_sending/outbox.rs), from `record_send_failures`,
+ * shown in the activity log beside the record.
+ */
+export interface SendFailure {
+  recipient_id: string
+  record_id: string
+  attempts: number
+  last_error: string
+  next_attempt_at: string | null
+}
+
+/**
  * One row of the activity log view (src-tauri/src/domain/learning_record.rs),
  * from `learning_records_list`, newest first.
  */

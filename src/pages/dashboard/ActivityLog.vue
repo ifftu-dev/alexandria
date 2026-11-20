@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AppAlert, AppButton, ConfirmDialog, EmptyState } from '@/components/ui'
 import ActivityLogRow from '@/components/activity-log/ActivityLogRow.vue'
+import ActivityLogSendFailures from '@/components/activity-log/ActivityLogSendFailures.vue'
 import ActivityLogUsage from '@/components/activity-log/ActivityLogUsage.vue'
 import { useActivityLog } from '@/composables/useActivityLog'
 import { errorMessage } from '@/utils/errorMessage'
@@ -13,7 +14,10 @@ import { errorMessage } from '@/utils/errorMessage'
  */
 const { t } = useI18n()
 const log = useActivityLog()
-const { entries, usage, loading } = log
+const { entries, usage, loading, failures } = log
+
+/** A record's refusals by recipients, from the send failures. */
+const refusalsOf = (id: string) => failures.value.filter(failure => failure.record_id === id)
 
 const selected = ref(new Set<string>())
 interface DeleteRequest { kind: 'one' | 'some' | 'all', ids: string[] }
@@ -119,7 +123,7 @@ async function loadMore() {
 
     <ActivityLogUsage v-if="usage" :usage="usage" />
 
-    <!-- Further panels about the log (send failures, for example) go here. -->
+    <ActivityLogSendFailures v-if="failures.length > 0" :failures="failures" />
 
     <div class="flex flex-wrap items-center gap-2">
       <AppButton :loading="exporting" :disabled="usage === null" @click="exportLog">
@@ -164,7 +168,18 @@ async function loadMore() {
         :selected="selected.has(entry.id)"
         @toggle="toggle(entry.id)"
         @delete="ask('one', [entry.id])"
-      />
+      >
+        <template #status>
+          <p
+            v-for="refusal in refusalsOf(entry.id)"
+            :key="refusal.recipient_id"
+            class="mt-1 break-words text-xs text-destructive"
+            data-send-failure
+          >
+            {{ t('dashboard.activityLog.sendFailures.row', { attempts: refusal.attempts, error: refusal.last_error }, refusal.attempts) }}
+          </p>
+        </template>
+      </ActivityLogRow>
     </ul>
     <div v-if="hasMore" class="flex justify-center">
       <AppButton variant="ghost" @click="loadMore">{{ t('dashboard.activityLog.actions.showMore') }}</AppButton>

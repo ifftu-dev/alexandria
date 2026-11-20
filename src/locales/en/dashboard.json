@@ -304,6 +304,11 @@
       "many": "This removes them from this device. Records waiting to be sent are not sent; records already sent stay with whoever received them.",
       "delete": "Delete"
     },
+    "sendFailures": {
+      "label": "Sending problems",
+      "summary": "{count} record was refused by a recipient at its last try. Records that fail to send stay here; check the destination or share they were going to. | {count} records were refused by a recipient at their last try. Records that fail to send stay here; check the destination or share they were going to.",
+      "row": "Refused by a recipient after {attempts} try: {error} | Refused by a recipient after {attempts} tries: {error}"
+    },
     "empty": {
       "title": "No learning records yet",
       "description": "Records appear here as you enrol in courses and work through them."
