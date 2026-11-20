@@ -5,6 +5,10 @@
 //! the screen. Item text goes from the service to the screen and nowhere
 //! else.
 //!
+//! A plugin item is shown in the bundled plugin it names; that plugin is
+//! installed from the app's own bundle before the item reaches the screen
+//! ([`with_plugin_installed`]).
+//!
 //! Errors read `hosted_attempt:<code>: <message>`
 //! ([`HostedError::into_command_error`]), except the verified-device refusal,
 //! which keeps its own `verified_device_required:` form.
@@ -74,6 +78,41 @@ fn platform() -> &'static dyn PlatformKey {
     }
 }
 
+/// Install the bundled plugin a plugin item names, from this app's own bundle,
+/// when it is not installed yet, so the screen can show the item in it. The
+/// client has already refused a plugin the app does not bundle.
+async fn with_plugin_installed(
+    state: &State<'_, AppState>,
+    attempt: AttemptState,
+) -> Result<AttemptState, String> {
+    let Some(cid) = attempt
+        .item
+        .as_ref()
+        .and_then(|i| i.plugin.as_ref())
+        .map(|p| p.cid.clone())
+    else {
+        return Ok(attempt);
+    };
+    let bundle = crate::plugins::builtins::find_bundle_by_cid(&cid)
+        .ok_or_else(|| HostedError::PluginNotBundled.into_command_error())?;
+    let plugins_dir = state.plugins_dir()?;
+    state
+        .db_executor
+        .execute(
+            DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "hosted_attempt.plugin",
+            move |db| {
+                if crate::plugins::registry::get_installed(db, &cid)?.is_none() {
+                    crate::plugins::registry::install_builtin(db, &plugins_dir, bundle)?;
+                }
+                Ok(())
+            },
+        )
+        .await?;
+    Ok(attempt)
+}
+
 /// The terms of a hosted attempt from the request `request_id`: what goes to
 /// the organisation, the device requirement, the retake rule and retention,
 /// shown before the first item; and whether an attempt can open or resume.
@@ -119,10 +158,11 @@ pub async fn hosted_attempt_open(
             crate::sentinel::attestation::AttemptDevice::current(),
         )?;
     }
-    service
+    let opened = service
         .open(&request_id, &consent, attested, platform())
         .await
-        .map_err(HostedError::into_command_error)
+        .map_err(HostedError::into_command_error)?;
+    with_plugin_installed(&state, opened).await
 }
 
 /// The item the candidate is on: after a dropped connection the attempt
@@ -134,15 +174,17 @@ pub async fn hosted_attempt_resume(
     directory_url: String,
     attempt_id: String,
 ) -> Result<AttemptState, String> {
-    service(&state, &directory_url)
+    let resumed = service(&state, &directory_url)
         .await?
         .resume(&attempt_id)
         .await
-        .map_err(HostedError::into_command_error)
+        .map_err(HostedError::into_command_error)?;
+    with_plugin_installed(&state, resumed).await
 }
 
-/// Answer the current item. `device_timings` is stored beside the service's
-/// own timings and decides nothing.
+/// Answer the current item: displayed positions for a choice item, the
+/// plugin's submission for a plugin item. `device_timings` is stored beside
+/// the service's own timings and decides nothing.
 #[tauri::command]
 pub async fn hosted_attempt_answer(
     state: State<'_, AppState>,
@@ -150,21 +192,24 @@ pub async fn hosted_attempt_answer(
     attempt_id: String,
     seq: i32,
     selected: Vec<i64>,
+    submission: Option<Value>,
     device_timings: Option<Value>,
 ) -> Result<AttemptState, String> {
-    service(&state, &directory_url)
+    let next = service(&state, &directory_url)
         .await?
         .answer(
             &attempt_id,
             &AnswerBody {
                 seq,
                 selected,
+                submission,
                 device_timings,
             },
             platform(),
         )
         .await
-        .map_err(HostedError::into_command_error)
+        .map_err(HostedError::into_command_error)?;
+    with_plugin_installed(&state, next).await
 }
 
 /// Close the attempt with the ended integrity session's assertion and, for
