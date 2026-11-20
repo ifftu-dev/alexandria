@@ -280,7 +280,128 @@ export interface PackageActivity {
   /** Absent for a heading. */
   launch?: PackageLaunch
   prerequisites?: string
+  /** SCORM 2004 `imsss:sequencing`, any sequencing collection already applied. */
+  sequencing?: PackageSequencing
+  /** SCORM 2004 `adlcp:completionThreshold`. */
+  completion_threshold?: PackageCompletionThreshold
+  /** SCORM 2004 `adlnav:hideLMSUI`: player controls hidden while this activity is delivered. */
+  hide_lms_ui?: PackageNavigationControl[]
+  /** SCORM 2004 `adlcp:data`. */
+  shared_data?: PackageSharedDataMap[]
   children?: PackageActivity[]
+}
+
+// SCORM 2004 sequencing, as `alexandria_studio::package::sequencing` describes
+// it: snake_case keys, enumerated values spelled as the manifest spells them.
+// An element present in the manifest has every attribute filled in.
+
+export type PackageNavigationControl = 'previous' | 'continue' | 'exit' | 'exitAll' | 'abandon' | 'abandonAll' | 'suspendAll'
+export type PackageConditionCombination = 'all' | 'any'
+export type PackageConditionOperator = 'noOp' | 'not'
+export type PackageRequiredFor = 'always' | 'ifAttempted' | 'ifNotSkipped' | 'ifNotSuspended'
+export type PackageTiming = 'never' | 'once' | 'onEachNewAttempt'
+
+export interface PackageSequencing {
+  /** Provenance only: the collection is already merged in. */
+  collection?: string
+  control_mode?: {
+    choice: boolean
+    choice_exit: boolean
+    flow: boolean
+    forward_only: boolean
+    use_current_attempt_objective_info: boolean
+    use_current_attempt_progress_info: boolean
+  }
+  sequencing_rules?: {
+    pre_condition_rules?: PackageSequencingRule[]
+    exit_condition_rules?: PackageSequencingRule[]
+    post_condition_rules?: PackageSequencingRule[]
+  }
+  limit_conditions?: { attempt_limit?: number, attempt_absolute_duration_limit?: string }
+  rollup_rules?: {
+    rollup_objective_satisfied: boolean
+    rollup_progress_completion: boolean
+    objective_measure_weight: number
+    rules?: PackageRollupRule[]
+  }
+  objectives?: { primary: PackageObjective, others?: PackageObjective[] }
+  adl_objectives?: { id: string, map_info: PackageAdlMapInfo[] }[]
+  randomization_controls?: {
+    randomization_timing: PackageTiming
+    select_count?: number
+    reorder_children: boolean
+    selection_timing: PackageTiming
+  }
+  delivery_controls?: { tracked: boolean, completion_set_by_content: boolean, objective_set_by_content: boolean }
+  constrained_choice_considerations?: { prevent_activation: boolean, constrain_choice: boolean }
+  rollup_considerations?: {
+    required_for_satisfied: PackageRequiredFor
+    required_for_not_satisfied: PackageRequiredFor
+    required_for_completed: PackageRequiredFor
+    required_for_incomplete: PackageRequiredFor
+    measure_satisfaction_if_active: boolean
+  }
+}
+
+export interface PackageSequencingRule {
+  condition_combination: PackageConditionCombination
+  conditions: {
+    condition: string
+    operator: PackageConditionOperator
+    referenced_objective?: string
+    measure_threshold?: number
+  }[]
+  action: string
+}
+
+export interface PackageRollupRule {
+  child_activity_set: 'all' | 'any' | 'none' | 'atLeastCount' | 'atLeastPercent'
+  minimum_count: number
+  minimum_percent: number
+  condition_combination: PackageConditionCombination
+  conditions: { condition: string, operator: PackageConditionOperator }[]
+  action: 'satisfied' | 'notSatisfied' | 'completed' | 'incomplete'
+}
+
+export interface PackageObjective {
+  id?: string
+  satisfied_by_measure: boolean
+  min_normalized_measure: number
+  map_info?: PackageMapInfo[]
+}
+
+export interface PackageMapInfo {
+  target_objective_id: string
+  read_satisfied_status: boolean
+  read_normalized_measure: boolean
+  write_satisfied_status: boolean
+  write_normalized_measure: boolean
+}
+
+export interface PackageAdlMapInfo {
+  target_objective_id: string
+  read_raw_score: boolean
+  read_min_score: boolean
+  read_max_score: boolean
+  read_completion_status: boolean
+  read_progress_measure: boolean
+  write_raw_score: boolean
+  write_min_score: boolean
+  write_max_score: boolean
+  write_completion_status: boolean
+  write_progress_measure: boolean
+}
+
+export interface PackageCompletionThreshold {
+  completed_by_measure: boolean
+  min_progress_measure: number
+  progress_weight: number
+}
+
+export interface PackageSharedDataMap {
+  target_id: string
+  read_shared_data: boolean
+  write_shared_data: boolean
 }
 
 export interface PackageDescription {
@@ -377,6 +498,17 @@ export interface PackageCommit {
   /** True for the commit the content's own finish call produced. */
   session_ended: boolean
   runtime: { cmi: Record<string, unknown> }
+}
+
+/**
+ * What the wrapper hands the host after the SCORM 2004 sequencing engine
+ * navigates: its opaque snapshot, kept per attempt, and its rollup of the
+ * root activity (the package is complete when that is `completed`).
+ */
+export interface PackageSequencingState {
+  attempt_id: string
+  snapshot: string
+  root: { completion_status: string }
 }
 
 /** What one lesson of an attempt has reported: a table-of-contents row. */
