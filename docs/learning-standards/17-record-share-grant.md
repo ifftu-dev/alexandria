@@ -41,3 +41,8 @@ Done when: the grant format carries the new scope with test vectors both reposit
   1. Sign batches with a per-share key derived from the learner's key and the share label, drop `subject_did` from the batch, and have the grant name that key. The grant statement still comes from the learner's DID, so the organisation can link the two through the grant unless the grant is reworked too; this narrows the link to the grant, it does not remove it.
   2. Accept it and amend the spec: a record share is a grant to an organisation that already knows the learner's DID, so the pairwise identifier only keeps two recipients from matching records; the "cannot link to the DID" promise holds for record destinations, not shares.
   Recommended: 2, unless the grant mechanism itself is to become pseudonymous. The share consent copy no longer promises otherwise (frontend review, ticket 16 Notes). No code changed for this item.
+
+### Review (2026-11-21): hosted service
+
+- Batch refusals now carry a reason (`record_batch::GrantRefusal`: other grant, not the subject, revoked, no records, no account, other actor) instead of a string, and the ingest endpoint maps statuses from it: a share revoked or narrowed to no records answers 409, the rest 400. Before, a grant whose update dropped its record scope answered 400, which made the app retry statement by statement. The app's outbox semantics (400 retried singly, 408/429/5xx later, other 4xx visible) are unchanged and still match.
+- `access_grants::create_request` takes a `NewRequest` struct rather than eight arguments.
