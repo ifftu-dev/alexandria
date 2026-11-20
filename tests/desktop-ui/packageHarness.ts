@@ -363,6 +363,10 @@ export async function lessonFrame(page: Page, path: string): Promise<Frame> {
  */
 export async function openLesson(page: Page, activityId: string, path = `${activityId}.html`, prefix?: string): Promise<Frame> {
   const entry = page.locator(`[data-activity="${activityId}"]`)
+  // Let the player pick the lesson it resumes at first: clicking that one
+  // before it is current would open it twice, and the first session would
+  // end under a test that is already driving it.
+  await expect.poll(() => page.locator('[data-activity][aria-current="true"], [data-package-sequencing]').count()).toBeGreaterThan(0)
   if (await entry.getAttribute('aria-current') !== 'true') await entry.click()
   await expect(entry).toHaveAttribute('aria-current', 'true')
   return runningLesson(page, path, prefix)
