@@ -3191,7 +3191,11 @@ export interface HostedAttemptState {
     requires_attested: boolean
     ready_to_close: boolean
   }
+  /** Null once every item is answered, and while a probe waits for Start. */
   item: HostedItem | null
+  /** A probe is next: its limit, shown before Start; its text and clock
+   *  arrive with `hosted_attempt_start_probe`. */
+  pending_probe?: { time_limit_ms: number } | null
 }
 
 /** A refusal code in plain words (`assessment::hosted::refusal`). */

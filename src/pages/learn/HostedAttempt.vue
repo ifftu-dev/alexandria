@@ -50,7 +50,7 @@ import type {
 } from '@/types'
 import type { DeepReadonly } from 'vue'
 
-type Phase = 'loading' | 'consent' | 'item' | 'reconnecting' | 'closing' | 'result' | 'abandoned' | 'blocked' | 'error'
+type Phase = 'loading' | 'consent' | 'probe' | 'item' | 'reconnecting' | 'closing' | 'result' | 'abandoned' | 'blocked' | 'error'
 
 const route = useRoute()
 const router = useRouter()
@@ -70,6 +70,8 @@ const attemptId = ref('')
 const progress = ref<HostedAttemptState['attempt'] | null>(null)
 /** The item on screen: in memory only, dropped as soon as it is answered. */
 const item = ref<HostedItem | null>(null)
+/** A probe's limit, shown before Start; its text and clock come after. */
+const pendingProbeMs = ref<number | null>(null)
 const selected = ref<Set<number>>(new Set())
 const remainingMs = ref(0)
 const sending = ref(false)
@@ -175,8 +177,10 @@ function show(state: HostedAttemptState) {
   stopClock()
   item.value = state.item
   selected.value = new Set()
+  pendingProbeMs.value = state.item ? null : state.pending_probe?.time_limit_ms ?? null
   if (!state.item) {
-    if (state.attempt.ready_to_close) void close()
+    if (pendingProbeMs.value !== null) phase.value = 'probe'
+    else if (state.attempt.ready_to_close) void close()
     return
   }
   phase.value = 'item'
@@ -302,10 +306,36 @@ function answerArgs(pending: PendingAnswer) {
   return {
     directoryUrl,
     attemptId: attemptId.value,
-    seq: pending.seq,
-    selected: pending.selected,
-    submission: pending.submission,
-    deviceTimings: { shown_ms: pending.shownMs },
+    answer: {
+      seq: pending.seq,
+      selected: pending.selected,
+      submission: pending.submission,
+      device_timings: { shown_ms: pending.shownMs },
+    },
+  }
+}
+
+/** The candidate read the probe's limit and pressed Start: fetch it now, so
+ *  its clock starts now on the service's side. */
+async function startProbe() {
+  if (sending.value) return
+  sending.value = true
+  error.value = ''
+  try {
+    const state = await invoke<HostedAttemptState>('hosted_attempt_start_probe', { directoryUrl, attemptId: attemptId.value })
+    if (disposed) return
+    show(state)
+  } catch (e) {
+    if (isGone(e)) {
+      await stopMonitoring()
+      phase.value = 'abandoned'
+    } else if (isDisconnected(e)) {
+      error.value = t('learn.hosted.closeRetry')
+    } else {
+      failWith(e)
+    }
+  } finally {
+    sending.value = false
   }
 }
 
@@ -503,6 +533,16 @@ async function checkAgain() {
     <div v-else-if="phase === 'blocked' && floorBlocked" class="space-y-3">
       <TrustProfileNotice :selected="floorBlocked" />
       <AppButton variant="outline" @click="router.go(0)">{{ $t('sentinel.trust.notice.tryAgain') }}</AppButton>
+    </div>
+
+    <!-- A probe states its limit before its clock starts -->
+    <div v-else-if="phase === 'probe' && pendingProbeMs !== null" class="space-y-4" data-testid="hosted-probe-start">
+      <p class="text-xs text-muted-foreground">{{ $t('learn.hosted.followUp') }}</p>
+      <p class="rounded-lg border border-border bg-card p-3 text-sm text-foreground">
+        {{ $t('learn.hosted.followUpStart', { seconds: Math.round(pendingProbeMs / 1000) }) }}
+      </p>
+      <p v-if="error" class="text-sm text-warning">{{ error }}</p>
+      <AppButton :loading="sending" data-testid="hosted-probe-go" @click="startProbe">{{ $t('learn.assessment.probeStart') }}</AppButton>
     </div>
 
     <!-- One item at a time -->

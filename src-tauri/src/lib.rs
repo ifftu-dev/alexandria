@@ -1778,6 +1778,7 @@ pub fn run() {
             commands::hosted_attempt::hosted_attempt_open,
             commands::hosted_attempt::hosted_attempt_resume,
             commands::hosted_attempt::hosted_attempt_answer,
+            commands::hosted_attempt::hosted_attempt_start_probe,
             commands::hosted_attempt::hosted_attempt_close,
             commands::hosted_attempt::hosted_attempt_result,
             commands::exchange::exchange_start_assessment,

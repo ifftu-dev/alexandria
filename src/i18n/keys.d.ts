@@ -1890,6 +1890,7 @@ export type MessageKey =
   | 'learn.hosted.decline'
   | 'learn.hosted.followUp'
   | 'learn.hosted.followUpNote'
+  | 'learn.hosted.followUpStart'
   | 'learn.hosted.held'
   | 'learn.hosted.intro'
   | 'learn.hosted.issued'

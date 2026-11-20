@@ -86,6 +86,10 @@ struct Stub {
     seen: Arc<Mutex<Vec<Seen>>>,
 }
 
+/// The probe [`Stub::with_probe`] holds back until Start.
+const PROBE_QUESTION: &str =
+    "Which header lets a client tell a cache it accepts a stale response while revalidating?";
+
 fn terms() -> Value {
     json!({
         "format": "alexandria-hosted-attempt-terms/1",
@@ -186,7 +190,18 @@ impl Stub {
     }
 
     async fn serving(refusal_code: &'static str, items: Vec<Value>) -> Self {
+        Self::serving_with(refusal_code, items, false).await
+    }
+
+    /// The first answer earns a probe, which waits for Start: the answer's
+    /// reply carries only its limit, and `POST …/probe` sends it.
+    async fn with_probe() -> Self {
+        Self::serving_with("rung_below_minimum", choice_items(), true).await
+    }
+
+    async fn serving_with(refusal_code: &'static str, items: Vec<Value>, probe: bool) -> Self {
         let items = Arc::new(items);
+        let probe_state = Arc::new(Mutex::new(if probe { 1u8 } else { 0 }));
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let seen: Arc<Mutex<Vec<Seen>>> = Arc::default();
@@ -195,6 +210,7 @@ impl Stub {
         tokio::spawn(async move {
             while let Ok((mut socket, _)) = listener.accept().await {
                 let (seen, answered, items) = (served.clone(), answered.clone(), items.clone());
+                let probe_state = probe_state.clone();
                 tokio::spawn(async move {
                     let Some(request) = read_request(&mut socket).await else {
                         return;
@@ -227,9 +243,48 @@ impl Stub {
                             (200, state(&items, *answered.lock().unwrap()))
                         }
                         ("POST", r) if r == format!("attempts/{ATTEMPT}/answers") => {
-                            let mut n = answered.lock().unwrap();
-                            *n += 1;
-                            (200, state(&items, *n))
+                            let mut probe = probe_state.lock().unwrap();
+                            match *probe {
+                                // The first answer earns the probe.
+                                1 => {
+                                    *probe = 2;
+                                    let mut waiting = state(&items, 1);
+                                    waiting["item"] = Value::Null;
+                                    waiting["pending_probe"] = json!({"time_limit_ms": 30000});
+                                    (200, waiting)
+                                }
+                                // The probe answered: on to the next drawn item.
+                                3 => {
+                                    *probe = 0;
+                                    let mut n = answered.lock().unwrap();
+                                    *n += 1;
+                                    (200, state(&items, *n))
+                                }
+                                _ => {
+                                    let mut n = answered.lock().unwrap();
+                                    *n += 1;
+                                    (200, state(&items, *n))
+                                }
+                            }
+                        }
+                        ("POST", r) if r == format!("attempts/{ATTEMPT}/probe") => {
+                            let mut probe = probe_state.lock().unwrap();
+                            let mut sent = state(&items, 1);
+                            if *probe == 2 {
+                                *probe = 3;
+                                sent["item"]["probe"] = json!(true);
+                                sent["item"]["question"] = json!(PROBE_QUESTION);
+                                sent["item"]["time_limit_ms"] = json!(30000);
+                                sent["item"]["remaining_ms"] = json!(30000);
+                            }
+                            (200, sent)
+                        }
+                        ("GET", "malformed") => {
+                            // An item whose `seq` is its text: serde would
+                            // quote it in its error.
+                            let mut sent = state(&items, 0);
+                            sent["item"]["seq"] = json!(QUESTIONS[0]);
+                            (200, sent)
                         }
                         ("POST", r) if r == format!("attempts/{ATTEMPT}/close") => (
                             200,
@@ -393,6 +448,92 @@ async fn a_hosted_attempts_item_text_stays_out_of_the_database_and_logs() {
             "the assistant's bank guard does not know: {question}"
         );
     }
+}
+
+/// A probe states its limit before its text arrives (story 15): the answer
+/// that earns it carries only the limit, and the probe is fetched with
+/// `POST …/probe` once the candidate presses Start.
+#[tokio::test]
+async fn a_waiting_probe_is_fetched_only_on_start() {
+    let stub = Stub::with_probe().await;
+    let key = test_key("candidate");
+    let did = derive_did_key(&key);
+    let service = HostedService::new(&stub.origin, key, did).unwrap();
+    let terms = service.terms(INVITE).await.unwrap();
+    let consent = Consent {
+        accepted: true,
+        terms_digest: terms.terms_digest.clone(),
+    };
+    let state = service
+        .open(INVITE, &consent, false, &NoPlatformKey)
+        .await
+        .unwrap();
+    let first = state.item.unwrap();
+    let answer = AnswerBody {
+        seq: first.seq,
+        selected: vec![0],
+        submission: None,
+        device_timings: None,
+    };
+    let waiting = service
+        .answer(ATTEMPT, &answer, &NoPlatformKey)
+        .await
+        .unwrap();
+    assert!(waiting.item.is_none());
+    assert!(!waiting.attempt.ready_to_close);
+    assert_eq!(
+        waiting.pending_probe.as_ref().map(|p| p.time_limit_ms),
+        Some(30000)
+    );
+    assert!(
+        !stub.seen().iter().any(|s| s.path.ends_with("/probe")),
+        "nothing asks for the probe before Start"
+    );
+
+    let started = service.start_probe(ATTEMPT).await.unwrap();
+    let probe = started.item.expect("the probe, sent on Start");
+    assert!(probe.probe);
+    assert_eq!(probe.question, PROBE_QUESTION);
+    assert!(started.pending_probe.is_none());
+    let asked = stub
+        .seen()
+        .into_iter()
+        .find(|s| s.path.ends_with("/probe"))
+        .unwrap();
+    assert_eq!(asked.method, "POST");
+    // The bank guard knows the probe like any other item.
+    let (db, _, _, _) = fixtures::setup();
+    assert!(crate::ai_chat::bank_guard::matches_assessment_item(
+        db.conn(),
+        &format!("Help me with this: {PROBE_QUESTION}")
+    ));
+}
+
+/// A reply the client cannot read never quotes itself into the error: it may
+/// hold item text, and command errors reach the screen and logs.
+#[tokio::test]
+async fn a_malformed_reply_is_refused_without_quoting_it() {
+    let stub = Stub::start("rung_below_minimum").await;
+    let key = test_key("candidate");
+    let did = derive_did_key(&key);
+    let service = HostedService::new(&stub.origin, key, did).unwrap();
+    let error = service
+        .send::<wire::AttemptState>(
+            reqwest::Method::GET,
+            &service.path("malformed"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), "protocol");
+    let message = error.into_command_error();
+    assert!(!message.contains("phantom"), "quoted the reply: {message}");
+    assert!(
+        !message.contains(QUESTIONS[0]),
+        "quoted the reply: {message}"
+    );
 }
 
 /// Declining the terms sends nothing: no open request, so no item.
