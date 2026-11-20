@@ -1,6 +1,81 @@
 # Changelog
 
-## 0.7.0 (unreleased)
+## 0.8.0 (unreleased)
+
+Assessment hardening: a credential says who held the answers, a desktop
+session backed by a paired phone gets its own level, and an organisation's
+policy can require issuer-held answers and a rung that its evidence shows.
+
+### Breaking changes
+
+- **The integrity assertion states answer custody.**
+  `IntegrityAssertion::answer_custody: Option<AnswerCustody>`
+  (`answerCustody`: `device` or `issuer`, omitted from JSON when absent). An
+  assertion without it reads as `device` (`IntegrityAssertion::answer_custody()`).
+  A struct literal of `IntegrityAssertion` must set it; assertions without it
+  serialize and hash as before. This is the assertion format change; the
+  assertion carries no format version field of its own, so this crate's
+  version is it.
+- **`companion_attested`.** `VerifiedAssuranceLevel` gains
+  `CompanionAttested`, ordered `local` < `companion_attested` <
+  `device_attested`, with `ALL` and `parse`.
+  `AttestationOutcome::VerifiedCredentialBound` and `VerifiedSessionBound`
+  gain `companion: bool` (omitted from JSON while false), set when a paired
+  phone produced the evidence. Companion credential-bound evidence verifies
+  as `companion_attested`, never `device_attested`. Patterns naming the
+  fields need `companion` or `..`.
+- **Companion evidence no longer carries a policy floor.** A floor's device
+  attestation signal counts only for verified evidence from the attempt's own
+  device; a paired phone's evidence, either binding, says nothing about the
+  desktop.
+- **New issuance policy requirement.** `IssuancePolicy::required_answer_custody:
+  Option<AnswerCustody>` (omitted from the stored shape while unset):
+  `issuer` is met only by `issuer`, `device` by either. A struct literal must
+  set it. `PolicyRefusal::CustodyBelowRequired` (`custody_below_required`) is
+  judged first: the order is custody, status, score, flags, assurance, floor,
+  rung, probes. A required `device_attested` is not met by
+  `companion_attested`; a required `companion_attested` is met by either.
+- **The required rung is judged on the strict ladder.** A stated rung of
+  `probed` or above counts only beside a probe step with outcome `satisfied`,
+  at least one satisfied probe and none failed or skipped (its policies are
+  not judged, so a `reseed` policy still counts); otherwise the rule credits
+  `process`. `RungBelowMinimum::rung` names the credited rung.
+- **New result field.** `VerificationResult::custody_defects:
+  Vec<CustodyDefect>` (omitted from JSON while empty); any defect rejects.
+- **Trust classification.** `TrustInvalidReason` gains
+  `IssuerCustodySelfIssued`, `HostedAttemptSelfIssued`, `HostedAttemptInvalid`
+  and `HostedAttemptCustodyMismatch`; a result whose `custody_defects` differ
+  from the credential's is `InconsistentVerificationResult`.
+  `TRUST_CALCULATION_VERSION` is 5.
+- **Coverage statements.** `CURRENT_VERSION` is `"3"` and `VERSIONS` gains
+  it. Every published version-1 and version-2 digest still resolves.
+
+### Added
+
+- **Answer custody** (`custody`, `integrity::AnswerCustody`): `custody_defects`
+  reports, in order, `issuer_custody_self_issued`, `hosted_attempt_self_issued`,
+  `hosted_attempt_invalid` and `hosted_attempt_custody_mismatch`, judged on
+  the credential alone (self-issued: the issuer DID is the subject's).
+- **Hosted attempt evidence** (`custody::HostedAttemptEvidence`,
+  `HOSTED_ATTEMPT_EVIDENCE_TYPE`): the `evidence` entry an organisation's role
+  credential from a hosted attempt carries, with `attemptId`, `answerCustody`
+  and `gradedBy` (`issuer`), the issuer's `probe` summary, and the
+  `attestation` outcome and `verifiedAssuranceLevel` it found (`new`, `find`,
+  `into_entry`, `assurance_level`, `states_a_hosted_attempt`). Valid only on
+  an issuer-signed credential stating `issuer` custody.
+  `policy::evaluate_hosted` judges a role's policy from it: its level, its
+  outcome for a floor, and its probe step for the probe policy and the rung.
+- **Coverage statement version 3**: below `live`, a line says a second device
+  or person was not ruled out; the probe lines say the follow-up questions
+  were ones the learner had not already answered, with a time limit fixed by
+  the item.
+- **Vectors**: credential vectors 24–29 (answer custody, hosted attempts, a
+  version-3 statement), attestation vector 13 (companion session-bound),
+  issuance policy vectors 27–51 (companion level, custody, the rung at every
+  step and its probe evidence, companion floors, hosted attempts). The
+  independent JavaScript verifier checks custody.
+
+## 0.7.0
 
 Credential trust: what a credential says about how it was earned becomes
 checkable where the platform allows it, organisations can put their own

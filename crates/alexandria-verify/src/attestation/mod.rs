@@ -349,7 +349,13 @@ pub enum AttestationOutcome {
         companion: bool,
     },
     /// The platform vouched for the session, not for this credential.
-    VerifiedSessionBound { platform: Platform },
+    /// `companion` is true when a paired phone produced the evidence for a
+    /// desktop session; omitted on the wire when false.
+    VerifiedSessionBound {
+        platform: Platform,
+        #[serde(default, skip_serializing_if = "is_false")]
+        companion: bool,
+    },
     /// Evidence is present but cannot be checked here: no trust inputs for
     /// its platform, or the library was built without `attestation`.
     Unverifiable { platform: Platform },
@@ -951,7 +957,10 @@ mod checks {
             BindingKind::Session if evidence.has_binding_proof() => {
                 Err(invalid(R::MalformedEvidence))
             }
-            BindingKind::Session => Ok(AttestationOutcome::VerifiedSessionBound { platform }),
+            BindingKind::Session => Ok(AttestationOutcome::VerifiedSessionBound {
+                platform,
+                companion: evidence.companion.is_some(),
+            }),
             BindingKind::Credential => {
                 let digest =
                     binding_digest(credential).map_err(|_| invalid(R::MalformedEvidence))?;
@@ -1132,7 +1141,10 @@ mod tests {
                 VerifiedAssuranceLevel::CompanionAttested,
             ),
             (
-                AttestationOutcome::VerifiedSessionBound { platform: p },
+                AttestationOutcome::VerifiedSessionBound {
+                    platform: p,
+                    companion: false,
+                },
                 VerifiedAssuranceLevel::Local,
             ),
             (

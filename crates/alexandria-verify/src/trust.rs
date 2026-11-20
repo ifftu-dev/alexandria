@@ -16,6 +16,7 @@ use crate::course::{
     evaluate_completion_endorsements, CourseCompletionBinding, CourseCompletionEndorsement,
     CourseCompletionPolicy,
 };
+use crate::custody::{custody_defects, CustodyDefect};
 use crate::did::Did;
 use crate::org::{organisation_backing, OrgDescriptor, OrganisationBacking};
 use crate::vc::verify::type_allowed;
@@ -32,7 +33,11 @@ use crate::vc::{
 /// 4: a paired phone's credential-bound evidence verifies as
 ///    `companion_attested` (the outcome says `companion`), not
 ///    `device_attested`.
-pub const TRUST_CALCULATION_VERSION: u32 = 4;
+/// 5: a credential with a custody defect (`issuer` custody on a self-issued
+///    credential, or a hosted attempt entry that is self-issued, malformed or
+///    beside another custody) is invalid, and a paired phone's session-bound
+///    outcome says `companion`.
+pub const TRUST_CALCULATION_VERSION: u32 = 5;
 
 const COURSE_DOCUMENT_EVIDENCE_PREFIX: &str = "course-document:blake3:";
 const COMPLETION_ROOT_EVIDENCE_PREFIX: &str = "completion-root:";
@@ -112,6 +117,29 @@ pub enum TrustInvalidReason {
     TypeNotAllowed,
     /// The credential's device attestation evidence is invalid.
     InvalidAttestation,
+    /// A self-issued credential states `issuer` answer custody
+    /// ([`CustodyDefect::IssuerCustodySelfIssued`]).
+    IssuerCustodySelfIssued,
+    /// A self-issued credential carries a hosted attempt entry
+    /// ([`CustodyDefect::HostedAttemptSelfIssued`]).
+    HostedAttemptSelfIssued,
+    /// The hosted attempt entry is malformed or does not say the issuer held
+    /// the answers and graded ([`CustodyDefect::HostedAttemptInvalid`]).
+    HostedAttemptInvalid,
+    /// A hosted attempt entry beside an assertion that does not state
+    /// `issuer` custody ([`CustodyDefect::HostedAttemptCustodyMismatch`]).
+    HostedAttemptCustodyMismatch,
+}
+
+impl From<CustodyDefect> for TrustInvalidReason {
+    fn from(defect: CustodyDefect) -> Self {
+        match defect {
+            CustodyDefect::IssuerCustodySelfIssued => Self::IssuerCustodySelfIssued,
+            CustodyDefect::HostedAttemptSelfIssued => Self::HostedAttemptSelfIssued,
+            CustodyDefect::HostedAttemptInvalid => Self::HostedAttemptInvalid,
+            CustodyDefect::HostedAttemptCustodyMismatch => Self::HostedAttemptCustodyMismatch,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -247,8 +275,10 @@ fn invalid_reasons(
     verification: &VerificationResult,
     policy: &VerificationPolicy,
 ) -> Vec<TrustInvalidReason> {
+    let defects = custody_defects(credential);
     if verification.credential_id != credential.id.as_deref().unwrap_or_default()
         || !attestation_consistent(credential, verification)
+        || verification.custody_defects != defects
     {
         return vec![TrustInvalidReason::InconsistentVerificationResult];
     }
@@ -308,6 +338,7 @@ fn invalid_reasons(
             .into_iter()
             .filter_map(|(failed, reason)| failed.then_some(reason)),
     );
+    reasons.extend(defects.into_iter().map(TrustInvalidReason::from));
     reasons
 }
 
@@ -820,6 +851,55 @@ mod tests {
         );
     }
 
+    /// A self-issued credential stating `issuer` answer custody is invalid
+    /// with its own reason, and a result that leaves the defect out does not
+    /// describe the credential.
+    #[test]
+    fn issuer_custody_on_a_self_issued_credential_is_invalid() {
+        let learner = key(1);
+        let subject = derive_did_key(&learner);
+        let mut vc = credential(&learner, &subject, completion_refs());
+        vc.integrity = Some(crate::vc::IntegrityAssertion {
+            session_id: "isess_custody".into(),
+            status: "completed".into(),
+            integrity_score: None,
+            critical_count: 0,
+            warning_count: 0,
+            assurance_level: "local".into(),
+            commitment_root: None,
+            anchor_ref: None,
+            generated_at: "2026-01-01T00:00:00Z".into(),
+            trust_profile: None,
+            verification_rung: None,
+            coverage_statement_digest: None,
+            signals_run: vec![],
+            signals_degraded: vec![],
+            signals_not_run: vec![],
+            camera_coverage: None,
+            probe: None,
+            answer_custody: Some(crate::integrity::AnswerCustody::Issuer),
+        });
+        let vc = sign_credential(UnsignedCredential { credential: vc }, &learner, &subject)
+            .expect("sign");
+        assert_eq!(
+            classify(&vc, None),
+            CredentialTrust::Invalid {
+                reasons: vec![TrustInvalidReason::IssuerCustodySelfIssued]
+            }
+        );
+
+        let policy = VerificationPolicy::default();
+        let mut stripped = verify_credential(&NullStore, &vc, NOW, &policy);
+        stripped.custody_defects.clear();
+        stripped.acceptance_decision = AcceptanceDecision::Accept;
+        assert_eq!(
+            classify_credential(&vc, &stripped, &policy, NETWORK, None),
+            CredentialTrust::Invalid {
+                reasons: vec![TrustInvalidReason::InconsistentVerificationResult]
+            }
+        );
+    }
+
     #[test]
     fn missing_status_evidence_is_pending_not_verified() {
         let learner = key(1);
@@ -993,6 +1073,7 @@ mod tests {
             signals_not_run: vec![],
             camera_coverage: None,
             probe: None,
+            answer_custody: None,
         });
         let started = "2025-12-31T23:00:00Z";
         let nonce = session_nonce("isess_trust", started);

@@ -6,7 +6,8 @@
 //! credential, and the expected result: no refusal, or the first unmet
 //! requirement with its stable code. A vector with an `assessed` entry is a
 //! role credential issued on an assessed credential, judged from that entry
-//! (`evaluate_assessed`). The app and the hosted service judge a
+//! (`evaluate_assessed`); one with a `hosted` entry is a role credential
+//! issued from a hosted attempt, judged from that entry (`evaluate_hosted`). The app and the hosted service judge a
 //! role's policy with this one rule, so both must reproduce every file.
 //!
 //! # Regenerating
@@ -25,9 +26,10 @@ use serde::{Deserialize, Serialize};
 
 use alexandria_verify::assessed::{AssessedCredentialEvidence, ASSESSED_CREDENTIAL_EVIDENCE_TYPE};
 use alexandria_verify::attestation::{AttestationOutcome, Platform, VerifiedAssuranceLevel};
-use alexandria_verify::integrity::{TrustProfile, VerificationRung};
+use alexandria_verify::custody::HostedAttemptEvidence;
+use alexandria_verify::integrity::{AnswerCustody, TrustProfile, VerificationRung};
 use alexandria_verify::policy::{
-    evaluate, evaluate_assessed, IssuancePolicy, PolicyRefusal, ProbePolicy,
+    evaluate, evaluate_assessed, evaluate_hosted, IssuancePolicy, PolicyRefusal, ProbePolicy,
 };
 use alexandria_verify::vc::{IntegrityAssertion, ProbeSummary};
 
@@ -46,6 +48,10 @@ struct Vector {
     /// on, from which the rule takes its assurance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     assessed: Option<AssessedCredentialEvidence>,
+    /// For a role credential from a hosted attempt: the entry naming the
+    /// attempt, from which the rule takes its assurance and probe outcome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hosted: Option<HostedAttemptEvidence>,
     expect: Expect,
 }
 
@@ -85,6 +91,7 @@ fn clean() -> IntegrityAssertion {
         signals_degraded: vec![],
         signals_not_run: vec!["device_attestation".into()],
         camera_coverage: None,
+        answer_custody: None,
         probe: Some(ProbeSummary {
             outcome: "satisfied".into(),
             policies: vec!["reseed".into()],
@@ -125,6 +132,11 @@ fn build_all() -> Vec<(&'static str, Vector)> {
     };
     let session_bound = AttestationOutcome::VerifiedSessionBound {
         platform: Platform::Ios,
+        companion: false,
+    };
+    let companion_session_bound = AttestationOutcome::VerifiedSessionBound {
+        platform: Platform::Ios,
+        companion: true,
     };
     let none = AttestationOutcome::NotSupplied;
     let vector = |description: &str,
@@ -137,6 +149,7 @@ fn build_all() -> Vec<(&'static str, Vector)> {
         integrity,
         attestation,
         assessed: None,
+        hosted: None,
         expect: Expect { refusal },
     };
     let role_on = |description: &str,
@@ -160,6 +173,7 @@ fn build_all() -> Vec<(&'static str, Vector)> {
             attestation: assessed_outcome,
             verified_assurance_level: stated,
         }),
+        hosted: None,
         expect: Expect { refusal },
     };
     let requires = |level: &str| IssuancePolicy {
@@ -180,6 +194,78 @@ fn build_all() -> Vec<(&'static str, Vector)> {
         probe_connection_id: None,
         min_trust_profile: Some(TrustProfile::Camera),
         min_verification_rung: Some(VerificationRung::Probed),
+        required_answer_custody: None,
+    };
+    let custody = |required: AnswerCustody| IssuancePolicy {
+        required_answer_custody: Some(required),
+        ..Default::default()
+    };
+    let stating = |custody: Option<AnswerCustody>| IntegrityAssertion {
+        answer_custody: custody,
+        ..clean()
+    };
+    let rung = |required: VerificationRung| IssuancePolicy {
+        min_verification_rung: Some(required),
+        ..Default::default()
+    };
+    // `clean()` carries a satisfied probe step, so any stated rung's probe
+    // evidence holds.
+    let on_rung = |stated: &str| IntegrityAssertion {
+        verification_rung: Some(stated.into()),
+        ..clean()
+    };
+    // A role from a hosted attempt: issuer custody, the `probed` rung and a
+    // verified device, judged on the service's own findings.
+    let hosted_role = IssuancePolicy {
+        required_answer_custody: Some(AnswerCustody::Issuer),
+        required_assurance_level: Some("device_attested".into()),
+        probe_policy: Some(ProbePolicy::Authored),
+        min_verification_rung: Some(VerificationRung::Probed),
+        ..Default::default()
+    };
+    let service_probe = ProbeSummary {
+        outcome: "satisfied".into(),
+        policies: vec!["authored".into()],
+        satisfied: 1,
+        failed: 0,
+        skipped: 0,
+    };
+    // The assertion the issuer writes: the device's session status and
+    // profile, issuer custody, the service's rung. Its probe summary is the
+    // device's report, which the rule does not judge.
+    let hosted_assertion = || IntegrityAssertion {
+        answer_custody: Some(AnswerCustody::Issuer),
+        probe: Some(ProbeSummary {
+            outcome: "failed".into(),
+            policies: vec!["reseed".into()],
+            satisfied: 0,
+            failed: 1,
+            skipped: 0,
+        }),
+        ..attested()
+    };
+    let from_hosted = |description: &str,
+                       found: AttestationOutcome,
+                       probe: Option<ProbeSummary>,
+                       refusal: Option<PolicyRefusal>| Vector {
+        description: description.into(),
+        policy: hosted_role.clone(),
+        integrity: hosted_assertion(),
+        // The role credential carries no attestation evidence of its own.
+        attestation: AttestationOutcome::NotSupplied,
+        assessed: None,
+        hosted: Some(HostedAttemptEvidence::new(
+            "hatt_policy_vector",
+            probe,
+            found,
+        )),
+        expect: Expect { refusal },
+    };
+    let below = |stated: &str, required: &str| {
+        Some(PolicyRefusal::RungBelowMinimum {
+            rung: stated.into(),
+            required: required.into(),
+        })
     };
 
     vec![
@@ -494,7 +580,7 @@ fn build_all() -> Vec<(&'static str, Vector)> {
             "19-first-unmet-requirement",
             vector(
                 "Several bounds unmet: the refusal is the first in the rule's order \
-                 (status, score, flags, assurance, floor, rung, probes).",
+                 (custody, status, score, flags, assurance, floor, rung, probes).",
                 every_bound,
                 IntegrityAssertion {
                     status: "suspended".into(),
@@ -680,6 +766,274 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 }),
             ),
         ),
+        (
+            "32-custody-issuer-required-device-stated",
+            vector(
+                "`issuer` answer custody is required and the assertion states `device`: \
+                 the candidate's device held the answers.",
+                custody(AnswerCustody::Issuer),
+                stating(Some(AnswerCustody::Device)),
+                none,
+                Some(PolicyRefusal::CustodyBelowRequired {
+                    custody: "device".into(),
+                    required: "issuer".into(),
+                }),
+            ),
+        ),
+        (
+            "33-custody-issuer-required-unstated",
+            vector(
+                "`issuer` answer custody is required and the assertion states none, as \
+                 assertions issued before `answerCustody` existed: it reads as `device`.",
+                custody(AnswerCustody::Issuer),
+                stating(None),
+                none,
+                Some(PolicyRefusal::CustodyBelowRequired {
+                    custody: "device".into(),
+                    required: "issuer".into(),
+                }),
+            ),
+        ),
+        (
+            "34-custody-issuer-required-issuer-stated",
+            vector(
+                "`issuer` answer custody is required and the assertion states it.",
+                custody(AnswerCustody::Issuer),
+                stating(Some(AnswerCustody::Issuer)),
+                none,
+                None,
+            ),
+        ),
+        (
+            "35-custody-device-accepted-issuer-stated",
+            vector(
+                "A role that accepts `device` custody is met by `issuer` custody too: \
+                 answers the issuer held are never less than answers on the device.",
+                custody(AnswerCustody::Device),
+                stating(Some(AnswerCustody::Issuer)),
+                none,
+                None,
+            ),
+        ),
+        (
+            "36-custody-judged-first",
+            vector(
+                "`issuer` custody and a clean session are required; the session was \
+                 flagged and its answers were on the device. Custody is judged first \
+                 (custody, status, score, flags, assurance, floor, rung, probes): no \
+                 retake on the device can meet it.",
+                IssuancePolicy {
+                    require_clean: true,
+                    ..custody(AnswerCustody::Issuer)
+                },
+                IntegrityAssertion {
+                    status: "flagged".into(),
+                    ..stating(Some(AnswerCustody::Device))
+                },
+                none,
+                Some(PolicyRefusal::CustodyBelowRequired {
+                    custody: "device".into(),
+                    required: "issuer".into(),
+                }),
+            ),
+        ),
+        (
+            "37-rung-process-unmet",
+            vector(
+                "`process` is required and the session stands on `none`.",
+                rung(VerificationRung::Process),
+                on_rung("none"),
+                none,
+                below("none", "process"),
+            ),
+        ),
+        (
+            "38-rung-process-met",
+            vector(
+                "`process` is required and the session stands on it.",
+                rung(VerificationRung::Process),
+                on_rung("process"),
+                none,
+                None,
+            ),
+        ),
+        (
+            "39-rung-probed-unmet",
+            vector(
+                "`probed` is required and the session stands on `process`: a satisfied \
+                 same-item probe does not lift it.",
+                rung(VerificationRung::Probed),
+                on_rung("process"),
+                none,
+                below("process", "probed"),
+            ),
+        ),
+        (
+            "40-rung-probed-met-under-reseed",
+            vector(
+                "`probed` is required and the session stands on it, with a satisfied \
+                 probe step whose policies are `[\"reseed\"]`. Accepted: an authored \
+                 variant served under the `reseed` policy asks a question the candidate \
+                 had not answered, and the probe summary does not say which kind ran.",
+                rung(VerificationRung::Probed),
+                on_rung("probed"),
+                none,
+                None,
+            ),
+        ),
+        (
+            "41-rung-consistent-unmet",
+            vector(
+                "`consistent` is required and the session stands on `probed`.",
+                rung(VerificationRung::Consistent),
+                on_rung("probed"),
+                none,
+                below("probed", "consistent"),
+            ),
+        ),
+        (
+            "42-rung-consistent-met",
+            vector(
+                "`consistent` is required and the session stands on it.",
+                rung(VerificationRung::Consistent),
+                on_rung("consistent"),
+                none,
+                None,
+            ),
+        ),
+        (
+            "43-rung-live-unmet",
+            vector(
+                "`live` is required and the session stands on `consistent`: no live \
+                 segment was marked done.",
+                rung(VerificationRung::Live),
+                on_rung("consistent"),
+                none,
+                below("consistent", "live"),
+            ),
+        ),
+        (
+            "44-rung-live-met",
+            vector(
+                "`live` is required and the session stands on it.",
+                rung(VerificationRung::Live),
+                on_rung("live"),
+                none,
+                None,
+            ),
+        ),
+        (
+            "45-rung-probed-stated-without-probe-step",
+            vector(
+                "`probed` is required and the assertion states `live` but carries no \
+                 probe step. The rung is a strict ladder: `probed` and everything above \
+                 it stand only on a probe step whose every probe was satisfied, so the \
+                 rule credits `process`.",
+                rung(VerificationRung::Probed),
+                IntegrityAssertion {
+                    probe: None,
+                    ..on_rung("live")
+                },
+                none,
+                below("process", "probed"),
+            ),
+        ),
+        (
+            "46-rung-probed-stated-with-skipped-probe",
+            vector(
+                "`probed` is required and the assertion states `probed` beside a probe \
+                 step that skipped a probe: not every probe was satisfied, so the rule \
+                 credits `process`.",
+                rung(VerificationRung::Probed),
+                IntegrityAssertion {
+                    probe: Some(ProbeSummary {
+                        outcome: "satisfied".into(),
+                        policies: vec!["authored".into()],
+                        satisfied: 1,
+                        failed: 0,
+                        skipped: 1,
+                    }),
+                    ..on_rung("probed")
+                },
+                none,
+                below("process", "probed"),
+            ),
+        ),
+        (
+            "47-attested-floor-companion-credential-bound",
+            vector(
+                "An attested floor and a desktop session backed by a paired phone whose \
+                 evidence verifies credential-bound. The phone's attestation says a \
+                 genuine phone was present and nothing about the desktop the attempt ran \
+                 on, so it does not carry the floor's device attestation signal.",
+                IssuancePolicy {
+                    min_trust_profile: Some(TrustProfile::Attested),
+                    ..Default::default()
+                },
+                companion(),
+                companion_bound,
+                Some(PolicyRefusal::TrustProfileBelowFloor {
+                    profile: "attested".into(),
+                    required: "attested".into(),
+                }),
+            ),
+        ),
+        (
+            "48-attested-floor-companion-session-bound",
+            vector(
+                "An attested floor and a paired phone's evidence that verifies only \
+                 session-bound (the phone link closed before issuance): it does not \
+                 carry the floor either.",
+                IssuancePolicy {
+                    min_trust_profile: Some(TrustProfile::Attested),
+                    ..Default::default()
+                },
+                companion(),
+                companion_session_bound,
+                Some(PolicyRefusal::TrustProfileBelowFloor {
+                    profile: "attested".into(),
+                    required: "attested".into(),
+                }),
+            ),
+        ),
+        (
+            "49-hosted-attempt-met",
+            from_hosted(
+                "A role credential from a hosted attempt, for a role requiring `issuer` \
+                 custody, `device_attested`, the `authored` probe policy and the `probed` \
+                 rung. The entry records verified credential-bound evidence from the \
+                 attempt's device and the service's satisfied probe. The device reported a \
+                 failed probe in the assertion: the service's probe outcome is the one \
+                 judged. Met.",
+                credential_bound,
+                Some(service_probe.clone()),
+                None,
+            ),
+        ),
+        (
+            "50-hosted-attempt-companion",
+            from_hosted(
+                "The same role, and the entry records a paired phone's credential-bound \
+                 evidence: `companion_attested` does not meet `device_attested`.",
+                companion_bound,
+                Some(service_probe.clone()),
+                Some(PolicyRefusal::AssuranceBelowRequired {
+                    level: "companion_attested".into(),
+                    required: "device_attested".into(),
+                }),
+            ),
+        ),
+        (
+            "51-hosted-attempt-no-probe-step",
+            from_hosted(
+                "The same role, and the service ran no probe step: the assertion states \
+                 `probed`, but without the service's probe step the rule credits \
+                 `process`.",
+                credential_bound,
+                None,
+                below("process", "probed"),
+            ),
+        ),
     ]
 }
 
@@ -719,9 +1073,10 @@ fn policy_vectors_match_this_implementation() {
         return;
     }
     for (path, v) in load() {
-        let judged = match &v.assessed {
-            Some(assessed) => evaluate_assessed(&v.policy, &v.integrity, assessed),
-            None => evaluate(&v.policy, &v.integrity, &v.attestation),
+        let judged = match (&v.assessed, &v.hosted) {
+            (Some(assessed), _) => evaluate_assessed(&v.policy, &v.integrity, assessed),
+            (None, Some(hosted)) => evaluate_hosted(&v.policy, &v.integrity, hosted),
+            (None, None) => evaluate(&v.policy, &v.integrity, &v.attestation),
         };
         let got = Expect {
             refusal: judged.err(),
@@ -779,6 +1134,7 @@ fn the_suite_covers_every_refusal_code() {
         "rung_below_minimum",
         "probe_policy_not_run",
         "probe_failed",
+        "custody_below_required",
     ] {
         assert!(codes.iter().any(|c| c == code), "no vector for {code}");
     }
@@ -791,6 +1147,7 @@ fn the_suite_covers_every_refusal_code() {
 fn stored_role_policies_deserialize_unchanged() {
     for stored in [
         r#"{"min_trust_profile":"attested"}"#,
+        r#"{"min_verification_rung":"probed","required_answer_custody":"issuer"}"#,
         r#"{"min_integrity":0.7,"max_critical":null,"max_warning":null,"require_clean":true,"required_assurance_level":null,"probe_policy":null,"min_trust_profile":null,"min_verification_rung":null}"#,
         r#"{"min_integrity":null,"max_critical":0,"max_warning":2,"require_clean":false,"required_assurance_level":"device_attested","probe_policy":"llm","probe_connection_id":"conn","min_trust_profile":"camera","min_verification_rung":"probed"}"#,
     ] {
@@ -815,6 +1172,7 @@ fn stored_role_policies_deserialize_unchanged() {
             probe_connection_id: Some("conn".into()),
             min_trust_profile: Some(TrustProfile::Camera),
             min_verification_rung: Some(VerificationRung::Probed),
+            required_answer_custody: None,
         }
     );
     // The serialized shape is the one the app has always written: every

@@ -221,6 +221,7 @@ pub(crate) fn build_integrity_assertion(
         signals_degraded: surface.signals_degraded,
         signals_not_run: surface.signals_not_run,
         camera_coverage: surface.camera_coverage,
+        answer_custody: None,
         probe: surface.probe.map(|p| ProbeSummary {
             outcome: p.outcome.as_str().to_string(),
             policies: p.policies,
@@ -689,7 +690,7 @@ mod tests {
                 VerificationRung::Process.as_str()
             )
         );
-        assert_eq!(statement.version, "2", "new credentials name version 2");
+        assert_eq!(statement.version, "3", "new credentials name version 3");
         assert!(statement.certification.is_none());
         assert!(statement
             .not_checked

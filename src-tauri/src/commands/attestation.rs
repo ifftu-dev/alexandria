@@ -710,6 +710,7 @@ mod tests {
                 signals_degraded: vec![],
                 signals_not_run: vec![],
                 camera_coverage: None,
+                answer_custody: None,
                 probe: None,
             }),
             evidence: Vec::new(),
@@ -819,7 +820,8 @@ mod tests {
             view_of(&db, "urn:uuid:session", trust()).provenance,
             Some(Provenance::SelfReported {
                 attestation: AttestationOutcome::VerifiedSessionBound {
-                    platform: Platform::Android
+                    platform: Platform::Android,
+                    companion: false,
                 }
             })
         );

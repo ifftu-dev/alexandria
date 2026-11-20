@@ -487,6 +487,21 @@ pub struct IntegrityAssertion {
     /// Outcome of the follow-up probes, when any probe step ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe: Option<ProbeSummary>,
+    /// Who held the answers: `device` or `issuer`. Absent from assertions
+    /// issued before the field existed, which read as `device`
+    /// ([`Self::answer_custody`]). A self-issued credential stating `issuer`
+    /// is invalid: nobody holds answers away from themselves
+    /// ([`crate::custody`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer_custody: Option<crate::integrity::AnswerCustody>,
+}
+
+impl IntegrityAssertion {
+    /// The answer custody the assertion states, `device` when it states
+    /// none.
+    pub fn answer_custody(&self) -> crate::integrity::AnswerCustody {
+        self.answer_custody.unwrap_or_default()
+    }
 }
 
 /// What the probe step of an integrity session concluded.
@@ -800,6 +815,13 @@ pub struct VerificationResult {
     /// Omitted while false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub coverage_statement_mismatch: bool,
+    /// What is wrong with what the credential says about who held the
+    /// answers ([`crate::custody::custody_defects`]): `issuer` custody on a
+    /// self-issued credential, or a hosted attempt entry that is self-issued,
+    /// malformed or beside another custody. Any one rejects. Omitted while
+    /// empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custody_defects: Vec<crate::custody::CustodyDefect>,
     pub verification_time: String,
     #[serde(default)]
     pub pending_reasons: Vec<VerificationPendingReason>,

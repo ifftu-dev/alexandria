@@ -488,7 +488,7 @@ pub(crate) fn trust_summary(
             format!("Device-attested and verified ({})", platform(*p))
         }
         Some(Provenance::SelfReported { attestation }) => match attestation {
-            AttestationOutcome::VerifiedSessionBound { platform: p } => format!(
+            AttestationOutcome::VerifiedSessionBound { platform: p, .. } => format!(
                 "Self-reported ({} attestation covers the session, not this credential)",
                 platform(*p)
             ),

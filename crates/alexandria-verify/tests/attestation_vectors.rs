@@ -119,6 +119,7 @@ fn integrity() -> IntegrityAssertion {
         signals_not_run: vec!["camera".into()],
         camera_coverage: None,
         probe: None,
+        answer_custody: None,
     }
 }
 
@@ -370,6 +371,7 @@ fn build_all() -> Vec<(&'static str, Vector)> {
             expect(
                 AttestationOutcome::VerifiedSessionBound {
                     platform: Platform::Ios,
+                    companion: false,
                 },
                 Local,
                 Accept,
@@ -567,6 +569,34 @@ fn build_all() -> Vec<(&'static str, Vector)> {
             &full_trust,
             credential(&learner, 0.9, vec![ios_bound(0.9), ios_bound(0.9)]),
             expect(invalid(InvalidReason::DuplicateEvidence), Local, Reject),
+        ),
+    ));
+
+    out.push((
+        "13-companion-session-bound",
+        vector(
+            "A paired phone's attestation over the companion nonce and the learner's \
+             signature over the companion statement, without an assertion over the \
+             binding digest (the phone link closed before issuance). Verified \
+             session-bound through a companion: local, and the outcome says \
+             companion, so it never carries a floor's device attestation signal.",
+            &phone_trust,
+            companion_credential(
+                &learner,
+                0.9,
+                vec![AttestationEvidence::session_bound(
+                    &companion_record(&learner_key),
+                    STARTED,
+                )],
+            ),
+            expect(
+                AttestationOutcome::VerifiedSessionBound {
+                    platform: Platform::Ios,
+                    companion: true,
+                },
+                Local,
+                Accept,
+            ),
         ),
     ));
 

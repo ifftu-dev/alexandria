@@ -30,14 +30,18 @@ use std::path::PathBuf;
 use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
 
+use alexandria_verify::attestation::{AttestationOutcome, Platform};
 use alexandria_verify::coverage::{self, CoverageStatement};
+use alexandria_verify::custody::{CustodyDefect, Grader, HostedAttemptEvidence};
 use alexandria_verify::did::{derive_did_key, Did, KeyRegistryEntry};
+use alexandria_verify::integrity::AnswerCustody;
 use alexandria_verify::org::{organisation_backing, OrgDescriptor, OrganisationBacking};
 use alexandria_verify::vc::sign::{sign_credential, UnsignedCredential};
 use alexandria_verify::vc::verify::verify_credential;
 use alexandria_verify::vc::{
     AcceptanceDecision, CredentialIssuer, CredentialStatus, CredentialSubject, CredentialType,
-    IntegrityAssertion, Proof, VerifiableCredential, VerificationPolicy, VerificationResult,
+    IntegrityAssertion, ProbeSummary, Proof, VerifiableCredential, VerificationPolicy,
+    VerificationResult,
 };
 use alexandria_verify::{StoreLookup, VerificationStore};
 
@@ -834,6 +838,131 @@ fn build_all() -> Vec<(&'static str, Vector)> {
         ));
     }
 
+    // --- answer custody and hosted attempts -------------------------------
+    {
+        let learner_key = key("vector-learner");
+        let learner = derive_did_key(&learner_key);
+        let core_probed = coverage::statement("3", "core", "probed", None).expect("v3 statement");
+        let attested_probed =
+            coverage::statement("3", "attested", "probed", None).expect("v3 statement");
+        let stating = |statement: &CoverageStatement, custody: AnswerCustody| IntegrityAssertion {
+            answer_custody: Some(custody),
+            probe: Some(ProbeSummary {
+                outcome: "satisfied".into(),
+                policies: vec!["authored".into()],
+                satisfied: 1,
+                failed: 0,
+                skipped: 0,
+            }),
+            ..integrity_naming(statement)
+        };
+        let hosted = || {
+            HostedAttemptEvidence::new(
+                "hatt_vector",
+                Some(ProbeSummary {
+                    outcome: "satisfied".into(),
+                    policies: vec!["authored".into()],
+                    satisfied: 1,
+                    failed: 0,
+                    skipped: 0,
+                }),
+                AttestationOutcome::VerifiedCredentialBound {
+                    platform: Platform::Ios,
+                    companion: false,
+                },
+            )
+        };
+        // A self-issued credential: the learner signs about themselves.
+        let self_issued = |custody: AnswerCustody, evidence: Vec<HostedAttemptEvidence>| {
+            let mut vc = skeleton(learner.clone(), learner.clone(), None);
+            vc.integrity = Some(stating(&core_probed, custody));
+            vc.related_resource = vec![coverage::related_resource(&core_probed, None)];
+            vc.evidence = evidence.into_iter().map(|e| e.into_entry()).collect();
+            signed(vc, &learner_key, &learner)
+        };
+        // An organisation's role credential from a hosted attempt.
+        let org_issued = |custody: AnswerCustody, entry: HostedAttemptEvidence| {
+            let mut vc = skeleton(issuer.clone(), subject.clone(), None);
+            vc.issuer = CredentialIssuer::organisation(issuer.clone(), ORG_NAME, ORG_DOMAIN);
+            vc.type_ = vec!["VerifiableCredential".into(), "RoleCredential".into()];
+            vc.integrity = Some(stating(&attested_probed, custody));
+            vc.related_resource = vec![coverage::related_resource(
+                &attested_probed,
+                Some("https://status.example"),
+            )];
+            vc.evidence = vec![entry.into_entry()];
+            signed(vc, &issuer_key, &issuer)
+        };
+        let mut push = |name: &'static str, description: &str, vc: VerifiableCredential| {
+            let expect = verify_credential(&VectorStore::default(), &vc, NOW, &default_policy);
+            out.push((
+                name,
+                Vector {
+                    description: description.into(),
+                    verification_time: NOW.into(),
+                    policy: default_policy.clone(),
+                    credential: vc,
+                    store: VectorStore::default(),
+                    expect,
+                    organisation_descriptor: None,
+                    expect_organisation_backing: None,
+                },
+            ));
+        };
+        push(
+            "24-device-custody-self-issued",
+            "A self-issued credential whose integrity assertion states answerCustody \
+             `device`, naming a version-3 coverage statement: the learner's device held the \
+             answers, which is all a self-issued credential can say. Accepted.",
+            self_issued(AnswerCustody::Device, vec![]),
+        );
+        push(
+            "25-issuer-custody-self-issued",
+            "A self-issued credential (issuer is the subject) whose integrity assertion \
+             states answerCustody `issuer`. Nobody holds answers away from themselves: \
+             rejected with custodyDefects [issuer_custody_self_issued].",
+            self_issued(AnswerCustody::Issuer, vec![]),
+        );
+        push(
+            "26-hosted-attempt-issuer-signed",
+            "An organisation's role credential from a hosted attempt: issuer-signed, the \
+             assertion states answerCustody `issuer`, and one HostedAttemptEvidence entry \
+             names the attempt, says the issuer held the answers and graded, and records \
+             the probe outcome and the attestation outcome and verified assurance level \
+             the issuer found. Accepted; the entry is read back as written.",
+            org_issued(AnswerCustody::Issuer, hosted()),
+        );
+        push(
+            "27-hosted-attempt-self-issued",
+            "A self-issued credential carrying a HostedAttemptEvidence entry and stating \
+             `issuer` custody. The entry is only valid on an issuer-signed credential: \
+             rejected with custodyDefects [issuer_custody_self_issued, \
+             hosted_attempt_self_issued].",
+            self_issued(AnswerCustody::Issuer, vec![hosted()]),
+        );
+        push(
+            "28-hosted-attempt-custody-mismatch",
+            "An issuer-signed credential with a HostedAttemptEvidence entry whose \
+             integrity assertion states answerCustody `device`: the credential says two \
+             things about who held the answers. Rejected with custodyDefects \
+             [hosted_attempt_custody_mismatch].",
+            org_issued(AnswerCustody::Device, hosted()),
+        );
+        push(
+            "29-hosted-attempt-graded-by-device",
+            "An issuer-signed credential whose HostedAttemptEvidence entry says the device \
+             graded. A hosted attempt is graded by the issuer: rejected with \
+             custodyDefects [hosted_attempt_invalid].",
+            org_issued(
+                AnswerCustody::Issuer,
+                HostedAttemptEvidence {
+                    graded_by: Grader::Device,
+                    ..hosted()
+                },
+            ),
+        );
+    }
+
     out
 }
 
@@ -858,6 +987,7 @@ fn integrity_naming(statement: &CoverageStatement) -> IntegrityAssertion {
         signals_not_run: Vec::new(),
         camera_coverage: None,
         probe: None,
+        answer_custody: None,
     }
 }
 
@@ -942,6 +1072,12 @@ fn vectors_match_this_implementation() {
             got.coverage_statement_mismatch,
             v.expect.coverage_statement_mismatch,
             "{}: coverageStatementMismatch",
+            path.display()
+        );
+        assert_eq!(
+            got.custody_defects,
+            v.expect.custody_defects,
+            "{}: custodyDefects",
             path.display()
         );
         if let Some(expected) = &v.expect_organisation_backing {
@@ -1031,6 +1167,77 @@ fn the_suite_covers_distinct_failure_modes() {
         all.iter().any(|(_, v)| v.expect.suspended),
         "no vector is suspended"
     );
+    for defect in CustodyDefect::ALL {
+        assert!(
+            all.iter()
+                .any(|(_, v)| v.expect.custody_defects.contains(&defect)),
+            "no vector for custody defect {defect:?}"
+        );
+    }
+}
+
+/// The custody vectors state the spec's rules: a self-issued credential may
+/// state `device` custody only, and a hosted attempt entry is valid only on
+/// an issuer-signed credential that states `issuer` custody and says the
+/// issuer graded. Written by hand, not read from the verifier's output.
+#[test]
+fn custody_vectors_assert_the_custody_rules() {
+    use AcceptanceDecision::{Accept, Reject};
+    use CustodyDefect as D;
+    let all = build_all();
+    let get = |name: &str| &all.iter().find(|(n, _)| *n == name).expect(name).1;
+    for (name, decision, defects) in [
+        ("24-device-custody-self-issued", Accept, vec![]),
+        (
+            "25-issuer-custody-self-issued",
+            Reject,
+            vec![D::IssuerCustodySelfIssued],
+        ),
+        ("26-hosted-attempt-issuer-signed", Accept, vec![]),
+        (
+            "27-hosted-attempt-self-issued",
+            Reject,
+            vec![D::IssuerCustodySelfIssued, D::HostedAttemptSelfIssued],
+        ),
+        (
+            "28-hosted-attempt-custody-mismatch",
+            Reject,
+            vec![D::HostedAttemptCustodyMismatch],
+        ),
+        (
+            "29-hosted-attempt-graded-by-device",
+            Reject,
+            vec![D::HostedAttemptInvalid],
+        ),
+    ] {
+        let v = get(name);
+        assert!(v.expect.valid_signature, "{name}: the signature verifies");
+        assert_eq!(v.expect.acceptance_decision, decision, "{name}");
+        assert_eq!(v.expect.custody_defects, defects, "{name}");
+    }
+
+    // The accepted hosted attempt exposes its entry as the issuer wrote it.
+    let v = get("26-hosted-attempt-issuer-signed");
+    let entry = HostedAttemptEvidence::find(&v.credential)
+        .expect("one well-formed entry")
+        .expect("an entry");
+    assert_eq!(entry.attempt_id, "hatt_vector");
+    assert_eq!(entry.answer_custody, AnswerCustody::Issuer);
+    assert_eq!(entry.graded_by, Grader::Issuer);
+    assert_eq!(
+        entry.verified_assurance_level,
+        alexandria_verify::attestation::VerifiedAssuranceLevel::DeviceAttested
+    );
+    let wire = serde_json::to_value(&v.credential.evidence[0]).expect("serialize");
+    assert_eq!(wire["type"], "HostedAttemptEvidence");
+    assert_eq!(wire["attemptId"], "hatt_vector");
+    assert_eq!(wire["answerCustody"], "issuer");
+    assert_eq!(wire["gradedBy"], "issuer");
+    assert_eq!(wire["probe"]["outcome"], "satisfied");
+    assert_eq!(wire["attestation"]["outcome"], "verified_credential_bound");
+    assert_eq!(wire["verifiedAssuranceLevel"], "device_attested");
+    let custody = v.credential.integrity.as_ref().expect("assertion");
+    assert_eq!(custody.answer_custody(), AnswerCustody::Issuer);
 }
 
 /// A `did:key` resolves to the key in its identifier whatever registry state

@@ -1,0 +1,41 @@
+{
+  "description": "`probed` is required and the assertion states `live` but carries no probe step. The rung is a strict ladder: `probed` and everything above it stand only on a probe step whose every probe was satisfied, so the rule credits `process`.",
+  "policy": {
+    "min_integrity": null,
+    "max_critical": null,
+    "max_warning": null,
+    "require_clean": false,
+    "required_assurance_level": null,
+    "probe_policy": null,
+    "min_trust_profile": null,
+    "min_verification_rung": "probed"
+  },
+  "integrity": {
+    "sessionId": "isess_policy_vector",
+    "status": "completed",
+    "integrityScore": 0.91,
+    "criticalCount": 0,
+    "warningCount": 1,
+    "assuranceLevel": "local",
+    "generatedAt": "2026-06-01T00:00:00Z",
+    "trustProfile": "camera",
+    "verificationRung": "live",
+    "signalsRun": [
+      "core",
+      "camera"
+    ],
+    "signalsNotRun": [
+      "device_attestation"
+    ]
+  },
+  "attestation": {
+    "outcome": "not_supplied"
+  },
+  "expect": {
+    "refusal": {
+      "code": "rung_below_minimum",
+      "rung": "process",
+      "required": "probed"
+    }
+  }
+}

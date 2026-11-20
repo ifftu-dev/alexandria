@@ -38,7 +38,7 @@ by the signature like any other field, and nothing expands or dereferences it.
    controls. For `did:key` the fragment is the key's own multibase identifier.
 6. Apply the remaining checks: expiry, subject binding, the revocation and
    suspension status lists, supersession, the coverage statement cross-check,
-   and the supplied verification policy.
+   answer custody, and the supplied verification policy.
 7. Return `accept`, `pending`, or `reject`. Missing issuer-key or referenced
    status-list evidence is pending. A failed cryptographic/policy check or an
    invalid status reference is rejected.
@@ -120,6 +120,29 @@ in `relatedResource` as `{ id, digestSRI, mediaType }`, where `id` is
 BLAKE3. `digestSRI` is for readers who fetch the statement bytes; the
 statement texts themselves are in the crate's `coverage` registry.
 
+## Answer custody
+
+An integrity assertion may state `answerCustody`: `device` when the candidate's
+device held the items and their answers, `issuer` when the answers never left
+the issuer. An assertion without it reads as `device`. A credential is
+self-issued when its issuer DID is its subject's.
+
+An organisation's role credential from a hosted attempt carries one `evidence`
+entry of type `HostedAttemptEvidence`: `attemptId`, `answerCustody` (`issuer`),
+`gradedBy` (`issuer`), the issuer's `probe` summary (omitted when no probe step
+ran), the `attestation` outcome and the `verifiedAssuranceLevel` the issuer
+found.
+
+Set `custodyDefects` (omitted from `expect` while empty), in this order, and
+reject when any is set:
+
+| Code | When |
+|---|---|
+| `issuer_custody_self_issued` | A self-issued credential states `issuer` custody: nobody holds answers away from themselves |
+| `hosted_attempt_self_issued` | A self-issued credential carries a `HostedAttemptEvidence` entry |
+| `hosted_attempt_invalid` | More than one entry, or one that does not parse or does not say `answerCustody` and `gradedBy` `issuer` |
+| `hosted_attempt_custody_mismatch` | An entry beside an assertion that does not state `issuer` custody, or beside no assertion |
+
 ## Organisation backing
 
 A vector may supply `organisationDescriptor`, the `alexandria-org/1` record an
@@ -156,7 +179,8 @@ Backing is judged apart from the verification result, which it never changes:
 
 Compare at least `validSignature`, `issuerResolved`, `statusValid`, `expired`,
 `revoked`, `suspended`, `subjectBound`, `coverageStatementMismatch` (omitted
-from `expect` while false), `pendingReasons`, and `acceptanceDecision`. Every
+from `expect` while false), `custodyDefects` (omitted while empty),
+`pendingReasons`, and `acceptanceDecision`. Every
 `expect` here also carries `attestation` (`not_supplied`) and
 `verifiedAssuranceLevel` (`local`); the attestation set below exercises them. The
 booleans matter independently of the decision: policy changes the decision,
@@ -190,10 +214,17 @@ in what the policy does about it.
 | `21-organisation-key-not-listed` | The key was removed from the descriptor; backing `key_not_listed`, still accepted |
 | `22-organisation-wrong-domain` | A descriptor for another domain; backing `wrong_domain` |
 | `23-organisation-invalid-descriptor` | A descriptor that fails its checks; backing `invalid_descriptor` |
+| `24-device-custody-self-issued` | A self-issued credential stating `device` custody under a version-3 statement; accepted |
+| `25-issuer-custody-self-issued` | A self-issued credential stating `issuer` custody; rejected with `issuer_custody_self_issued` |
+| `26-hosted-attempt-issuer-signed` | An organisation's role credential with a `HostedAttemptEvidence` entry and `issuer` custody; accepted |
+| `27-hosted-attempt-self-issued` | A hosted attempt entry on a self-issued credential; rejected with `issuer_custody_self_issued` and `hosted_attempt_self_issued` |
+| `28-hosted-attempt-custody-mismatch` | A hosted attempt entry beside `device` custody; rejected with `hosted_attempt_custody_mismatch` |
+| `29-hosted-attempt-graded-by-device` | A hosted attempt entry that says the device graded; rejected with `hosted_attempt_invalid` |
 
 The suite contains accepted, rejected, and pending cases, including independent
 signature, expiry, subject-binding, revocation, suspension, type-policy,
-coverage-statement, organisation-backing and missing-evidence outcomes.
+coverage-statement, answer-custody, organisation-backing and missing-evidence
+outcomes.
 
 ## Attestation vectors
 
@@ -205,11 +236,13 @@ Apple's and Google's. `expect` holds `attestation` (`outcome`, plus `platform`
 or the invalid `reason`), `verifiedAssuranceLevel` and `acceptanceDecision`.
 
 The cases cover not supplied, credential-bound on iOS, Android and a companion
-phone, session-bound, unverifiable without Play Integrity keys, and invalid
+phone, session-bound from the device and from a companion phone, unverifiable without Play Integrity keys, and invalid
 evidence (untrusted chain, wrong nonce, wrong app id, evidence lifted from
 another credential, a companion binding for another learner, duplicate
-entries). Only verified credential-bound evidence reads `device_attested`;
-invalid evidence rejects; every other outcome leaves the decision to the rest
+entries). Only verified credential-bound evidence from the attempt's own device
+reads `device_attested`; a companion phone's reads `companion_attested`, and
+either binding from a companion says `companion: true`; invalid evidence
+rejects; every other outcome leaves the decision to the rest
 of verification. The binding digest, the per-platform proofs and the outcome
 rules are documented in the crate's `attestation` module and in
 `tests/attestation_vectors.rs`. The independent verifier below does not check
@@ -220,12 +253,25 @@ this set.
 `issuance-policy/` holds the shared issuance rule that an issuing app and a
 hosted service both apply. Each file is a `policy`, the `integrity` assertion,
 the `attestation` outcome a verifier established and, for a role credential,
-the `assessed` entry naming the credential it was issued on. `expect.refusal`
-is `null` or the first unmet requirement with its stable `code`, in the order
-status, score, flags, assurance, floor, rung, probes. A required assurance
-level is met only by the verified level. A degraded signal never carries a
-floor, except the camera when the assertion states a `cameraCoverage` from 0.9
-to 1 (vectors 23–26). `tests/policy_vectors.rs` documents the format.
+the `assessed` entry naming the credential it was issued on or the `hosted`
+entry naming the hosted attempt it was issued from. `expect.refusal` is `null`
+or the first unmet requirement with its stable `code`, in the order custody
+(`custody_below_required`), status, score, flags, assurance, floor, rung,
+probes. A required answer custody of `issuer` is met only by an assertion
+stating `issuer`; `device` accepts either (vectors 32–36). A required
+assurance level is met only by the verified level, and a companion phone's
+evidence verifies `companion_attested`. A floor's device attestation signal
+counts only for verified evidence from the attempt's own device, never a
+companion's (47–48). A degraded signal never carries a floor, except the
+camera when the assertion states a `cameraCoverage` from 0.9 to 1 (23–26). The
+required rung (`min_verification_rung`) is judged on the strict ladder: a
+stated `probed` or higher counts only beside a probe step with outcome
+`satisfied`, at least one satisfied probe and none failed or skipped, whatever
+its policies (an authored variant served under `reseed` earns `probed`);
+otherwise the rule credits `process`, and the refusal names the credited rung
+(37–46). A hosted entry supplies the verified level, the floor's attestation
+and the probe step judged, in place of the assertion's own (49–51).
+`tests/policy_vectors.rs` documents the format.
 
 
 ## Untrusted input limits

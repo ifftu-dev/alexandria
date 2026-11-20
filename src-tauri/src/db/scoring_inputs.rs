@@ -488,6 +488,7 @@ pub(crate) mod test_support {
             signals_degraded: vec![],
             signals_not_run: vec![],
             camera_coverage: None,
+            answer_custody: None,
             probe: None,
         };
         let subject = Claim::Skill(SkillClaim {
