@@ -113,7 +113,8 @@ pub(super) async fn handle<D: PackageDb>(
     if resource == "about" && request.method() == Method::GET {
         return json(StatusCode::OK, json!({ "version": VERSIONS }));
     }
-    if header(&request, "authorization") != Some(format!("Basic {}", live.token).as_str()) {
+    let token = header(&request, "authorization").and_then(|value| value.strip_prefix("Basic "));
+    if !same_secret(token, &live.token) {
         return error(StatusCode::UNAUTHORIZED, "the session's token is required");
     }
     if header(&request, "x-experience-api-version").is_none() {
@@ -172,7 +173,7 @@ fn fetch(live: &Live, method: &Method, code: &str) -> Response<Vec<u8>> {
     if method != Method::POST {
         return error(StatusCode::METHOD_NOT_ALLOWED, "the fetch URL takes POST");
     }
-    if code != live.fetch_code {
+    if !same_secret(Some(code), &live.fetch_code) {
         return json(
             StatusCode::OK,
             json!({ "error-code": "2", "error-text": "This is not the session's fetch URL." }),
@@ -187,6 +188,15 @@ fn fetch(live: &Live, method: &Method, code: &str) -> Response<Vec<u8>> {
     }
     *used = true;
     json(StatusCode::OK, json!({ "auth-token": live.token }))
+}
+
+/// Compares a secret the caller sent with the session's own in constant
+/// time, so the time a refusal takes says nothing about how much matched.
+fn same_secret(given: Option<&str>, expected: &str) -> bool {
+    use subtle::ConstantTimeEq;
+    given.is_some_and(|given| {
+        given.len() == expected.len() && bool::from(given.as_bytes().ct_eq(expected.as_bytes()))
+    })
 }
 
 fn is_uuid(text: &str) -> bool {
