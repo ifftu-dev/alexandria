@@ -161,8 +161,9 @@ fn the_schema_keeps_what_the_runtime_reads() {
     assert!(names(db.conn(), "view")
         .iter()
         .any(|v| v == "current_reputation_assertions"));
-    // Three integrity triggers, and three keeping chat search in step.
-    assert_eq!(names(db.conn(), "trigger").len(), 6);
+    // Three integrity triggers, three keeping chat search in step, and four
+    // refusing to grade a package element.
+    assert_eq!(names(db.conn(), "trigger").len(), 10);
 }
 
 /// Asserting that a wanted object is present cannot catch an unwanted one
@@ -202,7 +203,9 @@ fn the_view_set_is_exact() {
 /// session and item, without rowid, so no index). The lookup-only key
 /// registry drops its 2 validity-window indexes. Credential requests stored
 /// as verified add 1 table (primary key only). Standards packages add 1
-/// table (primary key only).
+/// table (primary key only). Package attempts add 3 tables (attempts,
+/// activity state, sequencing state; keys and unique constraints only, so no
+/// named index) and 4 triggers that refuse grading a package element.
 #[test]
 fn the_schema_object_counts_are_pinned() {
     let db = migrated();
@@ -210,11 +213,11 @@ fn the_schema_object_counts_are_pinned() {
         .into_iter()
         .filter(|t| t != "_migrations" && t != "_schema_identity")
         .count();
-    assert_eq!(tables, 145, "table count changed");
+    assert_eq!(tables, 148, "table count changed");
     assert_eq!(names(db.conn(), "index").len(), 132, "index count changed");
     assert_eq!(
         names(db.conn(), "trigger").len(),
-        6,
+        10,
         "trigger count changed"
     );
     assert_eq!(names(db.conn(), "view").len(), 1, "view count changed");
@@ -556,7 +559,7 @@ fn with_provisional_notifications(db: Database) -> Database {
 #[test]
 fn provisional_notifications_upgrade_preserves_data_and_backfills_call_kinds() {
     let db = provisional_notification_database();
-    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 26);
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 27);
     assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
     let saved: (
         String,
@@ -685,7 +688,8 @@ fn provisional_notifications_upgrade_preserves_data_and_backfills_call_kinds() {
             (41, "key_registry_lookup_only".into()),
             (42, "status_list_valid_from".into()),
             (43, "exchange_requests".into()),
-            (44, "packages".into())
+            (44, "packages".into()),
+            (45, "package_attempts".into())
         ]
     );
     let applied_at: String = db
@@ -733,7 +737,7 @@ fn notifications_migrate_fresh_and_current_main_without_changing_existing_calls(
         }
         assert_eq!(
             super::run_migrations_on_connection(db.conn()).unwrap(),
-            44 - prior_version
+            45 - prior_version
         );
         assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
         db.conn().execute_batch(
@@ -819,7 +823,7 @@ fn provisional_notifications_failed_upgrade_reopens_and_retries_atomically() {
     db.conn()
         .execute_batch("DROP TRIGGER fail_upgrade")
         .unwrap();
-    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 26);
+    assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 27);
     assert_eq!(super::run_migrations_on_connection(db.conn()).unwrap(), 0);
 }
 

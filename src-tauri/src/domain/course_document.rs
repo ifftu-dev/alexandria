@@ -21,6 +21,13 @@ pub const COURSE_DOCUMENT_VERSION: u32 = 2;
 /// shows its unknown-element notice. See `crate::packages`.
 pub const PACKAGE_ELEMENT_TYPE: &str = "package";
 
+/// The element types a course's completion is assessed on: each needs a
+/// passing graded submission (an `interactive` element, a completion) before
+/// a completion witness can be claimed. The one list every reader of
+/// "assessed" uses. [`PACKAGE_ELEMENT_TYPE`] is never in it: a package
+/// result is a self-report from untrusted script (ADR 0003).
+pub const ASSESSED_ELEMENT_TYPES: [&str; 3] = ["quiz", "interactive", "assessment"];
+
 /// The unsigned course document payload (everything that gets signed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CourseDocumentPayload {

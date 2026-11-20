@@ -161,6 +161,11 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // tree, and whether the archive is a draft kept outside the served store
     // or has moved into it. See `crate::packages`.
     (44, "packages", include_str!("packages.sql")),
+    // Package attempts and their run-time state, device-local, plus the
+    // triggers that keep a package element from ever being graded,
+    // skill-tagged or given grading configuration. See
+    // `crate::packages::attempts`.
+    (45, "package_attempts", include_str!("package_attempts.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

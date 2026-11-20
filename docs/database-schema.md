@@ -9,8 +9,8 @@ Status: live
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 44 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 140 tables, 132 indexes, 1 view, 6 triggers.
+**Schema**: 45 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 143 tables, 132 indexes, 1 view, 10 triggers.
 
 ---
 
@@ -67,6 +67,7 @@ and requires a database's history to be an exact prefix of this list:
 42. `status_list_valid_from`
 43. `exchange_requests`
 44. `packages`
+45. `package_attempts`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -1774,7 +1775,36 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `put_body` TEXT
 - `last_error_detail` TEXT
 
-### Standards packages (1)
+### Standards packages (4)
+
+#### `package_activity_state`
+
+- `attempt_id` TEXT PK → `package_attempts.id`
+- `activity_id` TEXT PK — activity identifier from the package's activity tree
+- `runtime_json` TEXT NOT NULL — the last commit's run-time data, as the content stored it
+- `complete` INTEGER NOT NULL default `0` — whether the activity counts as complete under its standard's rule
+- `score` REAL — reported score normalised to 0..1, self-reported
+- `total_seconds` REAL NOT NULL default `0` — sum of the reported times of finished sessions
+- `session_seconds` REAL NOT NULL default `0` — reported time of the session still open, folded into total_seconds when it ends
+- `updated_at` TEXT NOT NULL
+
+#### `package_attempts`
+
+- `id` TEXT PK
+- `enrollment_id` TEXT NOT NULL → `enrollments.id`
+- `element_id` TEXT NOT NULL → `course_elements.id`
+- `package_hash` TEXT NOT NULL → `packages.hash` — the archive the element carried when the attempt began
+- `attempt_number` INTEGER NOT NULL — 1 for the first attempt at the element under this enrolment
+- `status` TEXT NOT NULL — completed: the package reported completion; closed: replaced by a fresh attempt
+- `started_at` TEXT NOT NULL
+- `ended_at` TEXT — when the attempt completed or was closed
+- `updated_at` TEXT NOT NULL
+
+#### `package_sequencing_state`
+
+- `attempt_id` TEXT PK → `package_attempts.id`
+- `state_json` TEXT NOT NULL — global objectives and tracking state, as the sequencing engine stores it
+- `updated_at` TEXT NOT NULL
 
 #### `packages`
 
@@ -1799,7 +1829,7 @@ CREATE VIEW current_reputation_assertions AS
 SELECT * FROM reputation_assertions WHERE input_policy_state = 'valid';
 ```
 
-Triggers: `chat_message_search_delete`, `chat_message_search_insert`, `chat_message_search_update`, `completion_request_existing_journal`, `completion_request_journal_handoff`, `snapshot_submission_checkpoint`.
+Triggers: `chat_message_search_delete`, `chat_message_search_insert`, `chat_message_search_update`, `completion_request_existing_journal`, `completion_request_journal_handoff`, `package_element_never_graded`, `package_element_never_skill_tagged`, `package_element_no_grading_insert`, `package_element_no_grading_update`, `snapshot_submission_checkpoint`.
 
 ---
 
@@ -1892,6 +1922,11 @@ erDiagram
     chat_messages ||--o{ learning_memory : source_message_id
     chat_threads ||--o{ learning_memory : thread_id
     subject_fields ||--o{ opinions : subject_field_id
+    package_attempts ||--o{ package_activity_state : attempt_id
+    packages ||--o{ package_attempts : package_hash
+    course_elements ||--o{ package_attempts : element_id
+    enrollments ||--o{ package_attempts : enrollment_id
+    package_attempts ||--o{ package_sequencing_state : attempt_id
     plugin_installed ||--o{ plugin_dependencies : dependency_cid
     plugin_installed ||--o{ plugin_dependencies : plugin_cid
     plugin_installed ||--o{ plugin_irl_submissions : plugin_cid
