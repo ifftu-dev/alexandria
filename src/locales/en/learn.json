@@ -34,6 +34,8 @@
     "probeProgress": "Follow-up {current} of {total}",
     "probeComplement": "Select every option that is not a correct answer.",
     "probeTimeLeft": "{seconds}s left",
+    "probeTimeLimit": "This follow-up has a time limit of {seconds} seconds. The clock starts when you press Start.",
+    "probeStart": "Start",
     "probeAnswer": "Answer",
     "probeSkip": "Skip",
     "generatedProbeConsent": "Let this role's model connection write my follow-up questions",

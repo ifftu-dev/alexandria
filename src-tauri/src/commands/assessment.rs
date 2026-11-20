@@ -2272,7 +2272,8 @@ mod tests {
         failed_earlier_attempt(&ctx);
         conn.execute("UPDATE attempt_items SET score = 1.0", [])
             .unwrap();
-        // Both items observed, and a probe on them satisfied in the session.
+        // Both items observed, and a probe asking something new (an authored
+        // variant) satisfied in the session.
         conn.execute(
             "INSERT INTO integrity_observed_items (session_id, item_id)
              SELECT 'test-session', value FROM assessment_attempts, json_each(question_ids)
@@ -2290,7 +2291,7 @@ mod tests {
                 outcome: VerificationOutcome::Satisfied,
                 reason: None,
                 subject_ref: None,
-                detail: serde_json::json!({}),
+                detail: serde_json::json!({ "source": "variant" }),
             },
         )
         .unwrap();
