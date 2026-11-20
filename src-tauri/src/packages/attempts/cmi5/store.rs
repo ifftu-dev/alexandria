@@ -162,8 +162,8 @@ pub(super) struct Begin {
 }
 
 /// Opens a session: the session row, `LMS.LaunchData`, the learner
-/// preferences when none are stored, `launched`, the unit's stored state and
-/// whatever the moveOn criteria satisfy already (9.6.1). Returns what the
+/// preferences when none are stored, the unit's stored state, whatever the
+/// moveOn criteria satisfy already (9.6.1), then `launched`. Returns what the
 /// registration has seen of the unit.
 pub(super) fn begin(
     db: &Database,
@@ -216,6 +216,11 @@ pub(super) fn begin(
                 .as_bytes(),
         )?;
     }
+    // 9.6.1.1-3: the moveOn criteria are evaluated as the registration
+    // starts, so what they satisfy already (NotApplicable units) is recorded
+    // before the unit is launched.
+    refresh_unit(conn, attempt, package, &begin.unit_id)?;
+    satisfy(conn, attempt, package, facts)?;
     let launched = rules::launched(&new_id(), facts, &values, now);
     insert_statement(
         conn,
@@ -236,8 +241,6 @@ pub(super) fn begin(
         package,
         &begin.unit_id,
     ));
-    refresh_unit(conn, attempt, package, &begin.unit_id)?;
-    satisfy(conn, attempt, package, facts)?;
     roll_up(db, attempt, package)?;
     Ok(SessionRecord {
         completed_before: used(conn, &attempt.id, &begin.unit_id, "completed")?,

@@ -46,7 +46,7 @@ fn fixture_files(dir: &Path, prefix: &str, out: &mut Vec<(String, Vec<u8>)>) {
     }
 }
 
-fn did(seed: u8) -> String {
+pub(super) fn did(seed: u8) -> String {
     crate::crypto::did::derive_did_key(&SigningKey::from_bytes(&[seed; 32]))
         .as_str()
         .to_string()
@@ -54,13 +54,13 @@ fn did(seed: u8) -> String {
 
 /// A learner enrolled in a course whose one element is the cmi5 fixture,
 /// with the package launch open the way the player opens it.
-struct Learner {
-    db: Arc<Mutex<Database>>,
-    sessions: Arc<Cmi5Sessions>,
-    launches: Arc<Launches>,
-    key: [u8; 32],
-    attempt: PackageAttempt,
-    prefix: String,
+pub(super) struct Learner {
+    pub(super) db: Arc<Mutex<Database>>,
+    pub(super) sessions: Arc<Cmi5Sessions>,
+    pub(super) launches: Arc<Launches>,
+    pub(super) key: [u8; 32],
+    pub(super) attempt: PackageAttempt,
+    pub(super) prefix: String,
     _node: ContentNode,
     _root: TempDir,
 }
@@ -71,6 +71,14 @@ const ENROLLMENT: &str = "enr1";
 
 impl Learner {
     async fn new() -> Self {
+        let mut files = Vec::new();
+        fixture_files(&fixture_dir(), "", &mut files);
+        Self::with_package(&files).await
+    }
+
+    /// A learner enrolled in a course whose one element is the package made
+    /// of `files` (archive path, bytes).
+    pub(super) async fn with_package(files: &[(String, Vec<u8>)]) -> Self {
         let root = TempDir::new().expect("temp dir");
         let dirs = PackageDirs {
             archives: root.path().join("packages"),
@@ -107,8 +115,6 @@ impl Learner {
             .unwrap();
         let db = Arc::new(Mutex::new(db));
 
-        let mut files = Vec::new();
-        fixture_files(&fixture_dir(), "", &mut files);
         let entries: Vec<(&str, &[u8])> = files
             .iter()
             .map(|(name, data)| (name.as_str(), data.as_slice()))
@@ -147,7 +153,7 @@ impl Learner {
         }
     }
 
-    async fn launch(&self, unit: &str) -> Result<Cmi5Launch, AttemptError> {
+    pub(super) async fn launch(&self, unit: &str) -> Result<Cmi5Launch, AttemptError> {
         launch(
             self.db.clone(),
             &self.sessions,
@@ -163,11 +169,11 @@ impl Learner {
         .await
     }
 
-    async fn unit(&self, unit: &str) -> Unit {
+    pub(super) async fn unit(&self, unit: &str) -> Unit {
         Unit::from_launch(self.launch(unit).await.expect("launch"))
     }
 
-    async fn end(&self, session_id: &str) -> PackageAttemptProgress {
+    pub(super) async fn end(&self, session_id: &str) -> PackageAttemptProgress {
         end(&*self.db, &self.sessions, &self.launches, session_id)
             .await
             .expect("end session")
@@ -200,20 +206,22 @@ impl Learner {
 }
 
 /// The unit's side of a session: what the launch URL gave it, over HTTP.
-struct Unit {
-    launch: Cmi5Launch,
-    client: reqwest::Client,
-    endpoint: String,
-    fetch: String,
-    actor: Value,
-    registration: String,
-    activity_id: String,
-    token: Option<String>,
-    template: Value,
+pub(super) struct Unit {
+    pub(super) launch: Cmi5Launch,
+    pub(super) client: reqwest::Client,
+    pub(super) endpoint: String,
+    pub(super) fetch: String,
+    pub(super) actor: Value,
+    pub(super) registration: String,
+    pub(super) activity_id: String,
+    pub(super) token: Option<String>,
+    pub(super) template: Value,
+    /// LMS.LaunchData `masteryScore`, once read.
+    pub(super) mastery: Option<f64>,
 }
 
 impl Unit {
-    fn from_launch(launch: Cmi5Launch) -> Self {
+    pub(super) fn from_launch(launch: Cmi5Launch) -> Self {
         let url = url::Url::parse(&launch.url.replace("package://localhost", "http://package"))
             .expect("launch url parses");
         let param = |name: &str| {
@@ -231,11 +239,12 @@ impl Unit {
             client: reqwest::Client::new(),
             token: None,
             template: Value::Null,
+            mastery: None,
             launch,
         }
     }
 
-    async fn post_fetch(&self) -> Value {
+    pub(super) async fn post_fetch(&self) -> Value {
         self.client
             .post(&self.fetch)
             .header("Origin", package_serving::origin())
@@ -248,7 +257,7 @@ impl Unit {
     }
 
     /// Takes the token and reads LMS.LaunchData, as every unit starts.
-    async fn start(&mut self) -> Value {
+    pub(super) async fn start(&mut self) -> Value {
         let answer = self.post_fetch().await;
         self.token = Some(answer["auth-token"].as_str().expect("token").to_string());
         let (status, data) = self
@@ -256,10 +265,11 @@ impl Unit {
             .await;
         assert_eq!(status, StatusCode::OK, "{data}");
         self.template = data["contextTemplate"].clone();
+        self.mastery = data["masteryScore"].as_f64();
         data
     }
 
-    fn state_path(&self, state_id: &str) -> String {
+    pub(super) fn state_path(&self, state_id: &str) -> String {
         format!(
             "activities/state?activityId={}&agent={}&registration={}&stateId={state_id}",
             urlencode(&self.activity_id),
@@ -268,7 +278,12 @@ impl Unit {
         )
     }
 
-    async fn xapi(&self, method: Method, path: &str, body: Option<Value>) -> (StatusCode, Value) {
+    pub(super) async fn xapi(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
         let mut request = self
             .client
             .request(method, format!("{}{path}", self.endpoint))
@@ -309,6 +324,10 @@ impl Unit {
                 "extensions": self.template["extensions"],
             },
         });
+        if let (Some(mastery), false) = (self.mastery, result["score"].is_null()) {
+            statement["context"]["extensions"]
+                [alexandria_studio::xapi::cmi5::EXTENSION_MASTERY_SCORE] = json!(mastery);
+        }
         if result.as_object().is_some_and(|r| !r.is_empty()) {
             statement["result"] = result;
         }
@@ -327,7 +346,7 @@ fn rules_category() -> &'static str {
     alexandria_studio::xapi::cmi5::CATEGORY_CMI5
 }
 
-fn urlencode(value: &str) -> String {
+pub(super) fn urlencode(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
 
