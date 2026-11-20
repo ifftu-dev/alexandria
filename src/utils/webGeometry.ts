@@ -1,4 +1,5 @@
-import type { AtlasModel, BloomRank } from '@/utils/skillAtlas'
+import { compareIds, type AtlasModel, type BloomRank } from '@/utils/skillAtlas'
+import type { AtlasDepth } from '@/utils/skillAtlasView'
 
 /** What the Web layout reads from the atlas model: plain data, no credentials. */
 export interface WebGraph {
@@ -82,10 +83,6 @@ export const WEB_COLLISION_DISTANCE = 28
 export const WEB_COLLISION_STRENGTH = 0.5
 /** Passes spent at the end pushing apart dots still closer than the minimum distance. */
 const WEB_SEPARATION_PASSES = 60
-
-function compareIds(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0
-}
 
 /** The graph in index form, in ID order, with links deduplicated and sorted so input order never matters. */
 interface Prepared {
@@ -528,15 +525,12 @@ export function webNamePlaces(labels: readonly WebNameLabel[], obstacles: readon
   return places
 }
 
-/** How far the Web graph can be narrowed around the selection, in steps. */
-export type WebNarrowingDepth = 1 | 2 | 3
-
 /**
  * The skills within `depth` steps of `id`: along prerequisites in either
  * direction and, when `related` is on (the dotted lines are shown), along
  * relations. Empty when the graph does not hold `id`.
  */
-export function webNarrowedIds(graph: WebGraph, id: string, depth: WebNarrowingDepth, related: boolean): Set<string> {
+export function webNarrowedIds(graph: WebGraph, id: string, depth: AtlasDepth, related: boolean): Set<string> {
   const steps = new Map<string, string[]>()
   const link = (a: string, b: string) => { steps.set(a, [...steps.get(a) ?? [], b]); steps.set(b, [...steps.get(b) ?? [], a]) }
   for (const { skill, prerequisite } of graph.prerequisites) link(skill, prerequisite)

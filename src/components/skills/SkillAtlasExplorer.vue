@@ -13,7 +13,7 @@ import { webGraphFromAtlas, webLayout, webNarrowedIds, type WebPoint } from '@/u
 import { animateMotion, motionDuration, useMotion } from '@/composables/useMotion'
 import type { SkillGraphView } from '@/composables/useSkillGraphView'
 import { BLOOM_ORDER } from '@/utils/bloom'
-import { createAtlasViewState, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
+import { ATLAS_DEPTHS, createAtlasViewState, isAtlasDepth, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
 import { isBloomRank, type AtlasField, type AtlasModel, type AtlasNode, type SkillRelationType } from '@/utils/skillAtlas'
 import type { AtlasFeedback } from '@/composables/useSkillAtlas'
 
@@ -318,7 +318,6 @@ const focusSummary = computed(() => {
   })
 })
 const DEPTH_KEYS = { 1: 'skills.atlas.oneStep', 2: 'skills.atlas.twoSteps', 3: 'skills.atlas.threeSteps' } as const
-const DEPTHS = [1, 2, 3] as const
 // A string computed only notifies when the query text changes, so other view
 // updates (selection, camera) keep the same match list and its window.
 // Simple offers no search, so its list holds every skill; the query waits for Detailed.
@@ -407,8 +406,9 @@ function narrow(around: boolean): void {
   update({ webNarrowed: around, webCamera: null })
 }
 function setDepth(event: Event): void {
-  const value = Number((event.target as HTMLSelectElement).value)
-  update({ neighborhoodDepth: value === 3 ? 3 : value === 2 ? 2 : 1, ...(webNarrowed.value ? { webCamera: null } : {}) })
+  const value = event.target instanceof HTMLSelectElement ? Number(event.target.value) : null
+  if (!isAtlasDepth(value)) return
+  update({ neighborhoodDepth: value, ...(webNarrowed.value ? { webCamera: null } : {}) })
 }
 function webMapEvent<E extends Event>(handler: (event: E) => void): (event: E) => void {
   return event => { if (webMode.value) handler(event) }
@@ -766,7 +766,7 @@ function setBloom(event: Event): void {
         <div class="web-tool-group" role="group" :aria-label="t('skills.atlas.webShow')">
           <button type="button" :aria-pressed="!webNarrowed" @click="narrow(false)">{{ t('skills.atlas.webWhole') }}</button>
           <button type="button" :aria-pressed="webNarrowed" :disabled="!selected" @click="narrow(true)">{{ t('skills.atlas.webAround') }}</button>
-          <label><span>{{ t('skills.atlas.depth') }}</span><select :value="view.neighborhoodDepth" :disabled="!webNarrowed" @change="setDepth"><option v-for="depth in DEPTHS" :key="depth" :value="depth">{{ t(DEPTH_KEYS[depth]) }}</option></select></label>
+          <label><span>{{ t('skills.atlas.depth') }}</span><select :value="view.neighborhoodDepth" :disabled="!webNarrowed" @change="setDepth"><option v-for="depth in ATLAS_DEPTHS" :key="depth" :value="depth">{{ t(DEPTH_KEYS[depth]) }}</option></select></label>
         </div>
         <div class="web-tool-group" role="group" :aria-label="t('skills.atlas.webDisplay')">
           <button type="button" :aria-pressed="view.webNames" @click="update({ webNames: !view.webNames })">{{ t('skills.atlas.webNames') }}</button>
@@ -902,7 +902,7 @@ function setBloom(event: Event): void {
             <p v-if="!selected.prerequisites.length && selected.skill.prerequisite_count === 0" class="atlas-muted">{{ t('skills.atlas.noPrerequisites') }}</p>
             <p v-else-if="selected.prerequisitesSatisfied" class="atlas-muted">{{ t('skills.atlas.satisfied') }}</p>
             <p v-else-if="selected.prerequisites.some(relation => !relation.loaded) || selected.prerequisites.length < selected.skill.prerequisite_count" class="atlas-muted">{{ t('skills.atlas.incomplete') }}</p>
-            <div class="neighborhood-controls"><button type="button" :aria-pressed="view.neighborhood === 'prerequisites'" @click="update({ neighborhood: view.neighborhood === 'prerequisites' ? 'none' : 'prerequisites' })">{{ t('skills.atlas.focusPrerequisites') }}</button><button type="button" :aria-pressed="view.neighborhood === 'dependents'" @click="update({ neighborhood: view.neighborhood === 'dependents' ? 'none' : 'dependents' })">{{ t('skills.atlas.focusDependents') }}</button><button v-if="view.neighborhood !== 'none'" type="button" @click="update({ neighborhood: 'none' })">{{ t('skills.atlas.allConnections') }}</button><label v-if="view.neighborhood !== 'none'"><span>{{ t('skills.atlas.depth') }}</span><select :value="view.neighborhoodDepth" @change="setDepth"><option v-for="depth in DEPTHS" :key="depth" :value="depth">{{ t(DEPTH_KEYS[depth]) }}</option></select></label></div>
+            <div class="neighborhood-controls"><button type="button" :aria-pressed="view.neighborhood === 'prerequisites'" @click="update({ neighborhood: view.neighborhood === 'prerequisites' ? 'none' : 'prerequisites' })">{{ t('skills.atlas.focusPrerequisites') }}</button><button type="button" :aria-pressed="view.neighborhood === 'dependents'" @click="update({ neighborhood: view.neighborhood === 'dependents' ? 'none' : 'dependents' })">{{ t('skills.atlas.focusDependents') }}</button><button v-if="view.neighborhood !== 'none'" type="button" @click="update({ neighborhood: 'none' })">{{ t('skills.atlas.allConnections') }}</button><label v-if="view.neighborhood !== 'none'"><span>{{ t('skills.atlas.depth') }}</span><select :value="view.neighborhoodDepth" @change="setDepth"><option v-for="depth in ATLAS_DEPTHS" :key="depth" :value="depth">{{ t(DEPTH_KEYS[depth]) }}</option></select></label></div>
             <section v-for="direction in (['prerequisites', 'dependents'] as const)" :key="direction" class="inspector-relations">
               <h3>{{ t(`skills.atlas.${direction}`) }} <span>{{ selected[direction].length }}</span></h3>
               <ul><li v-for="relation in selected[direction]" :key="relation.skillId"><button v-if="relation.loaded" type="button" :aria-label="relationLabel(relation)" @click="select(relation.skillId, true)"><strong dir="auto">{{ relation.name }}</strong><small>{{ fieldName(nodesById.get(relation.skillId)?.fieldId ?? null) }} · {{ present.state(relationNode(relation)) }}</small></button><p v-else>{{ relation.name }} · {{ t('skills.atlas.notLoaded') }}</p></li></ul>

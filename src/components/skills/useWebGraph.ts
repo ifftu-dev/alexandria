@@ -1,6 +1,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
 import { motionDuration, useMotion } from '@/composables/useMotion'
-import type { AtlasModel, AtlasNode } from '@/utils/skillAtlas'
+import { compareIds, type AtlasModel, type AtlasNode } from '@/utils/skillAtlas'
 import type { AtlasCamera } from '@/utils/skillAtlasView'
 import { atlasFieldColor } from './atlasPresentation'
 import { continueWebLayout, webDotRadius, webGraphFromAtlas, webNamePlaces, webNearestInDirection, webNearestTo, type WebDirection, type WebNamePlace, type WebPoint } from '@/utils/webGeometry'
@@ -266,7 +266,7 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
     const near = (dot: WebDot) => dot.x > -maxPixels && dot.x < width + maxPixels && dot.y > -linePixels * 2 && dot.y < height + linePixels * 2
     const named = drawn.filter(dot => dot.labelled && near(dot))
     if (!named.length) return
-    named.sort((a, b) => rank(a) - rank(b) || b.size - a.size || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    named.sort((a, b) => rank(a) - rank(b) || b.size - a.size || compareIds(a.id, b.id))
     const places = webNamePlaces(named.map(dot => ({ id: dot.id, x: dot.x, y: dot.y, radius: dot.size / 2, height: linePixels,
       width: Math.min(maxPixels, dot.node.skill.name.length * charPixels + 4) })),
     drawn.filter(near).map(dot => ({ x: dot.x, y: dot.y, radius: dot.size / 2 })))
