@@ -16,7 +16,10 @@
 //
 // It also turns `window.open` and links aimed at another window into a
 // navigation of the frame that asked, and a full-screen request into a
-// focus-mode request to the host.
+// focus-mode request to the host. It tells the host, with a `blocked` message
+// naming the kind of thing, when content asks for a pop-up, a dialog, a
+// plug-in or a resource from off the package origin, so the player can say
+// why the content may look broken.
 //
 // This is one layer. The content policy, the frame policies and the launch
 // prefix are each enforced on their own; none relies on this script.
@@ -52,10 +55,27 @@
     };
   }
 
-  function tellHost(win, type) {
+  function tellHost(win, type, what, detail) {
+    var message = { source: MESSAGE_SOURCE, type: type };
+    if (what) message.what = what;
+    if (detail) message.detail = String(detail).slice(0, 200);
     try {
-      win.top.postMessage({ source: MESSAGE_SOURCE, type: type }, '*');
+      win.top.postMessage(message, '*');
     } catch (_) {}
+  }
+
+  // The player tells the learner when content needed something that is not
+  // available here. Only the kind of thing and a host name travel.
+  function blocked(win, what, detail) {
+    tellHost(win, 'blocked', what, detail);
+  }
+
+  function hostOf(address) {
+    try {
+      return new URL(address).host;
+    } catch (_) {
+      return '';
+    }
   }
 
   function scrub(win) {
@@ -183,10 +203,41 @@
           } catch (_) {
             return null;
           }
+          blocked(win, 'popup');
           return win;
         },
         writable: false,
         configurable: false,
+      });
+    } catch (_) {}
+
+    // The player frame has no modal dialogs; say so instead of failing
+    // silently.
+    [
+      ['alert', undefined],
+      ['confirm', false],
+      ['prompt', null],
+    ].forEach(function (entry) {
+      try {
+        Object.defineProperty(win, entry[0], {
+          value: function () {
+            blocked(win, 'dialog');
+            return entry[1];
+          },
+          writable: false,
+          configurable: false,
+        });
+      } catch (_) {}
+    });
+
+    // Anything the content policy turns away: a plug-in, or a resource from
+    // off the package origin.
+    try {
+      win.document.addEventListener('securitypolicyviolation', function (event) {
+        var directive = event.effectiveDirective || event.violatedDirective || '';
+        if (directive.indexOf('object-src') === 0) blocked(win, 'plugin');
+        else if (directive.indexOf('script-src') === 0 && !/^https?:/.test(event.blockedURI || '')) return;
+        else blocked(win, 'remote-resource', hostOf(event.blockedURI));
       });
     } catch (_) {}
 
