@@ -20,9 +20,12 @@
 //!   records are kept as one summary per attempt at each activity.
 //! - **Per profile.** The tables live in the profile's own database.
 
+pub mod activity_log;
 mod limit;
 mod write;
 
+#[cfg(test)]
+mod activity_log_tests;
 #[cfg(test)]
 mod tests;
 

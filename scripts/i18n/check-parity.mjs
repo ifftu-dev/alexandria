@@ -130,6 +130,11 @@ const PENDING_TRANSLATION = [
   // 16). English-only pending a translate pass; consent copy should be
   // prioritised in that pass.
   'organisations.records.',
+  // Activity log view, signed export and deletion (learning standards ticket
+  // 15). English-only pending the next learner translation pass; the delete
+  // confirmation says what happens to unsent records, so prioritise it.
+  'dashboard.activityLog.',
+  'nav.userMenu.activityLog',
 ]
 
 const isPending = (key) => PENDING_TRANSLATION.some((p) => key.startsWith(p))

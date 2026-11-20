@@ -496,6 +496,38 @@ export interface RecordAccessEntry {
   detail: string | null
 }
 
+/**
+ * One row of the activity log view (src-tauri/src/domain/learning_record.rs),
+ * from `learning_records_list`, newest first.
+ */
+export interface LearningRecordEntry {
+  id: string
+  kind: 'completion' | 'interaction'
+  /** xAPI verb short name: registered, launched, progressed, completed, passed, failed, scored, responded, voided. */
+  verb: string
+  course_id: string
+  course_title: string | null
+  element_id: string | null
+  element_title: string | null
+  /** The activity's identifier, a DID URL. */
+  activity_id: string
+  summary: boolean
+  bytes: number
+  recorded_at: string
+  percent: number | null
+  /** Scaled score, -1 to 1. */
+  score: number | null
+}
+
+/**
+ * A signed activity log export, from `learning_records_export`: write both
+ * strings to disk unchanged; the signature covers the statement file's exact bytes.
+ */
+export interface LearningRecordExport {
+  statements: string
+  signature: string
+}
+
 export interface AuthorizedCourseAttestor {
   did: string
   public_key_hex: string
