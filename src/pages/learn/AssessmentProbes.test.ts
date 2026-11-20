@@ -44,6 +44,11 @@ function button(wrapper: ReturnType<typeof render>, label: string) {
   return wrapper.findAll('button').find(b => b.text() === label)!
 }
 
+async function begin(wrapper: ReturnType<typeof render>) {
+  await button(wrapper, 'learn.assessment.probeStart').trigger('click')
+  await flushPromises()
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
   mocks.startProbes.mockReset()
@@ -66,10 +71,33 @@ describe('assessment probes', () => {
     expect(mocks.finishProbes).not.toHaveBeenCalled()
   })
 
+  it('states the time limit before the probe starts and starts the clock only on Start', async () => {
+    mocks.startProbes.mockResolvedValue([probe('p1', { time_box_ms: 45_000 })])
+    const wrapper = render()
+    await flushPromises()
+    expect(wrapper.text()).toContain('learn.assessment.probeTimeLimit:{"seconds":45}')
+    expect(wrapper.text()).not.toContain('Prompt p1')
+    expect(mocks.renderProbe).not.toHaveBeenCalled()
+
+    await button(wrapper, 'learn.assessment.probeStart').trigger('click')
+    await flushPromises()
+    expect(mocks.renderProbe).toHaveBeenCalledExactlyOnceWith('p1')
+    expect(wrapper.text()).toContain('Prompt p1')
+  })
+
+  it('resumes a probe whose clock is already running without asking again', async () => {
+    mocks.startProbes.mockResolvedValue([probe('p1', { remaining_ms: 12_000 })])
+    const wrapper = render()
+    await flushPromises()
+    expect(mocks.renderProbe).toHaveBeenCalledExactlyOnceWith('p1')
+    expect(wrapper.text()).toContain('Prompt p1')
+  })
+
   it('renders each probe, submits served positions with first-input latency, then finishes', async () => {
     mocks.startProbes.mockResolvedValue([probe('p1'), probe('p2')])
     const wrapper = render()
     await flushPromises()
+    await begin(wrapper)
     expect(mocks.renderProbe).toHaveBeenCalledExactlyOnceWith('p1')
     expect(wrapper.text()).toContain('Prompt p1')
     expect(wrapper.text()).toContain('learn.assessment.probeComplement')
@@ -81,6 +109,8 @@ describe('assessment probes', () => {
     await button(wrapper, 'learn.assessment.probeAnswer').trigger('click')
     await flushPromises()
     expect(mocks.answerProbe).toHaveBeenCalledExactlyOnceWith('p1', { selected_positions: [0, 2] }, 1_200)
+    expect(mocks.renderProbe).toHaveBeenCalledOnce()
+    await begin(wrapper)
     expect(mocks.renderProbe).toHaveBeenLastCalledWith('p2')
 
     await button(wrapper, 'learn.assessment.probeSkip').trigger('click')
@@ -94,6 +124,7 @@ describe('assessment probes', () => {
     mocks.startProbes.mockResolvedValue([probe('p1')])
     const wrapper = render()
     await flushPromises()
+    await begin(wrapper)
     await wrapper.findAll('input')[1]!.setValue(true)
     vi.advanceTimersByTime(31_000)
     await flushPromises()

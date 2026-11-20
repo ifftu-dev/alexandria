@@ -790,6 +790,8 @@ mod tests {
 
     /// Record a verification result in a finished session, as if it had
     /// been recorded before monitoring ended.
+    /// Record a verification result. A probe's source is its policy's own:
+    /// `reseed` asks the same item again, `authored` a new question.
     fn verified(conn: &Connection, session: &str, step: &str, policy: &str, outcome: &str) {
         use crate::sentinel::verification::{record_verification, NewVerification};
         let outcome = match outcome {
@@ -812,7 +814,7 @@ mod tests {
                 outcome,
                 reason: None,
                 subject_ref: None,
-                detail: serde_json::json!({}),
+                detail: serde_json::json!({ "source": policy }),
             },
         )
         .unwrap();
@@ -859,15 +861,15 @@ mod tests {
     fn satisfied_probes_raise_the_rung_and_skipped_ones_leave_it_at_process() {
         let (db, key, _, subject) = setup();
         assessed(db.conn(), "probed", false, 2, 2);
-        verified(db.conn(), "probed", "probe", "reseed", "satisfied");
-        verified(db.conn(), "probed", "probe", "reseed", "satisfied");
+        verified(db.conn(), "probed", "probe", "authored", "satisfied");
+        verified(db.conn(), "probed", "probe", "authored", "satisfied");
         let a = assertion_for(db.conn(), &key, &subject, "probed");
         assert_eq!(a.verification_rung.as_deref(), Some("probed"));
         assert_eq!(
             a.probe,
             Some(ProbeSummary {
                 outcome: "satisfied".into(),
-                policies: vec!["reseed".into()],
+                policies: vec!["authored".into()],
                 satisfied: 2,
                 failed: 0,
                 skipped: 0,
@@ -877,11 +879,32 @@ mod tests {
         // A probe that timed out never counts against the learner, but the
         // probe policy was not satisfied either.
         assessed(db.conn(), "timeout", false, 2, 2);
-        verified(db.conn(), "timeout", "probe", "reseed", "satisfied");
-        verified(db.conn(), "timeout", "probe", "reseed", "skipped");
+        verified(db.conn(), "timeout", "probe", "authored", "satisfied");
+        verified(db.conn(), "timeout", "probe", "authored", "skipped");
         let a = assertion_for(db.conn(), &key, &subject, "timeout");
         assert_eq!(a.verification_rung.as_deref(), Some("process"));
         assert_eq!(a.probe.as_ref().map(|p| p.skipped), Some(1));
+    }
+
+    #[test]
+    fn a_satisfied_reseed_probe_is_reported_but_leaves_the_rung_at_process() {
+        let (db, key, _, subject) = setup();
+        assessed(db.conn(), "again", false, 2, 2);
+        verified(db.conn(), "again", "probe", "reseed", "satisfied");
+        verified(db.conn(), "again", "probe", "reseed", "satisfied");
+        let a = assertion_for(db.conn(), &key, &subject, "again");
+        assert_eq!(a.verification_rung.as_deref(), Some("process"));
+        assert_eq!(
+            a.probe,
+            Some(ProbeSummary {
+                outcome: "satisfied".into(),
+                policies: vec!["reseed".into()],
+                satisfied: 2,
+                failed: 0,
+                skipped: 0,
+            }),
+            "the probe still ran and is reported as it went"
+        );
     }
 
     #[test]
@@ -939,7 +962,11 @@ mod tests {
             "issuance policy: verification rung 'process' does not meet the 'probed' minimum"
         );
 
+        // The same item asked again does not lift the rung; a new question
+        // does.
         verified(db.conn(), "process", "probe", "reseed", "satisfied");
+        assert!(issue(db.conn(), &key, &req, NOW).is_err());
+        verified(db.conn(), "process", "probe", "authored", "satisfied");
         assert!(issue(db.conn(), &key, &req, NOW).is_ok());
     }
 

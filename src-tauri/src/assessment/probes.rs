@@ -7,8 +7,9 @@
 //! comes from:
 //!
 //! * `reseed` — the same item again with a fresh option order, or one of the
-//!   item's authored seeded variants, with a time box proportional to the
-//!   time the learner spent per item in the attempt.
+//!   item's authored seeded variants. The same item again asks nothing new,
+//!   so a satisfied one never earns the `probed` rung (see
+//!   [`asks_a_new_question`]); a failed one still flags the session.
 //! * `authored` — an instructor-written follow-up for the item.
 //! * `plugin` — the item's grader generates one from the submission through
 //!   its optional probe export (see [`crate::plugins::grade_contract`]).
@@ -29,9 +30,11 @@
 //! learner. Authored probes written by the learner being probed are never
 //! served to them.
 //!
-//! The time box starts when the probe renders, on the host clock. Latency to
-//! render, to first input and to answer is kept with the result as a
-//! response-process input.
+//! A probe's time box is fixed by the item, never by the attempt's pace: the
+//! limit its author set, or [`item_time_box_ms`] from its length and the
+//! item's difficulty. The time box starts when the probe renders, on the
+//! host clock. Latency to render, to first input and to answer is kept with
+//! the result as a response-process input.
 //!
 //! Credential authority is unchanged (ADR-0003): a probe runs on the item's
 //! own CID-verified grader and grants nothing by itself.
@@ -63,17 +66,50 @@ pub const MAX_PROBES_PER_ATTEMPT: usize = 2;
 /// Slack after the time box for the answer's round trip to the host.
 const TIME_BOX_GRACE_MS: i64 = 2_000;
 
-/// Time box for authored probes that do not set one.
-const DEFAULT_AUTHORED_TIME_BOX_MS: u64 = 60_000;
+/// A probe without its own time box gets its reading floor this many times
+/// over: the floor is fast skimming, a probe is read properly.
+const PROBE_READING_FACTOR: f64 = 4.0;
+/// ...plus this long to work out and give the answer.
+const PROBE_ANSWER_ALLOWANCE_MS: f64 = 20_000.0;
+/// Bounds on a time box derived from the item.
+const ITEM_TIME_BOX_MIN_MS: u64 = 15_000;
+const ITEM_TIME_BOX_MAX_MS: u64 = 300_000;
 
-/// Reseed time box bounds: proportional to the attempt, within these.
-const RESEED_TIME_BOX_MIN_MS: u64 = 15_000;
-const RESEED_TIME_BOX_MAX_MS: u64 = 300_000;
+/// The time box of a probe showing `content` for an item of `difficulty`
+/// when its author set none: the reading floor the response-process signals
+/// use ([`crate::sentinel::scoring::reading_floor_ms`]), over the prompt and
+/// option text, read [`PROBE_READING_FACTOR`] times over plus
+/// [`PROBE_ANSWER_ALLOWANCE_MS`]. Depends on the item alone, so every
+/// attempt gets the same clock for the same probe.
+pub(crate) fn item_time_box_ms(content: &serde_json::Value, difficulty: u8) -> u64 {
+    let text = |v: &serde_json::Value| v.as_str().map_or(0, |s| s.chars().count());
+    let chars = text(&content["prompt"])
+        + content["options"]
+            .as_array()
+            .map_or(0, |options| options.iter().map(text).sum());
+    let floor = crate::sentinel::scoring::reading_floor_ms(
+        u32::try_from(chars).unwrap_or(u32::MAX),
+        Some(difficulty),
+    );
+    ((floor * PROBE_READING_FACTOR + PROBE_ANSWER_ALLOWANCE_MS).round() as u64)
+        .clamp(ITEM_TIME_BOX_MIN_MS, ITEM_TIME_BOX_MAX_MS)
+}
 
-/// Skip reasons recorded with a `skipped` result.
 /// `assessment_probes.source` of a probe a model wrote (`llm` policy).
 pub const GENERATED_SOURCE: &str = "llm";
 
+/// Whether a probe of `source` asks a question the learner had not already
+/// answered: an authored variant or follow-up, a plugin's own probe, or a
+/// generated one. `reseed` (the same item again) does not, and neither does
+/// a missing or unknown source. Only these probes earn the `probed` rung.
+pub fn asks_a_new_question(source: Option<&str>) -> bool {
+    matches!(
+        source,
+        Some("variant" | "authored" | "plugin" | GENERATED_SOURCE)
+    )
+}
+
+/// Skip reasons recorded with a `skipped` result.
 pub mod skip_reason {
     pub const POLICY_NONE: &str = "policy_none";
     pub const NO_ELIGIBLE_ITEMS: &str = "no_eligible_items";
@@ -229,8 +265,6 @@ pub(crate) struct AttemptCtx {
     question_ids: Vec<String>,
     option_orders: Vec<Vec<usize>>,
     answers: Vec<FrozenAnswer>,
-    started_at: String,
-    submitted_at: String,
 }
 
 pub(crate) fn load_submitted_attempt(
@@ -245,13 +279,12 @@ pub(crate) fn load_submitted_attempt(
         String,
         String,
         Option<String>,
-        String,
         Option<String>,
         bool,
     ) = conn
         .query_row(
             "SELECT subject_did, integrity_session_id, seed, question_ids, option_orders, \
-                    submitted_answers_json, started_at, submitted_at, \
+                    submitted_answers_json, submitted_at, \
                     graded_at IS NOT NULL OR ended_at IS NOT NULL \
                FROM assessment_attempts WHERE id = ?1",
             params![attempt_id],
@@ -265,7 +298,6 @@ pub(crate) fn load_submitted_attempt(
                     r.get(5)?,
                     r.get(6)?,
                     r.get(7)?,
-                    r.get(8)?,
                 ))
             },
         )
@@ -273,11 +305,11 @@ pub(crate) fn load_submitted_attempt(
             rusqlite::Error::QueryReturnedNoRows => "attempt not found".to_string(),
             other => other.to_string(),
         })?;
-    let (subject_did, session, seed, qids, orders, answers, started_at, submitted_at, closed) = row;
+    let (subject_did, session, seed, qids, orders, answers, submitted_at, closed) = row;
     if closed {
         return Err("attempt is already graded or ended".into());
     }
-    let (Some(answers), Some(submitted_at)) = (answers, submitted_at) else {
+    let (Some(answers), Some(_)) = (answers, submitted_at) else {
         return Err("submit answers before probes".into());
     };
     Ok(AttemptCtx {
@@ -287,27 +319,7 @@ pub(crate) fn load_submitted_attempt(
         question_ids: serde_json::from_str(&qids).map_err(|e| e.to_string())?,
         option_orders: serde_json::from_str(&orders).map_err(|e| e.to_string())?,
         answers: serde_json::from_str(&answers).map_err(|e| e.to_string())?,
-        started_at,
-        submitted_at,
     })
-}
-
-/// Milliseconds the learner spent per served item, from the attempt's start
-/// and submission times. `None` when either time is unreadable.
-fn per_item_ms(ctx: &AttemptCtx) -> Option<u64> {
-    fn parse(s: &str) -> Option<chrono::DateTime<chrono::Utc>> {
-        chrono::DateTime::parse_from_rfc3339(s)
-            .map(|t| t.with_timezone(&chrono::Utc))
-            .ok()
-            .or_else(|| {
-                chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-                    .ok()
-                    .map(|t| t.and_utc())
-            })
-    }
-    let spent = parse(&ctx.submitted_at)? - parse(&ctx.started_at)?;
-    let n = ctx.question_ids.len().max(1) as i64;
-    u64::try_from(spent.num_milliseconds() / n).ok()
 }
 
 // ---- probe generation -----------------------------------------------------
@@ -376,13 +388,17 @@ fn authored_for(
         .collect()
 }
 
-fn from_authored(source: &'static str, row: AuthoredRow, time_box_ms: u64) -> Generated {
+/// An authored probe keeps the time box its author set, or gets one from its
+/// own text and the item's difficulty.
+fn from_authored(source: &'static str, row: AuthoredRow, item: &AssessmentItem) -> Generated {
     Generated {
         source,
         source_id: Some(row.id),
+        time_box_ms: row
+            .time_box_ms
+            .unwrap_or_else(|| item_time_box_ms(&row.content_public, item.difficulty)),
         question: row.content_public,
         expectation: row.grader_private,
-        time_box_ms: row.time_box_ms.unwrap_or(time_box_ms),
         pass_score: 1.0,
         generation: None,
     }
@@ -403,10 +419,6 @@ fn generate(
     let generated = match policy {
         ProbePolicy::None => return Ok(Generation::Skipped(skip_reason::POLICY_NONE, json_null())),
         ProbePolicy::Reseed => {
-            let time_box = per_item_ms(ctx)
-                .map(|ms| ms.saturating_mul(3) / 2)
-                .unwrap_or(DEFAULT_AUTHORED_TIME_BOX_MS)
-                .clamp(RESEED_TIME_BOX_MIN_MS, RESEED_TIME_BOX_MAX_MS);
             let mut variants = authored_for(conn, &item.id, "variant", &ctx.subject_did)?;
             if variants.is_empty() {
                 Generated {
@@ -414,13 +426,13 @@ fn generate(
                     source_id: None,
                     question: item.content_public.clone(),
                     expectation: item.grader_private.clone(),
-                    time_box_ms: time_box,
+                    time_box_ms: item_time_box_ms(&item.content_public, item.difficulty),
                     pass_score: 1.0,
                     generation: None,
                 }
             } else {
                 let pick = rng.below(variants.len());
-                from_authored("variant", variants.swap_remove(pick), time_box)
+                from_authored("variant", variants.swap_remove(pick), item)
             }
         }
         ProbePolicy::Authored => {
@@ -432,11 +444,7 @@ fn generate(
                 ));
             }
             let pick = rng.below(follow_ups.len());
-            from_authored(
-                "authored",
-                follow_ups.swap_remove(pick),
-                DEFAULT_AUTHORED_TIME_BOX_MS,
-            )
+            from_authored("authored", follow_ups.swap_remove(pick), item)
         }
         // Generated probes need network I/O and never reach this
         // database-bound path: `start_probes_db` returns a plan instead.
@@ -1455,12 +1463,12 @@ mod tests {
             "the probe leaks its key"
         );
         assert_eq!(probe.remaining_ms, None, "the time box starts on render");
-        // One minute per item in the attempt, half as long again.
-        assert_eq!(probe.time_box_ms, 90_000);
+        // Fixed by the item (see the pace test below), not the attempt.
+        assert_eq!(probe.time_box_ms, 24_416);
 
         let root_before = root(&ctx);
         let rendered = render_probe_db(&ctx.db, &probe.id, LEARNER, NOW_MS).unwrap();
-        assert_eq!(rendered.remaining_ms, Some(90_000));
+        assert_eq!(rendered.remaining_ms, Some(24_416));
         let receipt = respond(&ctx, probe, &["a"], NOW_MS + 4_000);
         assert!(receipt.in_time);
 
@@ -1478,6 +1486,127 @@ mod tests {
             "the result is in the commitment chain"
         );
         assert_eq!(root(&ctx).as_deref(), Some(result.commitment_hash.as_str()));
+    }
+
+    /// The response tracker saw both served items, so the session stands on
+    /// the `process` rung before any probe.
+    fn observe_items(ctx: &Ctx) {
+        ctx.conn()
+            .execute_batch(
+                "INSERT INTO integrity_observed_items (session_id, item_id)
+                 VALUES ('sess', 'q1'), ('sess', 'q2');",
+            )
+            .unwrap();
+    }
+
+    fn rung(ctx: &Ctx) -> crate::sentinel::scoring::VerificationRung {
+        crate::sentinel::surface::session_surface(
+            ctx.conn(),
+            "sess",
+            false,
+            &crate::sentinel::scoring::RatioManifest::uncertified(),
+            None,
+        )
+        .unwrap()
+        .rung
+    }
+
+    #[test]
+    fn a_satisfied_reseed_probe_of_the_same_item_leaves_the_rung_at_process() {
+        use crate::sentinel::scoring::VerificationRung;
+        let ctx = setup("reseed");
+        observe_items(&ctx);
+        submit(&ctx, &[answer("q1", &[0]), answer("q2", &[0])]);
+        assert_eq!(rung(&ctx), VerificationRung::Process);
+        let probe = &start(&ctx)[0];
+        assert_eq!(probe.content["prompt"], "one?", "the same item again");
+        render_probe_db(&ctx.db, &probe.id, LEARNER, NOW_MS).unwrap();
+        respond(&ctx, probe, &["a"], NOW_MS + 4_000);
+        assert_eq!(summary(&ctx).outcome, Some(VerificationOutcome::Satisfied));
+        assert_eq!(
+            rung(&ctx),
+            VerificationRung::Process,
+            "asking an answered question again shows nothing new"
+        );
+    }
+
+    #[test]
+    fn two_attempts_at_different_paces_get_the_same_time_limit_for_the_same_probe_item() {
+        let quick = setup("reseed");
+        submit(&quick, &[answer("q1", &[0]), answer("q2", &[0])]);
+        let slow = setup("reseed");
+        submit(&slow, &[answer("q1", &[0]), answer("q2", &[0])]);
+        slow.conn()
+            .execute(
+                "UPDATE assessment_attempts SET submitted_at = '2026-11-12T10:40:00Z'",
+                [],
+            )
+            .unwrap();
+        let (quick, slow) = (&start(&quick)[0], &start(&slow)[0]);
+        assert_eq!(quick.content["prompt"], slow.content["prompt"]);
+        assert_eq!(quick.time_box_ms, slow.time_box_ms);
+        // "one?" and options "a".."d": 8 characters at difficulty 2. Reading
+        // floor (800 + 8 * 20) * 1.15 = 1_104 ms, read four times over plus
+        // 20 s to answer.
+        assert_eq!(quick.time_box_ms, 24_416);
+    }
+
+    #[test]
+    fn a_failed_reseed_probe_still_flags_the_session() {
+        use crate::sentinel::scoring::VerificationRung;
+        let ctx = setup("reseed");
+        observe_items(&ctx);
+        submit(&ctx, &[answer("q1", &[0]), answer("q2", &[0])]);
+        let probe = &start(&ctx)[0];
+        render_probe_db(&ctx.db, &probe.id, LEARNER, NOW_MS).unwrap();
+        respond(&ctx, probe, &["d"], NOW_MS + 4_000);
+        assert_eq!(summary(&ctx).outcome, Some(VerificationOutcome::Failed));
+        assert_eq!(session_status(&ctx), "flagged");
+        assert_eq!(rung(&ctx), VerificationRung::Process);
+    }
+
+    #[test]
+    fn a_satisfied_authored_variant_earns_the_probed_rung() {
+        use crate::sentinel::scoring::VerificationRung;
+        let ctx = setup("reseed");
+        observe_items(&ctx);
+        set_roles(&ctx, r#"["learner","instructor"]"#);
+        let mut variant = follow_up("one, reworded?", &["w", "x", "y", "z"], &[3]);
+        variant.probe_kind = ItemProbeKind::Variant;
+        save_item_probe_db(&ctx.db, INSTRUCTOR, &variant).unwrap();
+        submit(&ctx, &[answer("q1", &[0]), answer("q2", &[0])]);
+        let probe = &start(&ctx)[0];
+        assert_eq!(probe.content["prompt"], "one, reworded?");
+        render_probe_db(&ctx.db, &probe.id, LEARNER, NOW_MS).unwrap();
+        respond(&ctx, probe, &["z"], NOW_MS + 2_000);
+        assert_eq!(rung(&ctx), VerificationRung::Probed);
+    }
+
+    #[test]
+    fn a_satisfied_reseed_probe_beside_a_new_question_neither_earns_nor_blocks_the_rung() {
+        use crate::sentinel::scoring::VerificationRung;
+        // q1 has a variant, q2 does not: one probe asks something new, the
+        // other asks q2 again. Both answered correctly.
+        let ctx = setup("reseed");
+        observe_items(&ctx);
+        set_roles(&ctx, r#"["learner","instructor"]"#);
+        let mut variant = follow_up("one, reworded?", &["w", "x", "y", "z"], &[3]);
+        variant.probe_kind = ItemProbeKind::Variant;
+        save_item_probe_db(&ctx.db, INSTRUCTOR, &variant).unwrap();
+        submit(&ctx, &[answer("q1", &[0]), answer("q2", &[1])]);
+        let probes = start(&ctx);
+        assert_eq!(probes.len(), 2);
+        for p in &probes {
+            render_probe_db(&ctx.db, &p.id, LEARNER, NOW_MS).unwrap();
+            let key = if p.content["prompt"] == "two?" {
+                "b"
+            } else {
+                "z"
+            };
+            respond(&ctx, p, &[key], NOW_MS + 2_000);
+        }
+        assert_eq!(summary(&ctx).satisfied, 2);
+        assert_eq!(rung(&ctx), VerificationRung::Probed);
     }
 
     #[test]
@@ -1557,8 +1686,8 @@ mod tests {
         let probe = &start(&ctx)[0];
         render_probe_db(&ctx.db, &probe.id, LEARNER, NOW_MS).unwrap();
         // Rendering again does not restart the clock.
-        let again = render_probe_db(&ctx.db, &probe.id, LEARNER, NOW_MS + 60_000).unwrap();
-        assert_eq!(again.remaining_ms, Some(30_000));
+        let again = render_probe_db(&ctx.db, &probe.id, LEARNER, NOW_MS + 10_000).unwrap();
+        assert_eq!(again.remaining_ms, Some(14_416));
         // Right answer, too late: never counts against the learner.
         let receipt = respond(&ctx, probe, &["d"], NOW_MS + 200_000);
         assert!(!receipt.in_time);
@@ -1783,9 +1912,11 @@ mod tests {
         submit(&ctx, &[answer("q1", &[0]), answer("q2", &[0])]);
         let probe = &start(&ctx)[0];
         assert_eq!(probe.content["prompt"], "one, reworded?");
+        // "one, reworded?" and options "w".."z": 18 characters at the
+        // item's difficulty 2. (800 + 18 * 20) * 1.15 * 4 + 20_000.
         assert_eq!(
-            probe.time_box_ms, 90_000,
-            "a variant without a time box gets the reseed one"
+            probe.time_box_ms, 25_336,
+            "a variant without a time box gets one from its own text"
         );
         render_probe_db(&ctx.db, &probe.id, LEARNER, NOW_MS).unwrap();
         respond(&ctx, probe, &["z"], NOW_MS + 2_000);
