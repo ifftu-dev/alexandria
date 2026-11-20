@@ -437,6 +437,11 @@ export interface OpenedPackageFile {
   element_id: string
 }
 
+/** A package file opened to learn from, with the learner's local enrolment in its draft course. */
+export interface OpenedPackageCourse extends OpenedPackageFile {
+  enrollment_id: string
+}
+
 export interface PackageExtractProgress {
   hash: string
   files_done: number
@@ -537,6 +542,127 @@ export interface LearningRecordUsage {
   limit_bytes: number
   records: number
   interaction_records: number
+}
+
+// Sending learning records (mirrors src-tauri/src/domain/record_sending.rs).
+
+/** What a recipient receives: these courses' records, completion-level always, interaction-level only when chosen. */
+export interface RecordScope {
+  course_ids: string[]
+  include_interactions: boolean
+}
+
+export type RecipientKind = 'destination' | 'share'
+
+/** The identifier a recipient sees: one made only for it, or the learner's own DID. */
+export type IdentifierChoice = 'pairwise' | 'real_did'
+
+export interface CourseChoice {
+  id: string
+  title: string
+}
+
+/** What the consent screen shows for a store before approval. Producing it sends nothing. */
+export interface DestinationPreview {
+  endpoint: string
+  location: 'device' | 'private_network' | 'remote'
+  needs_confirmation: boolean
+  pairwise_actor: string
+  real_did_actor: string
+  courses: CourseChoice[]
+}
+
+/** What the learner approved on the record consent screen. */
+export interface RecordConsentDecision {
+  course_ids: string[]
+  include_interactions: boolean
+  identifier: IdentifierChoice
+  confirm_private: boolean
+}
+
+export interface NewDestinationRequest {
+  address: string
+  username: string
+  secret: string
+  course_ids: string[]
+  include_interactions: boolean
+  identifier: IdentifierChoice
+  confirm_private: boolean
+}
+
+export interface OutboxStatus {
+  queued: number
+  failed: number
+  sent: number
+  last_error: string | null
+  next_attempt_at: string | null
+  last_sent_at: string | null
+}
+
+/** A record destination; never carries the store's secret. */
+export interface RecordDestination {
+  id: string
+  endpoint: string
+  location: 'device' | 'private_network' | 'remote'
+  username: string
+  identifier: 'pairwise' | 'real_did' | 'proposed'
+  actor_name: string
+  scope: RecordScope
+  xapi_version: string
+  created_at: string
+  status: OutboxStatus
+}
+
+export interface RemovalReport {
+  voided: number
+  void_error: string | null
+}
+
+/** One send in the learner-readable access log. */
+export interface RecordAccessEntry {
+  seq: number
+  at: string
+  recipient_id: string
+  recipient_kind: RecipientKind
+  recipient_name: string
+  action: 'send' | 'void'
+  scope: RecordScope
+  record_count: number
+  identifier: string
+  accepted: boolean
+  detail: string | null
+}
+
+/**
+ * One row of the activity log view (src-tauri/src/domain/learning_record.rs),
+ * from `learning_records_list`, newest first.
+ */
+export interface LearningRecordEntry {
+  id: string
+  kind: 'completion' | 'interaction'
+  /** xAPI verb short name: registered, launched, progressed, completed, passed, failed, scored, responded, voided. */
+  verb: string
+  course_id: string
+  course_title: string | null
+  element_id: string | null
+  element_title: string | null
+  /** The activity's identifier, a DID URL. */
+  activity_id: string
+  summary: boolean
+  bytes: number
+  recorded_at: string
+  percent: number | null
+  /** Scaled score, -1 to 1. */
+  score: number | null
+}
+
+/**
+ * A signed activity log export, from `learning_records_export`: write both
+ * strings to disk unchanged; the signature covers the statement file's exact bytes.
+ */
+export interface LearningRecordExport {
+  statements: string
+  signature: string
 }
 
 export interface AuthorizedCourseAttestor {

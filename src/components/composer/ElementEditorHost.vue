@@ -2,6 +2,7 @@
 // Hosts the per-type editor plus the fields every element shares:
 // title, duration, and skill tags.
 import { computed, ref, watch, type Component } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, StatusBadge, ConfirmDialog } from '@/components/ui'
 import SkillTagPicker from './SkillTagPicker.vue'
@@ -12,12 +13,23 @@ import QuizEditor from './editors/QuizEditor.vue'
 import EssayEditor from './editors/EssayEditor.vue'
 import JsonEditor from './editors/JsonEditor.vue'
 import PluginEditor from './editors/PluginEditor.vue'
+import PackageEditor from './editors/PackageEditor.vue'
+import { packageErrorMessage } from './packageMessages'
 import type { Element } from '@/types'
 
 const props = defineProps<{ element: Element }>()
 const emit = defineEmits<{ updated: [Element]; deleted: [string]; dirty: [boolean] }>()
 
 const { invoke } = useLocalApi()
+const { t } = useI18n()
+
+const isPackage = computed(() => props.element.element_type === 'package')
+
+/** A refusal with a known package code reads as its explanation; anything else as it came. */
+function describe(e: unknown): string {
+  const message = packageErrorMessage(e)
+  return message.code ? t(message.key, message.params) : String(e)
+}
 
 const editorFor = computed<Component>(() => {
   switch (props.element.element_type) {
@@ -31,6 +43,7 @@ const editorFor = computed<Component>(() => {
     case 'subjective_mcq': return QuizEditor
     case 'essay': return EssayEditor
     case 'plugin': return PluginEditor
+    case 'package': return PackageEditor
     default: return JsonEditor // interactive, assessment, future types
   }
 })
@@ -61,7 +74,7 @@ async function saveTitle() {
     emit('updated', updated)
     titleDirty.value = false
   } catch (e) {
-    error.value = String(e)
+    error.value = describe(e)
   } finally {
     savingTitle.value = false
   }
@@ -73,7 +86,7 @@ async function deleteElement() {
     await invoke('delete_element', { elementId: props.element.id })
     emit('deleted', props.element.id)
   } catch (e) {
-    error.value = String(e)
+    error.value = describe(e)
   } finally {
     deleting.value = false
     showDelete.value = false
@@ -104,7 +117,8 @@ async function deleteElement() {
         >
         <AppButton v-if="titleDirty" size="sm" :loading="savingTitle" @click="saveTitle">{{ $t('common.actions.save') }}</AppButton>
       </div>
-      <SkillTagPicker :key="element.id" :element-id="element.id" />
+      <!-- A package element's results are self-reported: no skill tags (the database refuses them too). -->
+      <SkillTagPicker v-if="!isPackage" :key="element.id" :element-id="element.id" />
     </div>
 
     <div class="border-t border-border pt-5">

@@ -25,6 +25,7 @@ import {
   type SequencingNavigation,
   type SequencingNode,
 } from './packageSession'
+import { previewInvoke } from './packagePreview'
 
 // A package element: a SCORM package running in the wrapper at the package
 // origin, under a label the app draws. Results come from the package's own
@@ -37,13 +38,18 @@ const props = defineProps<{
   /** Who published the course, or `null` for a package file opened on this device. */
   publisher: string | null
   progress: ElementProgress | null
+  /** An author's preview: runs without an enrolment and stores nothing. */
+  preview?: boolean
 }>()
 
 const emit = defineEmits<{ progress: [progress: ElementProgress] }>()
 
 const { t } = useI18n()
-const { invoke } = useLocalApi()
-const invokeCommand: PackageInvoke = (command, args) => invoke(command as Parameters<typeof invoke>[0], args)
+const { invoke: localInvoke } = useLocalApi()
+const invokeCommand: PackageInvoke = (command, args) => localInvoke(command as Parameters<typeof localInvoke>[0], args)
+// A preview runs the same lifecycle against the host's preview commands:
+// no enrolment, nothing stored.
+const invoke: PackageInvoke = props.preview ? previewInvoke(localInvoke, props.element.id) : invokeCommand
 
 type Phase = 'loading' | 'unenrolled' | 'missing' | 'preparing' | 'ready' | 'error'
 interface Row { activity: PackageActivity, depth: number }
@@ -187,7 +193,7 @@ async function startSession() {
     return
   }
   const opened = createPackageSession({
-    invoke: invokeCommand,
+    invoke,
     frame: frame.value,
     launch,
     attemptId: current.id,
@@ -250,7 +256,7 @@ function step(offset: number) {
 }
 
 async function startFresh() {
-  if (!props.enrollmentId || busy.value) return
+  if ((!props.enrollmentId && !props.preview) || busy.value) return
   busy.value = true
   confirmingFresh.value = false
   try {
@@ -283,7 +289,7 @@ function onKeydown(event: KeyboardEvent) {
 onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
   const hash = props.element.content_cid
-  if (!props.enrollmentId) {
+  if (!props.enrollmentId && !props.preview) {
     phase.value = 'unenrolled'
     return
   }
@@ -353,6 +359,10 @@ onBeforeUnmount(() => {
         {{ focus ? t('learn.package.label.focusOff') : t('learn.package.label.focusOn') }}
       </button>
     </div>
+
+    <p v-if="preview" data-package-preview-note class="shrink-0 border-b border-border bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
+      {{ t('instructor.package.previewNote') }}
+    </p>
 
     <div v-if="phase === 'unenrolled' || phase === 'missing' || phase === 'error'" class="m-4 rounded-lg border border-border bg-card p-6 text-center text-sm text-muted-foreground">
       <p v-if="phase === 'unenrolled'">{{ t('learn.package.unenrolled') }}</p>

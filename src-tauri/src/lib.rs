@@ -34,6 +34,7 @@ pub mod packages;
 pub mod plugins;
 pub mod profile;
 pub mod ratelimit;
+pub mod record_sending;
 pub mod sentinel;
 pub mod settings;
 pub mod studio;
@@ -121,6 +122,9 @@ pub struct AppState {
     /// Open standards package launches, read by the `package` scheme
     /// handler. Emptied when the profile stops.
     pub package_launches: Arc<package_serving::Launches>,
+    /// Open package previews (an author running their own package element
+    /// without an enrolment). In memory only; emptied when the profile stops.
+    pub package_previews: Arc<packages::preview::Previews>,
 
     // ─── per-profile resources (populated while active) ─────────────
     pub db: Arc<std::sync::Mutex<Option<Database>>>,
@@ -363,6 +367,7 @@ impl AppState {
         }
 
         self.start_registry_refresh().await;
+        self.start_record_sender().await;
         commands::discussions::start_relay(self).await?;
         tutoring::presence::start(self).await?;
 
@@ -381,6 +386,19 @@ impl AppState {
         }
         log::info!("profile {} fully initialized", paths.id);
         Ok(())
+    }
+
+    /// Sends learning records to the learner's record destinations while the
+    /// profile is open. Fenced like the registry refresh: the job starts
+    /// before admission opens and is joined by profile cleanup.
+    async fn start_record_sender(&self) {
+        let db = p2p::inbound::InboundDatabase::pin_on_first_use(
+            self.db_executor.clone(),
+            self.profile_operations.clone(),
+        );
+        self.profile_operations
+            .spawn_job(record_sending::destinations::run(db, self.keystore.clone()))
+            .await;
     }
 
     async fn start_registry_refresh(&self) {
@@ -437,6 +455,7 @@ impl AppState {
         // Package launches belong to this profile's session; their prefixes
         // must not serve anything once it ends.
         self.package_launches.close_all();
+        self.package_previews.clear();
 
         // Seeding can write through the shared DB/content handles. Join it
         // before either resource can be closed or repointed at another user.
@@ -1412,6 +1431,7 @@ pub fn run() {
                 ipc_limiter: Arc::new(std::sync::Mutex::new(ratelimit::IpcRateLimiter::new())),
                 evidence_staging: Arc::new(sentinel::evidence::EvidenceStaging::new()),
                 package_launches: Arc::new(package_serving::Launches::new()),
+                package_previews: Arc::new(packages::preview::Previews::new()),
                 db,
                 db_executor,
                 keystore,
@@ -1695,7 +1715,25 @@ pub fn run() {
             commands::package_attempts::package_attempt_activities,
             commands::package_attempts::package_attempt_sequencing,
             commands::package_attempts::package_attempt_sequencing_save,
+            commands::package_previews::package_preview_open,
+            commands::package_previews::package_preview_fresh,
+            commands::package_previews::package_preview_initialise,
+            commands::package_previews::package_preview_commit,
+            commands::package_previews::package_preview_activities,
+            commands::package_previews::package_preview_terminate,
+            commands::package_previews::package_preview_sequencing,
+            commands::package_previews::package_preview_sequencing_save,
             commands::learning_records::learning_records_usage,
+            commands::record_destinations::record_destination_preview,
+            commands::record_destinations::record_destination_add,
+            commands::record_destinations::record_destinations,
+            commands::record_destinations::record_destination_remove,
+            commands::record_destinations::record_destinations_send_now,
+            commands::record_destinations::record_access_log,
+            commands::learning_records::learning_records_list,
+            commands::learning_records::learning_records_export,
+            commands::learning_records::learning_records_delete,
+            commands::learning_records::learning_records_delete_all,
             // Content (iroh blob store)
             commands::content::content_add,
             commands::content::content_get_text,

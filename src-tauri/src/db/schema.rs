@@ -170,6 +170,11 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // per-recipient outbox the sending code fills, and the creator DID their
     // activity identifiers are anchored to. See `crate::learning_records`.
     (46, "learning_records", include_str!("learning_records.sql")),
+    // Record sending: the recipients the learner approved and each one's
+    // scope and identifier, the stores the learner named with the
+    // credentials they issued, and the learner-readable access log of every
+    // send. See `crate::record_sending`.
+    (47, "record_sending", include_str!("record_sending.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"
