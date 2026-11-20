@@ -7,7 +7,7 @@ import { onProfileLocked, onProfileReady, useProfiles } from '@/composables/useP
 import { CREDENTIALS_CHANGED } from '@/composables/credentialEvents'
 import type { SkillGraphEdge, SkillGraphRelation, SkillInfo, SubjectFieldInfo, VerifiableCredential } from '@/types'
 import { buildSkillAtlas, type AtlasModel } from '@/utils/skillAtlas'
-import { createAtlasViewState, type AtlasViewState } from '@/utils/skillAtlasView'
+import { createAtlasViewState, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
 import { webGraphFromAtlas, webLayout, type WebGraph, type WebPoint } from '@/components/skills/webGeometry'
 import { errorMessage } from '@/utils/errorMessage'
 
@@ -79,6 +79,8 @@ const error = ref<string | null>(null)
 const refreshing = ref(false)
 const pageView = ref<AtlasViewState>(createAtlasViewState())
 const modalView = ref<AtlasViewState>(createAtlasViewState())
+/** The sidebar graph's own Web camera; it shares the rest of the modal's view state. Null fits what is shown. */
+const sidebarWebCamera = shallowRef<AtlasCamera | null>(null)
 const skillsTab = ref<AtlasTab>('credentials')
 const modalOpen = ref(false)
 const feedback = ref<AtlasFeedback | null>(null)
@@ -95,6 +97,8 @@ interface SkillReturn {
   surface: AtlasSurface
   /** Set once the learner explicitly asks to go back. */
   explicit: boolean
+  /** Whether returning restores the surface: the expanded graph reopens only if it was open (not when Open skill came from the sidebar). */
+  restore: boolean
 }
 
 // A return belongs to one explicit Open skill action and one profile session.
@@ -146,6 +150,7 @@ function clearProfileState(): void {
   refreshing.value = false
   pageView.value = createAtlasViewState()
   modalView.value = createAtlasViewState()
+  sidebarWebCamera.value = null
   webDragged.value = null
   skillsTab.value = 'credentials'
   modalOpen.value = false
@@ -235,6 +240,10 @@ function updateView(surface: AtlasSurface, patch: Partial<AtlasViewState>): void
     ...(patch.webCamera ? { webCamera: { ...patch.webCamera } } : {}) }
 }
 
+function setSidebarWebCamera(camera: AtlasCamera | null): void {
+  sidebarWebCamera.value = camera ? { ...camera } : null
+}
+
 function resetView(surface: AtlasSurface): void {
   ;(surface === 'page' ? pageView : modalView).value = createAtlasViewState()
 }
@@ -250,7 +259,8 @@ function acknowledgeFeedback(revision: number): void {
 
 async function openSkill(router: Router, surface: AtlasSurface, id: string): Promise<void> {
   const ticket = generation
-  const pending: SkillReturn = { router, surface, origin: router.currentRoute.value.fullPath, detail: `/skills/${encodeURIComponent(id)}`, explicit: false }
+  const pending: SkillReturn = { router, surface, origin: router.currentRoute.value.fullPath, detail: `/skills/${encodeURIComponent(id)}`, explicit: false,
+    restore: surface === 'page' || modalOpen.value }
   skillReturn = pending
   try {
     const failure = await router.push(pending.detail)
@@ -296,7 +306,7 @@ export function installSkillAtlasRefresh(router: Router): () => void {
       if (skillReturn?.router === router && to.fullPath !== skillReturn.detail) {
         const pending = skillReturn
         skillReturn = null
-        if (from.fullPath === pending.detail && to.fullPath === pending.origin && (back || pending.explicit)) {
+        if (pending.restore && from.fullPath === pending.detail && to.fullPath === pending.origin && (back || pending.explicit)) {
           if (pending.surface === 'modal') modalOpen.value = true
           else skillsTab.value = 'graph'
         }
@@ -335,7 +345,7 @@ export function useSkillAtlas() {
   return {
     model: readonly(model), phase: readonly(phase), error: readonly(error), refreshing: readonly(refreshing), isLoading: readonly(isLoading),
     pageView: readonly(pageView), modalView: readonly(modalView), skillsTab: readonly(skillsTab), modalOpen: readonly(modalOpen), feedback: readonly(feedback),
-    webGraph, webPositions, setWebPositions, resetWebPositions,
+    webGraph, webPositions, setWebPositions, resetWebPositions, sidebarWebCamera: readonly(sidebarWebCamera), setSidebarWebCamera,
     ensureLoaded, refresh, openSkill, returnToAtlas, activateSurface, updateView, resetView, setSkillsTab, setModalOpen, feedbackFor, acknowledgeFeedback, reset: clearProfileState,
   }
 }

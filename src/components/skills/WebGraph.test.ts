@@ -304,6 +304,23 @@ describe('Web graph', () => {
     expect(wrapper.emitted('update:camera')).toHaveLength(1)
   })
 
+  it('in compact form leaves out a lit name that would overlap one already shown, the hovered and selected first, but never with Names on', async () => {
+    const names = (wrapper: VueWrapper) => wrapper.findAll('.web-name').map(item => item.text()).sort()
+    // Bridges sits close enough to Algebra that their names would collide.
+    const crowded = new Map([...positions, ['b', { x: 20, y: 0 }]])
+    const wrapper = setup({ compact: true, positions: crowded, selectedId: 'a' })
+    expect(names(wrapper)).toEqual(['Algebra', 'Data'])
+    await dot(wrapper, BRIDGES).trigger('pointerenter')
+    expect(names(wrapper)).toEqual(['Bridges', 'Calculus', 'Data'])
+    await dot(wrapper, BRIDGES).trigger('pointerleave')
+    expect(names(wrapper)).toEqual(['Algebra', 'Data'])
+    await wrapper.setProps({ names: true })
+    expect(names(wrapper)).toEqual(['Algebra', 'Bridges', 'Calculus', 'Data', 'Essays'])
+    // The full graph never leaves a lit name out.
+    await wrapper.setProps({ names: false, compact: false })
+    expect(names(wrapper)).toEqual(['Algebra', 'Bridges', 'Data'])
+  })
+
   it('fades dots outside a search or field match, and lights an owner-given neighbourhood in place of the selection', async () => {
     const wrapper = setup({ matchIds: new Set(['a', 'b']) })
     expect(faded(wrapper)).toEqual(['c', 'd', 'e'])

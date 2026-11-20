@@ -201,7 +201,7 @@ it('keeps Ready learning accessible, updates the skill filter on route reuse and
   await click('My Graph')
   await click('Detailed')
   await wrapper!.get('input[type="search"]').setValue('Sorting Algorithms')
-  await click('Sorting Algorithms, not yet earned, Ready, learning-outcome Bloom level 3 Apply')
+  await click('Sorting Algorithms, not yet earned, Ready, learning-outcome Bloom level 3 Apply', document.querySelector('[aria-label="Full-label skill list"]')!)
   await click('Find learning opportunities')
   expect(wrapper!.text()).toContain('Learning for Sorting Algorithms')
   expect(wrapper!.findAll('a.cc-grid').map(course => course.text())).toEqual([expect.stringContaining('Practising sorting algorithms')])
