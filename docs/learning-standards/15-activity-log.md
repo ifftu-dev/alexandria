@@ -32,3 +32,8 @@ Proposed doc edits (not made):
 - `crates/alexandria-verify/README.md` and `tests/vectors/README.md`: list the record export format and its vectors.
 - `docs/desktop-ui-validation.md`: the `activity-log` harness screen.
 - `GLOSSARY.md`: "signed export" as the activity log's export with a detached learner signature.
+
+### Review (2026-11-21)
+
+- Send failures are wired in: a new `record_send_failures` command (`commands/record_destinations.rs`, over `outbox::failures`) is read with the log; each refused record says so through the row's `#status` slot and a "Sending problems" panel counts them (placeholder comment removed). Gap: the row does not name the recipient (only `recipient_id` is known there).
+- Size units come from catalogue strings (`dashboard.activityLog.size.bytes|kilobytes|megabytes`).
