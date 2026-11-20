@@ -135,6 +135,12 @@ const PENDING_TRANSLATION = [
   // answers were held, the role form's custody line and a request that needs
   // issuer custody. English-only pending the next translation pass.
   'credentials.detail.custody',
+  // Who computed the score and the level the issuer verified (assessment
+  // hardening review fixes, story 2). English-only pending the next
+  // translation pass.
+  'credentials.detail.gradedBy',
+  'credentials.detail.issuerLevelLabel',
+  'credentials.detail.assuranceLevel.',
   'dashboard.sponsor.roleModal.custodyDevice',
   'organisations.requests.assessment.policy.custodyIssuer',
   // Not-found page for stale deep links, added when retired route redirects
