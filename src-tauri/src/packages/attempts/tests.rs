@@ -827,6 +827,29 @@ async fn the_table_of_contents_lists_every_lesson_in_order_with_what_it_reported
 }
 
 #[tokio::test]
+async fn launching_shown_only_content_hands_the_player_the_progress_it_completed() {
+    let learner = Learner::new().await;
+    learner.add_package("el_pkg", "com.example.induction").await;
+    let attempt = open(&learner.db, ENROLLMENT, "el_pkg").await.expect("open");
+
+    let lesson = initialise(&learner.db, &learner.key, &attempt.id, "welcome")
+        .await
+        .expect("launch a lesson");
+    assert!(
+        lesson.progress.is_none(),
+        "a lesson reports through its commits"
+    );
+
+    let handout = initialise(&learner.db, &learner.key, &attempt.id, "handout")
+        .await
+        .expect("open the handout");
+    let progress = handout.progress.expect("the handout's launch completed it");
+    assert!(!progress.package_completed, "two lessons are still open");
+    assert_eq!(progress.element_progress.element_id, "el_pkg");
+    assert_eq!(progress.element_progress.status, "in_progress");
+}
+
+#[tokio::test]
 async fn the_table_of_contents_of_an_unknown_attempt_is_refused() {
     let learner = Learner::new().await;
     learner.add_package("el_pkg", "com.example.induction").await;

@@ -366,6 +366,8 @@ export interface PackageLaunchInit {
   time_limit_action: string | null
   /** Hand to the run-time library's `loadFromJSON` before the lesson loads. */
   runtime: { cmi: Record<string, unknown> }
+  /** Set when the launch itself completed the activity (shown-only content). */
+  progress: PackageAttemptProgress | null
 }
 
 /** One coalesced commit: the whole run-time state of one activity. */

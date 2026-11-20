@@ -54,7 +54,7 @@ pub struct PackageAttempt {
 
 /// What the wrapper needs before one lesson starts: the values only the host
 /// knows, and the run-time data to load before the lesson initialises.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageLaunchInit {
     pub attempt_id: String,
     pub activity_id: String,
@@ -76,6 +76,11 @@ pub struct PackageLaunchInit {
     /// lesson starts: the stored state with the session values removed and
     /// every host-supplied value above filled in, in the standard's shape.
     pub runtime: serde_json::Value,
+    /// Set when launching completed the activity (shown-only content
+    /// reports nothing, so its launch is what completes it): the attempt and
+    /// element progress after that.
+    #[serde(default)]
+    pub progress: Option<PackageAttemptProgress>,
 }
 
 /// One coalesced commit from the wrapper: the whole run-time state of one

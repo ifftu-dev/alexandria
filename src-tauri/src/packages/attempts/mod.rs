@@ -184,6 +184,7 @@ pub async fn initialise(
             .ok_or_else(|| AttemptError::NotFound(format!("activity {activity_id}")))?;
 
         let stored = rows::finish_open_session(conn, &attempt.id, &activity_id)?;
+        let mut rolled_up = None;
         if progress::completes_on_launch(launch) && attempt.status != PackageAttemptStatus::Closed {
             // Shown-only content reports nothing: launching it completes it.
             rows::put_activity(
@@ -198,7 +199,7 @@ pub async fn initialise(
                     session_seconds: 0.0,
                 },
             )?;
-            roll_up(db, &attempt, &package)?;
+            rolled_up = Some(roll_up(db, &attempt, &package)?);
         }
         let standard = package.standard;
         let entry = progress::entry(standard, stored.as_ref().map(|s| &s.runtime));
@@ -227,6 +228,7 @@ pub async fn initialise(
             max_time_allowed: launch.max_time_allowed.clone(),
             time_limit_action: launch.time_limit_action.clone(),
             runtime,
+            progress: rolled_up,
         })
     })
     .await
