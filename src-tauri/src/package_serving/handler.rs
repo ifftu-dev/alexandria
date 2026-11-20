@@ -79,6 +79,7 @@ const SCORM12_JS: &[u8] = include_bytes!("../../resources/scorm-again/scorm12.mi
 const SCORM2004_JS: &[u8] = include_bytes!("../../resources/scorm-again/scorm2004.min.js");
 const WRAPPER_HTML: &[u8] = include_bytes!("wrapper.html");
 const WRAPPER_JS: &[u8] = include_bytes!("wrapper.js");
+const RETURNED_HTML: &[u8] = include_bytes!("returned.html");
 
 /// The app's own files under every launch prefix, at
 /// `<prefix>/_alexandria/<name>`. The wrapper is the player's page at the
@@ -90,6 +91,8 @@ const RESERVED_FILES: &[(&str, &[u8])] = &[
     ("wrapper.js", WRAPPER_JS),
     ("scorm12.min.js", SCORM12_JS),
     ("scorm2004.min.js", SCORM2004_JS),
+    // A cmi5 unit's `returnURL`: tells the player the unit exited.
+    ("returned.html", RETURNED_HTML),
 ];
 
 /// Answers one request for package content.
@@ -129,10 +132,35 @@ pub async fn serve(
             .and_then(|value| value.to_str().ok());
         serve_file(&launch, prefix, &path, range, limits).await
     };
+    if let Some(port) = launch.endpoint_port {
+        admit_endpoint(&mut response, port);
+    }
     if head_only {
         response.body_mut().clear();
     }
     response
+}
+
+/// Lets the content of a launch with an open cmi5 session connect to that
+/// session's loopback endpoint: the literal address and port, nothing wider.
+fn admit_endpoint(response: &mut Response<Vec<u8>>, port: u16) {
+    let Some(policy) = response
+        .headers()
+        .get("Content-Security-Policy")
+        .and_then(|value| value.to_str().ok())
+    else {
+        return;
+    };
+    let admitted = policy.replacen(
+        "connect-src 'self';",
+        &format!("connect-src 'self' http://127.0.0.1:{port};"),
+        1,
+    );
+    if let Ok(value) = HeaderValue::from_str(&admitted) {
+        response
+            .headers_mut()
+            .insert("Content-Security-Policy", value);
+    }
 }
 
 /// The name under the reserved segment, if the path is in it.

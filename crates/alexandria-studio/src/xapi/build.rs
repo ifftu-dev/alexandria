@@ -75,6 +75,25 @@ pub enum Action {
     Voided {
         target_local_id: String,
     },
+    /// A cmi5 session ended without the unit terminating it; the outcome
+    /// carries the session's length.
+    Abandoned {
+        target: Target,
+        outcome: Outcome,
+    },
+    /// Every unit of a cmi5 block or course met its moveOn criteria.
+    Satisfied {
+        target: Target,
+        scope: Satisfiable,
+    },
+}
+
+/// What a cmi5 `satisfied` record is about; it sets the object's type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Satisfiable {
+    Block,
+    Course,
 }
 
 /// An activity and, optionally, its display name.
@@ -219,6 +238,9 @@ pub struct Outcome {
 pub enum Profile {
     /// The xAPI SCORM profile: every statement carries its category activity.
     Scorm,
+    /// cmi5: every statement carries the cmi5 category activity, and one
+    /// whose result says success or completion the moveOn category too.
+    Cmi5,
 }
 
 impl Profile {
@@ -230,6 +252,10 @@ impl Profile {
                     activity_type: Some("http://adlnet.gov/expapi/activities/profile".into()),
                     ..Definition::default()
                 }),
+            },
+            Self::Cmi5 => Activity {
+                id: super::cmi5::CATEGORY_CMI5.into(),
+                definition: None,
             },
         }
     }
@@ -358,6 +384,8 @@ impl Action {
             Self::Scored { .. } => Verb::Scored,
             Self::Responded { .. } => Verb::Responded,
             Self::Voided { .. } => Verb::Voided,
+            Self::Abandoned { .. } => Verb::Abandoned,
+            Self::Satisfied { .. } => Verb::Satisfied,
         }
     }
 }
@@ -424,6 +452,20 @@ pub fn build_statement(
             let (activity, definition) = object_of(action, options.names)?;
             let result = result_of(action)?;
             let mut context = context_of(&activity, event.profile)?;
+            if event.profile == Some(Profile::Cmi5)
+                && result
+                    .as_ref()
+                    .is_some_and(|r| r.success.is_some() || r.completion.is_some())
+            {
+                context
+                    .context_activities
+                    .get_or_insert_with(ContextActivities::default)
+                    .category
+                    .push(ContextActivity::Activity(Activity {
+                        id: super::cmi5::CATEGORY_MOVEON.into(),
+                        definition: None,
+                    }));
+            }
             context.registration = match event.registration.as_deref() {
                 Some("") => {
                     return Err(StatementError::InvalidIdentifier(
@@ -481,7 +523,20 @@ fn object_of(action: &Action, names: Names) -> Result<(ActivityRef, Definition),
         | Action::Completed { target, .. }
         | Action::Passed { target, .. }
         | Action::Failed { target, .. }
-        | Action::Scored { target, .. } => target,
+        | Action::Scored { target, .. }
+        | Action::Abandoned { target, .. } => target,
+        Action::Satisfied { target, scope } => {
+            let activity_type = match scope {
+                Satisfiable::Block => super::cmi5::ACTIVITY_TYPE_BLOCK,
+                Satisfiable::Course => super::cmi5::ACTIVITY_TYPE_COURSE,
+            };
+            let definition = Definition {
+                activity_type: Some(activity_type.into()),
+                name: keep(&target.name),
+                ..Definition::default()
+            };
+            return Ok((target.activity.clone(), definition));
+        }
         Action::Responded { interaction, .. } => {
             if interaction.activity.level()? != Level::Interaction {
                 return Err(StatementError::InvalidActivity(
@@ -539,8 +594,19 @@ fn object_of(action: &Action, names: Names) -> Result<(ActivityRef, Definition),
 fn result_of(action: &Action) -> Result<Option<StatementResult>, StatementError> {
     let conflict = |m: &str| Err(StatementError::InvalidResult(m.into()));
     let (outcome, success, completion) = match action {
-        Action::Registered { .. } | Action::Launched { .. } | Action::Voided { .. } => {
-            return Ok(None)
+        Action::Registered { .. }
+        | Action::Launched { .. }
+        | Action::Voided { .. }
+        | Action::Satisfied { .. } => return Ok(None),
+        Action::Abandoned { outcome, .. } => {
+            if outcome.success.is_some()
+                || outcome.completion.is_some()
+                || outcome.score.is_some()
+                || outcome.response.is_some()
+            {
+                return conflict("an abandoned record carries only the session's length");
+            }
+            (outcome, None, None)
         }
         Action::Progressed { percent, .. } => {
             if *percent > 100 {

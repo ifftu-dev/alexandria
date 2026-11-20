@@ -15,6 +15,9 @@ pub(super) struct OpenLaunch {
     pub package_hash: String,
     /// The package's extracted files, canonical.
     pub root: PathBuf,
+    /// The port of the cmi5 session endpoint this launch's content may
+    /// connect to, while a session is open.
+    pub endpoint_port: Option<u16>,
 }
 
 /// The launches open in this profile. Held in the app state, read by the
@@ -51,6 +54,7 @@ impl Launches {
                 OpenLaunch {
                     package_hash: package_hash.to_string(),
                     root,
+                    endpoint_port: None,
                 },
             );
         Ok(OpenedPackageLaunch {
@@ -89,6 +93,30 @@ impl Launches {
             .expect("launch registry lock poisoned")
             .values()
             .any(|launch| launch.package_hash == package_hash)
+    }
+
+    /// Admits (`Some`) or withdraws (`None`) a cmi5 session endpoint on the
+    /// loopback address for this launch's content: its responses' policy
+    /// lets the content connect to `http://127.0.0.1:<port>` and nowhere
+    /// else outside the package. Returns whether the launch is open.
+    pub fn set_endpoint_port(&self, prefix: &str, port: Option<u16>) -> bool {
+        match self
+            .open
+            .lock()
+            .expect("launch registry lock poisoned")
+            .get_mut(prefix)
+        {
+            Some(launch) => {
+                launch.endpoint_port = port;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The package an open launch serves.
+    pub fn package_of(&self, prefix: &str) -> Option<String> {
+        self.get(prefix).map(|launch| launch.package_hash)
     }
 
     pub(super) fn get(&self, prefix: &str) -> Option<OpenLaunch> {

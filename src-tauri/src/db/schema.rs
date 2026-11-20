@@ -175,6 +175,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // credentials they issued, and the learner-readable access log of every
     // send. See `crate::record_sending`.
     (47, "record_sending", include_str!("record_sending.sql")),
+    // cmi5 sessions: each launch of an assignable unit, the statements its
+    // on-device endpoint accepted or the launching system wrote, and the
+    // xAPI documents cmi5 needs. See `crate::packages::attempts::cmi5`.
+    (48, "cmi5_sessions", include_str!("cmi5_sessions.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

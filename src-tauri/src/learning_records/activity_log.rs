@@ -79,7 +79,11 @@ fn detail(action: &Action) -> (Option<u8>, Option<f64>) {
         | Action::Responded { outcome, .. } => {
             (None, outcome.score.as_ref().and_then(|s| s.scaled))
         }
-        Action::Registered { .. } | Action::Launched { .. } | Action::Voided { .. } => (None, None),
+        Action::Registered { .. }
+        | Action::Launched { .. }
+        | Action::Voided { .. }
+        | Action::Abandoned { .. }
+        | Action::Satisfied { .. } => (None, None),
     }
 }
 

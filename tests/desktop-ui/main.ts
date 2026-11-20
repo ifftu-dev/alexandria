@@ -278,6 +278,30 @@ if (screen === 'motion') {
     control: backend.control,
     called: (command: string) => backend.called(command),
   } })
+} else if (screen === 'cmi5-player') {
+  // The real course player over the cmi5 fixture package, with a fake host
+  // bridge and a fake session endpoint the spec routes the loopback address to.
+  const { cmi5Backend } = await import('./cmi5Backend')
+  const backend = cmi5Backend()
+  Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
+    invoke: (command: string, args?: Record<string, unknown>) => backend.invoke(command, args),
+    transformCallback: () => 1, unregisterCallback: () => {},
+  } })
+  const { useProfiles } = await import('@/composables/useProfiles')
+  await useProfiles().initialize()
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/learn/:id', component: (await import('@/pages/learn/Player.vue')).default },
+    { path: '/:pathMatch(.*)*', component: { render: () => h('p', 'Elsewhere') } },
+  ] })
+  await router.push('/learn/course-forklift')
+  createApp({ render: () => h('div', { class: 'flex h-dvh flex-col' }, [h(RouterView)]) }).use(i18n).use(router).mount('#app')
+  Object.assign(window, { cmi5Fixture: {
+    endpoint: backend.endpoint,
+    statements: backend.statements,
+    called: backend.called,
+    navigate: (path: string) => router.push(path),
+  } })
 } else if (screen === 'skill-atlas') {
   // Keep the props-only fixture free of unrelated page lifecycle and global CSS.
   const { default: SkillAtlasFixture } = await import('./SkillAtlasFixture.vue')
