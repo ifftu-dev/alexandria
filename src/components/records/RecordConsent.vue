@@ -10,12 +10,13 @@
  * learner may approve fewer courses than were offered.
  *
  * Shared by every way of sending: record destinations use it as is; a record
- * share fills the `undo` slot with what revoking a share does.
+ * share fills the `undo` slot with what revoking a share does, and may offer
+ * the account the organisation proposed as a third identifier.
  */
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AppButton } from '@/components/ui'
-import type { CourseChoice, IdentifierChoice, RecordConsentDecision } from '@/types'
+import type { CourseChoice, IdentifierChoice, RecordAccount, RecordConsentDecision } from '@/types'
 
 const props = withDefaults(
   defineProps<{
@@ -31,12 +32,21 @@ const props = withDefaults(
     pairwiseActor: string
     /** The account name records carry if the learner uses their own DID. */
     realDidActor: string
+    /** An account the recipient proposed (a record share request), offered as a choice. */
+    proposedAccount?: RecordAccount | null
     /** The recipient is on this device or a private network. */
     privateAddress?: boolean
     busy?: boolean
     error?: string
   }>(),
-  { initialCourseIds: () => [], interactionsOffered: true, privateAddress: false, busy: false, error: '' },
+  {
+    initialCourseIds: () => [],
+    interactionsOffered: true,
+    proposedAccount: null,
+    privateAddress: false,
+    busy: false,
+    error: '',
+  },
 )
 
 const emit = defineEmits<{ approve: [decision: RecordConsentDecision]; cancel: [] }>()
@@ -48,7 +58,11 @@ const includeInteractions = ref(false)
 const identifier = ref<IdentifierChoice>('pairwise')
 const confirmPrivate = ref(false)
 
-const actor = computed(() => (identifier.value === 'real_did' ? props.realDidActor : props.pairwiseActor))
+const actor = computed(() => {
+  if (identifier.value === 'real_did') return props.realDidActor
+  if (identifier.value === 'proposed' && props.proposedAccount) return props.proposedAccount.name
+  return props.pairwiseActor
+})
 const canApprove = computed(
   () => selected.value.length > 0 && (!props.privateAddress || confirmPrivate.value) && !props.busy,
 )
@@ -116,6 +130,15 @@ function approve() {
           <span class="block">{{ t('organisations.records.consent.realDid') }}</span>
           <span v-if="identifier === 'real_did'" class="block text-xs text-muted-foreground">
             {{ t('organisations.records.consent.realDidNote') }}
+          </span>
+        </span>
+      </label>
+      <label v-if="proposedAccount" class="flex items-start gap-2 text-sm text-foreground">
+        <input v-model="identifier" type="radio" value="proposed" class="mt-1" data-testid="consent-identifier-proposed" />
+        <span>
+          <span class="block">{{ t('organisations.records.consent.proposed', { recipient }) }}</span>
+          <span class="block text-xs text-muted-foreground">
+            {{ t('organisations.records.consent.proposedNote', { recipient, homePage: proposedAccount.home_page }) }}
           </span>
         </span>
       </label>

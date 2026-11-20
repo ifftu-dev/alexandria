@@ -31,7 +31,10 @@ pub mod destinations;
 pub mod outbox;
 pub mod recipients;
 mod send;
+pub mod shares;
 
+#[cfg(test)]
+mod share_tests;
 #[cfg(test)]
 mod tests;
 #[cfg(test)]

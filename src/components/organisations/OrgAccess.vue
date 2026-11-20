@@ -8,6 +8,11 @@
  * permission flipped on screen but not on the server would tell somebody they
  * had withdrawn consent when they had not.
  *
+ * A grant that shares learning records (a record share) lists the courses,
+ * whether individual responses go too and the identifier the records carry,
+ * and can be narrowed: fewer courses, or responses no longer sent. Widening
+ * needs a new request. "Stop sharing" ends record sends too.
+ *
  * Below the grants sit the two older views of the same question — which
  * institutions see the learner by name, and who has looked — because "who
  * can see me" is one question to the person asking it. Beside who has looked
@@ -58,6 +63,9 @@ const syncing = ref(false)
 const syncReport = ref<SyncReport | null>(null)
 const stopping = ref<GrantView | null>(null)
 const sendLog = ref<InstanceType<typeof RecordSendLog> | null>(null)
+/** Per grant: the courses and responses a narrowing would keep. */
+const keptCourses = ref<Record<string, string[]>>({})
+const keptInteractions = ref<Record<string, boolean>>({})
 let generation = 0
 
 const active = computed(() => grants.value.filter((g) => g.revokedAt === null))
@@ -135,6 +143,53 @@ async function setSync(g: GrantView, sync: boolean) {
   grantError.value = { ...grantError.value, [g.grantId]: '' }
   try {
     replace(await invoke<GrantView>('org_grant_set_sync', { grantId: g.grantId, sync }))
+  } catch (e) {
+    grantError.value = { ...grantError.value, [g.grantId]: String(e) }
+  } finally {
+    changing.value = ''
+  }
+}
+
+const kept = (g: GrantView): string[] => keptCourses.value[g.grantId] ?? g.records?.courses.map((c) => c.id) ?? []
+const keepsInteractions = (g: GrantView): boolean =>
+  keptInteractions.value[g.grantId] ?? g.records?.include_interactions ?? false
+
+function toggleKept(g: GrantView, courseId: string, on: boolean) {
+  const current = kept(g)
+  keptCourses.value = {
+    ...keptCourses.value,
+    [g.grantId]: on ? [...new Set([...current, courseId])] : current.filter((c) => c !== courseId),
+  }
+}
+
+function setKeptInteractions(g: GrantView, on: boolean) {
+  keptInteractions.value = { ...keptInteractions.value, [g.grantId]: on }
+}
+
+const narrows = (g: GrantView): boolean =>
+  !!g.records &&
+  kept(g).length > 0 &&
+  (kept(g).length < g.records.courses.length || (g.records.include_interactions && !keepsInteractions(g)))
+
+/** Share records from fewer courses, or stop sending responses, under the same grant. */
+async function narrowRecords(g: GrantView) {
+  if (changing.value || !narrows(g)) return
+  changing.value = g.grantId
+  grantError.value = { ...grantError.value, [g.grantId]: '' }
+  try {
+    replace(
+      await invoke<GrantView>('org_grant_narrow_records', {
+        grantId: g.grantId,
+        courseIds: kept(g),
+        includeInteractions: keepsInteractions(g),
+      }),
+    )
+    const courses = { ...keptCourses.value }
+    const responses = { ...keptInteractions.value }
+    delete courses[g.grantId]
+    delete responses[g.grantId]
+    keptCourses.value = courses
+    keptInteractions.value = responses
   } catch (e) {
     grantError.value = { ...grantError.value, [g.grantId]: String(e) }
   } finally {
@@ -238,6 +293,56 @@ onUnmounted(() => { generation++ })
           {{ s.name }}<span v-if="s.bloomLevel !== null" class="ms-1 opacity-70">{{ bloomLabel(s.bloomLevel) }}</span>
         </li>
       </ul>
+      <div v-if="g.records" class="space-y-1" data-testid="grant-records">
+        <p class="text-sm font-medium text-foreground">{{ t('organisations.records.share.heading') }}</p>
+        <p class="text-xs text-muted-foreground">
+          {{ g.records.courses.map((c) => c.title).join(', ') }}
+          <template v-if="g.records.include_interactions"> · {{ t('organisations.records.withResponses') }}</template>
+        </p>
+        <p class="break-all text-xs text-muted-foreground">
+          {{ t('organisations.records.carries', { identifier: g.records.actor_name }) }}
+        </p>
+        <p v-if="!g.records.status" class="text-xs text-muted-foreground">{{ t('organisations.records.share.stopped') }}</p>
+        <p v-else-if="g.records.status.last_error" class="text-xs text-destructive">
+          {{ t('organisations.records.status.error', { error: g.records.status.last_error }) }}
+        </p>
+        <details
+          v-if="g.records.status && (g.records.courses.length > 1 || g.records.include_interactions)"
+          data-testid="grant-records-narrow"
+        >
+          <summary class="cursor-pointer text-xs text-foreground">{{ t('organisations.records.share.narrow') }}</summary>
+          <div class="mt-2 space-y-1">
+            <label v-for="c in g.records.courses" :key="c.id" class="flex items-center gap-2 text-sm text-foreground">
+              <input
+                type="checkbox"
+                :checked="kept(g).includes(c.id)"
+                :data-testid="`narrow-course-${c.id}`"
+                @change="toggleKept(g, c.id, ($event.target as HTMLInputElement).checked)"
+              />
+              <span>{{ c.title }}</span>
+            </label>
+            <label v-if="g.records.include_interactions" class="flex items-center gap-2 text-sm text-foreground">
+              <input
+                type="checkbox"
+                :checked="keepsInteractions(g)"
+                data-testid="narrow-interactions"
+                @change="setKeptInteractions(g, ($event.target as HTMLInputElement).checked)"
+              />
+              <span>{{ t('organisations.records.consent.interactions') }}</span>
+            </label>
+            <p class="text-xs text-muted-foreground">{{ t('organisations.records.share.narrowNote') }}</p>
+            <AppButton
+              size="sm"
+              variant="outline"
+              data-testid="narrow-apply"
+              :disabled="changing === g.grantId || !narrows(g)"
+              @click="narrowRecords(g)"
+            >
+              {{ t('organisations.records.share.narrowApply') }}
+            </AppButton>
+          </div>
+        </details>
+      </div>
       <p class="text-xs text-muted-foreground">
         {{ t('organisations.access.sharedOn', { date: when(g.grantedAt) }) }}
         <template v-if="g.viewCount !== null">

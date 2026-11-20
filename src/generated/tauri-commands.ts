@@ -325,6 +325,7 @@ export const TAURI_COMMANDS = [
   "org_access_requests",
   "org_cloud",
   "org_grant",
+  "org_grant_narrow_records",
   "org_grant_revoke",
   "org_grant_set_sync",
   "org_grants",

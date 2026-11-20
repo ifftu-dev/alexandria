@@ -2,6 +2,11 @@
 //! `about` and `statements` under `/xapi/` on a loopback port, records every
 //! request, keeps the statements it accepted, and can be told to refuse, or
 //! stopped and started again on the same port to play an offline store.
+//!
+//! It also plays an organisation's hosted service for record shares:
+//! `POST /api/grants/{id}/records` takes a signed batch, checks the
+//! signature the way the service does (Ed25519 by the batch's subject over
+//! `format || 0x00 || JCS(batch)`, from the JSON alone) and keeps it.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -30,6 +35,41 @@ struct State {
     refuse: Option<(u16, String)>,
     /// Refuse (400) any statements request whose body contains this text.
     refuse_containing: Option<String>,
+    /// Signed record-share batches whose signature checked, as received.
+    batches: Vec<Value>,
+}
+
+/// Whether a signed batch's signature is its subject's, checked from the
+/// JSON alone, as the hosted service checks it.
+pub(super) fn batch_signature_checks(signed: &Value) -> bool {
+    use base64::Engine;
+    use ed25519_dalek::Verifier;
+    let batch = &signed["batch"];
+    let (Some(format), Some(subject)) = (batch["format"].as_str(), batch["subject_did"].as_str())
+    else {
+        return false;
+    };
+    let Ok(key) =
+        alexandria_verify::did::resolve_did_key(&alexandria_verify::did::Did(subject.to_string()))
+    else {
+        return false;
+    };
+    let Some(signature) = signed["signature"]
+        .as_str()
+        .and_then(|s| {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(s)
+                .ok()
+        })
+        .and_then(|b| <[u8; 64]>::try_from(b).ok())
+    else {
+        return false;
+    };
+    let mut bytes = format.as_bytes().to_vec();
+    bytes.push(0);
+    bytes.extend(serde_json_canonicalizer::to_vec(batch).unwrap());
+    key.verify(&bytes, &ed25519_dalek::Signature::from_bytes(&signature))
+        .is_ok()
 }
 
 pub(super) struct XapiStub {
@@ -69,6 +109,16 @@ impl XapiStub {
     }
 
     /// Every statement the store accepted, in arrival order.
+    /// The hosted service's base address, as a grant's directory names it.
+    pub fn base(&self) -> String {
+        format!("http://{}", self.addr)
+    }
+
+    /// Signed record-share batches the service accepted, in arrival order.
+    pub fn batches(&self) -> Vec<Value> {
+        self.state.lock().unwrap().batches.clone()
+    }
+
     pub fn accepted(&self) -> Vec<Value> {
         self.state.lock().unwrap().accepted.clone()
     }
@@ -191,6 +241,29 @@ fn respond(state: &Mutex<State>, request: StubRequest) -> (u16, String) {
             let ids: Vec<Value> = statements.iter().map(|s| s["id"].clone()).collect();
             state.accepted.extend(statements);
             (200, Value::Array(ids).to_string())
+        }
+        ("POST", path) if path.starts_with("/api/grants/") && path.ends_with("/records") => {
+            if let Some((status, body)) = state.refuse.clone() {
+                return (status, body);
+            }
+            let grant_id = &path["/api/grants/".len()..path.len() - "/records".len()];
+            let Ok(signed) = serde_json::from_str::<Value>(&request.body) else {
+                return (400, "{\"error\":\"not json\"}".into());
+            };
+            if signed["batch"]["grant_id"].as_str() != Some(grant_id) {
+                return (400, "{\"error\":\"batch is for another grant\"}".into());
+            }
+            if !batch_signature_checks(&signed) {
+                return (401, "{\"error\":\"signature\"}".into());
+            }
+            let statements = signed["batch"]["statements"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            let count = statements.len();
+            state.accepted.extend(statements);
+            state.batches.push(signed);
+            (200, serde_json::json!({ "accepted": count }).to_string())
         }
         _ => (404, "{}".into()),
     }
