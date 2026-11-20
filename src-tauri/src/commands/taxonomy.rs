@@ -512,10 +512,11 @@ pub(crate) fn skill_relations(
          ORDER BY skill_id, related_skill_id",
     )?;
     let rows = stmt.query_map([], |row| {
+        let stored: String = row.get(2)?;
         Ok(SkillGraphRelation {
             skill_id: row.get(0)?,
             related_skill_id: row.get(1)?,
-            relation_type: row.get(2)?,
+            relation_type: SkillRelationType::from_stored(&stored),
         })
     })?;
     rows.collect()
@@ -525,8 +526,28 @@ pub(crate) fn skill_relations(
 pub struct SkillGraphRelation {
     pub skill_id: String,
     pub related_skill_id: String,
-    /// `related`, `complementary` or `alternative`.
-    pub relation_type: String,
+    pub relation_type: SkillRelationType,
+}
+
+/// The kind of a non-prerequisite relation, lowercase on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SkillRelationType {
+    Related,
+    Complementary,
+    Alternative,
+}
+
+impl SkillRelationType {
+    /// The type of a stored value. Any value this build does not know reads
+    /// as `Related`, the stored default, as the frontend does.
+    pub fn from_stored(value: &str) -> Self {
+        match value {
+            "complementary" => Self::Complementary,
+            "alternative" => Self::Alternative,
+            _ => Self::Related,
+        }
+    }
 }
 
 // ============================================================================
@@ -673,23 +694,28 @@ mod tests {
         let bundled: serde_json::Value =
             serde_json::from_str(include_str!("../../../bootstrap/public_taxonomy.json"))
                 .expect("parse bundled taxonomy");
-        let mut expected: Vec<(String, String, String)> = bundled["skill_relations"]
+        let mut expected: Vec<(String, String, SkillRelationType)> = bundled["skill_relations"]
             .as_array()
             .expect("bundled relations")
             .iter()
             .map(|row| {
                 let field = |name: &str| row[name].as_str().expect(name).to_string();
+                let stored = field("relation_type");
+                assert!(
+                    ["related", "complementary", "alternative"].contains(&stored.as_str()),
+                    "unknown bundled relation type {stored}"
+                );
                 (
                     field("skill_id"),
                     field("related_skill_id"),
-                    field("relation_type"),
+                    SkillRelationType::from_stored(&stored),
                 )
             })
             .collect();
         expected.sort();
         assert!(!expected.is_empty());
 
-        let mut listed: Vec<(String, String, String)> = skill_relations(db.conn())
+        let mut listed: Vec<(String, String, SkillRelationType)> = skill_relations(db.conn())
             .expect("list relations")
             .into_iter()
             .map(|r| (r.skill_id, r.related_skill_id, r.relation_type))
@@ -697,11 +723,17 @@ mod tests {
         listed.sort();
 
         assert_eq!(listed, expected);
-        for (_, _, relation_type) in &listed {
-            assert!(
-                ["related", "complementary", "alternative"].contains(&relation_type.as_str()),
-                "unknown relation type {relation_type}"
-            );
-        }
+    }
+
+    #[test]
+    fn relation_types_are_lowercase_on_the_wire_and_unknown_reads_as_related() {
+        let wire = |value: &str| {
+            serde_json::to_value(SkillRelationType::from_stored(value)).expect("serialize")
+        };
+        assert_eq!(wire("related"), "related");
+        assert_eq!(wire("complementary"), "complementary");
+        assert_eq!(wire("alternative"), "alternative");
+        assert_eq!(wire("prerequisite-ish"), "related");
+        assert_eq!(wire(""), "related");
     }
 }
