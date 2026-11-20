@@ -122,6 +122,9 @@ pub struct AppState {
     /// Open standards package launches, read by the `package` scheme
     /// handler. Emptied when the profile stops.
     pub package_launches: Arc<package_serving::Launches>,
+    /// Open cmi5 sessions and their loopback endpoints. Every endpoint stops
+    /// when the profile stops.
+    pub cmi5_sessions: Arc<packages::attempts::cmi5::Cmi5Sessions>,
 
     // ─── per-profile resources (populated while active) ─────────────
     pub db: Arc<std::sync::Mutex<Option<Database>>>,
@@ -452,6 +455,9 @@ impl AppState {
         // Package launches belong to this profile's session; their prefixes
         // must not serve anything once it ends.
         self.package_launches.close_all();
+        // cmi5 endpoints go with them; a session left open is abandoned at
+        // the attempt's next launch.
+        self.cmi5_sessions.close_all();
 
         // Seeding can write through the shared DB/content handles. Join it
         // before either resource can be closed or repointed at another user.
@@ -790,6 +796,14 @@ pub fn run() {
                     "sentinel://display",
                     serde_json::json!({ "reason": "scale_changed" }),
                 );
+            }
+            // A suspended app's listening sockets may be reclaimed (iOS):
+            // bring every open cmi5 session's endpoint back on its port.
+            // `Suspended` also fires for a call banner or control centre, so
+            // nothing is closed there.
+            #[cfg(mobile)]
+            tauri::WindowEvent::Resumed => {
+                commands::package_cmi5::revive_endpoints(window.app_handle().clone());
             }
             _ => {}
         }
@@ -1427,6 +1441,7 @@ pub fn run() {
                 ipc_limiter: Arc::new(std::sync::Mutex::new(ratelimit::IpcRateLimiter::new())),
                 evidence_staging: Arc::new(sentinel::evidence::EvidenceStaging::new()),
                 package_launches: Arc::new(package_serving::Launches::new()),
+                cmi5_sessions: Arc::new(packages::attempts::cmi5::Cmi5Sessions::new()),
                 db,
                 db_executor,
                 keystore,
@@ -1708,6 +1723,9 @@ pub fn run() {
             commands::package_attempts::package_attempt_commit,
             commands::package_attempts::package_attempt_terminate,
             commands::package_attempts::package_attempt_activities,
+            commands::package_cmi5::package_cmi5_launch,
+            commands::package_cmi5::package_cmi5_end,
+            commands::package_cmi5::package_cmi5_focus,
             commands::learning_records::learning_records_usage,
             commands::record_destinations::record_destination_preview,
             commands::record_destinations::record_destination_add,
