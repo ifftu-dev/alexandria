@@ -37,3 +37,9 @@ Proposed doc edits, not made here:
 - `docs/learning-standards-spec.md`, Serving and isolation: pages carry the Trusted Types requirement; fetch preloads are stripped; a new frame per launch.
 - `docs/desktop-ui-validation.md`: the package harness, its mirrored headers and the `?package=` fixtures.
 - The conformance statement, when written: link the matrix.
+
+### Review (2026-11-21)
+
+- Isolation checks no longer sleep a fixed second: each waits until the hostile lesson reports its attempt (or its own frame was replaced by a refused navigation), then allows 200 ms for a navigation or window the browser let through to reach the harness. The network lesson reports done only after its worker says it tried.
+- New hostile-clear checks («a launch does not start when storage clearing fails: …») cover a failed, nonce-less, wrong-nonce and wrong-sender answer, through `openPlayer({ reservedFiles })`.
+- `openPlayer({ commitIntervalMs })` serves `wrapper.js` with a short default interval; the after-finish checks wait three intervals instead of 2.5 s.

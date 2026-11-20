@@ -95,6 +95,18 @@ describe('RecordConsent', () => {
     expect(wrapper.find('[data-testid=consent-interactions]').exists()).toBe(false)
   })
 
+  it('promises a destination that its own identifier cannot be compared with other recipients', () => {
+    const text = mountConsent({ initialCourseIds: ['c-safety'] }).text()
+    expect(text).toContain('organisations.records.consent.pairwiseNote')
+  })
+
+  it('tells a share the truth: the organisation can link its identifier to the learner', () => {
+    // Shares are signed by the learner and carry their DID beside the identifier.
+    const text = mountConsent({ initialCourseIds: ['c-safety'], share: true }).text()
+    expect(text).not.toContain('organisations.records.consent.pairwiseNote')
+    expect(text).toContain('organisations.records.share.pairwiseNote')
+  })
+
   it('cancelling sends nothing', async () => {
     const wrapper = mountConsent({ initialCourseIds: ['c-safety'] })
     await wrapper.get('[data-testid=consent-cancel]').trigger('click')

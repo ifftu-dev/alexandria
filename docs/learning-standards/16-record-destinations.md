@@ -47,3 +47,9 @@ Proposed doc edits (not made):
 - `GLOSSARY.md`: "record destination", "recipient label" and "access log (local)".
 - `src-tauri/src/AGENTS.md`: sending code lives in `record_sending/`; reuse `send_due` with a `Transport` rather than writing a second outbox driver.
 - The spec's Enterprise boundary rows are unchanged by this ticket.
+
+### Review (2026-11-21)
+
+- The send log is shared state (`useRecordSendLog`), so the destinations panel and an organisation's access page show and refresh the same rows.
+- Supervised profiles: the panel maps a host refusal starting with `guardian_approval_required` to `organisations.records.guardianRequired` (a guardian decides; nothing was added). Gap: no in-app request-approval flow on the frontend; it follows whatever the host side adds.
+- Share consent copy: `RecordConsent` takes `share`; for a share the pairwise note no longer promises recipients cannot link the identifier (shares carry the learner's DID and are signed with their key). The destination promise is unchanged. The owner decision on shares is recorded with ticket 17.

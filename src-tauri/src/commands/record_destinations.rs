@@ -8,6 +8,7 @@ use crate::domain::record_sending::{
     DestinationPreview, NewDestinationRequest, RecordAccessEntry, RecordDestination, RemovalReport,
 };
 use crate::profile::scope::ProfileState as State;
+use crate::record_sending::outbox::{self, SendFailure};
 use crate::record_sending::{access_log, destinations, LeasedDb};
 use crate::AppState;
 
@@ -94,6 +95,20 @@ pub async fn record_access_log(
             state.profile_lease(),
             "records.access-log.list",
             |db| access_log::list(db.conn()).map_err(|e| e.to_string()),
+        )
+        .await
+}
+
+/// Records a recipient refused at their last try, for the activity log.
+#[tauri::command]
+pub async fn record_send_failures(state: State<'_, AppState>) -> Result<Vec<SendFailure>, String> {
+    state
+        .db_executor
+        .execute(
+            crate::db::executor::DatabaseWorkload::Learner,
+            state.profile_lease(),
+            "records.send-failures.list",
+            |db| outbox::failures(db.conn()).map_err(|e| e.to_string()),
         )
         .await
 }

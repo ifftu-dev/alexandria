@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import type { Page } from '@playwright/test'
+import { handlerConstant } from './packageHarness'
 
 // Serves the package origin the fake hosts hand out (`launch-N/` under
 // `http://scorm-package.test`) from a fixture package on disk (the player
@@ -18,13 +19,6 @@ const reserved: Record<string, URL> = {
   'wrapper.js': new URL('wrapper.js', serving),
   'scorm12.min.js': new URL('../../resources/scorm-again/scorm12.min.js', serving),
   'scorm2004.min.js': new URL('../../resources/scorm-again/scorm2004.min.js', serving),
-}
-
-async function handlerConstant(name: string) {
-  const source = await readFile(new URL('handler.rs', serving), 'utf8')
-  const found = new RegExp(`const ${name}: &str = "((?:[^"\\\\]|\\\\[\\s\\S])*)";`).exec(source)
-  if (!found?.[1]) throw new Error(`${name} not found in handler.rs`)
-  return found[1].replace(/\\\n\s*/g, '')
 }
 
 const contentType = (path: string) =>

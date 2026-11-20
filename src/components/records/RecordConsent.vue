@@ -34,6 +34,13 @@ const props = withDefaults(
     realDidActor: string
     /** An account the recipient proposed (a record share request), offered as a choice. */
     proposedAccount?: RecordAccount | null
+    /**
+     * A record share with an organisation. Shares are signed with the
+     * learner's key and carry their DID, so the organisation can link the
+     * identifier made for it to the learner: the screen must not promise
+     * otherwise.
+     */
+    share?: boolean
     /** The recipient is on this device or a private network. */
     privateAddress?: boolean
     busy?: boolean
@@ -44,6 +51,7 @@ const props = withDefaults(
     interactionsOffered: true,
     proposedAccount: null,
     privateAddress: false,
+    share: false,
     busy: false,
     error: '',
   },
@@ -121,7 +129,7 @@ function approve() {
         <input v-model="identifier" type="radio" value="pairwise" class="mt-1" data-testid="consent-identifier-pairwise" />
         <span>
           <span class="block">{{ t('organisations.records.consent.pairwise') }}</span>
-          <span class="block text-xs text-muted-foreground">{{ t('organisations.records.consent.pairwiseNote') }}</span>
+          <span class="block text-xs text-muted-foreground">{{ share ? t('organisations.records.share.pairwiseNote', { recipient }) : t('organisations.records.consent.pairwiseNote') }}</span>
         </span>
       </label>
       <label class="flex items-start gap-2 text-sm text-foreground">

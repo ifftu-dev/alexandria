@@ -5,11 +5,12 @@
 
 import type { useLocalApi } from '@/composables/useLocalApi'
 import type { PackageInvoke } from './packageSession'
+import type { TauriCommand } from '@/generated/tauri-commands'
 
 type LocalInvoke = ReturnType<typeof useLocalApi>['invoke']
 
 export function previewInvoke(invoke: LocalInvoke, elementId: string): PackageInvoke {
-  return <T>(command: string, args: Record<string, unknown> = {}): Promise<T> => {
+  return <T>(command: TauriCommand, args: Record<string, unknown> = {}): Promise<T> => {
     switch (command) {
       case 'package_attempt_open': return invoke<T>('package_preview_open', { elementId })
       case 'package_attempt_fresh': return invoke<T>('package_preview_fresh', { elementId })
@@ -19,7 +20,7 @@ export function previewInvoke(invoke: LocalInvoke, elementId: string): PackageIn
       case 'package_attempt_terminate': return invoke<T>('package_preview_terminate', args)
       case 'package_attempt_sequencing': return invoke<T>('package_preview_sequencing', args)
       case 'package_attempt_sequencing_save': return invoke<T>('package_preview_sequencing_save', args)
-      default: return invoke<T>(command as Parameters<LocalInvoke>[0], args)
+      default: return invoke<T>(command, args)
     }
   }
 }

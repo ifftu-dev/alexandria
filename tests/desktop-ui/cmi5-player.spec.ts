@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { expect, test, type FrameLocator, type Page } from '@playwright/test'
+import { handlerConstant } from './packageHarness'
 
 // cmi5 at the player seam: the real course player and wrapper page, the
 // cmi5 fixture package (a block of two units and a unit that asks for its
@@ -22,13 +23,6 @@ const reserved: Record<string, URL> = {
   'returned.html': new URL('returned.html', serving),
 }
 
-async function handlerConstant(name: string) {
-  const source = await readFile(new URL('handler.rs', serving), 'utf8')
-  const found = new RegExp(`const ${name}: &str = "((?:[^"\\\\]|\\\\[\\s\\S])*)";`).exec(source)
-  if (!found?.[1]) throw new Error(`${name} not found in handler.rs`)
-  return found[1].replace(/\\\n\s*/g, '')
-}
-
 const contentType = (path: string) =>
   path.endsWith('.html') ? 'text/html' : path.endsWith('.js') ? 'text/javascript' : 'application/octet-stream'
 
@@ -44,6 +38,7 @@ interface Cmi5Fixture {
     { status: number, body: string }
   statements: { unit: string, verb: string, status: number }[]
   called: (command: string) => number
+  notEndedByPlayer: () => string[]
   navigate: (path: string) => Promise<void>
 }
 
@@ -195,4 +190,21 @@ test('a unit that asks for its own window leaves the frame a placeholder that ca
   // The walkaround's session was abandoned by the handbook's launch; the
   // handbook's own ended when the learner ended it.
   await expect.poll(() => fixture(page, f => f.called('package_cmi5_end'))).toBe(2)
+})
+
+test('picking two units in quick succession runs only the last one and ends the other', async ({ page }) => {
+  await open(page)
+  await seen(page)
+  // Both clicks land before the first unit has finished opening.
+  await page.evaluate(() => {
+    const entry = (id: string) => document.querySelector<HTMLButtonElement>(`[data-package-toc] [data-activity="${id}"]`)!
+    entry('https://example.org/cmi5/forklift/handbook').click()
+    entry('https://example.org/cmi5/forklift/check').click()
+  })
+  const check = page.locator('[data-package-toc] [data-activity="https://example.org/cmi5/forklift/check"]')
+  await expect(check).toHaveAttribute('aria-current', 'true')
+  await expect.poll(async () => (await seen(page)).moveOn).toBe('Passed')
+  await expect(page.locator('[data-package-unit-window]')).toBeHidden()
+  // Every session but the running one was ended by the player.
+  await expect.poll(() => fixture(page, f => f.notEndedByPlayer())).toEqual(['Safety check'])
 })

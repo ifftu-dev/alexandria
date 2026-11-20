@@ -29,6 +29,9 @@ async function answers(frame: Frame, calls: Call[]): Promise<string[]> {
 
 const opened = new WeakSet<Page>()
 
+/** A commit interval for checks that nothing more is written: three of them pass quickly. */
+const SHORT_COMMIT_INTERVAL_MS = 200
+
 /**
  * Opens a probe lesson before LMSInitialize: `probe` carries every value a
  * manifest can give a lesson, `plain` none. The player opens once per page.
@@ -93,6 +96,9 @@ test('API: LMSCommit and LMSFinish take only an empty argument (201)', async ({ 
 })
 
 test('API: after LMSFinish every call but the error functions fails with 301 and nothing more reaches the host', async ({ page }) => {
+  // A short commit interval, so waiting out a few of them is quick.
+  await openPlayer(page, { fixture: 'scorm12-conformance', commitIntervalMs: SHORT_COMMIT_INTERVAL_MS })
+  opened.add(page)
   const frame = await started(page)
   expect(await answers(frame, [set('cmi.core.lesson_location', 'before'), ['LMSFinish', '']])).toEqual(['true/0', 'true/0'])
   await expect.poll(async () => (await lastCommit(page))?.session_ended).toBe(true)
@@ -105,7 +111,7 @@ test('API: after LMSFinish every call but the error functions fails with 301 and
   ])).toEqual(['/301', 'false/301', 'false/301', 'false/301'])
   const [description] = await run(frame, [['LMSGetErrorString', '301']])
   expect(description?.value).toMatch(/not initiali[sz]ed/i)
-  await page.waitForTimeout(2500)
+  await page.waitForTimeout(3 * SHORT_COMMIT_INTERVAL_MS)
   expect((await commits(page)).length).toBe(writes)
 })
 

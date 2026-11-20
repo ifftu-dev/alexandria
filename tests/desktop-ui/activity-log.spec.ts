@@ -35,6 +35,16 @@ test('the log lists every record with what it is about and shows its size limit'
   await expect(limit.getByRole('progressbar')).toHaveAttribute('aria-valuemax', String(16 * 1024 * 1024))
 })
 
+test('a record a recipient refused says so beside it, and the log counts what was refused', async ({ page }) => {
+  await open(page)
+
+  await expect(rows(page).nth(0)).toContainText('Refused by a recipient after 3 tries')
+  await expect(rows(page).nth(0)).toContainText('invalid statement')
+  await expect(rows(page).nth(1)).not.toContainText('Refused')
+  await expect(page.getByRole('region', { name: 'Sending problems' })).toContainText('1 record was refused')
+  expect((await calls(page)).map(call => call.command)).toContain('record_send_failures')
+})
+
 test('export saves the statement file and its signature unchanged', async ({ page }) => {
   await open(page)
 
