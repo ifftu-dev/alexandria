@@ -156,7 +156,7 @@ const dash = computed(() => 2 * Math.PI * 20)
   <div>
     <div class="mb-6 flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 class="page-title">{{ $t('goals.index.title') }}</h1>
+        <h1 class="text-xl font-bold text-foreground">{{ $t('goals.index.title') }}</h1>
         <p class="mt-1 text-sm text-muted-foreground">
           {{ $t('goals.index.subtitle') }}
         </p>
@@ -296,12 +296,3 @@ const dash = computed(() => 2 * Math.PI * 20)
   </div>
 </template>
 
-<style scoped>
-.page-title {
-  font-family: 'Libre Baskerville', 'DM Serif Display', Georgia, serif;
-  font-size: 1.6rem;
-  font-weight: 400;
-  letter-spacing: -0.01em;
-  color: var(--app-foreground);
-}
-</style>

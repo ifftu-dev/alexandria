@@ -106,7 +106,9 @@ const calm = computed(() => notices.value.length === 0)
 .sli {
   position: fixed;
   right: 1rem;
-  bottom: 1rem;
+  /* Phones: clear the tab bar and the course player's prev/next bar, which
+     the chip and its panel otherwise cover (the panel hid "Next"). */
+  bottom: calc(7rem + var(--sab, env(safe-area-inset-bottom)));
   z-index: 40;
   max-width: 18rem;
 }

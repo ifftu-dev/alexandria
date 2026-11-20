@@ -26,7 +26,10 @@ const inReview = computed(() => review.value !== null || resetReview.value !== n
 const allVisibleSelected = computed(() => visible.value.length > 0 && visible.value.every(r => selected.value.includes(r.id)))
 watch([review, resetReview, results], async () => {
   await nextTick()
-  scrollArea.value?.scrollTo?.({ top: 0 })
+  const area = scrollArea.value
+  area?.scrollTo?.({ top: 0 })
+  // Phones scroll the whole settings page rather than this list.
+  if (area && area.scrollHeight <= area.clientHeight) area.scrollIntoView?.({ block: 'start' })
   if (inReview.value) reviewHeading.value?.focus({ preventScroll: true })
 })
 const categories = computed(() => ['All', ...new Set(catalog.value.resources.map(r => r.category))])
@@ -218,10 +221,18 @@ async function reset() {
 
 <style scoped>
 .seed-panel { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
-.seed-scroll { flex: 1; min-height: 0; overscroll-behavior: contain; padding-block: 1rem; padding-inline: 1px; }
+.seed-scroll { flex: 1; min-height: 0; overscroll-behavior: contain; padding-block: 1rem; padding-inline: 1px 0.75rem; }
 .seed-scroll > * + * { margin-top: 1.25rem; }
 .seed-footer { flex-shrink: 0; border-top: 1px solid var(--app-border); background: var(--app-background); padding-block: 0.5rem 0.75rem; }
 .seed-scroll h3:focus { box-shadow: none; }
+/* Phones: the Cloud address card above this panel leaves too little height
+   for a nested scroller (the resource list shrank to nothing), so the whole
+   settings page scrolls and the action footer sticks to the bottom. */
+@media (max-width: 767px) {
+  .seed-panel { display: block; }
+  .seed-scroll { overflow: visible; }
+  .seed-footer { position: sticky; bottom: 0; z-index: 1; }
+}
 @media (min-width: 768px) {
   .seed-filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(16rem, 1fr); align-items: center; column-gap: 1rem; }
   .seed-filters > * { margin-top: 0; }
