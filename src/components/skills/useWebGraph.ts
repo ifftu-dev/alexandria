@@ -3,7 +3,7 @@ import { motionDuration, useMotion } from '@/composables/useMotion'
 import type { AtlasModel, AtlasNode } from '@/utils/skillAtlas'
 import type { AtlasCamera } from '@/utils/skillAtlasView'
 import { atlasFieldColor } from './atlasPresentation'
-import { continueWebLayout, webDotRadius, webGraphFromAtlas, webNearestInDirection, webNearestTo, type WebDirection, type WebPoint } from './webGeometry'
+import { continueWebLayout, webDotRadius, webGraphFromAtlas, webNamePlaces, webNearestInDirection, webNearestTo, type WebDirection, type WebNamePlace, type WebPoint } from './webGeometry'
 
 // Camera and drawing constants. Positions and dot radii are layout units; the
 // camera's zoom is screen pixels per layout unit. Lines, arrowheads and names
@@ -15,6 +15,8 @@ export const WEB_MAX_ZOOM = 6
 export const WEB_NAMES_ZOOM = 2
 /** Room left around what a fitted camera shows, in pixels, in the full and the compact graph. */
 export const WEB_FIT_PADDING = 36
+/** Room left in the full graph when every shown dot carries its name: half the widest name, so names at the edge are not cut off. */
+export const WEB_NAMED_FIT_PADDING = 84
 export const WEB_COMPACT_FIT_PADDING = 14
 /** A fitted camera never frames less than this many layout units, so one dot is not blown up. */
 export const WEB_MIN_FIT_EXTENT = 160
@@ -30,6 +32,14 @@ export const WEB_DRAG_THRESHOLD = 4
 export const WEB_WHEEL_RATE = 0.002
 /** Zoom of one press of a zoom button, as a factor. */
 export const WEB_ZOOM_STEP = 1.25
+
+/** Estimated size of a name, to keep names apart: pixels per character, widest name and line height, in the full and the compact graph (match WebGraphDot's styles). */
+export const WEB_NAME_CHAR_PIXELS = 6.6
+export const WEB_COMPACT_NAME_CHAR_PIXELS = 5.5
+export const WEB_NAME_MAX_PIXELS = 160
+export const WEB_COMPACT_NAME_MAX_PIXELS = 110
+export const WEB_NAME_LINE_PIXELS = 16
+export const WEB_COMPACT_NAME_LINE_PIXELS = 13
 
 /** Length of an arrowhead, in pixels. */
 export const WEB_ARROW_PIXELS = 7
@@ -57,8 +67,10 @@ export interface WebDot {
   roving: boolean
   /** Outside the lit neighbourhood, or not matching the search or field focus. */
   faded: boolean
-  /** Its name shows under the dot. */
+  /** Its name shows beside the dot, */
   labelled: boolean
+  /** on this side, chosen so names do not overlap where there is room. */
+  namePlace: WebNamePlace
 }
 
 /** What a Web graph draws and how; the component's props, read through a getter so the composable sees changes. */
@@ -113,7 +125,7 @@ export function webFitCamera(points: Iterable<WebPoint>, width: number, height: 
  * apart. `root` is the element that holds the dots (each carries
  * `data-skill`) and takes the pointer, wheel, key and focus handlers.
  */
-export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, root: Ref<HTMLElement | undefined>) {
+export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, root: Readonly<Ref<HTMLElement | undefined>>) {
   const { reduced: systemReduced } = useMotion()
   const motionReduced = computed(() => input().reducedMotion || systemReduced.value)
   const model = computed(() => input().model)
@@ -154,7 +166,8 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
     const fit = input().fitIds
     const ids = fit && [...fit].some(id => shownSet.value.has(id)) ? [...fit].filter(id => shownSet.value.has(id)) : [...shownSet.value]
     const points = ids.flatMap(id => { const point = positions.value.get(id); return point ? [point] : [] })
-    return webFitCamera(points, size.value.width, size.value.height, input().compact ? WEB_COMPACT_FIT_PADDING : WEB_FIT_PADDING)
+    const { compact, names, narrowed } = input()
+    return webFitCamera(points, size.value.width, size.value.height, compact ? WEB_COMPACT_FIT_PADDING : names || narrowed ? WEB_NAMED_FIT_PADDING : WEB_FIT_PADDING)
   })
   /** A camera this graph moved to and has emitted, until the owner's camera changes. */
   const localCamera = shallowRef<AtlasCamera | null>(null)
@@ -224,7 +237,7 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
   const dots = computed<WebDot[]>(() => {
     const at = camera.value, { selectedId: selected, names, narrowed } = input()
     const everyName = names || narrowed || at.zoom >= WEB_NAMES_ZOOM
-    return shownNodes.value.map(node => {
+    const drawn = shownNodes.value.map((node): WebDot => {
       const id = node.skill.id
       const screen = toScreen(positions.value.get(id)!)
       const dotSize = Math.max(WEB_DOT_MIN_PIXELS, radiusOf(node) * 2 * at.zoom)
@@ -233,10 +246,32 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
         color: atlasFieldColor(model.value.fieldById.get(node.fieldId) ?? { id: node.fieldId, slot: null }),
         state: node.status === 'earned' ? 'earned' : node.readyNext ? 'ready-next' : 'ready',
         selected: id === selected, roving: id === rovingId.value, faded: faded(id),
-        labelled: everyName || namedIds.value.has(id),
+        labelled: everyName || namedIds.value.has(id), namePlace: 'below',
       }
     })
+    placeNames(drawn)
+    return drawn
   })
+  /**
+   * Chooses where each shown name on screen sits, so names in a cluster do
+   * not overlap where there is room: the selected and the hovered or focused
+   * dot first, then their neighbours, then larger dots.
+   */
+  function placeNames(drawn: WebDot[]): void {
+    const { compact } = input(), transient = transientId.value, { width, height } = size.value
+    const charPixels = compact ? WEB_COMPACT_NAME_CHAR_PIXELS : WEB_NAME_CHAR_PIXELS
+    const maxPixels = compact ? WEB_COMPACT_NAME_MAX_PIXELS : WEB_NAME_MAX_PIXELS
+    const linePixels = compact ? WEB_COMPACT_NAME_LINE_PIXELS : WEB_NAME_LINE_PIXELS
+    const rank = (dot: WebDot) => dot.selected ? 0 : dot.id === transient ? 1 : namedIds.value.has(dot.id) ? 2 : 3
+    const near = (dot: WebDot) => dot.x > -maxPixels && dot.x < width + maxPixels && dot.y > -linePixels * 2 && dot.y < height + linePixels * 2
+    const named = drawn.filter(dot => dot.labelled && near(dot))
+    if (!named.length) return
+    named.sort((a, b) => rank(a) - rank(b) || b.size - a.size || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    const places = webNamePlaces(named.map(dot => ({ id: dot.id, x: dot.x, y: dot.y, radius: dot.size / 2, height: linePixels,
+      width: Math.min(maxPixels, dot.node.skill.name.length * charPixels + 4) })),
+    drawn.filter(near).map(dot => ({ x: dot.x, y: dot.y, radius: dot.size / 2 })))
+    for (const dot of named) dot.namePlace = places.get(dot.id) ?? 'below'
+  }
 
   // Lines run from dot edge to dot edge in screen pixels, so their width and
   // arrowheads stay the same at any zoom.
@@ -437,8 +472,10 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
     const element = target instanceof Element ? target.closest<HTMLElement>('[data-skill]') : null
     return element && root.value?.contains(element) ? element.dataset.skill ?? null : null
   }
+  /** The control of a dot: the element that carries `data-skill`, or the button inside it (the explorer's node wrapper). */
   function dotElement(id: string): HTMLElement | undefined {
-    return [...root.value?.querySelectorAll<HTMLElement>('[data-skill]') ?? []].find(element => element.dataset.skill === id)
+    const element = [...root.value?.querySelectorAll<HTMLElement>('[data-skill]') ?? []].find(item => item.dataset.skill === id)
+    return element instanceof HTMLButtonElement ? element : element?.querySelector<HTMLElement>('button') ?? element
   }
   /** Puts focus on the roving dot, such as when an owner moves focus into the graph. */
   function focus(): void {
