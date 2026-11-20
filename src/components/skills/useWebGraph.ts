@@ -482,6 +482,6 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
 
   return {
     size, camera, dots, lines, graph, motionReduced, rovingId, namedIds, litIds,
-    zoomBy, panBy, wheel, dotClick, pointerDown, pointerMove, pointerUp, clickCapture, focus, focusIn, focusOut, keyDown, keyUp, hover, pressStart, pressEnd,
+    zoomBy, panBy, wheel, dotClick, pointerDown, pointerMove, pointerUp, clickCapture, focus, focusIn, focusOut, keyDown, keyUp, hover,
   }
 }

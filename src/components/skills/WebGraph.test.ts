@@ -102,6 +102,7 @@ async function pointer(target: Element, name: string, x: number, y: number, poin
   target.dispatchEvent(event)
   await nextTick()
 }
+const last = <T>(list: readonly T[]): T | undefined => list[list.length - 1]
 const dragged = (wrapper: VueWrapper) => (wrapper.emitted('drag') ?? []).map(([next]) => next as ReadonlyMap<string, WebPoint>)
 
 describe('Web graph', () => {
@@ -118,7 +119,8 @@ describe('Web graph', () => {
   it('moves a roving dot with the arrow keys, lighting its neighbourhood, and selects with Enter or Space and clears with Escape', async () => {
     const wrapper = setup()
     expect(faded(wrapper)).toEqual([])
-    dot(wrapper, ALGEBRA).element.focus()
+    const algebra = dot(wrapper, ALGEBRA).element as HTMLElement
+    algebra.focus()
     await nextTick()
     await key(wrapper, 'ArrowRight')
     expect(focusedSkill()).toBe('b')
@@ -126,7 +128,7 @@ describe('Web graph', () => {
     expect(dot(wrapper, ALGEBRA).attributes('tabindex')).toBe('-1')
     // Bridges builds on Algebra and leads to Calculus.
     expect(faded(wrapper)).toEqual(['d', 'e'])
-    expect(wrapper.emitted('active')?.at(-1)).toEqual(['b'])
+    expect(last(wrapper.emitted('active') ?? [])).toEqual(['b'])
     await key(wrapper, 'ArrowDown')
     expect(focusedSkill()).toBe('d')
     await key(wrapper, 'ArrowUp')
@@ -143,7 +145,7 @@ describe('Web graph', () => {
     document.activeElement!.dispatchEvent(escape)
     document.body.removeEventListener('keydown', outside)
     await nextTick()
-    expect(wrapper.emitted('select')?.at(-1)).toEqual([null])
+    expect(last(wrapper.emitted('select') ?? [])).toEqual([null])
     // Escape that cleared a selection stops there, so it never also closes a modal.
     expect(outside).not.toHaveBeenCalled()
     // Arrow keys never scroll or pan while the graph has focus.
@@ -220,10 +222,10 @@ describe('Web graph', () => {
     expect(wrapper.emitted('select')).toBeUndefined()
     const moves = dragged(wrapper)
     expect(moves).toHaveLength(2)
-    expect(moves.at(-1)!.get('b')).toEqual({ x: 130, y: 40 })
-    for (const id of ['a', 'c', 'd', 'e']) expect(moves.at(-1)!.get(id)).toEqual(positions.get(id))
+    expect(last(moves)!.get('b')).toEqual({ x: 130, y: 40 })
+    for (const id of ['a', 'c', 'd', 'e']) expect(last(moves)!.get(id)).toEqual(positions.get(id))
     // The owner stores the drag; the dot is drawn where it was dropped.
-    expect(wrapper.props('positions')).toEqual(moves.at(-1))
+    expect(wrapper.props('positions')).toEqual(last(moves))
     // A press without movement is a click, and selects.
     await pointer(held, 'pointerdown', 480, 250)
     await pointer(held, 'pointerup', 480, 250)
@@ -242,9 +244,9 @@ describe('Web graph', () => {
     await nextTick()
     const live = dragged(wrapper)
     expect(live.length).toBeGreaterThan(5)
-    expect(live.at(-1)!.get('b')).toEqual({ x: 200, y: 0 })
+    expect(last(live)!.get('b')).toEqual({ x: 200, y: 0 })
     // Calculus, which builds on Bridges, is pushed or pulled along.
-    expect(live.at(-1)!.get('c')).not.toEqual(positions.get('c'))
+    expect(last(live)!.get('c')).not.toEqual(positions.get('c'))
     await pointer(held, 'pointerup', 550, 210)
     vi.advanceTimersByTime(motionDurationForTest())
     await nextTick()
@@ -252,7 +254,7 @@ describe('Web graph', () => {
     vi.advanceTimersByTime(2000)
     await nextTick()
     expect(dragged(wrapper).length).toBe(settled)
-    expect(dragged(wrapper).at(-1)!.get('b')).toEqual({ x: 200, y: 0 })
+    expect(last(dragged(wrapper))!.get('b')).toEqual({ x: 200, y: 0 })
   })
 
   it('pans by dragging the background, zooms with the wheel about the pointer, and pinches on touch', async () => {
