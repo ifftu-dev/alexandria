@@ -22,7 +22,7 @@ use alexandria_studio::package::progress::{self, ActivityOutcome, HostValues};
 use rusqlite::OptionalExtension;
 use serde_json::Value;
 
-use super::attempts::{AttemptError, MAX_RUNTIME_BYTES, MAX_SEQUENCING_BYTES};
+use super::attempts::{self, AttemptError, MAX_SEQUENCING_BYTES};
 use super::PackageDb;
 use crate::domain::course_document::PACKAGE_ELEMENT_TYPE;
 use crate::domain::enrollment::ElementProgress;
@@ -333,43 +333,16 @@ pub fn commit(
     previews: &Previews,
     commit: PackageCommit,
 ) -> Result<PackageAttemptProgress, AttemptError> {
-    if !commit.runtime.get("cmi").is_some_and(|cmi| cmi.is_object()) {
-        return Err(AttemptError::InvalidCommit(
-            "run-time data must be an object with a `cmi` object".into(),
-        ));
-    }
-    let size = serde_json::to_vec(&commit.runtime)
-        .map_err(|e| AttemptError::InvalidCommit(e.to_string()))?
-        .len();
-    if size > MAX_RUNTIME_BYTES {
-        return Err(AttemptError::InvalidCommit(format!(
-            "run-time data is {size} bytes; the limit is {MAX_RUNTIME_BYTES}"
-        )));
-    }
+    attempts::checked_runtime(&commit)?;
     previews.with(&commit.attempt_id, |preview| {
-        let standard = preview.package.standard;
-        if !preview
-            .package
-            .description
-            .launchable_activities()
-            .iter()
-            .any(|activity| activity.id == commit.activity_id)
-        {
-            return Err(AttemptError::NotFound(format!(
-                "activity {}",
-                commit.activity_id
-            )));
-        }
-        let report = progress::read_report(standard, &commit.runtime);
+        attempts::launchable(&preview.package, &commit.activity_id)?;
+        let report = progress::read_report(preview.package.standard, &commit.runtime);
         let prior_total = preview
             .activities
             .get(&commit.activity_id)
             .map_or(0.0, |state| state.total_seconds);
-        let (total_seconds, session_seconds) = if commit.session_ended {
-            (prior_total + report.session_seconds, 0.0)
-        } else {
-            (prior_total, report.session_seconds)
-        };
+        let (total_seconds, session_seconds) =
+            attempts::activity_time(prior_total, report.session_seconds, commit.session_ended);
         preview.activities.insert(
             commit.activity_id.clone(),
             ActivityState {

@@ -299,11 +299,8 @@ where
     let move_on = cmi5.move_on.unwrap_or(MoveOn::NotApplicable);
     let wants_own_window = cmi5.launch_method == Some(LaunchMethod::OwnWindow);
 
-    let tcp = listener::bind(0).map_err(|e| AttemptError::Database(format!("endpoint: {e}")))?;
-    let port = tcp
-        .local_addr()
-        .map_err(|e| AttemptError::Database(format!("endpoint: {e}")))?
-        .port();
+    let tcp = listener::bind(0).map_err(AttemptError::Endpoint)?;
+    let port = tcp.local_addr().map_err(AttemptError::Endpoint)?.port();
 
     let learner_id = progress::learner_id(learner_key, &package.hash);
     let session_id = uuid::Uuid::new_v4().to_string();

@@ -105,6 +105,20 @@ pub mod organisations;
 
 pub mod discussions;
 
+/// The active profile's database as the standards modules take it
+/// ([`crate::packages::PackageDb`]): work of `workload`, under the command's
+/// profile lease.
+pub(crate) fn executor_db<'a>(
+    state: &'a State<'_, AppState>,
+    workload: DatabaseWorkload,
+) -> crate::packages::ExecutorDb<'a> {
+    crate::packages::ExecutorDb {
+        executor: &state.db_executor,
+        lease: state.profile_lease(),
+        workload,
+    }
+}
+
 /// Runs `f` on the active profile's database as learner work, under the
 /// command's profile lease, so it is refused once the profile it started
 /// for has been locked or switched. `label` names the work in the

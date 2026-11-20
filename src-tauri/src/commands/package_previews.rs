@@ -14,11 +14,7 @@ use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
 fn db<'a>(state: &'a State<'_, AppState>) -> ExecutorDb<'a> {
-    ExecutorDb {
-        executor: &state.db_executor,
-        lease: state.profile_lease(),
-        workload: DatabaseWorkload::Instructor,
-    }
+    super::executor_db(state, DatabaseWorkload::Instructor)
 }
 
 /// Opens a preview of a package element of a course the active profile wrote.

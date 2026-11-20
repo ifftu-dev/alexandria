@@ -54,6 +54,9 @@ pub enum AttemptError {
     InvalidCommit(String),
     #[error("package files: {0}")]
     Package(#[from] crate::packages::PackageError),
+    /// A cmi5 session's loopback endpoint could not be opened.
+    #[error("endpoint: {0}")]
+    Endpoint(#[source] std::io::Error),
     #[error("database: {0}")]
     Database(String),
 }
@@ -284,19 +287,7 @@ pub async fn commit(
     db: &impl PackageDb,
     commit: PackageCommit,
 ) -> Result<PackageAttemptProgress, AttemptError> {
-    if !commit.runtime.get("cmi").is_some_and(|cmi| cmi.is_object()) {
-        return Err(AttemptError::InvalidCommit(
-            "run-time data must be an object with a `cmi` object".into(),
-        ));
-    }
-    let runtime_json = serde_json::to_string(&commit.runtime)
-        .map_err(|e| AttemptError::InvalidCommit(e.to_string()))?;
-    if runtime_json.len() > MAX_RUNTIME_BYTES {
-        return Err(AttemptError::InvalidCommit(format!(
-            "run-time data is {} bytes; the limit is {MAX_RUNTIME_BYTES}",
-            runtime_json.len()
-        )));
-    }
+    let runtime_json = checked_runtime(&commit)?;
     in_transaction(db, "packages.attempt-commit", move |db| {
         let conn = db.conn();
         let attempt = open_attempt(conn, &commit.attempt_id)?;
@@ -306,11 +297,8 @@ pub async fn commit(
         let report = progress::read_report(package.standard, &commit.runtime);
         let prior_total = rows::activity(conn, &attempt.id, &commit.activity_id)?
             .map_or(0.0, |stored| stored.total_seconds);
-        let (total_seconds, session_seconds) = if commit.session_ended {
-            (prior_total + report.session_seconds, 0.0)
-        } else {
-            (prior_total, report.session_seconds)
-        };
+        let (total_seconds, session_seconds) =
+            activity_time(prior_total, report.session_seconds, commit.session_ended);
         rows::put_activity(
             conn,
             &attempt.id,
@@ -526,8 +514,45 @@ fn stored_package(conn: &rusqlite::Connection, hash: &str) -> Result<Package, At
         .ok_or_else(|| AttemptError::NotAPackage(format!("package {hash} is not stored")))
 }
 
+/// Checks a commit's run-time data as attempts and previews both take it:
+/// an object with a `cmi` object, within [`MAX_RUNTIME_BYTES`]. Returns it
+/// serialised.
+pub(crate) fn checked_runtime(commit: &PackageCommit) -> Result<String, AttemptError> {
+    if !commit.runtime.get("cmi").is_some_and(|cmi| cmi.is_object()) {
+        return Err(AttemptError::InvalidCommit(
+            "run-time data must be an object with a `cmi` object".into(),
+        ));
+    }
+    let runtime_json = serde_json::to_string(&commit.runtime)
+        .map_err(|e| AttemptError::InvalidCommit(e.to_string()))?;
+    if runtime_json.len() > MAX_RUNTIME_BYTES {
+        return Err(AttemptError::InvalidCommit(format!(
+            "run-time data is {} bytes; the limit is {MAX_RUNTIME_BYTES}",
+            runtime_json.len()
+        )));
+    }
+    Ok(runtime_json)
+}
+
+/// An activity's total and current-session seconds after a commit: a
+/// commit that ends the session adds its time to the total.
+pub(crate) fn activity_time(
+    prior_total: f64,
+    session_seconds: f64,
+    session_ended: bool,
+) -> (f64, f64) {
+    if session_ended {
+        (prior_total + session_seconds, 0.0)
+    } else {
+        (prior_total, session_seconds)
+    }
+}
+
 /// The package's launchable activity with this identifier.
-fn launchable<'a>(package: &'a Package, activity_id: &str) -> Result<&'a Activity, AttemptError> {
+pub(crate) fn launchable<'a>(
+    package: &'a Package,
+    activity_id: &str,
+) -> Result<&'a Activity, AttemptError> {
     package
         .description
         .launchable_activities()

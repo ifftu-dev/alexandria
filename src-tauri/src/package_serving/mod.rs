@@ -69,10 +69,7 @@ pub async fn open_launch(
     hash: &str,
     progress: impl FnMut(PackageExtractProgress) + Send + 'static,
 ) -> Result<OpenedPackageLaunch, PackageError> {
-    let hash = hash.to_ascii_lowercase();
-    if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(PackageError::InvalidHash(hash));
-    }
+    let hash = packages::checked_hash(hash)?;
     let _extracting = launches.lock_extraction(&hash).await;
     let extracted = packages::ensure_extracted(db, node, dirs, &hash, progress).await?;
     Ok(launches.open(&extracted.package.hash, &extracted.root)?)

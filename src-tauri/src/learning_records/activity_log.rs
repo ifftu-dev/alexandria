@@ -99,7 +99,7 @@ pub struct Export {
 #[derive(serde::Serialize)]
 #[serde(untagged)]
 enum Exported {
-    Record(alexandria_studio::xapi::Statement),
+    Record(Box<alexandria_studio::xapi::Statement>),
     Unit(serde_json::Value),
 }
 
@@ -115,7 +115,9 @@ pub fn export(conn: &Connection, key: &SigningKey) -> Result<Export, RecordError
         .iter()
         .map(|record| {
             let recipient = local_recipient(&secret, &record.learner_did)?;
-            Ok(Exported::Record(statement(record, &recipient, &options)?))
+            Ok(Exported::Record(Box::new(statement(
+                record, &recipient, &options,
+            )?)))
         })
         .collect::<Result<Vec<_>, RecordError>>()?;
     let (_, unit_count) = unit_records::usage(conn)?;

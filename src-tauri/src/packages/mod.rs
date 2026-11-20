@@ -11,7 +11,7 @@
 //! - **A draft's archive stays off the served store.** The content node
 //!   answers any request for a hash it holds, so "never served" means the
 //!   archive is not in the store: it is a file in the profile's packages
-//!   directory ([`ArchiveLocation::Draft`]) until [`publish`] moves it into
+//!   directory ([`PackageArchiveLocation::Draft`]) until [`publish`] moves it into
 //!   the store with a pin that eviction never removes.
 //! - **Extracted files are a cache.** They live under the profile's package
 //!   cache, one directory per hash, are dropped on completion or after
@@ -44,7 +44,9 @@ use crate::content_store::content::{self, ContentError};
 use crate::content_store::node::ContentNode;
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::db::Database;
-use crate::domain::package::{ArchiveLocation, OpenedPackageFile, Package, PackageExtractProgress};
+use crate::domain::package::{
+    OpenedPackageFile, Package, PackageArchiveLocation, PackageExtractProgress,
+};
 use crate::profile::manager::ProfilePaths;
 use crate::profile::scope::ProfileLease;
 
@@ -122,7 +124,7 @@ impl PackageDirs {
 
 /// Somewhere to run database work: the executor in commands, a plain
 /// database in tests.
-pub trait PackageDb: Sync {
+pub trait PackageDb: Send + Sync {
     fn run<T, F>(
         &self,
         label: &'static str,
@@ -219,7 +221,7 @@ impl PackageDb for std::sync::Mutex<Database> {
 }
 
 /// A package hash as a path component: 64 lowercase hex characters.
-fn checked_hash(hash: &str) -> Result<String, PackageError> {
+pub(crate) fn checked_hash(hash: &str) -> Result<String, PackageError> {
     let hash = hash.trim().to_ascii_lowercase();
     if hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()) {
         Ok(hash)
@@ -256,7 +258,7 @@ pub async fn import(
         title: checked.description.title.clone(),
         description: checked.description,
         archive_bytes: checked.size,
-        location: ArchiveLocation::Draft,
+        location: PackageArchiveLocation::Draft,
         imported_at: crate::clock::now_rfc3339(),
         last_opened_at: None,
     };
@@ -264,7 +266,7 @@ pub async fn import(
         rows::insert(db.conn(), &package)
     })
     .await?;
-    if stored.location == ArchiveLocation::Store {
+    if stored.location == PackageArchiveLocation::Store {
         // The served store already holds these bytes; one copy is enough.
         archive::discard_draft(&dirs.archives, &stored.hash)?;
     }
@@ -338,8 +340,10 @@ pub async fn ensure_extracted(
     let root = cache::extracted_path(&dirs.cache, &hash);
     if !root.is_dir() {
         let (archive, exported) = match package.location {
-            ArchiveLocation::Draft => (archive::draft_path(&dirs.archives, &hash), false),
-            ArchiveLocation::Store => (export_from_store(node, &dirs.cache, &hash).await?, true),
+            PackageArchiveLocation::Draft => (archive::draft_path(&dirs.archives, &hash), false),
+            PackageArchiveLocation::Store => {
+                (export_from_store(node, &dirs.cache, &hash).await?, true)
+            }
         };
         let cache_dir = dirs.cache.clone();
         let for_report = hash.clone();
@@ -439,7 +443,7 @@ pub async fn publish(
 ) -> Result<Package, PackageError> {
     let hash = checked_hash(hash)?;
     let package = required(db, &hash).await?;
-    if package.location == ArchiveLocation::Store {
+    if package.location == PackageArchiveLocation::Store {
         return Ok(package);
     }
 
@@ -509,7 +513,7 @@ pub async fn register_stored(
         title: checked.description.title.clone(),
         description: checked.description,
         archive_bytes: checked.size,
-        location: ArchiveLocation::Store,
+        location: PackageArchiveLocation::Store,
         imported_at: crate::clock::now_rfc3339(),
         last_opened_at: None,
     };
@@ -557,7 +561,7 @@ pub async fn get_or_receive(
     let hash = checked_hash(hash)?;
     let existing = get(db, &hash).await?;
     if let Some(package) = &existing {
-        let evicted = package.location == ArchiveLocation::Store
+        let evicted = package.location == PackageArchiveLocation::Store
             && !dirs.cache.join(&hash).is_dir()
             && !in_store(node, &hash).await?;
         if !evicted {

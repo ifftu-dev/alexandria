@@ -24,7 +24,7 @@ use crate::packages::PackageDb;
 pub(super) const MAX_BODY_BYTES: usize = 1 << 20;
 
 /// The versions the endpoint answers for, newest first.
-const VERSIONS: [&str; 2] = ["2.0.0", "1.0.3"];
+use alexandria_studio::xapi::XAPI_VERSIONS as VERSIONS;
 
 fn base(status: StatusCode) -> tauri::http::response::Builder {
     Response::builder()

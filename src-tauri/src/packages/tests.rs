@@ -13,7 +13,7 @@ use super::*;
 use crate::content_store::content;
 use crate::content_store::node::ContentNode;
 use crate::db::Database;
-use crate::domain::package::ArchiveLocation;
+use crate::domain::package::PackageArchiveLocation;
 
 pub(crate) mod fixture {
     //! A stored-only zip writer, enough for well-formed test packages.
@@ -188,7 +188,7 @@ async fn an_imported_package_is_kept_under_its_own_hash_and_described() {
     assert_eq!(package.edition, None);
     assert_eq!(package.title, "Warehouse induction");
     assert_eq!(package.archive_bytes, bytes.len() as u64);
-    assert_eq!(package.location, ArchiveLocation::Draft);
+    assert_eq!(package.location, PackageArchiveLocation::Draft);
 
     let found = get(&profile.db, &package.hash)
         .await
@@ -385,7 +385,7 @@ async fn publishing_moves_the_archive_into_the_served_store_where_extraction_fin
         .await
         .expect("publish");
 
-    assert_eq!(published.location, ArchiveLocation::Store);
+    assert_eq!(published.location, PackageArchiveLocation::Store);
     assert_eq!(
         content::get_bytes(&profile.node, &package.hash)
             .await
@@ -435,7 +435,7 @@ async fn publishing_moves_the_archive_into_the_served_store_where_extraction_fin
     let again = import(&profile.db, &profile.dirs, &source)
         .await
         .expect("import again");
-    assert_eq!(again.location, ArchiveLocation::Store);
+    assert_eq!(again.location, PackageArchiveLocation::Store);
     assert_eq!(
         std::fs::read_dir(&profile.dirs.archives).unwrap().count(),
         0
@@ -454,7 +454,7 @@ async fn a_package_received_into_the_store_is_described_and_extracted_from_there
         .await
         .expect("register");
     assert_eq!(package.hash, hash_of(&bytes));
-    assert_eq!(package.location, ArchiveLocation::Store);
+    assert_eq!(package.location, PackageArchiveLocation::Store);
     assert_eq!(package.title, "Warehouse induction");
 
     let (_, progress) = recorder();
@@ -558,7 +558,7 @@ async fn a_course_published_on_one_device_plays_its_package_on_another() {
         hash_of(&bytes),
         "the bytes the publisher published"
     );
-    assert_eq!(received.location, ArchiveLocation::Store);
+    assert_eq!(received.location, PackageArchiveLocation::Store);
     let pinned: (String, i64) = learner
         .db
         .lock()

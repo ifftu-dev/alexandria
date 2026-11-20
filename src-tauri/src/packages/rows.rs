@@ -3,7 +3,7 @@
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use super::PackageError;
-use crate::domain::package::{ArchiveLocation, Package};
+use crate::domain::package::{Package, PackageArchiveLocation};
 
 fn database(message: impl Into<String>) -> PackageError {
     PackageError::Database(message.into())
@@ -178,7 +178,7 @@ fn decode(row: StoredRow) -> Result<Package, PackageError> {
         .map_err(|e| bad(&e))?;
     let description = serde_json::from_str(&row.description).map_err(|e| bad(&e))?;
     let archive_bytes = u64::try_from(row.archive_bytes).map_err(|e| bad(&e))?;
-    let location = ArchiveLocation::parse(&row.location)
+    let location = PackageArchiveLocation::parse(&row.location)
         .ok_or_else(|| bad(&format!("unknown location {}", row.location)))?;
     Ok(Package {
         hash,

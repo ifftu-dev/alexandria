@@ -1164,7 +1164,7 @@ mod tests {
         use super::*;
         use crate::content_store::content;
         use crate::content_store::node::ContentNode;
-        use crate::domain::package::{ArchiveLocation, Package};
+        use crate::domain::package::{Package, PackageArchiveLocation};
         use crate::packages::tests::induction_package;
         use crate::packages::{self, PackageDirs};
 
@@ -1290,7 +1290,7 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!(stored.location, ArchiveLocation::Store);
+            assert_eq!(stored.location, PackageArchiveLocation::Store);
             assert_eq!(
                 author.pin(&package.hash),
                 Some(("course".to_string(), 0)),
@@ -1339,7 +1339,7 @@ mod tests {
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!(stored.location, ArchiveLocation::Draft);
+            assert_eq!(stored.location, PackageArchiveLocation::Draft);
         }
     }
 }

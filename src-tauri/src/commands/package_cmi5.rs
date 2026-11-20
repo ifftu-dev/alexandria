@@ -24,11 +24,7 @@ use crate::AppState;
 pub const SESSION_ENDED_EVENT: &str = "package-cmi5-ended";
 
 fn db<'a>(state: &'a State<'_, AppState>) -> ExecutorDb<'a> {
-    ExecutorDb {
-        executor: &state.db_executor,
-        lease: state.profile_lease(),
-        workload: DatabaseWorkload::Learner,
-    }
+    super::executor_db(state, DatabaseWorkload::Learner)
 }
 
 /// The window label of a unit's own window.

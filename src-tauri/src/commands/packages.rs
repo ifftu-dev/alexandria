@@ -16,7 +16,7 @@ use crate::db::executor::DatabaseWorkload;
 use crate::db::Database;
 use crate::domain::package::{OpenedPackageCourse, Package, PackageExtractProgress};
 use crate::enrollment;
-use crate::packages::{self, ExecutorDb, PackageDb, PackageDirs};
+use crate::packages::{self, PackageDb, PackageDirs};
 use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
@@ -29,13 +29,7 @@ fn dirs(state: &State<'_, AppState>) -> Result<PackageDirs, String> {
     Ok(dirs)
 }
 
-fn db<'a>(state: &'a State<'_, AppState>, workload: DatabaseWorkload) -> ExecutorDb<'a> {
-    ExecutorDb {
-        executor: &state.db_executor,
-        lease: state.profile_lease(),
-        workload,
-    }
-}
+use super::executor_db as db;
 
 /// Imports the package archive at `path`, a file on this device, without
 /// carrying its bytes over the bridge. Returns the stored package; a refused
@@ -203,7 +197,7 @@ mod tests {
 
     use super::*;
     use crate::content_store::content;
-    use crate::domain::package::ArchiveLocation;
+    use crate::domain::package::PackageArchiveLocation;
     use crate::packages::attempts;
     use crate::packages::tests::induction_package;
 
@@ -297,7 +291,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(stored.location, ArchiveLocation::Draft);
+        assert_eq!(stored.location, PackageArchiveLocation::Draft);
         assert_eq!(
             learner.count("SELECT COUNT(*) FROM courses WHERE status = 'draft'"),
             1
