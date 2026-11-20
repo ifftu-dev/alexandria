@@ -297,24 +297,36 @@ export function wrapperFrame(page: Page): Frame {
   return frame
 }
 
-/** The lesson frame whose address contains `path`, once it is there. */
+/** A lesson frame's page under the launch prefix, query included (`probe.html?plain`). */
+function lessonPath(frame: Frame): string | null {
+  if (!frame.parentFrame()?.url().endsWith('/_alexandria/wrapper.html') || !URL.canParse(frame.url())) return null
+  const url = new URL(frame.url())
+  return url.pathname.split('/').slice(2).join('/') + url.search
+}
+
+const findLesson = (page: Page, path: string) => page.frames().find(frame => lessonPath(frame) === path)
+
+/** The lesson frame showing exactly `path`, once it is there. */
 export async function lessonFrame(page: Page, path: string): Promise<Frame> {
-  await expect.poll(() => page.frames().some(frame => frame.url().includes(`/${path}`) && frame.parentFrame()?.url().endsWith('/_alexandria/wrapper.html'))).toBe(true)
-  return page.frames().find(frame => frame.url().includes(`/${path}`) && frame.parentFrame()?.url().endsWith('/_alexandria/wrapper.html'))!
+  await expect.poll(() => Boolean(findLesson(page, path))).toBe(true)
+  return findLesson(page, path)!
 }
 
 /**
  * Opens the lesson `activityId` from the table of contents and waits until
- * its page (`path`, by default `<activityId>.html`) is the lesson frame and
- * reports ready, so nothing is read from the lesson before it.
+ * its page (`path`, by default `<activityId>.html`) is the only lesson frame
+ * and reports ready, so nothing is read from the lesson it replaced.
  */
-export async function openLesson(page: Page, activityId: string, path = `${activityId}.html`) {
+export async function openLesson(page: Page, activityId: string, path = `${activityId}.html`): Promise<Frame> {
   const entry = page.locator(`[data-activity="${activityId}"]`)
   if (await entry.getAttribute('aria-current') !== 'true') await entry.click()
   await expect(entry).toHaveAttribute('aria-current', 'true')
-  const frame = await lessonFrame(page, path)
-  await expect.poll(() => frame.locator('#seen[data-ready]').count()).toBe(1)
-  await expect.poll(() => page.frames().filter(item => item.parentFrame()?.url().endsWith('/_alexandria/wrapper.html')).length).toBe(1)
+  await expect.poll(async () => {
+    const lessons = page.frames().filter(frame => lessonPath(frame) !== null)
+    if (lessons.length !== 1 || lessonPath(lessons[0]!) !== path) return false
+    return (await lessons[0]!.locator('#seen[data-ready]').count().catch(() => 0)) === 1
+  }).toBe(true)
+  return findLesson(page, path)!
 }
 
 /** What the running lesson reported in `#seen`. */

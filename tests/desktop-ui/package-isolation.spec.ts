@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import {
-  called, lesson, lessonFrame, openLaunches, openLesson, openPlayer, PACKAGE_ORIGIN, seen, navigate, type Served,
+  called, lesson, openLaunches, openLesson, openPlayer, PACKAGE_ORIGIN, seen, navigate, type Served,
 } from './packageHarness'
 
 // Isolation at the player seam: a hostile SCORM 1.2 package
@@ -189,7 +189,7 @@ async function frameBelowLabel(page: Page): Promise<boolean> {
 
 test('hostile content cannot cover the label, in or out of focus mode', async ({ page }) => {
   await openPlayer(page, { fixture: 'package-isolation' })
-  await openLesson(page, 'label')
+  const frame = await openLesson(page, 'label')
   const label = page.locator('[data-package-label]')
   const player = page.locator('[data-package-player]')
 
@@ -198,7 +198,6 @@ test('hostile content cannot cover the label, in or out of focus mode', async ({
   await expect(label).toContainText('recovery phrase')
 
   // Every spelling of full screen: the player turns it into focus mode.
-  const frame = await lessonFrame(page, 'label.html')
   await frame.evaluate(() => (window as unknown as { askForFullScreen: () => void }).askForFullScreen())
   await expect(player).toHaveAttribute('data-focus', 'true')
   await expect(label).toBeInViewport({ ratio: 1 })
