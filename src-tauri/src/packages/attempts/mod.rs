@@ -522,8 +522,7 @@ fn roll_up(
 }
 
 fn stored_package(conn: &rusqlite::Connection, hash: &str) -> Result<Package, AttemptError> {
-    super::rows::get(conn, hash)
-        .map_err(AttemptError::Database)?
+    super::rows::get(conn, hash)?
         .ok_or_else(|| AttemptError::NotAPackage(format!("package {hash} is not stored")))
 }
 

@@ -67,8 +67,34 @@ pub enum PackageError {
     Content(#[from] crate::content_store::content::ContentError),
     #[error("package files: {0}")]
     Io(#[from] std::io::Error),
+    /// Opening a package file as a course needs the local author.
+    #[error("no identity found — generate a wallet first: {0}")]
+    NoIdentity(String),
     #[error("{0}")]
     Database(String),
+}
+
+impl From<rusqlite::Error> for PackageError {
+    fn from(error: rusqlite::Error) -> Self {
+        PackageError::Database(error.to_string())
+    }
+}
+
+/// Runs one database step whose own failures are typed: an error from the
+/// step comes back as it is; a failure to reach the database at all is
+/// [`PackageError::Database`].
+pub(crate) async fn run_step<T, F>(
+    db: &impl PackageDb,
+    label: &'static str,
+    step: F,
+) -> Result<T, PackageError>
+where
+    T: Send + 'static,
+    F: FnOnce(&Database) -> Result<T, PackageError> + Send + 'static,
+{
+    db.run(label, move |db| Ok(step(db)))
+        .await
+        .map_err(PackageError::Database)?
 }
 
 /// The profile's two package directories.
@@ -234,12 +260,10 @@ pub async fn import(
         imported_at: crate::clock::now_rfc3339(),
         last_opened_at: None,
     };
-    let stored = db
-        .run("packages.import", move |db| {
-            rows::insert(db.conn(), &package)
-        })
-        .await
-        .map_err(PackageError::Database)?;
+    let stored = run_step(db, "packages.import", move |db| {
+        rows::insert(db.conn(), &package)
+    })
+    .await?;
     if stored.location == ArchiveLocation::Store {
         // The served store already holds these bytes; one copy is enough.
         archive::discard_draft(&dirs.archives, &stored.hash)?;
@@ -250,9 +274,7 @@ pub async fn import(
 /// The recorded package with this hash, if any.
 pub async fn get(db: &impl PackageDb, hash: &str) -> Result<Option<Package>, PackageError> {
     let hash = checked_hash(hash)?;
-    db.run("packages.get", move |db| rows::get(db.conn(), &hash))
-        .await
-        .map_err(PackageError::Database)
+    run_step(db, "packages.get", move |db| rows::get(db.conn(), &hash)).await
 }
 
 async fn required(db: &impl PackageDb, hash: &str) -> Result<Package, PackageError> {
@@ -276,12 +298,10 @@ pub async fn open_file(
 ) -> Result<OpenedPackageFile, PackageError> {
     let package = import(db, dirs, source).await?;
     let for_draft = package.clone();
-    let ids = db
-        .run("packages.open-file", move |db| {
-            draft::find_or_create(db.conn(), &for_draft)
-        })
-        .await
-        .map_err(PackageError::Database)?;
+    let ids = run_step(db, "packages.open-file", move |db| {
+        draft::find_or_create(db.conn(), &for_draft)
+    })
+    .await?;
     Ok(OpenedPackageFile {
         package,
         course_id: ids.course_id,
@@ -344,13 +364,11 @@ pub async fn ensure_extracted(
         .await?;
     }
     let now = crate::clock::now_rfc3339();
-    let package = db
-        .run("packages.opened", move |db| {
-            rows::mark_opened(db.conn(), &hash, &now)?;
-            rows::get(db.conn(), &hash)?.ok_or_else(|| format!("package {hash} vanished"))
-        })
-        .await
-        .map_err(PackageError::Database)?;
+    let package = run_step(db, "packages.opened", move |db| {
+        rows::mark_opened(db.conn(), &hash, &now)?;
+        rows::get(db.conn(), &hash)?.ok_or_else(|| PackageError::NotFound(hash.clone()))
+    })
+    .await?;
     Ok(Extracted { package, root })
 }
 
@@ -383,12 +401,10 @@ pub async fn drop_idle(
     now: DateTime<Utc>,
 ) -> Result<Vec<String>, PackageError> {
     let cutoff = (now - IDLE_DROP_AFTER).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let idle = db
-        .run("packages.idle", move |db| {
-            rows::idle_since(db.conn(), &cutoff)
-        })
-        .await
-        .map_err(PackageError::Database)?;
+    let idle = run_step(db, "packages.idle", move |db| {
+        rows::idle_since(db.conn(), &cutoff)
+    })
+    .await?;
     let cache_dir = dirs.cache.clone();
     blocking(move || {
         let mut dropped = Vec::new();
@@ -450,13 +466,12 @@ pub async fn publish(
 
     let size = package.archive_bytes;
     let for_db = hash.clone();
-    db.run("packages.publish", move |db| {
-        crate::db::with_transaction(db.conn(), || {
+    run_step(db, "packages.publish", move |db| {
+        crate::db::with_typed_transaction(db.conn(), || {
             rows::record_published(db.conn(), &for_db, size)
         })
     })
-    .await
-    .map_err(PackageError::Database)?;
+    .await?;
     archive::discard_draft(&dirs.archives, &hash)?;
     required(db, &hash).await
 }
@@ -498,11 +513,10 @@ pub async fn register_stored(
         imported_at: crate::clock::now_rfc3339(),
         last_opened_at: None,
     };
-    db.run("packages.register-stored", move |db| {
+    run_step(db, "packages.register-stored", move |db| {
         rows::insert(db.conn(), &package)
     })
     .await
-    .map_err(PackageError::Database)
 }
 
 /// Where a package archive this device lacks comes from: the peers that
@@ -551,12 +565,10 @@ pub async fn get_or_receive(
         }
     }
     let for_db = hash.clone();
-    let published = db
-        .run("packages.receive.course", move |db| {
-            rows::in_published_course(db.conn(), &for_db)
-        })
-        .await
-        .map_err(PackageError::Database)?;
+    let published = run_step(db, "packages.receive.course", move |db| {
+        rows::in_published_course(db.conn(), &for_db)
+    })
+    .await?;
     if !published {
         return Ok(existing);
     }
@@ -565,11 +577,10 @@ pub async fn get_or_receive(
     }
     let package = register_stored(db, node, dirs, &hash).await?;
     let (for_db, size) = (hash.clone(), package.archive_bytes);
-    db.run("packages.receive.pin", move |db| {
+    run_step(db, "packages.receive.pin", move |db| {
         rows::record_received(db.conn(), &for_db, size)
     })
-    .await
-    .map_err(PackageError::Database)?;
+    .await?;
     Ok(Some(package))
 }
 
@@ -579,11 +590,10 @@ pub async fn course_packages(
     course_id: &str,
 ) -> Result<Vec<String>, PackageError> {
     let course_id = course_id.to_string();
-    db.run("packages.course-packages", move |db| {
+    run_step(db, "packages.course-packages", move |db| {
         rows::course_packages(db.conn(), &course_id)
     })
     .await
-    .map_err(PackageError::Database)
 }
 
 /// Whether the store holds the whole blob.

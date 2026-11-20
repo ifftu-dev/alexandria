@@ -220,8 +220,7 @@ fn authored_package(
     let hash = content
         .filter(|_| element_type == PACKAGE_ELEMENT_TYPE)
         .ok_or_else(|| AttemptError::NotAPackage(format!("element {element_id} has no package")))?;
-    super::rows::get(conn, &hash)
-        .map_err(AttemptError::Database)?
+    super::rows::get(conn, &hash)?
         .ok_or_else(|| AttemptError::NotAPackage(format!("package {hash} is not stored")))
 }
 
