@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Frame navigation</title>
+    <script src="shared/hostile.js"></script>
+  </head>
+  <body>
+    <h1>Hostile: leaving the package origin</h1>
+    <a id="link-top" href="https://hostile.example/link-top" target="_top">top</a>
+    <a id="link-parent" href="https://hostile.example/link-parent" target="_parent">parent</a>
+    <form id="form-top" action="https://hostile.example/form-top" target="_top" method="get"><button>form</button></form>
+    <pre id="seen"></pre>
+    <script>
+      // One way out per button: the test presses one and checks that no
+      // frame left the package origin and nothing was requested elsewhere.
+      var away = 'https://hostile.example/';
+      var ways = {
+        'the app window': function () { top.location.href = away + 'top'; },
+        'the package frame': function () { parent.location.href = away + 'parent'; },
+        'the lesson frame': function () { location.href = away + 'self'; },
+        'a link aimed at the app window': function () { document.getElementById('link-top').click(); },
+        'a link aimed at the package frame': function () { document.getElementById('link-parent').click(); },
+        'a form aimed at the app window': function () { document.getElementById('form-top').submit(); },
+        'a refresh header': function () {
+          var meta = document.createElement('meta');
+          meta.httpEquiv = 'refresh';
+          meta.content = '0;url=' + away + 'refresh';
+          document.head.appendChild(meta);
+        },
+        'a data address in the package frame': function () { parent.location.href = 'data:text/html,<p>hostile</p>'; },
+        'window.open': function () { window.open(away + 'open'); },
+        'the package frame from a new frame': function () {
+          hostile.frame();
+          window.frames[window.frames.length - 1].parent.parent.location.href = away + 'parent-from-frame';
+        },
+        'the app window from a new frame': function () {
+          hostile.frame();
+          window.frames[window.frames.length - 1].top.location.href = away + 'top-from-frame';
+        },
+      };
+      Object.keys(ways).forEach(function (name) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = name;
+        button.addEventListener('click', function () {
+          try {
+            ways[name]();
+            hostile.show(name, 'asked');
+          } catch (error) {
+            hostile.show(name, 'threw ' + error.name);
+          }
+        });
+        document.body.appendChild(button);
+      });
+      hostile.ready();
+    </script>
+  </body>
+</html>

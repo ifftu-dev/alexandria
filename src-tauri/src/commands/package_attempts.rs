@@ -6,7 +6,8 @@
 use crate::credentials::Issuer;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::package_attempt::{
-    PackageActivityResult, PackageAttempt, PackageAttemptProgress, PackageCommit, PackageLaunchInit,
+    PackageActivityResult, PackageAttempt, PackageAttemptProgress, PackageCommit,
+    PackageLaunchInit, PackageSequencingState,
 };
 use crate::packages::{attempts, ExecutorDb, PackageDirs};
 use crate::profile::scope::ProfileState as State;
@@ -48,18 +49,50 @@ pub async fn package_attempt_fresh(
 /// The initialisation data for one launch of one activity: the pseudonymous
 /// learner identifier, display name, launch values and prior state. Needs
 /// the unlocked vault, because the identifier is derived from the learner's
-/// key.
+/// key. `resumed` (SCORM 2004 only) says the sequencing engine delivered the
+/// activity by resuming it.
 #[tauri::command]
 pub async fn package_attempt_initialise(
     state: State<'_, AppState>,
     attempt_id: String,
     activity_id: String,
+    resumed: Option<bool>,
 ) -> Result<PackageLaunchInit, String> {
     let (key, _) = Issuer::from_keystore(&state.keystore)
         .await
         .map_err(|e| e.to_string())?
         .into_parts();
-    attempts::initialise(&db(&state), &key.to_bytes(), &attempt_id, &activity_id)
+    attempts::initialise_delivery(
+        &db(&state),
+        &key.to_bytes(),
+        &attempt_id,
+        &activity_id,
+        resumed.unwrap_or(false),
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// The SCORM 2004 sequencing engine's snapshot stored for an attempt, if
+/// any.
+#[tauri::command]
+pub async fn package_attempt_sequencing(
+    state: State<'_, AppState>,
+    attempt_id: String,
+) -> Result<Option<String>, String> {
+    attempts::sequencing(&db(&state), &attempt_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Stores the SCORM 2004 sequencing engine's state for an attempt and rolls
+/// the attempt up from the root activity's status.
+#[tauri::command]
+pub async fn package_attempt_sequencing_save(
+    state: State<'_, AppState>,
+    sequencing: PackageSequencingState,
+) -> Result<PackageAttemptProgress, String> {
+    attempts::save_sequencing(&db(&state), sequencing)
         .await
         .map_err(|e| e.to_string())
 }

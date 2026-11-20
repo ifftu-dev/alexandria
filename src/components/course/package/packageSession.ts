@@ -17,6 +17,10 @@
 //   (and on desktop its own window, when it asks for one) and returns its
 //   launch URL; the wrapper only frames it, and the unit talks xAPI to the
 //   session's endpoint itself. Ending the lesson ends the session.
+// - SCORM 2004: the sequencing engine in the wrapper decides which lesson is
+//   delivered (`startSequencing`, `navigate`); the host stores the engine's
+//   state after each navigation, in the same queue as commits, and restores
+//   it at the next start. Closing suspends the package first.
 
 import type {
   Cmi5Launch,
@@ -25,8 +29,10 @@ import type {
   PackageAttemptProgress,
   PackageCommit,
   PackageLaunchInit,
+  PackageSequencingState,
   PackageStandard,
 } from '@/types'
+import { sequencingSettings } from './scorm2004Sequencing'
 
 export type PackageInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>
 
@@ -47,6 +53,69 @@ export interface PackageSessionEvents {
   unitExited?: () => void
   /** cmi5: the running unit opened in its own window (`launch`) or that ended (`null`). */
   unitWindow?: (launch: Cmi5Launch | null) => void
+  /** SCORM 2004: the controls and table of contents the engine allows now. */
+  navigation?: (state: SequencingNavigation) => void
+  /** SCORM 2004: the engine delivered this activity and it is launching. */
+  delivered?: (activityId: string) => void
+  /** SCORM 2004: the engine delivered nothing; the learner chooses a lesson. */
+  undelivered?: () => void
+  /** SCORM 2004: the engine's session is over (suspended, exited, finished). */
+  sessionEnded?: (reason: string) => void
+}
+
+/** One activity of the SCORM 2004 engine's tree, as plain data. */
+export interface SequencingNode {
+  id: string
+  title: string
+  visible: boolean
+  /** The engine's completion status for the activity. */
+  completion: string
+  /** A choice request for it is valid now. */
+  choosable: boolean
+  children: SequencingNode[]
+}
+
+/** What the SCORM 2004 engine allows the player's controls to do now. */
+export interface SequencingNavigation {
+  current: string | null
+  continue: boolean
+  previous: boolean
+  /** Controls the delivered activity asks the player not to draw (hideLMSUI). */
+  hidden: string[]
+  /** The engine's session is running: suspend and exit apply. */
+  active: boolean
+  tree: SequencingNode | null
+}
+
+/** Requests the player's SCORM 2004 controls issue. */
+export type NavigationRequest = 'continue' | 'previous' | 'choice' | 'suspendAll' | 'exitAll' | 'resumeAll'
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function sequencingNode(value: unknown): SequencingNode | null {
+  if (!isRecord(value) || typeof value.id !== 'string') return null
+  const children = Array.isArray(value.children) ? value.children : []
+  return {
+    id: value.id,
+    title: typeof value.title === 'string' ? value.title : '',
+    visible: value.visible !== false,
+    completion: typeof value.completion === 'string' ? value.completion : 'unknown',
+    choosable: value.choosable === true,
+    children: children.map(sequencingNode).filter((node): node is SequencingNode => node !== null),
+  }
+}
+
+function sequencingNavigation(message: Record<string, unknown>): SequencingNavigation {
+  return {
+    current: typeof message.current === 'string' ? message.current : null,
+    continue: message.continue === true,
+    previous: message.previous === true,
+    hidden: Array.isArray(message.hidden) ? message.hidden.filter((item): item is string => typeof item === 'string') : [],
+    active: message.active === true,
+    tree: sequencingNode(message.tree),
+  }
 }
 
 export interface PackageSessionOptions {
@@ -106,6 +175,24 @@ export function createPackageSession(options: PackageSessionOptions) {
   let closed = false
   /** cmi5: the running unit's session. */
   let unitSession: Cmi5Launch | null = null
+  /** Counts lesson requests; only the latest one launches. */
+  let requests = 0
+  /** SCORM 2004: the package's lessons by activity id, once sequencing started. */
+  let delivering: Map<string, PackageActivity> | null = null
+  const launchOrigin = new URL(launch.base_url).origin
+
+  /**
+   * The message comes from the wrapper page. WebKit delivers what a frame
+   * posts while it is being removed (the player unmounting) with no source
+   * window, so once the frame has left the page a sourceless message from
+   * the launch's origin is taken as the wrapper's last words. Some app
+   * schemes have an opaque origin (`null`), which then cannot narrow it.
+   */
+  function fromWrapper(event: MessageEvent): boolean {
+    if (wrapper !== null && event.source === wrapper) return true
+    return wrapper !== null && event.source === null && !frame.isConnected
+      && (event.origin === launchOrigin || launchOrigin === 'null')
+  }
 
   function waitFor(matches: (event: MessageEvent) => boolean, timeoutMs: number): Promise<boolean> {
     return new Promise((resolve) => {
@@ -126,15 +213,75 @@ export function createPackageSession(options: PackageSessionOptions) {
   }
 
   function persist(commit: PackageCommit) {
+    store(() => invoke<PackageAttemptProgress>('package_attempt_commit', { commit }))
+  }
+
+  /** Queues one write behind the others: each is whole state, so order matters. */
+  function store(write: () => Promise<PackageAttemptProgress>) {
     saving = saving.then(async () => {
       try {
-        const progress = await invoke<PackageAttemptProgress>('package_attempt_commit', { commit })
+        const progress = await write()
         events.saveError(null)
         events.progress(progress)
       } catch (error) {
         events.saveError(String(error))
       }
     })
+  }
+
+  /**
+   * SCORM 2004: the engine delivered `activityId`. Its stored state is read
+   * once every earlier write has landed, then the wrapper opens it.
+   */
+  async function deliver(activityId: string, resumed: boolean) {
+    const activity = delivering?.get(activityId)
+    if (!activity?.launch) {
+      events.refused(`not-a-lesson ${activityId}`)
+      return
+    }
+    await saving
+    if (closed) return
+    const init = await invoke<PackageLaunchInit>('package_attempt_initialise', { attemptId, activityId, resumed })
+    lessonId = activityId
+    post({
+      type: 'launch',
+      standard,
+      activityId,
+      title: activity.title,
+      url: lessonUrl(launch.base_url, activity),
+      runtime: init.runtime,
+    })
+    events.delivered?.(activityId)
+    if (init.progress) events.progress(init.progress)
+  }
+
+  function onSequencingMessage(message: Record<string, unknown>) {
+    switch (message.type) {
+      case 'sequencing-state': {
+        const root = isRecord(message.root) ? message.root : {}
+        if (typeof message.snapshot !== 'string') return
+        const sequencing: PackageSequencingState = {
+          attempt_id: attemptId,
+          snapshot: message.snapshot,
+          root: { completion_status: typeof root.completion_status === 'string' ? root.completion_status : 'unknown' },
+        }
+        store(() => invoke<PackageAttemptProgress>('package_attempt_sequencing_save', { sequencing }))
+        return
+      }
+      case 'navigation':
+        events.navigation?.(sequencingNavigation(message))
+        return
+      case 'delivered':
+        if (typeof message.activityId === 'string') {
+          deliver(message.activityId, message.resumed === true).catch(error => events.refused(String(error)))
+        }
+        return
+      case 'undelivered':
+        events.undelivered?.()
+        return
+      case 'session-ended':
+        events.sessionEnded?.(String(message.reason ?? ''))
+    }
   }
 
   function onMessage(event: MessageEvent) {
@@ -144,7 +291,7 @@ export function createPackageSession(options: PackageSessionOptions) {
     for (const waiter of [...waiters]) {
       if (waiter.matches(event)) waiter.resolve()
     }
-    if (message.source === FROM_WRAPPER && event.source === wrapper) {
+    if (message.source === FROM_WRAPPER && fromWrapper(event)) {
       if (message.type === 'commit') {
         // Only the running lesson's state is taken; the host fills in the
         // attempt itself.
@@ -156,6 +303,8 @@ export function createPackageSession(options: PackageSessionOptions) {
         lessonId = null
       } else if (message.type === 'refused') {
         events.refused(String(message.reason ?? ''))
+      } else if (delivering) {
+        onSequencingMessage(message)
       }
       return
     }
@@ -203,7 +352,7 @@ export function createPackageSession(options: PackageSessionOptions) {
     if (lessonId !== null && wrapper) {
       const ending = lessonId
       const ended = waitFor(
-        (event) => event.source === wrapper && (event.data as { type?: unknown, activityId?: unknown })?.type === 'ended'
+        (event) => fromWrapper(event) && (event.data as { type?: unknown, activityId?: unknown })?.type === 'ended'
           && (event.data as { activityId?: unknown }).activityId === ending,
         END_TIMEOUT_MS,
       )
@@ -264,8 +413,11 @@ export function createPackageSession(options: PackageSessionOptions) {
   /** Starts `activity` in a fresh API session with its stored state. */
   async function openLesson(activity: PackageActivity): Promise<PackageLaunchInit | Cmi5Launch> {
     if (standard === 'cmi5') return openUnit(activity)
+    const request = ++requests
     await endLesson()
     const init = await invoke<PackageLaunchInit>('package_attempt_initialise', { attemptId, activityId: activity.id })
+    // The learner picked another lesson while this one was starting.
+    if (request !== requests) return init
     lessonId = activity.id
     post({
       type: 'launch',
@@ -281,6 +433,49 @@ export function createPackageSession(options: PackageSessionOptions) {
   }
 
   /**
+   * SCORM 2004: hands the wrapper the package's sequencing and the engine
+   * state stored for the attempt; the engine then resumes or starts and
+   * says what it delivered.
+   */
+  async function startSequencing(tree: PackageActivity): Promise<void> {
+    const lessons = new Map<string, PackageActivity>()
+    const walk = (activity: PackageActivity) => {
+      if (activity.launch) lessons.set(activity.id, activity)
+      for (const child of activity.children ?? []) walk(child)
+    }
+    walk(tree)
+    delivering = lessons
+    const snapshot = await invoke<string | null>('package_attempt_sequencing', { attemptId })
+    post({
+      type: 'sequence',
+      standard,
+      settings: sequencingSettings(tree),
+      snapshot,
+      commitIntervalMs: options.commitIntervalMs,
+    })
+  }
+
+  /** SCORM 2004: a request from the player's controls, decided by the engine. */
+  function navigate(request: NavigationRequest, target?: string) {
+    post({ type: 'navigate', request, target: target ?? null })
+  }
+
+  /** SCORM 2004: suspends the package in the wrapper and waits for its last state. */
+  async function suspendForClose(): Promise<void> {
+    if (wrapper) {
+      const done = waitFor(
+        (event) => fromWrapper(event) && (event.data as { type?: unknown, source?: unknown })?.source === FROM_WRAPPER
+          && (event.data as { type?: unknown }).type === 'closed',
+        END_TIMEOUT_MS,
+      )
+      post({ type: 'end' })
+      await done
+      lessonId = null
+    }
+    await saving
+  }
+
+  /**
    * Ends the session. Works whether or not the frame is still in the page:
    * when the player unmounts, the wrapper finishes the lesson as its page
    * goes away and its last commit still arrives here.
@@ -289,7 +484,8 @@ export function createPackageSession(options: PackageSessionOptions) {
     if (closed) return null
     closed = true
     try {
-      await endLesson()
+      if (delivering) await suspendForClose()
+      else await endLesson()
       const helper = frame.isConnected ? null : document.createElement('iframe')
       if (helper) {
         helper.hidden = true
@@ -309,7 +505,7 @@ export function createPackageSession(options: PackageSessionOptions) {
     }
   }
 
-  return { start, openLesson, endLesson, close, unitEnded, focusUnitWindow }
+  return { start, openLesson, endLesson, close, startSequencing, navigate, unitEnded, focusUnitWindow }
 }
 
 export type PackageSession = ReturnType<typeof createPackageSession>

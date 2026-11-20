@@ -89,8 +89,16 @@ const failCommits = (page: Page, fail: boolean) =>
 
 const lesson = (page: Page): FrameLocator => page.frameLocator('[data-package-frame]').frameLocator('#lesson')
 
-/** What the lesson was given, once it has started. */
-async function seen(page: Page) {
+/**
+ * What the lesson was given, once it has started. With `path`, waits until
+ * that page is the only lesson frame, so the lesson it replaced is never read.
+ */
+async function seen(page: Page, path?: string) {
+  if (path) {
+    const lessons = () => page.frames().filter(frame => frame.parentFrame()?.url().endsWith('/_alexandria/wrapper.html'))
+    const pathOf = (url: string) => URL.canParse(url) ? new URL(url).pathname.split('/').slice(2).join('/') : url
+    await expect.poll(() => lessons().map(frame => pathOf(frame.url()))).toEqual([path])
+  }
   const values = lesson(page).locator('#seen[data-ready]')
   await expect(values).toBeAttached()
   return JSON.parse(await values.getAttribute('data-values') ?? '{}') as Record<string, string>
@@ -182,7 +190,7 @@ test('the package completes through the player, its result is labelled self-repo
   await expect(page.locator('[data-activity="welcome"]')).toHaveAttribute('data-complete', 'true')
 
   await page.locator('[data-activity="quiz"]').click()
-  expect(await seen(page)).toMatchObject({
+  expect(await seen(page, 'quiz/index.html')).toMatchObject({
     'cmi.core.entry': 'ab-initio',
     'cmi.launch_data': 'questions=2',
     'cmi.student_data.mastery_score': '80',
@@ -276,7 +284,8 @@ test('a fresh attempt starts the package from the beginning', async ({ page }) =
   await page.locator('[data-package-fresh]').click()
   await page.locator('[data-package-fresh-confirm]').click()
 
-  expect(await seen(page)).toMatchObject({ 'cmi.core.entry': 'ab-initio', 'cmi.core.lesson_location': '' })
-  expect(await called(page, 'package_attempt_fresh')).toBe(1)
+  // The second attempt's lesson, not the first attempt's still on screen.
   await expect(page.locator('[data-package-attempt]')).toContainText('2')
+  expect(await called(page, 'package_attempt_fresh')).toBe(1)
+  expect(await seen(page, 'welcome/index.html')).toMatchObject({ 'cmi.core.entry': 'ab-initio', 'cmi.core.lesson_location': '' })
 })

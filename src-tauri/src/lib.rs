@@ -125,6 +125,9 @@ pub struct AppState {
     /// Open cmi5 sessions and their loopback endpoints. Every endpoint stops
     /// when the profile stops.
     pub cmi5_sessions: Arc<packages::attempts::cmi5::Cmi5Sessions>,
+    /// Open package previews (an author running their own package element
+    /// without an enrolment). In memory only; emptied when the profile stops.
+    pub package_previews: Arc<packages::preview::Previews>,
 
     // ─── per-profile resources (populated while active) ─────────────
     pub db: Arc<std::sync::Mutex<Option<Database>>>,
@@ -458,6 +461,7 @@ impl AppState {
         // cmi5 endpoints go with them; a session left open is abandoned at
         // the attempt's next launch.
         self.cmi5_sessions.close_all();
+        self.package_previews.clear();
 
         // Seeding can write through the shared DB/content handles. Join it
         // before either resource can be closed or repointed at another user.
@@ -1442,6 +1446,7 @@ pub fn run() {
                 evidence_staging: Arc::new(sentinel::evidence::EvidenceStaging::new()),
                 package_launches: Arc::new(package_serving::Launches::new()),
                 cmi5_sessions: Arc::new(packages::attempts::cmi5::Cmi5Sessions::new()),
+                package_previews: Arc::new(packages::preview::Previews::new()),
                 db,
                 db_executor,
                 keystore,
@@ -1726,6 +1731,16 @@ pub fn run() {
             commands::package_cmi5::package_cmi5_launch,
             commands::package_cmi5::package_cmi5_end,
             commands::package_cmi5::package_cmi5_focus,
+            commands::package_attempts::package_attempt_sequencing,
+            commands::package_attempts::package_attempt_sequencing_save,
+            commands::package_previews::package_preview_open,
+            commands::package_previews::package_preview_fresh,
+            commands::package_previews::package_preview_initialise,
+            commands::package_previews::package_preview_commit,
+            commands::package_previews::package_preview_activities,
+            commands::package_previews::package_preview_terminate,
+            commands::package_previews::package_preview_sequencing,
+            commands::package_previews::package_preview_sequencing_save,
             commands::learning_records::learning_records_usage,
             commands::record_destinations::record_destination_preview,
             commands::record_destinations::record_destination_add,
@@ -1733,6 +1748,10 @@ pub fn run() {
             commands::record_destinations::record_destination_remove,
             commands::record_destinations::record_destinations_send_now,
             commands::record_destinations::record_access_log,
+            commands::learning_records::learning_records_list,
+            commands::learning_records::learning_records_export,
+            commands::learning_records::learning_records_delete,
+            commands::learning_records::learning_records_delete_all,
             // Content (iroh blob store)
             commands::content::content_add,
             commands::content::content_get_text,

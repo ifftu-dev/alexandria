@@ -21,9 +21,13 @@ import {
   createPackageSession,
   PACKAGE_FRAME_SANDBOX,
   type BlockedKind,
+  type NavigationRequest,
   type PackageInvoke,
   type PackageSession,
+  type SequencingNavigation,
+  type SequencingNode,
 } from './packageSession'
+import { previewInvoke } from './packagePreview'
 
 // A package element: a SCORM package running in the wrapper at the package
 // origin, or cmi5 units framed by it, under a label the app draws. Results come from the package's own
@@ -36,13 +40,18 @@ const props = defineProps<{
   /** Who published the course, or `null` for a package file opened on this device. */
   publisher: string | null
   progress: ElementProgress | null
+  /** An author's preview: runs without an enrolment and stores nothing. */
+  preview?: boolean
 }>()
 
 const emit = defineEmits<{ progress: [progress: ElementProgress] }>()
 
 const { t } = useI18n()
-const { invoke } = useLocalApi()
-const invokeCommand: PackageInvoke = (command, args) => invoke(command as Parameters<typeof invoke>[0], args)
+const { invoke: localInvoke } = useLocalApi()
+const invokeCommand: PackageInvoke = (command, args) => localInvoke(command as Parameters<typeof localInvoke>[0], args)
+// A preview runs the same lifecycle against the host's preview commands:
+// no enrolment, nothing stored.
+const invoke: PackageInvoke = props.preview ? previewInvoke(localInvoke, props.element.id) : invokeCommand
 
 type Phase = 'loading' | 'unenrolled' | 'missing' | 'preparing' | 'ready' | 'error'
 interface Row { activity: PackageActivity, depth: number }
@@ -68,9 +77,42 @@ const unitWindow = ref<Cmi5Launch | null>(null)
 const unitExited = ref(false)
 /** cmi5: the running unit asked for its own window on mobile; focus mode stays on. */
 const focusForced = ref(false)
+/**
+ * A new frame element for every session: a frame keeps its name and its
+ * history (which holds the earlier launch's addresses) across navigations.
+ */
+const frameKey = ref(0)
 let session: PackageSession | null = null
 let disposed = false
 let stopListening: UnlistenFn | null = null
+
+// SCORM 2004: the sequencing engine in the wrapper decides what is delivered
+// and which controls apply; the player draws what it reports.
+type Sequenced = 'running' | 'choose' | 'ended'
+interface SequencedRow { node: SequencingNode, depth: number, lesson: boolean }
+const sequenced = computed(() => pkg.value?.standard === 'scorm2004')
+const navigation = ref<SequencingNavigation | null>(null)
+const sequencedPhase = ref<Sequenced>('running')
+const endedReason = ref<string | null>(null)
+const confirmingExit = ref(false)
+
+const sequencedRows = computed<SequencedRow[]>(() => {
+  const out: SequencedRow[] = []
+  const walk = (node: SequencingNode, depth: number) => {
+    if (!node.visible) return
+    out.push({ node, depth, lesson: node.children.length === 0 })
+    for (const child of node.children) walk(child, depth + 1)
+  }
+  for (const child of navigation.value?.tree?.children ?? []) walk(child, 0)
+  return out
+})
+const sequencedLessonCount = computed(() => sequencedRows.value.filter(row => row.lesson).length)
+const hidden = (control: string) => navigation.value?.hidden.includes(control) ?? false
+
+function request(kind: NavigationRequest, target?: string) {
+  confirmingExit.value = false
+  session?.navigate(kind, target)
+}
 
 /** The table of contents: visible activities in order, headings included. */
 const rows = computed<Row[]>(() => {
@@ -155,6 +197,7 @@ async function startSession() {
   const current = attempt.value
   if (!hash || !current || !pkg.value) return
   phase.value = 'preparing'
+  frameKey.value += 1
   extracting.value = null
   const channel = new Channel<PackageExtractProgress>()
   channel.onmessage = (progress) => { extracting.value = progress }
@@ -165,7 +208,7 @@ async function startSession() {
     return
   }
   const opened = createPackageSession({
-    invoke: invokeCommand,
+    invoke,
     frame: frame.value,
     launch,
     attemptId: current.id,
@@ -184,6 +227,21 @@ async function startSession() {
         void endUnit()
       },
       unitWindow: (launch) => { unitWindow.value = launch },
+      navigation: (state) => { navigation.value = state },
+      delivered: (activityId) => {
+        currentId.value = activityId
+        sequencedPhase.value = 'running'
+        endedReason.value = null
+      },
+      undelivered: () => {
+        currentId.value = null
+        sequencedPhase.value = 'choose'
+      },
+      sessionEnded: (reason) => {
+        currentId.value = null
+        sequencedPhase.value = 'ended'
+        endedReason.value = reason
+      },
     },
   })
   session = opened
@@ -191,6 +249,11 @@ async function startSession() {
   await refreshResults()
   if (disposed) return
   phase.value = 'ready'
+  const tree = pkg.value?.description.tree
+  if (sequenced.value && tree) {
+    await opened.startSequencing(tree)
+    return
+  }
   const first = resumeLesson()
   if (first) await openLesson(first)
 }
@@ -229,7 +292,7 @@ function step(offset: number) {
 }
 
 async function startFresh() {
-  if (!props.enrollmentId || busy.value) return
+  if ((!props.enrollmentId && !props.preview) || busy.value) return
   busy.value = true
   confirmingFresh.value = false
   try {
@@ -243,6 +306,9 @@ async function startFresh() {
     results.value = []
     blocked.value = []
     saveError.value = null
+    navigation.value = null
+    sequencedPhase.value = 'running'
+    endedReason.value = null
     await startSession()
   } catch (error) {
     loadError.value = String(error)
@@ -267,7 +333,7 @@ onMounted(async () => {
     else stopListening = unlisten
   }).catch(() => {})
   const hash = props.element.content_cid
-  if (!props.enrollmentId) {
+  if (!props.enrollmentId && !props.preview) {
     phase.value = 'unenrolled'
     return
   }
@@ -341,6 +407,10 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
+    <p v-if="preview" data-package-preview-note class="shrink-0 border-b border-border bg-muted/40 px-3 py-1 text-xs text-muted-foreground">
+      {{ t('instructor.package.previewNote') }}
+    </p>
+
     <div v-if="phase === 'unenrolled' || phase === 'missing' || phase === 'error'" class="m-4 rounded-lg border border-border bg-card p-6 text-center text-sm text-muted-foreground">
       <p v-if="phase === 'unenrolled'">{{ t('learn.package.unenrolled') }}</p>
       <p v-else-if="phase === 'missing'">{{ t('learn.package.missing') }}</p>
@@ -349,8 +419,49 @@ onBeforeUnmount(() => {
 
     <div v-else class="flex min-h-0 flex-1 flex-col md:flex-row">
       <!-- Table of contents -->
+      <!-- SCORM 2004: the engine's tree; a lesson is offered only when a choice of it is valid. -->
       <nav
-        v-if="!focus && lessons.length > 1"
+        v-if="!focus && sequenced && sequencedLessonCount > 1"
+        data-package-toc
+        :aria-label="t('learn.package.toc')"
+        class="max-h-40 shrink-0 overflow-y-auto border-b border-border p-2 md:max-h-none md:w-60 md:border-b-0 md:border-e"
+      >
+        <p class="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{{ t('learn.package.toc') }}</p>
+        <template v-for="row in sequencedRows" :key="row.node.id">
+          <button
+            v-if="row.lesson"
+            type="button"
+            :data-activity="row.node.id"
+            :data-complete="row.node.completion === 'completed' ? 'true' : 'false'"
+            :aria-current="row.node.id === currentId ? 'true' : undefined"
+            :disabled="phase !== 'ready' || busy || !row.node.choosable"
+            class="pressable selection-indicator flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50 aria-[current=true]:bg-primary/10 aria-[current=true]:font-medium"
+            :style="{ paddingInlineStart: `${0.5 + row.depth * 0.75}rem` }"
+            @click="request('choice', row.node.id)"
+          >
+            <span
+              class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full border"
+              :class="row.node.completion === 'completed' ? 'border-emerald-500 bg-emerald-500 text-white' : row.node.completion === 'incomplete' ? 'border-amber-500' : 'border-border'"
+              aria-hidden="true"
+            >
+              <svg v-if="row.node.completion === 'completed'" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </span>
+            <span class="min-w-0 flex-1 truncate">{{ row.node.title }}</span>
+          </button>
+          <p
+            v-else
+            class="truncate px-2 pt-2 text-xs font-medium text-muted-foreground"
+            :style="{ paddingInlineStart: `${0.5 + row.depth * 0.75}rem` }"
+          >
+            {{ row.node.title }}
+          </p>
+        </template>
+      </nav>
+
+      <nav
+        v-if="!focus && !sequenced && lessons.length > 1"
         data-package-toc
         :aria-label="t('learn.package.toc')"
         class="max-h-40 shrink-0 overflow-y-auto border-b border-border p-2 md:max-h-none md:w-60 md:border-b-0 md:border-e"
@@ -398,7 +509,49 @@ onBeforeUnmount(() => {
             · {{ t('learn.package.selfReported') }}
           </p>
           <span data-package-attempt class="text-muted-foreground">{{ t('learn.package.attempt', { number: attempt?.attempt_number ?? 1 }) }}</span>
-          <template v-if="lessons.length > 1">
+          <template v-if="sequenced">
+            <AppButton
+              v-if="!hidden('previous')"
+              data-package-nav="previous"
+              size="xs"
+              variant="ghost"
+              :disabled="phase !== 'ready' || !navigation?.previous"
+              @click="request('previous')"
+            >
+              {{ t('learn.package.previous') }}
+            </AppButton>
+            <AppButton
+              v-if="!hidden('continue')"
+              data-package-nav="continue"
+              size="xs"
+              variant="ghost"
+              :disabled="phase !== 'ready' || !navigation?.continue"
+              @click="request('continue')"
+            >
+              {{ t('learn.package.continue') }}
+            </AppButton>
+            <AppButton
+              v-if="!hidden('suspendAll')"
+              data-package-nav="suspend"
+              size="xs"
+              variant="ghost"
+              :disabled="phase !== 'ready' || !navigation?.active"
+              @click="request('suspendAll')"
+            >
+              {{ t('learn.package.suspend') }}
+            </AppButton>
+            <AppButton
+              v-if="!hidden('exitAll')"
+              data-package-nav="exit"
+              size="xs"
+              variant="ghost"
+              :disabled="phase !== 'ready' || !navigation?.active"
+              @click="confirmingExit = true"
+            >
+              {{ t('learn.package.exit') }}
+            </AppButton>
+          </template>
+          <template v-else-if="lessons.length > 1">
             <AppButton size="xs" variant="ghost" :disabled="phase !== 'ready' || currentIndex <= 0" @click="step(-1)">
               {{ t('learn.package.previousLesson') }}
             </AppButton>
@@ -415,6 +568,12 @@ onBeforeUnmount(() => {
           <p class="min-w-0 flex-1">{{ t('learn.package.freshBody') }}</p>
           <AppButton data-package-fresh-confirm size="xs" @click="startFresh">{{ t('learn.package.freshConfirm') }}</AppButton>
           <AppButton size="xs" variant="ghost" @click="confirmingFresh = false">{{ t('learn.package.freshCancel') }}</AppButton>
+        </div>
+
+        <div v-if="confirmingExit && !focus" class="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2 text-xs">
+          <p class="min-w-0 flex-1">{{ t('learn.package.exitBody') }}</p>
+          <AppButton data-package-exit-confirm size="xs" @click="request('exitAll')">{{ t('learn.package.exitConfirm') }}</AppButton>
+          <AppButton size="xs" variant="ghost" @click="confirmingExit = false">{{ t('learn.package.freshCancel') }}</AppButton>
         </div>
 
         <div
@@ -452,6 +611,21 @@ onBeforeUnmount(() => {
             <p v-else>{{ t('learn.package.preparing') }}</p>
           </div>
           <div
+            v-else-if="sequenced && phase === 'ready' && sequencedPhase !== 'running'"
+            :data-package-sequencing="sequencedPhase"
+            role="status"
+            class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center text-sm text-muted-foreground"
+          >
+            <template v-if="sequencedPhase === 'choose'">
+              <p>{{ t('learn.package.choose') }}</p>
+            </template>
+            <template v-else-if="endedReason === 'suspend_all'">
+              <p>{{ t('learn.package.suspended') }}</p>
+              <AppButton data-package-resume size="sm" @click="request('resumeAll')">{{ t('learn.package.resume') }}</AppButton>
+            </template>
+            <p v-else>{{ t('learn.package.ended') }}</p>
+          </div>
+          <div
             v-if="unitWindow"
             data-package-unit-window
             class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background p-6 text-center text-sm text-muted-foreground"
@@ -473,6 +647,7 @@ onBeforeUnmount(() => {
           </p>
           <iframe
             v-if="phase !== 'loading'"
+            :key="frameKey"
             ref="frame"
             data-package-frame
             :title="t('learn.package.frameTitle', { title: element.title })"

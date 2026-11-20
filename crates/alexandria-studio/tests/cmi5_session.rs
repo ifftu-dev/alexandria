@@ -401,7 +401,7 @@ fn units_satisfy_by_move_on_and_blocks_and_the_course_follow_their_units() {
     };
     let mut outcomes = BTreeMap::new();
     assert!(ids(progress::satisfied_nodes(&course, &outcomes)).is_empty());
-    assert!(!progress::rollup(&course, &outcomes).complete);
+    assert!(!progress::rollup(&course, &outcomes, None).complete);
 
     let done = ActivityOutcome {
         complete: true,
@@ -412,14 +412,14 @@ fn units_satisfy_by_move_on_and_blocks_and_the_course_follow_their_units() {
         ids(progress::satisfied_nodes(&course, &outcomes)),
         ["https://example.org/block"]
     );
-    assert!(!progress::rollup(&course, &outcomes).complete);
+    assert!(!progress::rollup(&course, &outcomes, None).complete);
 
     outcomes.insert("https://example.org/au/c".to_string(), done);
     assert_eq!(
         ids(progress::satisfied_nodes(&course, &outcomes)),
         ["https://example.org/block", "https://example.org/course"]
     );
-    assert!(progress::rollup(&course, &outcomes).complete);
+    assert!(progress::rollup(&course, &outcomes, None).complete);
 }
 
 #[test]

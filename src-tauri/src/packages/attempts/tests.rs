@@ -182,8 +182,15 @@ impl Learner {
     /// Imports a package and adds it to the course as element `element_id`.
     /// Returns the package hash.
     async fn add_package(&self, element_id: &str, identifier: &str) -> String {
+        self.add_package_bytes(element_id, &package_bytes(identifier))
+            .await
+    }
+
+    /// Imports the package archive `bytes` and adds it to the course as
+    /// element `element_id`. Returns the package hash.
+    async fn add_package_bytes(&self, element_id: &str, bytes: &[u8]) -> String {
         let source: PathBuf = self.root.path().join(format!("{element_id}.zip"));
-        std::fs::write(&source, package_bytes(identifier)).expect("write package");
+        std::fs::write(&source, bytes).expect("write package");
         let package = packages::import(&self.db, &self.dirs, &source)
             .await
             .expect("import");
@@ -859,3 +866,6 @@ async fn the_table_of_contents_of_an_unknown_attempt_is_refused() {
         .expect_err("unknown attempt");
     assert!(error.to_string().starts_with("not_found:"), "{error}");
 }
+
+#[path = "scorm2004_tests.rs"]
+mod scorm2004;

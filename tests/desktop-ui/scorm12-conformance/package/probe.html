@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SCORM 1.2 probe</title>
+  </head>
+  <body>
+    <h1>SCORM 1.2 probe</h1>
+    <pre id="seen"></pre>
+    <script>
+      // Finds the API with the discovery algorithm published with SCORM 1.2
+      // and does nothing else: the conformance checks drive it call by call
+      // through `window.probe`, so they can also call before LMSInitialize.
+      function findAPI(win) {
+        var tries = 0;
+        while (win.API == null && win.parent != null && win.parent != win) {
+          if (++tries > 7) return null;
+          win = win.parent;
+        }
+        return win.API;
+      }
+      var api = findAPI(window);
+      window.probe = {
+        api: api,
+        // Runs [name, ...args] calls in order; each result carries the
+        // return value and the error code the API reported after it.
+        run: function (calls) {
+          return calls.map(function (call) {
+            var value = api[call[0]].apply(null, call.slice(1));
+            return { call: call, value: value, error: api.LMSGetLastError() };
+          });
+        },
+      };
+      var seen = document.getElementById('seen');
+      seen.setAttribute('data-values', JSON.stringify({ found: api != null }));
+      seen.setAttribute('data-ready', '');
+    </script>
+  </body>
+</html>

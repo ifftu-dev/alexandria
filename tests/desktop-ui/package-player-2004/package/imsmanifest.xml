@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A SCORM 2004 4th Edition fixture for the player's browser checks. Three
+     lessons under a flow-and-choice organization. The drill is disabled until
+     the introduction is passed: the introduction writes its primary objective
+     to the global objective g-intro and the drill reads it as `gate`. Each
+     lesson sets its own status (completion and objective set by content), so
+     leaving a lesson does not satisfy it. The drill hides the player's
+     previous control. The quiz is passed at a scaled score of 0.8. -->
+<manifest identifier="com.example.fire-safety" version="1"
+    xmlns="http://www.imsglobal.org/xsd/imscp_v1p1"
+    xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_v1p3"
+    xmlns:adlseq="http://www.adlnet.org/xsd/adlseq_v1p3"
+    xmlns:adlnav="http://www.adlnet.org/xsd/adlnav_v1p3"
+    xmlns:imsss="http://www.imsglobal.org/xsd/imsss">
+  <metadata>
+    <schema>ADL SCORM</schema>
+    <schemaversion>2004 4th Edition</schemaversion>
+  </metadata>
+  <organizations default="fire-safety">
+    <organization identifier="fire-safety">
+      <title>Fire safety</title>
+      <item identifier="intro" identifierref="r-intro">
+        <title>Introduction</title>
+        <adlcp:dataFromLMS>route=b</adlcp:dataFromLMS>
+        <imsss:sequencing>
+          <imsss:objectives>
+            <imsss:primaryObjective objectiveID="intro-done">
+              <imsss:mapInfo targetObjectiveID="g-intro" readSatisfiedStatus="false"
+                  readNormalizedMeasure="false" writeSatisfiedStatus="true"/>
+            </imsss:primaryObjective>
+          </imsss:objectives>
+          <imsss:deliveryControls completionSetByContent="true" objectiveSetByContent="true"/>
+        </imsss:sequencing>
+      </item>
+      <item identifier="drill" identifierref="r-drill">
+        <title>Evacuation drill</title>
+        <imsss:sequencing>
+          <imsss:sequencingRules>
+            <imsss:preConditionRule>
+              <imsss:ruleConditions conditionCombination="any">
+                <imsss:ruleCondition referencedObjective="gate" operator="not" condition="satisfied"/>
+                <imsss:ruleCondition referencedObjective="gate" operator="not" condition="objectiveStatusKnown"/>
+              </imsss:ruleConditions>
+              <imsss:ruleAction action="disabled"/>
+            </imsss:preConditionRule>
+          </imsss:sequencingRules>
+          <imsss:objectives>
+            <imsss:primaryObjective objectiveID="drill-done"/>
+            <imsss:objective objectiveID="gate">
+              <imsss:mapInfo targetObjectiveID="g-intro" readSatisfiedStatus="true"
+                  writeSatisfiedStatus="false"/>
+            </imsss:objective>
+          </imsss:objectives>
+          <imsss:deliveryControls completionSetByContent="true" objectiveSetByContent="true"/>
+        </imsss:sequencing>
+        <adlnav:presentation>
+          <adlnav:navigationInterface>
+            <adlnav:hideLMSUI>previous</adlnav:hideLMSUI>
+          </adlnav:navigationInterface>
+        </adlnav:presentation>
+      </item>
+      <item identifier="quiz" identifierref="r-quiz">
+        <title>Check</title>
+        <imsss:sequencing>
+          <imsss:objectives>
+            <imsss:primaryObjective objectiveID="quiz-pass" satisfiedByMeasure="true">
+              <imsss:minNormalizedMeasure>0.8</imsss:minNormalizedMeasure>
+            </imsss:primaryObjective>
+          </imsss:objectives>
+          <imsss:deliveryControls completionSetByContent="true" objectiveSetByContent="true"/>
+        </imsss:sequencing>
+      </item>
+      <imsss:sequencing>
+        <imsss:controlMode choice="true" flow="true"/>
+      </imsss:sequencing>
+    </organization>
+  </organizations>
+  <resources>
+    <resource identifier="r-intro" type="webcontent" adlcp:scormType="sco" href="intro/index.html">
+      <file href="intro/index.html"/>
+      <dependency identifierref="r-shared"/>
+    </resource>
+    <resource identifier="r-drill" type="webcontent" adlcp:scormType="sco" href="drill/index.html">
+      <file href="drill/index.html"/>
+      <dependency identifierref="r-shared"/>
+    </resource>
+    <resource identifier="r-quiz" type="webcontent" adlcp:scormType="sco" href="quiz/index.html">
+      <file href="quiz/index.html"/>
+      <dependency identifierref="r-shared"/>
+    </resource>
+    <resource identifier="r-shared" type="webcontent" adlcp:scormType="asset">
+      <file href="shared/lesson.js"/>
+    </resource>
+  </resources>
+</manifest>

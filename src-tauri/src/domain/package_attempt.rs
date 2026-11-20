@@ -1,6 +1,7 @@
 //! Package attempts as the player and the host exchange them. Mirrored in
 //! `src/types/index.ts`.
 
+pub use alexandria_studio::package::progress::RootStatus;
 use alexandria_studio::package::Standard;
 use serde::{Deserialize, Serialize};
 
@@ -95,6 +96,20 @@ pub struct PackageCommit {
     pub session_ended: bool,
     /// The library's commit payload, `{ "cmi": { … } }`.
     pub runtime: serde_json::Value,
+}
+
+/// What the wrapper hands the host after the SCORM 2004 sequencing engine
+/// has navigated (a lesson ended, the learner chose, continued or suspended):
+/// the engine's own snapshot of its global objective and tracking state, kept
+/// per attempt and restored on the next launch, and its rollup of the root.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PackageSequencingState {
+    pub attempt_id: String,
+    /// The engine's serialised state, opaque to the host.
+    pub snapshot: String,
+    /// The root activity's status: the package is complete when its
+    /// completion status is `completed`.
+    pub root: RootStatus,
 }
 
 /// What one lesson of an attempt has reported so far, for the player's table

@@ -30,7 +30,7 @@ use crate::domain::enrollment::{ElementProgress, UpdateProgressRequest};
 use crate::domain::package::Package;
 use crate::domain::package_attempt::{
     PackageActivityResult, PackageAttempt, PackageAttemptProgress, PackageAttemptStatus,
-    PackageCommit, PackageLaunchInit,
+    PackageCommit, PackageLaunchInit, PackageSequencingState,
 };
 use crate::learning_records;
 use crate::package_serving::{drop_unless_open, Launches};
@@ -172,6 +172,21 @@ pub async fn initialise(
     attempt_id: &str,
     activity_id: &str,
 ) -> Result<PackageLaunchInit, AttemptError> {
+    initialise_delivery(db, learner_key, attempt_id, activity_id, false).await
+}
+
+/// [`initialise`] for an activity the SCORM 2004 sequencing engine
+/// delivered. `resumed` is the engine's word that the delivery resumes a
+/// suspended activity; the lesson then gets its stored data back even if it
+/// did not exit with `suspend` itself (the player suspended the package
+/// around it).
+pub async fn initialise_delivery(
+    db: &impl PackageDb,
+    learner_key: &[u8; 32],
+    attempt_id: &str,
+    activity_id: &str,
+    resumed: bool,
+) -> Result<PackageLaunchInit, AttemptError> {
     let attempt_id = attempt_id.to_string();
     let activity_id = activity_id.to_string();
     let learner_key = *learner_key;
@@ -223,7 +238,8 @@ pub async fn initialise(
             rolled_up = Some(roll_up(db, &attempt, &package)?);
         }
         let standard = package.standard;
-        let entry = progress::entry(standard, stored.as_ref().map(|s| &s.runtime));
+        let entry =
+            progress::delivery_entry(standard, stored.as_ref().map(|s| &s.runtime), resumed);
         let learner_id = progress::learner_id(&learner_key, &package.hash);
         let learner_name = rows::display_name(conn)?;
         let runtime = progress::initial_runtime(
@@ -317,6 +333,58 @@ pub async fn commit(
             ));
         }
         roll_up(db, &attempt, &package)
+    })
+    .await
+}
+
+/// The largest SCORM 2004 engine snapshot the host keeps. The engine writes
+/// a few kilobytes per activity; this admits packages of several hundred.
+pub const MAX_SEQUENCING_BYTES: usize = 4 << 20;
+
+/// Stores the SCORM 2004 sequencing engine's state for an attempt, replacing
+/// what was there, and rolls the attempt up: the package is complete when
+/// the engine reports the root activity completed. The wrapper hands this
+/// over after the engine navigates and when the player closes, not on every
+/// commit.
+pub async fn save_sequencing(
+    db: &impl PackageDb,
+    state: PackageSequencingState,
+) -> Result<PackageAttemptProgress, AttemptError> {
+    if state.snapshot.len() > MAX_SEQUENCING_BYTES {
+        return Err(AttemptError::InvalidCommit(format!(
+            "sequencing state is {} bytes; the limit is {MAX_SEQUENCING_BYTES}",
+            state.snapshot.len()
+        )));
+    }
+    in_transaction(db, "packages.attempt-sequencing-save", move |db| {
+        let conn = db.conn();
+        let attempt = open_attempt(conn, &state.attempt_id)?;
+        let package = stored_package(conn, &attempt.package_hash)?;
+        rows::put_sequencing(
+            conn,
+            &attempt.id,
+            &rows::StoredSequencing {
+                snapshot: state.snapshot,
+                root: state.root,
+            },
+        )?;
+        roll_up(db, &attempt, &package)
+    })
+    .await
+}
+
+/// The SCORM 2004 sequencing engine's snapshot stored for an attempt, for
+/// the wrapper to restore before it starts or resumes the package. `None`
+/// before the engine has reported. Reads only.
+pub async fn sequencing(
+    db: &impl PackageDb,
+    attempt_id: &str,
+) -> Result<Option<String>, AttemptError> {
+    let attempt_id = attempt_id.to_string();
+    in_transaction(db, "packages.attempt-sequencing", move |db| {
+        let conn = db.conn();
+        let attempt = rows::get(conn, &attempt_id)?;
+        Ok(rows::sequencing(conn, &attempt.id)?.map(|stored| stored.snapshot))
     })
     .await
 }
@@ -416,7 +484,12 @@ fn roll_up(
 ) -> Result<PackageAttemptProgress, AttemptError> {
     let conn = db.conn();
     let outcomes = rows::outcomes(conn, &attempt.id)?;
-    let rollup = progress::rollup(&package.description, &outcomes);
+    let engine = rows::sequencing(conn, &attempt.id)?;
+    let rollup = progress::rollup(
+        &package.description,
+        &outcomes,
+        engine.as_ref().map(|stored| &stored.root),
+    );
     if rollup.complete && attempt.status == PackageAttemptStatus::InProgress {
         rows::mark_completed(conn, &attempt.id)?;
     }

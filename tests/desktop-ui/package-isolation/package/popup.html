@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Pop-up</title>
+    <script src="shared/hostile.js"></script>
+  </head>
+  <body>
+    <h1>Hostile: a new window</h1>
+    <a id="blank-link" href="https://hostile.example/blank-link" target="_blank">new window</a>
+    <a id="named-link" href="shared/opened.html" target="hostile-window">named window</a>
+    <form id="blank-form" action="shared/opened.html" target="_blank" method="get"><button>form</button></form>
+    <pre id="seen"></pre>
+    <script>
+      // One way to open a window per button.
+      var ways = {
+        'window.open to another origin': function () { return window.open('https://hostile.example/open', 'hostile', 'width=400'); },
+        'window.open in the package': function () { return window.open('shared/opened.html', '_blank'); },
+        'a link to a new window': function () { document.getElementById('blank-link').click(); },
+        'a link to a named window': function () { document.getElementById('named-link').click(); },
+        'a form to a new window': function () { document.getElementById('blank-form').submit(); },
+        'window.open from a new frame': function () {
+          hostile.frame();
+          return window.frames[window.frames.length - 1].open('https://hostile.example/open-from-frame', '_blank');
+        },
+        'window.open from the wrapper': function () { return parent.open('https://hostile.example/open-from-wrapper', '_blank'); },
+      };
+      Object.keys(ways).forEach(function (name) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = name;
+        button.addEventListener('click', function () {
+          try {
+            ways[name]();
+            hostile.show(name, 'asked');
+          } catch (error) {
+            hostile.show(name, 'threw ' + error.name);
+          }
+        });
+        document.body.appendChild(button);
+      });
+      hostile.ready();
+    </script>
+  </body>
+</html>

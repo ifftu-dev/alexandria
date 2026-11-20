@@ -1,8 +1,17 @@
 import type {
   Chapter, Course, Element, ElementProgress, Enrollment, OpenedPackageLaunch, Package, PackageActivity, PackageActivityResult,
-  PackageAttempt, PackageAttemptProgress, PackageCommit, PackageDescription, PackageLaunchInit,
+  PackageAttempt, PackageAttemptProgress, PackageCommit, PackageDescription, PackageLaunchInit, PackageSequencingState,
 } from '@/types'
-import description from './package-player/description.json'
+import playerDescription from './package-player/description.json'
+import isolationDescription from './package-isolation/description.json'
+import scorm12Description from './scorm12-conformance/description.json'
+
+export interface PackageBackendOptions {
+  /** One of the SCORM 1.2 fixture packages; `package-player` by default. */
+  fixture?: PackageFixtureName
+  /** Any other package the course's element holds (wins over `fixture`). */
+  description?: PackageDescription
+}
 
 /** The origin the package scheme answers at in these checks; the spec serves it with `page.route`. */
 export const PACKAGE_ORIGIN = 'http://scorm-package.test'
@@ -12,12 +21,38 @@ const ENROLLMENT = 'enrollment-safety'
 const ELEMENT = 'element-safety'
 const LEARNER_ID = 'learner-for-this-package'
 
+/** The fixture packages a check can load, each a directory under `tests/desktop-ui/`. */
+const DESCRIPTIONS = {
+  'package-player': playerDescription,
+  'package-isolation': isolationDescription,
+  'scorm12-conformance': scorm12Description,
+} as const
+export type PackageFixtureName = keyof typeof DESCRIPTIONS
+export const isPackageFixtureName = (name: unknown): name is PackageFixtureName =>
+  typeof name === 'string' && Object.prototype.hasOwnProperty.call(DESCRIPTIONS, name)
+
+/** A CMITimespan, the way the host writes `total_time`. */
+function timespan(seconds: number): string {
+  const centis = Math.round(Math.max(0, seconds) * 100)
+  const whole = Math.floor(centis / 100)
+  const pad = (value: number, width: number) => String(value).padStart(width, '0')
+  const text = `${pad(Math.floor(whole / 3600), 4)}:${pad(Math.floor(whole / 60) % 60, 2)}:${pad(whole % 60, 2)}`
+  return centis % 100 ? `${text}.${pad(centis % 100, 2)}` : text
+}
+
+function seconds(span: unknown): number {
+  const match = /^(\d+):(\d+):(\d+(?:\.\d+)?)$/.exec(String(span ?? '').trim())
+  return match ? Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) : 0
+}
+
 type Cmi = Record<string, unknown> & { core?: Record<string, unknown> }
 
 interface StoredActivity {
   cmi: Cmi
   complete: boolean
   score: number | null
+  /** Time of finished sessions, as the host accumulates it. */
+  totalSeconds: number
 }
 
 /**
@@ -27,8 +62,9 @@ interface StoredActivity {
  * in miniature) so a test can launch, save, leave, come back and finish.
  * Every command is recorded; unknown ones answer an empty list or null.
  */
-export function packageBackend() {
-  const packageDescription = description as unknown as PackageDescription
+export function packageBackend(options: PackageBackendOptions = {}) {
+  const packageDescription = options.description ?? DESCRIPTIONS[options.fixture ?? 'package-player'] as unknown as PackageDescription
+  const scorm2004 = packageDescription.standard === 'scorm2004'
   const course: Course = {
     id: 'course-safety', title: 'Workshop safety', kind: 'course', description: 'A packaged course', author_address: 'stake-instructor',
     author_name: 'Fixture instructor', content_cid: null, thumbnail_cid: null, thumbnail_svg: null, tags: null, skill_ids: [],
@@ -39,16 +75,19 @@ export function packageBackend() {
   const chapter: Chapter = { id: 'chapter-safety', course_id: course.id, title: 'The package', description: null, position: 0 }
   const element: Element = { id: ELEMENT, chapter_id: chapter.id, title: 'Workshop safety', element_type: 'package',
     content_cid: HASH, content_inline: null, position: 0, duration_seconds: null }
-  const stored: Package = { hash: HASH, standard: 'scorm12', title: packageDescription.title, description: packageDescription,
+  const stored: Package = { hash: HASH, standard: packageDescription.standard, title: packageDescription.title, description: packageDescription,
     archive_bytes: 4096, location: 'draft', imported_at: '2026-11-01T00:00:00Z', last_opened_at: null }
 
   const calls: { command: string, args: unknown }[] = []
   const commits: PackageCommit[] = []
+  /** When each commit reached the host, in milliseconds. */
+  const commitTimes: number[] = []
   const progress = new Map<string, ElementProgress>()
   const attempts: PackageAttempt[] = []
   const state = new Map<string, Map<string, StoredActivity>>()
   const openLaunches = new Set<string>()
-  let launches = 0
+  /** SCORM 2004: the engine state the wrapper handed over, per attempt, in order. */
+  const sequencing: PackageSequencingState[] = []
   const control = { failCommits: false }
 
   const launchable = (): PackageActivity[] => {
@@ -82,9 +121,12 @@ export function packageBackend() {
 
   // SCORM 1.2 rollup: complete when every lesson is completed or passed (an
   // asset when launched); score the mean of the reported lesson scores.
+  // SCORM 2004: complete when the engine reports the root activity completed.
   function rollUp(attempt: PackageAttempt): PackageAttemptProgress {
     const activities = state.get(attempt.id)!
-    const complete = launchable().every(activity => activities.get(activity.id)?.complete)
+    const complete = scorm2004
+      ? sequencing.filter(saved => saved.attempt_id === attempt.id).slice(-1)[0]?.root.completion_status === 'completed'
+      : launchable().every(activity => activities.get(activity.id)?.complete)
     const scores = [...activities.values()].map(item => item.score).filter((score): score is number => score !== null)
     const score = scores.length ? scores.reduce((sum, value) => sum + value, 0) / scores.length : null
     if (complete && attempt.status === 'in_progress') {
@@ -105,7 +147,33 @@ export function packageBackend() {
     return attempt
   }
 
-  function initialise(attemptId: unknown, activityId: unknown): PackageLaunchInit {
+  // SCORM 2004: a lesson's stored data comes back only when it is resumed
+  // (it exited with suspend, or the engine resumed it); otherwise the launch
+  // is a new attempt on the lesson.
+  function initialise2004(attempt: PackageAttempt, activity: PackageActivity, resumed: boolean): PackageLaunchInit {
+    const launch = activity.launch!
+    const prior = state.get(attempt.id)!.get(activity.id)
+    const resume = Boolean(prior) && (resumed || prior?.cmi.exit === 'suspend')
+    const entry = resume ? 'resume' : 'ab-initio'
+    const cmi: Cmi = {
+      ...(resume ? structuredClone(prior!.cmi) : {}),
+      learner_id: LEARNER_ID, learner_name: 'Ada Learner', entry, credit: 'credit', mode: 'normal',
+      ...(launch.launch_data ? { launch_data: launch.launch_data } : {}),
+      ...(launch.mastery_score !== undefined ? { scaled_passing_score: String(launch.mastery_score) } : {}),
+    }
+    delete cmi.session_time
+    delete cmi.exit
+    return { attempt_id: attempt.id, activity_id: activity.id, standard: 'scorm2004', learner_id: LEARNER_ID, learner_name: 'Ada Learner',
+      entry, launch_data: launch.launch_data ?? null, mastery_score: launch.mastery_score ?? null, max_time_allowed: null,
+      time_limit_action: null, runtime: { cmi }, progress: null }
+  }
+
+  function initialise(attemptId: unknown, activityId: unknown, resumed = false): PackageLaunchInit {
+    if (scorm2004) {
+      const activity = launchable().find(item => item.id === activityId)
+      if (!activity?.launch) throw new Error(`not_found: activity ${String(activityId)}`)
+      return initialise2004(attemptById(attemptId), activity, resumed)
+    }
     const attempt = attemptById(attemptId)
     const activity = launchable().find(item => item.id === activityId)
     if (!activity?.launch) throw new Error(`not_found: activity ${String(activityId)}`)
@@ -113,7 +181,7 @@ export function packageBackend() {
     const prior = state.get(attempt.id)!.get(activity.id)
     let launched: PackageAttemptProgress | null = null
     if (launch.kind === 'asset' && attempt.status !== 'closed') {
-      state.get(attempt.id)!.set(activity.id, { cmi: {}, complete: true, score: null })
+      state.get(attempt.id)!.set(activity.id, { cmi: {}, complete: true, score: null, totalSeconds: 0 })
       launched = rollUp(attempt)
     }
     const priorCore = { ...(prior?.cmi.core ?? {}) }
@@ -122,13 +190,18 @@ export function packageBackend() {
     delete priorCore.exit
     const cmi: Cmi = {
       ...structuredClone(prior?.cmi ?? {}),
-      core: { ...priorCore, student_id: LEARNER_ID, student_name: 'Ada Learner', entry, credit: 'credit', lesson_mode: 'normal' },
+      core: { ...priorCore, student_id: LEARNER_ID, student_name: 'Ada Learner', entry, credit: 'credit', lesson_mode: 'normal',
+        total_time: timespan(prior?.totalSeconds ?? 0) },
       ...(launch.launch_data ? { launch_data: launch.launch_data } : {}),
-      ...(launch.mastery_score !== undefined ? { student_data: { mastery_score: String(launch.mastery_score) } } : {}),
+      student_data: {
+        ...(launch.mastery_score !== undefined ? { mastery_score: String(launch.mastery_score) } : {}),
+        ...(launch.max_time_allowed ? { max_time_allowed: launch.max_time_allowed } : {}),
+        ...(launch.time_limit_action ? { time_limit_action: launch.time_limit_action } : {}),
+      },
     }
     return { attempt_id: attempt.id, activity_id: activity.id, standard: 'scorm12', learner_id: LEARNER_ID, learner_name: 'Ada Learner',
-      entry, launch_data: launch.launch_data ?? null, mastery_score: launch.mastery_score ?? null, max_time_allowed: null,
-      time_limit_action: null, runtime: { cmi }, progress: launched }
+      entry, launch_data: launch.launch_data ?? null, mastery_score: launch.mastery_score ?? null,
+      max_time_allowed: launch.max_time_allowed ?? null, time_limit_action: launch.time_limit_action ?? null, runtime: { cmi }, progress: launched }
   }
 
   function commit(request: PackageCommit): PackageAttemptProgress {
@@ -136,15 +209,36 @@ export function packageBackend() {
     const attempt = attemptById(request.attempt_id)
     if (attempt.status === 'closed') throw new Error(`attempt_closed: ${attempt.id}`)
     commits.push(structuredClone(request))
+    commitTimes.push(Date.now())
     const cmi = request.runtime.cmi as Cmi
+    if (scorm2004) {
+      const scaled = (cmi.score as { scaled?: string } | undefined)?.scaled
+      state.get(attempt.id)!.set(request.activity_id, {
+        cmi: structuredClone(cmi),
+        complete: cmi.completion_status === 'completed',
+        score: scaled ? Math.max(0, Number(scaled)) : null,
+        totalSeconds: 0,
+      })
+      return rollUp(attempt)
+    }
     const core = cmi.core ?? {}
     const status = String(core.lesson_status ?? '')
     const raw = (core.score as { raw?: string } | undefined)?.raw
+    const before = state.get(attempt.id)!.get(request.activity_id)?.totalSeconds ?? 0
     state.get(attempt.id)!.set(request.activity_id, {
       cmi: structuredClone(cmi),
       complete: status === 'completed' || status === 'passed',
       score: raw ? Number(raw) / 100 : null,
+      totalSeconds: request.session_ended ? before + seconds(core.session_time) : before,
     })
+    return rollUp(attempt)
+  }
+
+  function saveSequencing(request: PackageSequencingState): PackageAttemptProgress {
+    if (control.failCommits) throw new Error('database: disk I/O error')
+    const attempt = attemptById(request.attempt_id)
+    if (attempt.status === 'closed') throw new Error(`attempt_closed: ${attempt.id}`)
+    sequencing.push(structuredClone(request))
     return rollUp(attempt)
   }
 
@@ -170,8 +264,10 @@ export function packageBackend() {
         throw new Error('no credential: package results are self-reported and this course has no assessed element')
       case 'package_get': return args.hash === HASH ? structuredClone(stored) : null
       case 'package_launch_open': {
-        launches += 1
-        const prefix = `launch-${launches}`
+        // Unguessable, like the host's 128-bit prefixes, so a check can tell
+        // whether content learned another launch's address or guessed it.
+        const digits = Array.from(crypto.getRandomValues(new Uint32Array(4)), value => String(value).padStart(10, '0')).join('')
+        const prefix = `launch-${digits}`
         openLaunches.add(prefix)
         const opened: OpenedPackageLaunch = { prefix, package_hash: HASH, base_url: `${PACKAGE_ORIGIN}/${prefix}/` }
         return opened
@@ -194,8 +290,13 @@ export function packageBackend() {
           return { activity_id: activity.id, started: Boolean(item), complete: item?.complete ?? false, score: item?.score ?? null }
         })
       }
-      case 'package_attempt_initialise': return initialise(args.attemptId, args.activityId)
+      case 'package_attempt_initialise': return initialise(args.attemptId, args.activityId, args.resumed === true)
       case 'package_attempt_commit': return commit(args.commit as PackageCommit)
+      case 'package_attempt_sequencing': {
+        const id = attemptById(args.attemptId).id
+        return sequencing.filter(saved => saved.attempt_id === id).slice(-1)[0]?.snapshot ?? null
+      }
+      case 'package_attempt_sequencing_save': return saveSequencing(args.sequencing as PackageSequencingState)
       case 'package_attempt_terminate': return rollUp(attemptById(args.attemptId))
       default:
         if (command.startsWith('list_') || command.endsWith('_list')) return []
@@ -203,5 +304,8 @@ export function packageBackend() {
     }
   }
 
-  return { invoke, calls, commits, control, openLaunches, called: (command: string) => calls.filter(call => call.command === command) }
+  return {
+    invoke, calls, commits, commitTimes, sequencing, control, openLaunches,
+    called: (command: string) => calls.filter(call => call.command === command),
+  }
 }

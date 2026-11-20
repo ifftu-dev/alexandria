@@ -5,8 +5,11 @@
 //! - A `Range` request reads that range from disk and nothing else. A file
 //!   above [`ServeLimits::whole_file`] is served only by range.
 //! - HTML is always sent whole, with the bootstrap linked as its first
-//!   element. Documents that cannot carry it (SVG, XHTML, XML) are sent with
-//!   a `sandbox` policy, so their script never runs.
+//!   element. Documents that cannot carry it (SVG, XHTML, XML) are sent
+//!   whole with a `sandbox` policy, so their script never runs.
+//! - In every document, a `<link>` that would preload with `as=fetch` loses
+//!   its `as`: WebKit sends such a preload to any origin, whatever the
+//!   content policy says.
 //! - Every response, refusals included, carries the package content policy
 //!   and a permissions policy that grants no device capability.
 
@@ -58,6 +61,12 @@ const CONTENT_POLICY: &str = "default-src 'self'; \
 
 /// Added for documents that cannot carry the bootstrap.
 const SANDBOXED_POLICY_SUFFIX: &str = "; sandbox";
+
+/// Added for pages: string sinks go through the bootstrap's default Trusted
+/// Types policy, which is what stops a javascript: address from replacing a
+/// page with a document the bootstrap never ran in. Only pages: a worker
+/// script has no bootstrap to install the policy.
+const DOCUMENT_POLICY_SUFFIX: &str = "; require-trusted-types-for 'script'";
 
 /// No device capability is granted to package content.
 const PERMISSIONS_POLICY: &str = "camera=(), microphone=(), geolocation=(), \
@@ -200,16 +209,26 @@ async fn serve_file(
     };
     let kind = Kind::of(&file);
 
-    // A page is always sent whole, because the bootstrap goes into it.
-    if kind == Kind::Html {
+    // A document is always sent whole, because it is rewritten: a page gets
+    // the bootstrap, and no document keeps a fetch preload.
+    if matches!(kind, Kind::Html | Kind::Sandboxed(_)) {
         if size > limits.whole_file {
-            log::warn!("package page above the whole-file cap: {}", file.display());
+            log::warn!(
+                "package document above the whole-file cap: {}",
+                file.display()
+            );
             return refusal(StatusCode::NOT_FOUND);
         }
-        return match read_slice(&mut handle, 0, size).await {
-            Some(bytes) => respond(StatusCode::OK, kind, inject_bootstrap(&bytes, prefix)),
-            None => refusal(StatusCode::NOT_FOUND),
+        let Some(bytes) = read_slice(&mut handle, 0, size).await else {
+            return refusal(StatusCode::NOT_FOUND);
         };
+        let bytes = without_fetch_preloads(&bytes);
+        let bytes = if kind == Kind::Html {
+            inject_bootstrap(&bytes, prefix)
+        } else {
+            bytes
+        };
+        return respond(StatusCode::OK, kind, bytes);
     }
 
     let Some(range) = range else {
@@ -386,6 +405,112 @@ fn inject_bootstrap(page: &[u8], prefix: &str) -> Vec<u8> {
     out
 }
 
+/// Renames the `as` attribute of every `<link>` tag whose `as` is `fetch`,
+/// so the tag preloads nothing. Byte-level, like [`inject_bootstrap`].
+fn without_fetch_preloads(page: &[u8]) -> Vec<u8> {
+    const RENAMED: &[u8] = b"data-alexandria-as";
+    let mut out = Vec::with_capacity(page.len());
+    let mut from = 0;
+    while let Some(start) = find_tag(page, from, b"<link") {
+        let Some(close) = page[start..].iter().position(|&b| b == b'>') else {
+            break;
+        };
+        let end = start + close;
+        out.extend_from_slice(&page[from..start]);
+        let tag = &page[start..end];
+        let mut copied = 0;
+        for at in fetch_as_attributes(tag) {
+            out.extend_from_slice(&tag[copied..at]);
+            out.extend_from_slice(RENAMED);
+            copied = at + 2;
+        }
+        out.extend_from_slice(&tag[copied..]);
+        from = end;
+    }
+    out.extend_from_slice(&page[from..]);
+    out
+}
+
+/// Where `<name` starts at or after `from`, the name ending there.
+fn find_tag(page: &[u8], from: usize, name: &[u8]) -> Option<usize> {
+    let mut at = from;
+    while let Some(found) = page
+        .get(at..)?
+        .windows(name.len())
+        .position(|w| w.eq_ignore_ascii_case(name))
+    {
+        let start = at + found;
+        if matches!(
+            page.get(start + name.len()).copied(),
+            Some(b'>' | b' ' | b'\t' | b'\n' | b'\r' | b'/' | b'\x0c')
+        ) {
+            return Some(start);
+        }
+        at = start + 1;
+    }
+    None
+}
+
+/// Offsets, within one tag, of each `as` attribute name whose value is
+/// `fetch` (any case, quoted or not). Text inside other attribute values is
+/// skipped.
+fn fetch_as_attributes(tag: &[u8]) -> Vec<usize> {
+    let mut found = Vec::new();
+    let mut i = tag
+        .iter()
+        .position(|b| b.is_ascii_whitespace())
+        .unwrap_or(tag.len());
+    while i < tag.len() {
+        while i < tag.len() && (tag[i].is_ascii_whitespace() || tag[i] == b'/') {
+            i += 1;
+        }
+        let name_start = i;
+        while i < tag.len() && !tag[i].is_ascii_whitespace() && !matches!(tag[i], b'=' | b'/') {
+            i += 1;
+        }
+        let name = &tag[name_start..i];
+        while i < tag.len() && tag[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if tag.get(i) != Some(&b'=') {
+            if name.is_empty() {
+                i += 1;
+            }
+            continue;
+        }
+        i += 1;
+        while i < tag.len() && tag[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        let (value_start, value_end) = match tag.get(i) {
+            Some(&quote @ (b'"' | b'\'')) => {
+                let start = i + 1;
+                let end = tag[start..]
+                    .iter()
+                    .position(|&b| b == quote)
+                    .map_or(tag.len(), |p| start + p);
+                i = (end + 1).min(tag.len());
+                (start, end)
+            }
+            _ => {
+                let start = i;
+                while i < tag.len() && !tag[i].is_ascii_whitespace() {
+                    i += 1;
+                }
+                (start, i)
+            }
+        };
+        if name.eq_ignore_ascii_case(b"as")
+            && tag[value_start..value_end]
+                .trim_ascii()
+                .eq_ignore_ascii_case(b"fetch")
+        {
+            found.push(name_start);
+        }
+    }
+    found
+}
+
 /// The offset just past the first `<name …>` tag, matched without case and
 /// only when the name ends there (`<head` does not match `<header>`).
 fn after_open_tag(page: &[u8], name: &[u8]) -> Option<usize> {
@@ -409,7 +534,8 @@ fn after_open_tag(page: &[u8], name: &[u8]) -> Option<usize> {
 fn respond(status: StatusCode, kind: Kind, body: Vec<u8>) -> Response<Vec<u8>> {
     let policy = match kind {
         Kind::Sandboxed(_) => format!("{CONTENT_POLICY}{SANDBOXED_POLICY_SUFFIX}"),
-        _ => CONTENT_POLICY.to_string(),
+        Kind::Html => format!("{CONTENT_POLICY}{DOCUMENT_POLICY_SUFFIX}"),
+        Kind::Other(_) => CONTENT_POLICY.to_string(),
     };
     Response::builder()
         .status(status)

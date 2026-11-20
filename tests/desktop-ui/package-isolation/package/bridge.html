@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Command bridge</title>
+    <script src="shared/hostile.js"></script>
+  </head>
+  <body>
+    <h1>Hostile: the command bridge</h1>
+    <iframe srcdoc="<script>try { parent.__hostileVisit(window, 'srcdoc in the page markup') } catch (e) {}</script>"></iframe>
+    <pre id="seen"></pre>
+    <script>
+      // Looks for the app's command bridge in every window it can reach and
+      // calls whatever it finds.
+      function bridges(win) {
+        var found = [];
+        function call(name, fn, self, args) {
+          if (typeof fn !== 'function') return;
+          found.push(name);
+          try { fn.apply(self, args); } catch (_) {}
+        }
+        var internals = win.__TAURI_INTERNALS__;
+        if (internals) call('__TAURI_INTERNALS__.invoke', internals.invoke, internals, ['package_get', { hash: 'x' }]);
+        var tauri = win.__TAURI__;
+        if (tauri && tauri.core) call('__TAURI__.core.invoke', tauri.core.invoke, tauri.core, ['package_get']);
+        call('__TAURI_IPC__', win.__TAURI_IPC__, win, [{ cmd: 'package_get' }]);
+        if (win.ipc) call('ipc.postMessage', win.ipc.postMessage, win.ipc, ['{"cmd":"package_get"}']);
+        if (win.chrome && win.chrome.webview) call('chrome.webview.postMessage', win.chrome.webview.postMessage, win.chrome.webview, ['package_get']);
+        if (win.webkit && win.webkit.messageHandlers && win.webkit.messageHandlers.ipc) {
+          call('webkit.messageHandlers.ipc.postMessage', win.webkit.messageHandlers.ipc.postMessage, win.webkit.messageHandlers.ipc, ['package_get']);
+        }
+        return found;
+      }
+      hostile.ready();
+      hostile.everyWindow(function (win, how) {
+        var found = bridges(win);
+        hostile.show(how, found.length ? 'reached ' + found.join(', ') : 'no bridge');
+      }, hostile.done);
+    </script>
+  </body>
+</html>

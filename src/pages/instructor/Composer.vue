@@ -374,6 +374,12 @@ const publishBlockers = computed<string[]>(() => {
   if (unbound.length) {
     blockers.push(t('instructor.compose.blockerUnboundPlugins', { count: unbound.length }, unbound.length))
   }
+  const unattached = Object.values(elements.value)
+    .flat()
+    .filter(e => e.element_type === 'package' && !e.content_cid)
+  if (unattached.length) {
+    blockers.push(t('instructor.compose.blockerUnattachedPackages', { count: unattached.length }, unattached.length))
+  }
   if (policyDirty.value) blockers.push(t('instructor.compose.blockerPolicyUnsaved'))
   return blockers
 })

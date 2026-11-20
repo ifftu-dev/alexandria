@@ -181,6 +181,16 @@
     "attempt": "Attempt {number}",
     "previousLesson": "Previous lesson",
     "nextLesson": "Next lesson",
+    "previous": "Previous",
+    "continue": "Continue",
+    "suspend": "Suspend",
+    "exit": "Exit",
+    "exitBody": "Leave this package for good? Its own rules decide what counts; you cannot resume this attempt afterwards.",
+    "exitConfirm": "Exit package",
+    "choose": "Choose a lesson from the list to go on.",
+    "suspended": "Your place in this package is saved.",
+    "resume": "Resume",
+    "ended": "You have left this package. Start a fresh attempt to take it again.",
     "fresh": "Start a fresh attempt",
     "freshBody": "Start this package again from the beginning? Your place in the current attempt is set aside. A completed package stays completed.",
     "freshConfirm": "Start again",
@@ -203,5 +213,11 @@
     "unitExited": "This unit has finished. Choose the next one from the list.",
     "focusForced": "This unit needs the whole screen, so it stays in focus mode until you leave it.",
     "courseComplete": "Course complete. Package results are self-reported, so this course earns no credential."
+  },
+  "packageFile": {
+    "open": "Open a package file",
+    "opening": "Opening the package…",
+    "fileFilter": "Standards package",
+    "failed": "The package could not be opened: {error}"
   }
 }

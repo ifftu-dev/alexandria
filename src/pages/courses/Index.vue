@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, MotionList } from '@/components/ui'
 import CourseCard from '@/components/course/CourseCard.vue'
+import OpenPackageFileButton from '@/components/course/package/OpenPackageFileButton.vue'
 import type { Course, SkillDetail } from '@/types'
 
 const { invoke } = useLocalApi()
@@ -76,6 +77,7 @@ onMounted(async () => {
         </p>
       </div>
       <div class="flex gap-2">
+        <OpenPackageFileButton />
         <AppButton variant="ghost" size="sm" @click="$router.push('/instructor/tutorials/new')">
           <svg class="w-4 h-4 me-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8 5v14l11-7z" />
