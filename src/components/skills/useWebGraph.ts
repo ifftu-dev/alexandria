@@ -119,17 +119,23 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
   const model = computed(() => input().model)
   const graph = computed(() => webGraphFromAtlas(model.value))
 
-  // Size: measured from the root, with a default until then.
+  // Size: measured from the root, with a default until then. The root may
+  // come and go (the explorer draws its map only in some views), so it is
+  // watched rather than read once at mount.
   const measured = ref<{ width: number; height: number } | null>(null)
   const size = computed(() => measured.value ?? (input().compact ? WEB_COMPACT_DEFAULT_SIZE : WEB_DEFAULT_SIZE))
   let observer: ResizeObserver | undefined
   onMounted(() => {
-    if (!root.value || typeof ResizeObserver === 'undefined') return
-    observer = new ResizeObserver(entries => {
-      const box = entries[0]?.contentRect
-      if (box && box.width > 0 && box.height > 0) measured.value = { width: box.width, height: box.height }
-    })
-    observer.observe(root.value)
+    watch(root, element => {
+      observer?.disconnect()
+      observer = undefined
+      if (!element || typeof ResizeObserver === 'undefined') return
+      observer = new ResizeObserver(entries => {
+        const box = entries[0]?.contentRect
+        if (box && box.width > 0 && box.height > 0) measured.value = { width: box.width, height: box.height }
+      })
+      observer.observe(element)
+    }, { immediate: true, flush: 'post' })
   })
   onBeforeUnmount(() => observer?.disconnect())
 
