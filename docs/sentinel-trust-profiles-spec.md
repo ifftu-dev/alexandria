@@ -259,7 +259,7 @@ Owner actions, not agent work (ticket 16):
 
 2026-11-13, cross-repo follow-ups closed:
 
-- **`alexandria-verify` 0.6.0.** The crate is bumped to 0.6.0 for the new assertion fields. Cloud consumes it as a vendored, checksummed source snapshot, which is refreshed to 0.6.0 in the same coordinated change. The website verifier canonicalises the credential's raw JSON rather than a typed copy, so it already accepts the new fields and needs no change; it does not display integrity fields. Publishing 0.6.0 to crates.io is for third-party verifiers only and follows the merge.
+- **`alexandria-verify` 0.6.0.** The crate is bumped to 0.6.0 for the new assertion fields. Cloud consumes it as a vendored, checksummed source snapshot, which is refreshed to 0.6.0 in the same coordinated change. The website verifier canonicalises the credential's raw JSON rather than a typed copy, so it already accepts the new fields and needs no change; it does not display integrity fields. 0.6.0 is published to crates.io for third-party verifiers.
 - **Interview report rung.** The interview integrity report moves to `alexandria-interview-integrity/2` and gains `assurance_level` (`local` or `device_attested`) and `verification_rung` (`live` or `none`). Cloud accepts only `/2`, refuses any other value, and shows both on its interview page and in the panel's integrity view; the candidate's waiting room shows the rung of what it sent.
 - **`interview-assistant.md`** now covers the live signal feed, live segments, authored follow-ups, the report's new fields and the `review` status.
 
