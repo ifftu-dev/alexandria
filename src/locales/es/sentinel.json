@@ -615,7 +615,6 @@
       "over_budget": "este dispositivo no puede ejecutar las comprobaciones con cámara con fluidez"
     },
     "raise": {
-      "pair_phone": "Vincula tu teléfono antes de empezar.",
       "attested_device": "Usa un teléfono o tableta que supere la certificación del dispositivo.",
       "connect_camera": "Conecta una cámara.",
       "allow_camera": "Activa la cámara antes de empezar.",

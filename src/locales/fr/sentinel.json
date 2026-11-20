@@ -615,7 +615,6 @@
       "over_budget": "cet appareil ne peut pas exécuter les vérifications par caméra de façon fluide"
     },
     "raise": {
-      "pair_phone": "Associez votre téléphone avant de commencer.",
       "attested_device": "Utilisez un téléphone ou une tablette qui réussit l'attestation de l'appareil.",
       "connect_camera": "Branchez une caméra.",
       "allow_camera": "Activez la caméra avant de commencer.",

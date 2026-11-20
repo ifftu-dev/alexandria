@@ -3165,7 +3165,6 @@ export type MessageKey =
   | 'sentinel.trust.raise.attested_device'
   | 'sentinel.trust.raise.connect_camera'
   | 'sentinel.trust.raise.faster_device'
-  | 'sentinel.trust.raise.pair_phone'
   | 'sentinel.trust.reason.camera_not_consented'
   | 'sentinel.trust.reason.no_camera'
   | 'sentinel.trust.reason.not_attested'
