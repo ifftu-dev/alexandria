@@ -138,15 +138,27 @@ fn active_enrolment(db: &Database, course_id: &str) -> Result<Option<String>, St
         .map_err(|e| e.to_string())
 }
 
-/// The stored package with this hash, if this profile knows it.
+/// The stored package with this hash, if this profile knows it. A package
+/// of a published course on this device that is not here yet is fetched
+/// from the peers serving the course, by its hash, and recorded first
+/// ([`packages::get_or_receive`]); `null` when it cannot be.
 #[tauri::command]
 pub async fn package_get(
     state: State<'_, AppState>,
     hash: String,
 ) -> Result<Option<Package>, String> {
-    packages::get(&db(&state, DatabaseWorkload::Learner), &hash)
-        .await
-        .map_err(|e| e.to_string())
+    let db = db(&state, DatabaseWorkload::Learner);
+    let resolver = state.resolver.lock().await.as_ref().cloned();
+    let Some(resolver) = resolver else {
+        return packages::get(&db, &hash).await.map_err(|e| e.to_string());
+    };
+    let dirs = dirs(&state)?;
+    match packages::get_or_receive(&db, &state.content_node, &dirs, &resolver, &hash).await {
+        Ok(package) => Ok(package),
+        // No peer serves it right now: the player says it is not here yet.
+        Err(packages::PackageError::NotFound(_)) => Ok(None),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 /// Makes sure a package's files are extracted, reporting progress on

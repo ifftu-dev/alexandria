@@ -505,6 +505,100 @@ pub async fn register_stored(
     .map_err(PackageError::Database)
 }
 
+/// Where a package archive this device lacks comes from: the peers that
+/// serve the course's content, by the archive's hash. On success the blob is
+/// complete, and retained, in this device's content store.
+pub trait ArchiveSource: Sync {
+    fn fetch(&self, hash: &str) -> impl Future<Output = Result<(), PackageError>> + Send;
+}
+
+/// The app's content fetch path: the local store, then the peers that
+/// provide the hash, BLAKE3-verified end to end.
+impl ArchiveSource for crate::content_store::resolver::ContentResolver {
+    async fn fetch(&self, hash: &str) -> Result<(), PackageError> {
+        self.resolve(hash).await.map(|_| ()).map_err(|e| match e {
+            crate::content_store::resolver::ResolveError::NotFound(_) => {
+                PackageError::NotFound(hash.to_string())
+            }
+            other => PackageError::Content(ContentError::Store(other.to_string())),
+        })
+    }
+}
+
+/// The package with this hash for a learner: the record on this device, or,
+/// when the hash is a package element of a published course on this device
+/// and the archive is not here yet, the archive fetched from `source` by its
+/// hash, checked as import checks it, recorded and pinned as the course's
+/// content (evictable once no active enrolment needs it). `None` when the
+/// hash belongs to no published course here: a hash the player asks for is
+/// never fetched on its own say-so. A record whose archive was evicted from
+/// the store, and whose files are not extracted, is fetched again.
+pub async fn get_or_receive(
+    db: &impl PackageDb,
+    node: &ContentNode,
+    dirs: &PackageDirs,
+    source: &impl ArchiveSource,
+    hash: &str,
+) -> Result<Option<Package>, PackageError> {
+    let hash = checked_hash(hash)?;
+    let existing = get(db, &hash).await?;
+    if let Some(package) = &existing {
+        let evicted = package.location == ArchiveLocation::Store
+            && !dirs.cache.join(&hash).is_dir()
+            && !in_store(node, &hash).await?;
+        if !evicted {
+            return Ok(existing);
+        }
+    }
+    let for_db = hash.clone();
+    let published = db
+        .run("packages.receive.course", move |db| {
+            rows::in_published_course(db.conn(), &for_db)
+        })
+        .await
+        .map_err(PackageError::Database)?;
+    if !published {
+        return Ok(existing);
+    }
+    if !in_store(node, &hash).await? {
+        source.fetch(&hash).await?;
+    }
+    let package = register_stored(db, node, dirs, &hash).await?;
+    let (for_db, size) = (hash.clone(), package.archive_bytes);
+    db.run("packages.receive.pin", move |db| {
+        rows::record_received(db.conn(), &for_db, size)
+    })
+    .await
+    .map_err(PackageError::Database)?;
+    Ok(Some(package))
+}
+
+/// The package hashes a course on this device carries, in course order.
+pub async fn course_packages(
+    db: &impl PackageDb,
+    course_id: &str,
+) -> Result<Vec<String>, PackageError> {
+    let course_id = course_id.to_string();
+    db.run("packages.course-packages", move |db| {
+        rows::course_packages(db.conn(), &course_id)
+    })
+    .await
+    .map_err(PackageError::Database)
+}
+
+/// Whether the store holds the whole blob.
+async fn in_store(node: &ContentNode, hash: &str) -> Result<bool, PackageError> {
+    let store = node
+        .store()
+        .await
+        .map_err(|_| ContentError::NodeNotRunning)?;
+    let status = store
+        .status(content::parse_hash(hash)?)
+        .await
+        .map_err(|e| ContentError::Store(e.to_string()))?;
+    Ok(matches!(status, BlobStatus::Complete { .. }))
+}
+
 /// Copies an archive out of the content store into a scratch file in the
 /// cache directory, for one import check or extraction. The caller deletes it.
 async fn export_from_store(

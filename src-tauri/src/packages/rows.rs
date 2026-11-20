@@ -67,6 +67,57 @@ pub(super) fn record_published(conn: &Connection, hash: &str, size: u64) -> Resu
     Ok(())
 }
 
+/// Whether the hash is the content of a package element in a published
+/// course on this device.
+pub(super) fn in_published_course(conn: &Connection, hash: &str) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM course_elements e \
+           JOIN course_chapters ch ON ch.id = e.chapter_id \
+           JOIN courses c ON c.id = ch.course_id \
+           WHERE e.element_type = 'package' AND e.content_cid = ?1 AND c.status = 'published')",
+        params![hash],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// The distinct package hashes of a course's package elements.
+pub(super) fn course_packages(conn: &Connection, course_id: &str) -> Result<Vec<String>, String> {
+    let mut statement = conn
+        .prepare(
+            "SELECT e.content_cid FROM course_elements e \
+             JOIN course_chapters ch ON ch.id = e.chapter_id \
+             WHERE ch.course_id = ?1 AND e.element_type = 'package' AND e.content_cid IS NOT NULL \
+             GROUP BY e.content_cid ORDER BY MIN(ch.position), MIN(e.position)",
+        )
+        .map_err(|e| e.to_string())?;
+    let hashes = statement
+        .query_map(params![course_id], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<String>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(hashes)
+}
+
+/// Pins an archive received with a course as that course's content. Unlike
+/// a published archive, eviction may remove it once no active enrolment
+/// needs it; it is fetched again when wanted. A pin already held (the
+/// publisher's own, never evicted) is left as it is.
+pub(super) fn record_received(conn: &Connection, hash: &str, size: u64) -> Result<(), String> {
+    let held: bool = conn
+        .query_row(
+            "SELECT EXISTS (SELECT 1 FROM pins WHERE cid = ?1)",
+            params![hash],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if held {
+        crate::content_store::storage::touch_pin(conn, hash)
+    } else {
+        crate::content_store::storage::upsert_pin(conn, hash, "course", size, true)
+    }
+}
+
 /// Packages not extracted for a launch since `cutoff` (RFC 3339, UTC).
 pub(super) fn idle_since(conn: &Connection, cutoff: &str) -> Result<Vec<String>, String> {
     let mut statement = conn
