@@ -681,6 +681,9 @@ export interface GrantRecords {
   status: OutboxStatus | null
 }
 
+/** What an access log row records (`AccessAction` in src-tauri/src/domain/record_sending.rs). */
+export type AccessAction = 'send' | 'void'
+
 /** One send in the learner-readable access log. */
 export interface RecordAccessEntry {
   seq: number
@@ -688,7 +691,7 @@ export interface RecordAccessEntry {
   recipient_id: string
   recipient_kind: RecipientKind
   recipient_name: string
-  action: 'send' | 'void'
+  action: AccessAction
   scope: RecordScope
   record_count: number
   identifier: string
