@@ -1,6 +1,8 @@
 //! The activity log's size limit.
 //!
-//! Past [`LIMIT_BYTES`] the oldest interaction-level records go first. If the
+//! The statements cmi5 units wrote on their own count against the limit and
+//! go first, oldest first, never from a session still open. Then the oldest
+//! interaction-level records go. If the
 //! log is still over, completion-level records are kept as one summary per
 //! attempt at each activity: for each registration (an enrolment or a
 //! package attempt) and activity, the record with the strongest result
@@ -28,22 +30,27 @@ pub fn usage(conn: &Connection) -> Result<LearningRecordUsage, RecordError> {
         [],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )?;
+    let (unit_bytes, unit_records) = super::unit_records::usage(conn)?;
     Ok(LearningRecordUsage {
-        bytes: u64::try_from(bytes).unwrap_or(0),
+        bytes: u64::try_from(bytes).unwrap_or(0) + unit_bytes,
         limit_bytes: LIMIT_BYTES,
-        records: u64::try_from(records).unwrap_or(0),
-        interaction_records: u64::try_from(interaction_records).unwrap_or(0),
+        records: u64::try_from(records).unwrap_or(0) + unit_records,
+        interaction_records: u64::try_from(interaction_records).unwrap_or(0) + unit_records,
     })
 }
 
 /// Brings the log within `limit_bytes` by the rule in the module header.
 /// Returns how many records were removed.
 pub fn enforce_limit(conn: &Connection, limit_bytes: u64) -> Result<usize, RecordError> {
-    let mut total = usage(conn)?.bytes;
+    let total = usage(conn)?.bytes;
     if total <= limit_bytes {
         return Ok(0);
     }
-    let mut removed = 0;
+    // What cmi5 units wrote on their own goes first.
+    let (mut total, mut removed) = super::unit_records::trim(conn, total, limit_bytes)?;
+    if total <= limit_bytes {
+        return Ok(removed);
+    }
 
     // Oldest interaction-level records first.
     let interactions: Vec<(i64, i64)> = {

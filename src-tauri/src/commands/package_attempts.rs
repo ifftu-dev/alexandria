@@ -14,11 +14,7 @@ use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
 fn db<'a>(state: &'a State<'_, AppState>) -> ExecutorDb<'a> {
-    ExecutorDb {
-        executor: &state.db_executor,
-        lease: state.profile_lease(),
-        workload: DatabaseWorkload::Learner,
-    }
+    super::executor_db(state, DatabaseWorkload::Learner)
 }
 
 /// Opens the learner's current attempt at a package element of an

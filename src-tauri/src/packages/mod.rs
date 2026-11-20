@@ -11,7 +11,7 @@
 //! - **A draft's archive stays off the served store.** The content node
 //!   answers any request for a hash it holds, so "never served" means the
 //!   archive is not in the store: it is a file in the profile's packages
-//!   directory ([`ArchiveLocation::Draft`]) until [`publish`] moves it into
+//!   directory ([`PackageArchiveLocation::Draft`]) until [`publish`] moves it into
 //!   the store with a pin that eviction never removes.
 //! - **Extracted files are a cache.** They live under the profile's package
 //!   cache, one directory per hash, are dropped on completion or after
@@ -44,7 +44,9 @@ use crate::content_store::content::{self, ContentError};
 use crate::content_store::node::ContentNode;
 use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::db::Database;
-use crate::domain::package::{ArchiveLocation, OpenedPackageFile, Package, PackageExtractProgress};
+use crate::domain::package::{
+    OpenedPackageFile, Package, PackageArchiveLocation, PackageExtractProgress,
+};
 use crate::profile::manager::ProfilePaths;
 use crate::profile::scope::ProfileLease;
 
@@ -67,8 +69,34 @@ pub enum PackageError {
     Content(#[from] crate::content_store::content::ContentError),
     #[error("package files: {0}")]
     Io(#[from] std::io::Error),
+    /// Opening a package file as a course needs the local author.
+    #[error("no identity found — generate a wallet first: {0}")]
+    NoIdentity(String),
     #[error("{0}")]
     Database(String),
+}
+
+impl From<rusqlite::Error> for PackageError {
+    fn from(error: rusqlite::Error) -> Self {
+        PackageError::Database(error.to_string())
+    }
+}
+
+/// Runs one database step whose own failures are typed: an error from the
+/// step comes back as it is; a failure to reach the database at all is
+/// [`PackageError::Database`].
+pub(crate) async fn run_step<T, F>(
+    db: &impl PackageDb,
+    label: &'static str,
+    step: F,
+) -> Result<T, PackageError>
+where
+    T: Send + 'static,
+    F: FnOnce(&Database) -> Result<T, PackageError> + Send + 'static,
+{
+    db.run(label, move |db| Ok(step(db)))
+        .await
+        .map_err(PackageError::Database)?
 }
 
 /// The profile's two package directories.
@@ -96,7 +124,7 @@ impl PackageDirs {
 
 /// Somewhere to run database work: the executor in commands, a plain
 /// database in tests.
-pub trait PackageDb: Sync {
+pub trait PackageDb: Send + Sync {
     fn run<T, F>(
         &self,
         label: &'static str,
@@ -193,7 +221,7 @@ impl PackageDb for std::sync::Mutex<Database> {
 }
 
 /// A package hash as a path component: 64 lowercase hex characters.
-fn checked_hash(hash: &str) -> Result<String, PackageError> {
+pub(crate) fn checked_hash(hash: &str) -> Result<String, PackageError> {
     let hash = hash.trim().to_ascii_lowercase();
     if hash.len() == 64 && hash.bytes().all(|b| b.is_ascii_hexdigit()) {
         Ok(hash)
@@ -230,17 +258,15 @@ pub async fn import(
         title: checked.description.title.clone(),
         description: checked.description,
         archive_bytes: checked.size,
-        location: ArchiveLocation::Draft,
+        location: PackageArchiveLocation::Draft,
         imported_at: crate::clock::now_rfc3339(),
         last_opened_at: None,
     };
-    let stored = db
-        .run("packages.import", move |db| {
-            rows::insert(db.conn(), &package)
-        })
-        .await
-        .map_err(PackageError::Database)?;
-    if stored.location == ArchiveLocation::Store {
+    let stored = run_step(db, "packages.import", move |db| {
+        rows::insert(db.conn(), &package)
+    })
+    .await?;
+    if stored.location == PackageArchiveLocation::Store {
         // The served store already holds these bytes; one copy is enough.
         archive::discard_draft(&dirs.archives, &stored.hash)?;
     }
@@ -250,9 +276,7 @@ pub async fn import(
 /// The recorded package with this hash, if any.
 pub async fn get(db: &impl PackageDb, hash: &str) -> Result<Option<Package>, PackageError> {
     let hash = checked_hash(hash)?;
-    db.run("packages.get", move |db| rows::get(db.conn(), &hash))
-        .await
-        .map_err(PackageError::Database)
+    run_step(db, "packages.get", move |db| rows::get(db.conn(), &hash)).await
 }
 
 async fn required(db: &impl PackageDb, hash: &str) -> Result<Package, PackageError> {
@@ -276,12 +300,10 @@ pub async fn open_file(
 ) -> Result<OpenedPackageFile, PackageError> {
     let package = import(db, dirs, source).await?;
     let for_draft = package.clone();
-    let ids = db
-        .run("packages.open-file", move |db| {
-            draft::find_or_create(db.conn(), &for_draft)
-        })
-        .await
-        .map_err(PackageError::Database)?;
+    let ids = run_step(db, "packages.open-file", move |db| {
+        draft::find_or_create(db.conn(), &for_draft)
+    })
+    .await?;
     Ok(OpenedPackageFile {
         package,
         course_id: ids.course_id,
@@ -318,8 +340,10 @@ pub async fn ensure_extracted(
     let root = cache::extracted_path(&dirs.cache, &hash);
     if !root.is_dir() {
         let (archive, exported) = match package.location {
-            ArchiveLocation::Draft => (archive::draft_path(&dirs.archives, &hash), false),
-            ArchiveLocation::Store => (export_from_store(node, &dirs.cache, &hash).await?, true),
+            PackageArchiveLocation::Draft => (archive::draft_path(&dirs.archives, &hash), false),
+            PackageArchiveLocation::Store => {
+                (export_from_store(node, &dirs.cache, &hash).await?, true)
+            }
         };
         let cache_dir = dirs.cache.clone();
         let for_report = hash.clone();
@@ -344,13 +368,11 @@ pub async fn ensure_extracted(
         .await?;
     }
     let now = crate::clock::now_rfc3339();
-    let package = db
-        .run("packages.opened", move |db| {
-            rows::mark_opened(db.conn(), &hash, &now)?;
-            rows::get(db.conn(), &hash)?.ok_or_else(|| format!("package {hash} vanished"))
-        })
-        .await
-        .map_err(PackageError::Database)?;
+    let package = run_step(db, "packages.opened", move |db| {
+        rows::mark_opened(db.conn(), &hash, &now)?;
+        rows::get(db.conn(), &hash)?.ok_or_else(|| PackageError::NotFound(hash.clone()))
+    })
+    .await?;
     Ok(Extracted { package, root })
 }
 
@@ -383,12 +405,10 @@ pub async fn drop_idle(
     now: DateTime<Utc>,
 ) -> Result<Vec<String>, PackageError> {
     let cutoff = (now - IDLE_DROP_AFTER).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    let idle = db
-        .run("packages.idle", move |db| {
-            rows::idle_since(db.conn(), &cutoff)
-        })
-        .await
-        .map_err(PackageError::Database)?;
+    let idle = run_step(db, "packages.idle", move |db| {
+        rows::idle_since(db.conn(), &cutoff)
+    })
+    .await?;
     let cache_dir = dirs.cache.clone();
     blocking(move || {
         let mut dropped = Vec::new();
@@ -401,6 +421,35 @@ pub async fn drop_idle(
         Ok(dropped)
     })
     .await
+}
+
+/// Removes draft packages nothing uses: a package picked in the course
+/// editor and then cancelled or replaced, which no element and no attempt
+/// refers to. Its record, its draft archive and any extracted files go.
+/// Call at profile start, before an editor can hold a fresh pick. Returns
+/// the hashes removed.
+pub async fn sweep_unused_drafts(
+    db: &impl PackageDb,
+    dirs: &PackageDirs,
+) -> Result<Vec<String>, PackageError> {
+    let candidates = run_step(db, "packages.unused-drafts", |db| {
+        rows::unused_drafts(db.conn())
+    })
+    .await?;
+    let mut swept = Vec::new();
+    for hash in candidates {
+        let for_db = hash.clone();
+        let deleted = run_step(db, "packages.sweep-draft", move |db| {
+            rows::delete_unused_draft(db.conn(), &for_db)
+        })
+        .await?;
+        if deleted {
+            archive::discard_draft(&dirs.archives, &hash)?;
+            drop_extracted(dirs, &hash).await?;
+            swept.push(hash);
+        }
+    }
+    Ok(swept)
 }
 
 /// Removes what an interrupted import, export or extraction left behind.
@@ -423,7 +472,7 @@ pub async fn publish(
 ) -> Result<Package, PackageError> {
     let hash = checked_hash(hash)?;
     let package = required(db, &hash).await?;
-    if package.location == ArchiveLocation::Store {
+    if package.location == PackageArchiveLocation::Store {
         return Ok(package);
     }
 
@@ -450,13 +499,12 @@ pub async fn publish(
 
     let size = package.archive_bytes;
     let for_db = hash.clone();
-    db.run("packages.publish", move |db| {
-        crate::db::with_transaction(db.conn(), || {
+    run_step(db, "packages.publish", move |db| {
+        crate::db::with_typed_transaction(db.conn(), || {
             rows::record_published(db.conn(), &for_db, size)
         })
     })
-    .await
-    .map_err(PackageError::Database)?;
+    .await?;
     archive::discard_draft(&dirs.archives, &hash)?;
     required(db, &hash).await
 }
@@ -494,15 +542,104 @@ pub async fn register_stored(
         title: checked.description.title.clone(),
         description: checked.description,
         archive_bytes: checked.size,
-        location: ArchiveLocation::Store,
+        location: PackageArchiveLocation::Store,
         imported_at: crate::clock::now_rfc3339(),
         last_opened_at: None,
     };
-    db.run("packages.register-stored", move |db| {
+    run_step(db, "packages.register-stored", move |db| {
         rows::insert(db.conn(), &package)
     })
     .await
-    .map_err(PackageError::Database)
+}
+
+/// Where a package archive this device lacks comes from: the peers that
+/// serve the course's content, by the archive's hash. On success the blob is
+/// complete, and retained, in this device's content store.
+pub trait ArchiveSource: Sync {
+    fn fetch(&self, hash: &str) -> impl Future<Output = Result<(), PackageError>> + Send;
+}
+
+/// The app's content fetch path: the local store, then the peers that
+/// provide the hash, BLAKE3-verified end to end.
+impl ArchiveSource for crate::content_store::resolver::ContentResolver {
+    async fn fetch(&self, hash: &str) -> Result<(), PackageError> {
+        self.resolve(hash).await.map(|_| ()).map_err(|e| match e {
+            crate::content_store::resolver::ResolveError::NotFound(_) => {
+                PackageError::NotFound(hash.to_string())
+            }
+            other => PackageError::Content(ContentError::Store(other.to_string())),
+        })
+    }
+}
+
+/// The package with this hash for a learner: the record on this device, or,
+/// when the hash is a package element of a published course on this device
+/// and the archive is not here yet, the archive fetched from `source` by its
+/// hash, checked as import checks it, recorded and pinned as the course's
+/// content (evictable once no active enrolment needs it). `None` when the
+/// hash belongs to no published course here: a hash the player asks for is
+/// never fetched on its own say-so. A record whose archive was evicted from
+/// the store, and whose files are not extracted, is fetched again.
+pub async fn get_or_receive(
+    db: &impl PackageDb,
+    node: &ContentNode,
+    dirs: &PackageDirs,
+    source: &impl ArchiveSource,
+    hash: &str,
+) -> Result<Option<Package>, PackageError> {
+    let hash = checked_hash(hash)?;
+    let existing = get(db, &hash).await?;
+    if let Some(package) = &existing {
+        let evicted = package.location == PackageArchiveLocation::Store
+            && !dirs.cache.join(&hash).is_dir()
+            && !in_store(node, &hash).await?;
+        if !evicted {
+            return Ok(existing);
+        }
+    }
+    let for_db = hash.clone();
+    let published = run_step(db, "packages.receive.course", move |db| {
+        rows::in_published_course(db.conn(), &for_db)
+    })
+    .await?;
+    if !published {
+        return Ok(existing);
+    }
+    if !in_store(node, &hash).await? {
+        source.fetch(&hash).await?;
+    }
+    let package = register_stored(db, node, dirs, &hash).await?;
+    let (for_db, size) = (hash.clone(), package.archive_bytes);
+    run_step(db, "packages.receive.pin", move |db| {
+        rows::record_received(db.conn(), &for_db, size)
+    })
+    .await?;
+    Ok(Some(package))
+}
+
+/// The package hashes a course on this device carries, in course order.
+pub async fn course_packages(
+    db: &impl PackageDb,
+    course_id: &str,
+) -> Result<Vec<String>, PackageError> {
+    let course_id = course_id.to_string();
+    run_step(db, "packages.course-packages", move |db| {
+        rows::course_packages(db.conn(), &course_id)
+    })
+    .await
+}
+
+/// Whether the store holds the whole blob.
+async fn in_store(node: &ContentNode, hash: &str) -> Result<bool, PackageError> {
+    let store = node
+        .store()
+        .await
+        .map_err(|_| ContentError::NodeNotRunning)?;
+    let status = store
+        .status(content::parse_hash(hash)?)
+        .await
+        .map_err(|e| ContentError::Store(e.to_string()))?;
+    Ok(matches!(status, BlobStatus::Complete { .. }))
 }
 
 /// Copies an archive out of the content store into a scratch file in the

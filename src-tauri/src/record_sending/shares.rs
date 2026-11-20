@@ -485,12 +485,8 @@ pub async fn send_pending<D: RecordDb>(
     db: &D,
     key: &SigningKey,
     now: DateTime<Utc>,
-) -> Result<BatchOutcome, String> {
-    let shares = db
-        .run("records.shares.load", |db| {
-            active(db.conn()).map_err(|e| e.to_string())
-        })
-        .await?;
+) -> Result<BatchOutcome, SendError> {
+    let shares = super::run_step(db, "records.shares.load", |db| active(db.conn())).await?;
     if shares.is_empty() {
         return Ok(BatchOutcome::default());
     }

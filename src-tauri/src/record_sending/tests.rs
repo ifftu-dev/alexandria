@@ -141,12 +141,17 @@ impl Learner {
 
     /// A response a package reported, as the package writer stores it.
     pub(super) fn add_interaction_record(&self) -> String {
+        self.add_numbered_interaction_record(0)
+    }
+
+    /// The `n`th response a package reported in the attempt.
+    pub(super) fn add_numbered_interaction_record(&self, n: usize) -> String {
         let activity = ActivityRef::course(did(CREATOR_SEED), &self.course)
             .element(&self.video)
             .package_activity("ab".repeat(32), "lifting")
             .interaction("q1");
         let event = LearningEvent {
-            local_id: "package|attempt|lifting|interaction|0".into(),
+            local_id: format!("package|attempt|lifting|interaction|{n}"),
             timestamp: t0(),
             registration: Some("attempt".into()),
             action: xapi::Action::Responded {
@@ -193,7 +198,9 @@ impl Learner {
     }
 
     async fn add(&self, request: NewDestinationRequest) -> Result<RecordDestination, String> {
-        destinations::add(&self.db, request, &self.secret, &self.did, t0()).await
+        destinations::add(&self.db, request, &self.secret, &self.did, t0())
+            .await
+            .map_err(|e| e.to_string())
     }
 
     async fn pass(&self, at: DateTime<Utc>) -> BatchOutcome {
@@ -212,12 +219,22 @@ impl Learner {
 }
 
 /// The recipient's statement id for a local record id, worked out the way
-/// the recipient's label prescribes.
+/// the destination's label and approval prescribe.
 fn statement_id(learner: &Learner, endpoint: &str, username: &str, local_id: &str) -> String {
     let label = destinations::label(endpoint, username);
-    xapi::Recipient::pairwise(&learner.secret, &label)
-        .unwrap()
-        .statement_id(local_id)
+    let approval = learner
+        .destinations()
+        .into_iter()
+        .find(|d| d.endpoint == endpoint && d.username == username)
+        .expect("the destination is approved")
+        .id;
+    // Its identifier key is derived from the instance label alone.
+    xapi::Recipient::pairwise(
+        &learner.secret,
+        &recipients::instance_label(&label, &approval),
+    )
+    .unwrap()
+    .statement_id(local_id)
 }
 
 pub(super) fn actor_names(statements: &[Value]) -> Vec<String> {
@@ -586,6 +603,94 @@ async fn removal_stops_sending_even_when_voiding_cannot_reach_the_store() {
     assert_eq!(report.voided, 0);
     assert!(report.void_error.unwrap().starts_with("unreachable:"));
     assert!(learner.destinations().is_empty());
+}
+
+#[tokio::test]
+async fn a_store_added_again_after_removal_gets_fresh_statement_ids() {
+    let learner = Learner::new().await;
+    let store = XapiStub::start(&["2.0.0"]).await;
+    let first = learner
+        .add(learner.request(&store, "learner-key", &[&learner.course]))
+        .await
+        .unwrap();
+    learner.pass(t0()).await;
+    let sent = ids(&store.accepted());
+    destinations::remove(&learner.db, &first.id, &learner.secret, &learner.did, t0())
+        .await
+        .unwrap();
+    let after_voids = store.accepted().len();
+
+    learner
+        .add(learner.request(&store, "learner-key", &[&learner.course]))
+        .await
+        .unwrap();
+    learner.pass(t0() + Duration::hours(1)).await;
+
+    // The voided ids would be duplicates the store ignores; these are new.
+    let resent = ids(&store.accepted()[after_voids..]);
+    assert_eq!(resent.len(), sent.len());
+    for id in &resent {
+        assert!(!sent.contains(id), "{id} was voided at this store");
+    }
+}
+
+#[tokio::test]
+async fn a_removal_whose_voiding_stops_partway_reports_what_was_voided() {
+    let learner = Learner::new().await;
+    for n in 0..60 {
+        learner.add_numbered_interaction_record(n);
+    }
+    let store = XapiStub::start(&["2.0.0"]).await;
+    let mut request = learner.request(&store, "learner-key", &[&learner.course]);
+    request.include_interactions = true;
+    let added = learner.add(request).await.unwrap();
+    learner.pass(t0()).await;
+    let sent = ids(&store.accepted());
+    assert!(sent.len() > send::BATCH_SIZE, "two void batches");
+
+    // The second void batch is refused; the first went through.
+    store.refuse_containing(&sent[send::BATCH_SIZE + 1]);
+    let report = destinations::remove(&learner.db, &added.id, &learner.secret, &learner.did, t0())
+        .await
+        .unwrap();
+    assert_eq!(report.voided as usize, send::BATCH_SIZE);
+    assert!(report.void_error.is_some());
+}
+
+#[tokio::test]
+async fn a_supervised_profile_cannot_add_a_destination() {
+    let store = XapiStub::start(&["2.0.0"]).await;
+    let minor = Learner::new().await;
+    minor.with_conn(|conn| {
+        let birthdate = (Utc::now() - Duration::days(365 * 12)).format("%Y-%m-%d");
+        conn.execute(
+            "UPDATE local_identity SET birthdate = ?1 WHERE id = 1",
+            [birthdate.to_string()],
+        )
+        .unwrap();
+    });
+    let ward = Learner::new().await;
+    ward.with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO guardian_links (id, side, peer_did, shared_key, status) \
+             VALUES ('link-1', 'ward', 'did:key:z6Mkguardian', x'00', 'active')",
+            [],
+        )
+        .unwrap();
+    });
+
+    for learner in [&minor, &ward] {
+        let refused = learner
+            .add(learner.request(&store, "learner-key", &[&learner.course]))
+            .await
+            .unwrap_err();
+        assert!(
+            refused.starts_with("guardian_approval_required:"),
+            "{refused}"
+        );
+        assert!(learner.destinations().is_empty());
+    }
+    assert!(store.statement_posts().is_empty());
 }
 
 #[tokio::test]

@@ -43,16 +43,14 @@ mod xapi_stub;
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::db::executor::{DatabaseExecutor, DatabaseWorkload};
 use crate::db::Database;
 use crate::learning_records::{LearningRecord, RecordKind};
 use crate::p2p::inbound::InboundDatabase;
-use crate::profile::scope::ProfileLease;
 use alexandria_studio::xapi::lrs::LrsError;
 use alexandria_studio::xapi::{Account, Statement, StatementError};
 
 pub use crate::domain::record_sending::{RecipientKind, RecordScope as Scope};
-pub use send::{send_due, void_sent, BatchOutcome};
+pub use send::{send_due, void_sent, BatchOutcome, Voided};
 
 /// Why sending could not go ahead. Displays as `code: detail`.
 #[derive(Debug, thiserror::Error)]
@@ -67,6 +65,10 @@ pub enum SendError {
     InvalidScope(String),
     #[error("invalid_credentials: {0}")]
     InvalidCredentials(String),
+    /// The profile is supervised: its records are not sent by a route its
+    /// guardian has no say in.
+    #[error("guardian_approval_required: {0}")]
+    GuardianApprovalRequired(String),
     #[error("{0}")]
     Store(#[from] LrsError),
     #[error("invalid_record: {0}")]
@@ -184,15 +186,22 @@ pub trait Transport: Send + Sync {
 
 /// The database, as sending reaches it: one job per step, never held across
 /// a request.
-pub trait RecordDb: Send + Sync {
-    fn run<T, F>(
-        &self,
-        label: &'static str,
-        operation: F,
-    ) -> impl Future<Output = Result<T, String>> + Send
-    where
-        T: Send + 'static,
-        F: FnOnce(&Database) -> Result<T, String> + Send + 'static;
+/// The same trait the standards packages use, so one database handle
+/// serves both.
+pub use crate::packages::PackageDb as RecordDb;
+
+/// Runs one database step whose own failures are typed: an error from the
+/// step comes back as it is; a failure to reach the database at all is
+/// [`SendError::Database`].
+pub(crate) async fn run_step<D, T, F>(db: &D, label: &'static str, step: F) -> Result<T, SendError>
+where
+    D: RecordDb,
+    T: Send + 'static,
+    F: FnOnce(&Database) -> Result<T, SendError> + Send + 'static,
+{
+    db.run(label, move |db| Ok(step(db)))
+        .await
+        .map_err(SendError::Database)?
 }
 
 /// Background work (the sender), fenced to its profile session.
@@ -207,37 +216,6 @@ impl RecordDb for InboundDatabase {
         F: FnOnce(&Database) -> Result<T, String> + Send + 'static,
     {
         InboundDatabase::run(self, label, operation)
-    }
-}
-
-/// A command's database access, on the learner lane under its lease.
-pub struct LeasedDb {
-    executor: DatabaseExecutor,
-    lease: ProfileLease,
-}
-
-impl LeasedDb {
-    pub(crate) fn new(executor: DatabaseExecutor, lease: ProfileLease) -> Self {
-        Self { executor, lease }
-    }
-}
-
-impl RecordDb for LeasedDb {
-    fn run<T, F>(
-        &self,
-        label: &'static str,
-        operation: F,
-    ) -> impl Future<Output = Result<T, String>> + Send
-    where
-        T: Send + 'static,
-        F: FnOnce(&Database) -> Result<T, String> + Send + 'static,
-    {
-        self.executor.execute(
-            DatabaseWorkload::Learner,
-            self.lease.clone(),
-            label,
-            operation,
-        )
     }
 }
 

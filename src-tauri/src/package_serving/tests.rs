@@ -392,6 +392,68 @@ async fn every_html_page_loads_the_bootstrap_before_its_own_script() {
     assert!(doctype.starts_with("<!doctype html>"), "{doctype}");
 }
 
+/// Pages whose first `<head` is not the real head start: the bootstrap
+/// still comes before every byte the package wrote, apart from a leading
+/// byte-order mark, whitespace, comments and the doctype.
+#[tokio::test]
+async fn the_bootstrap_starts_the_document_whatever_comes_before_the_head() {
+    let launches = Launches::new();
+    let cases: &[(&str, &[u8], &[u8])] = &[
+        (
+            "script-first.html",
+            b"<!doctype html><script>window.first = 1</script><head></head>",
+            b"<!doctype html>",
+        ),
+        (
+            "commented.html",
+            b"<!--<head>--><script>window.first = 1</script>",
+            b"",
+        ),
+        (
+            "string.html",
+            b"<script>var s = '<head>'</script><head></head>",
+            b"",
+        ),
+        ("headless.html", b"<p>no head at all</p>", b""),
+        (
+            "upper.html",
+            b"  \n<!DOCTYPE  HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\">\n<script>1</script>",
+            b"  \n<!DOCTYPE  HTML PUBLIC \"-//W3C//DTD HTML 4.01//EN\">",
+        ),
+        (
+            "commented-doctype.html",
+            b"<!-- saved --><!doctype html><script>1</script>",
+            b"<!-- saved --><!doctype html>",
+        ),
+        (
+            "bom.html",
+            b"\xef\xbb\xbf<!doctype html><script>1</script>",
+            b"\xef\xbb\xbf<!doctype html>",
+        ),
+        (
+            "unclosed.html",
+            b"<!-- never closed <head><script>1</script>",
+            b"",
+        ),
+    ];
+    let entries: Vec<(&str, &[u8])> = cases.iter().map(|(p, b, _)| (*p, *b)).collect();
+    let package = files(&entries);
+    let prefix = open(&launches, HASH_A, package.path());
+    let tag = format!("<script src=\"/{prefix}/_alexandria/bootstrap.js\"></script>");
+
+    for (path, page, kept_before) in cases {
+        let response = send(&launches, get(&url(&prefix, path))).await;
+        let mut expected = kept_before.to_vec();
+        expected.extend_from_slice(tag.as_bytes());
+        expected.extend_from_slice(&page[kept_before.len()..]);
+        assert_eq!(
+            String::from_utf8_lossy(response.body()),
+            String::from_utf8_lossy(&expected),
+            "{path}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn an_html_page_keeps_its_own_encoding() {
     // windows-1252 "café"; the page declares its own charset.
@@ -890,13 +952,26 @@ async fn a_launch_of_an_unknown_package_opens_nothing() {
 
 #[tokio::test]
 async fn a_cmi5_launch_admits_its_own_session_endpoint_and_nothing_else() {
-    let package = files(&[("au/index.html", b"<html><head></head></html>")]);
+    let package = files(&[
+        ("au/index.html", b"<html><head></head></html>"),
+        (
+            "au/figure.svg",
+            b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
+        ),
+        ("au/app.js", b"1"),
+    ]);
     let launches = Launches::new();
     let cmi5 = open(&launches, HASH_A, package.path());
     let scorm = open(&launches, HASH_B, package.path());
     assert!(launches.set_endpoint_port(&cmi5, Some(41234)));
 
-    for path in ["au/index.html", "missing.js", "_alexandria/wrapper.html"] {
+    for path in [
+        "au/index.html",
+        "au/figure.svg",
+        "au/app.js",
+        "missing.js",
+        "_alexandria/wrapper.html",
+    ] {
         let policy = policy(&send(&launches, get(&url(&cmi5, path))).await);
         assert_eq!(
             directive(&policy, "connect-src"),

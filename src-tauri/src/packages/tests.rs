@@ -13,7 +13,7 @@ use super::*;
 use crate::content_store::content;
 use crate::content_store::node::ContentNode;
 use crate::db::Database;
-use crate::domain::package::ArchiveLocation;
+use crate::domain::package::PackageArchiveLocation;
 
 pub(crate) mod fixture {
     //! A stored-only zip writer, enough for well-formed test packages.
@@ -188,7 +188,7 @@ async fn an_imported_package_is_kept_under_its_own_hash_and_described() {
     assert_eq!(package.edition, None);
     assert_eq!(package.title, "Warehouse induction");
     assert_eq!(package.archive_bytes, bytes.len() as u64);
-    assert_eq!(package.location, ArchiveLocation::Draft);
+    assert_eq!(package.location, PackageArchiveLocation::Draft);
 
     let found = get(&profile.db, &package.hash)
         .await
@@ -385,7 +385,7 @@ async fn publishing_moves_the_archive_into_the_served_store_where_extraction_fin
         .await
         .expect("publish");
 
-    assert_eq!(published.location, ArchiveLocation::Store);
+    assert_eq!(published.location, PackageArchiveLocation::Store);
     assert_eq!(
         content::get_bytes(&profile.node, &package.hash)
             .await
@@ -435,7 +435,7 @@ async fn publishing_moves_the_archive_into_the_served_store_where_extraction_fin
     let again = import(&profile.db, &profile.dirs, &source)
         .await
         .expect("import again");
-    assert_eq!(again.location, ArchiveLocation::Store);
+    assert_eq!(again.location, PackageArchiveLocation::Store);
     assert_eq!(
         std::fs::read_dir(&profile.dirs.archives).unwrap().count(),
         0
@@ -454,7 +454,7 @@ async fn a_package_received_into_the_store_is_described_and_extracted_from_there
         .await
         .expect("register");
     assert_eq!(package.hash, hash_of(&bytes));
-    assert_eq!(package.location, ArchiveLocation::Store);
+    assert_eq!(package.location, PackageArchiveLocation::Store);
     assert_eq!(package.title, "Warehouse induction");
 
     let (_, progress) = recorder();
@@ -468,6 +468,214 @@ async fn a_package_received_into_the_store_is_described_and_extracted_from_there
     .await
     .expect("extract");
     assert_induction_files(&extracted.root);
+}
+
+/// Stands in for the peers that serve a published course's content: hands
+/// the learner's node the blob the publisher's node holds, and counts asks.
+struct Peers<'a> {
+    publisher: &'a ContentNode,
+    learner: &'a ContentNode,
+    asked: Mutex<Vec<String>>,
+}
+
+impl ArchiveSource for Peers<'_> {
+    async fn fetch(&self, hash: &str) -> Result<(), PackageError> {
+        self.asked.lock().unwrap().push(hash.to_string());
+        let bytes = content::get_bytes(self.publisher, hash).await?;
+        content::add_bytes_unencrypted(self.learner, &bytes).await?;
+        Ok(())
+    }
+}
+
+/// A published course on this device whose one element is a package.
+fn hydrated_course(profile: &Profile, course_id: &str, status: &str, hash: &str) {
+    let db = profile.db.lock().unwrap();
+    let conn = db.conn();
+    conn.execute(
+        "INSERT INTO courses (id, title, author_address, status) \
+         VALUES (?1, 'Induction', 'stake_test1upublisher', ?2)",
+        [course_id, status],
+    )
+    .expect("course");
+    conn.execute(
+        "INSERT INTO course_chapters (id, course_id, title, position) VALUES (?1, ?2, 'One', 0)",
+        [format!("{course_id}-chapter").as_str(), course_id],
+    )
+    .expect("chapter");
+    conn.execute(
+        "INSERT INTO course_elements (id, chapter_id, title, element_type, content_cid, position) \
+         VALUES (?1, ?2, 'Induction', 'package', ?3, 0)",
+        [
+            format!("{course_id}-element").as_str(),
+            format!("{course_id}-chapter").as_str(),
+            hash,
+        ],
+    )
+    .expect("element");
+}
+
+#[tokio::test]
+async fn a_course_published_on_one_device_plays_its_package_on_another() {
+    let publisher = Profile::new().await;
+    let bytes = induction_package();
+    let package = import(
+        &publisher.db,
+        &publisher.dirs,
+        &publisher.outside_file("induction.zip", &bytes),
+    )
+    .await
+    .expect("import");
+    publish(
+        &publisher.db,
+        &publisher.node,
+        &publisher.dirs,
+        &package.hash,
+    )
+    .await
+    .expect("publish");
+
+    let learner = Profile::new().await;
+    let peers = Peers {
+        publisher: &publisher.node,
+        learner: &learner.node,
+        asked: Mutex::new(Vec::new()),
+    };
+    hydrated_course(&learner, "course-1", "published", &package.hash);
+    assert_eq!(get(&learner.db, &package.hash).await.expect("get"), None);
+
+    let received = get_or_receive(
+        &learner.db,
+        &learner.node,
+        &learner.dirs,
+        &peers,
+        &package.hash,
+    )
+    .await
+    .expect("receive")
+    .expect("the course's package is on this device now");
+    assert_eq!(
+        received.hash,
+        hash_of(&bytes),
+        "the bytes the publisher published"
+    );
+    assert_eq!(received.location, PackageArchiveLocation::Store);
+    let pinned: (String, i64) = learner
+        .db
+        .lock()
+        .unwrap()
+        .conn()
+        .query_row(
+            "SELECT pin_type, auto_unpin FROM pins WHERE cid = ?1",
+            [&package.hash],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("pinned with the course");
+    assert_eq!(pinned, ("course".to_string(), 1), "kept as course content");
+
+    let (_, progress) = recorder();
+    let extracted = ensure_extracted(
+        &learner.db,
+        &learner.node,
+        &learner.dirs,
+        &package.hash,
+        progress,
+    )
+    .await
+    .expect("extract");
+    assert_induction_files(&extracted.root);
+
+    // Once here, it is not fetched again.
+    get_or_receive(
+        &learner.db,
+        &learner.node,
+        &learner.dirs,
+        &peers,
+        &package.hash,
+    )
+    .await
+    .expect("again");
+    assert_eq!(peers.asked.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn only_a_published_course_on_this_device_brings_a_package_in() {
+    let publisher = Profile::new().await;
+    let bytes = induction_package();
+    let added = content::add_bytes_unencrypted(&publisher.node, &bytes)
+        .await
+        .expect("add");
+    let learner = Profile::new().await;
+    let peers = Peers {
+        publisher: &publisher.node,
+        learner: &learner.node,
+        asked: Mutex::new(Vec::new()),
+    };
+
+    // Not in any course here, then only in someone's draft.
+    for status in [None, Some("draft")] {
+        if let Some(status) = status {
+            hydrated_course(&learner, "course-d", status, &added.hash);
+        }
+        let got = get_or_receive(
+            &learner.db,
+            &learner.node,
+            &learner.dirs,
+            &peers,
+            &added.hash,
+        )
+        .await
+        .expect("no error");
+        assert_eq!(got, None, "{status:?}");
+    }
+    assert!(peers.asked.lock().unwrap().is_empty(), "nothing fetched");
+}
+
+#[tokio::test]
+async fn a_draft_archive_no_course_uses_is_swept_at_profile_start() {
+    let profile = Profile::new().await;
+    // Picked in the editor, then the pick was cancelled or replaced.
+    let abandoned = import(
+        &profile.db,
+        &profile.dirs,
+        &profile.outside_file("abandoned.zip", &induction_package()),
+    )
+    .await
+    .expect("import");
+    // Opened from disk: its draft course keeps it.
+    let other = fixture::zip(&[
+        ("imsmanifest.xml", MANIFEST.as_bytes()),
+        ("welcome/index.html", WELCOME),
+        ("lifting/index.html", LIFTING),
+        ("notes.txt", b"a different archive"),
+    ]);
+    let kept = open_file(
+        &profile.db,
+        &profile.dirs,
+        &profile.outside_file("kept.zip", &other),
+    )
+    .await
+    .expect("open");
+
+    let swept = sweep_unused_drafts(&profile.db, &profile.dirs)
+        .await
+        .expect("sweep");
+
+    assert_eq!(swept, vec![abandoned.hash.clone()]);
+    assert_eq!(get(&profile.db, &abandoned.hash).await.expect("get"), None);
+    assert!(!profile
+        .dirs
+        .archives
+        .join(format!("{}.zip", abandoned.hash))
+        .exists());
+    assert!(get(&profile.db, &kept.package.hash)
+        .await
+        .expect("get")
+        .is_some());
+    assert!(profile
+        .dirs
+        .archives
+        .join(format!("{}.zip", kept.package.hash))
+        .exists());
 }
 
 #[tokio::test]

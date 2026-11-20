@@ -44,29 +44,63 @@ impl ServeLimits {
 /// The package content policy. Inline script and evaluation are allowed
 /// because legacy authoring tools emit both; everything that loads or sends
 /// stays on the package origin; plugins and objects are blocked.
-const CONTENT_POLICY: &str = "default-src 'self'; \
-    script-src 'self' 'unsafe-inline' 'unsafe-eval'; \
-    style-src 'self' 'unsafe-inline'; \
-    img-src 'self' data: blob:; \
-    media-src 'self' data: blob:; \
-    font-src 'self' data:; \
-    connect-src 'self'; \
-    frame-src 'self'; \
-    child-src 'self'; \
-    worker-src 'self'; \
-    manifest-src 'none'; \
-    object-src 'none'; \
-    base-uri 'self'; \
-    form-action 'self'";
+const CONTENT_POLICY: &[(&str, &str)] = &[
+    ("default-src", "'self'"),
+    ("script-src", "'self' 'unsafe-inline' 'unsafe-eval'"),
+    ("style-src", "'self' 'unsafe-inline'"),
+    ("img-src", "'self' data: blob:"),
+    ("media-src", "'self' data: blob:"),
+    ("font-src", "'self' data:"),
+    (CONNECT_SRC, "'self'"),
+    ("frame-src", "'self'"),
+    ("child-src", "'self'"),
+    ("worker-src", "'self'"),
+    ("manifest-src", "'none'"),
+    ("object-src", "'none'"),
+    ("base-uri", "'self'"),
+    ("form-action", "'self'"),
+];
+
+/// The directive a cmi5 launch widens to reach its session's endpoint.
+const CONNECT_SRC: &str = "connect-src";
 
 /// Added for documents that cannot carry the bootstrap.
-const SANDBOXED_POLICY_SUFFIX: &str = "; sandbox";
+const SANDBOXED_POLICY_EXTRA: (&str, &str) = ("sandbox", "");
 
 /// Added for pages: string sinks go through the bootstrap's default Trusted
 /// Types policy, which is what stops a javascript: address from replacing a
 /// page with a document the bootstrap never ran in. Only pages: a worker
 /// script has no bootstrap to install the policy.
-const DOCUMENT_POLICY_SUFFIX: &str = "; require-trusted-types-for 'script'";
+const DOCUMENT_POLICY_EXTRA: (&str, &str) = ("require-trusted-types-for", "'script'");
+
+/// The content policy for one kind of response, with the connect source a
+/// cmi5 launch's endpoint adds, if any.
+fn content_policy(kind: &Kind, endpoint_port: Option<u16>) -> String {
+    let extra = match kind {
+        Kind::Sandboxed(_) => Some(SANDBOXED_POLICY_EXTRA),
+        Kind::Html => Some(DOCUMENT_POLICY_EXTRA),
+        Kind::Other(_) => None,
+    };
+    let endpoint = endpoint_port.map(|port| format!("http://127.0.0.1:{port}"));
+    CONTENT_POLICY
+        .iter()
+        .copied()
+        .chain(extra)
+        .map(|(name, value)| {
+            let mut directive = name.to_string();
+            if !value.is_empty() {
+                directive.push(' ');
+                directive.push_str(value);
+            }
+            if let (CONNECT_SRC, Some(endpoint)) = (name, &endpoint) {
+                directive.push(' ');
+                directive.push_str(endpoint);
+            }
+            directive
+        })
+        .collect::<Vec<_>>()
+        .join("; ")
+}
 
 /// No device capability is granted to package content.
 const PERMISSIONS_POLICY: &str = "camera=(), microphone=(), geolocation=(), \
@@ -143,24 +177,19 @@ pub async fn serve(
 
 /// Lets the content of a launch with an open cmi5 session connect to that
 /// session's loopback endpoint: the literal address and port, nothing wider.
+/// The policy is built again from its parts with the endpoint added, never
+/// edited as text.
 fn admit_endpoint(response: &mut Response<Vec<u8>>, port: u16) {
-    let Some(policy) = response
-        .headers()
-        .get("Content-Security-Policy")
-        .and_then(|value| value.to_str().ok())
-    else {
-        return;
-    };
-    let admitted = policy.replacen(
-        "connect-src 'self';",
-        &format!("connect-src 'self' http://127.0.0.1:{port};"),
-        1,
-    );
-    if let Ok(value) = HeaderValue::from_str(&admitted) {
-        response
-            .headers_mut()
-            .insert("Content-Security-Policy", value);
-    }
+    let kind = response
+        .extensions()
+        .get::<Kind>()
+        .copied()
+        .expect("every package response is built by respond");
+    let policy = HeaderValue::from_str(&content_policy(&kind, Some(port)))
+        .expect("the package content policy is a valid header");
+    response
+        .headers_mut()
+        .insert("Content-Security-Policy", policy);
 }
 
 /// The name under the reserved segment, if the path is in it.
@@ -389,20 +418,75 @@ fn content_type(extension: &str) -> &'static str {
     }
 }
 
-/// Links the bootstrap as the first element of a page: after the opening
-/// `<head>` tag, else after `<html>`, else after the doctype, else at the
-/// very start. Works on bytes, so a page in any encoding is left intact.
+/// Links the bootstrap before anything the package wrote can run: at the
+/// very start of the document, after only a byte-order mark and, when there
+/// is a doctype, the whitespace, comments and doctype before it (so the page
+/// keeps its rendering mode). Nothing later in the page is looked at, so a
+/// `<head` inside a comment, in a string or after the package's own script
+/// cannot move it. Works on bytes, so a page in any encoding is left intact.
 fn inject_bootstrap(page: &[u8], prefix: &str) -> Vec<u8> {
     let tag = format!("<script src=\"/{prefix}/{RESERVED_SEGMENT}/bootstrap.js\"></script>");
-    let at = after_open_tag(page, b"<head")
-        .or_else(|| after_open_tag(page, b"<html"))
-        .or_else(|| after_open_tag(page, b"<!doctype"))
-        .unwrap_or(0);
+    let at = document_start(page);
     let mut out = Vec::with_capacity(page.len() + tag.len());
     out.extend_from_slice(&page[..at]);
     out.extend_from_slice(tag.as_bytes());
     out.extend_from_slice(&page[at..]);
     out
+}
+
+/// Where the document's first element may go: past a UTF-8 byte-order mark
+/// and, when a doctype follows only whitespace, comments and processing
+/// instructions, past that doctype. Otherwise right after the byte-order
+/// mark: a script there is still the document's first element.
+fn document_start(page: &[u8]) -> usize {
+    let bom = if page.starts_with(b"\xef\xbb\xbf") {
+        3
+    } else {
+        0
+    };
+    let mut at = bom;
+    loop {
+        while matches!(page.get(at), Some(b' ' | b'\t' | b'\n' | b'\r' | b'\x0c')) {
+            at += 1;
+        }
+        let rest = &page[at..];
+        let skipped = if let Some(body) = rest.strip_prefix(b"<!--") {
+            comment_length(body).map(|length| 4 + length)
+        } else if rest.starts_with(b"<?") {
+            // The HTML parser reads `<?...>` (an XML prolog) as a comment.
+            rest.iter().position(|&b| b == b'>').map(|close| close + 1)
+        } else if rest.len() >= 9 && rest[..9].eq_ignore_ascii_case(b"<!doctype") {
+            // A doctype ends at its first `>`, quoted identifiers or not.
+            return match rest.iter().position(|&b| b == b'>') {
+                Some(close) => at + close + 1,
+                None => bom,
+            };
+        } else {
+            None
+        };
+        match skipped {
+            Some(length) => at += length,
+            None => return bom,
+        }
+    }
+}
+
+/// The length of a comment's body after `<!--`, up to and including its
+/// end, as the HTML parser ends it: at once for `<!-->` and `<!--->`, else
+/// at the first `-->` or `--!>`. `None` when it never ends.
+fn comment_length(body: &[u8]) -> Option<usize> {
+    if body.starts_with(b">") {
+        return Some(1);
+    }
+    if body.starts_with(b"->") {
+        return Some(2);
+    }
+    let close = body.windows(3).position(|w| w == b"-->").map(|i| i + 3);
+    let bang = body.windows(4).position(|w| w == b"--!>").map(|i| i + 4);
+    match (close, bang) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
 }
 
 /// Renames the `as` attribute of every `<link>` tag whose `as` is `fetch`,
@@ -511,36 +595,15 @@ fn fetch_as_attributes(tag: &[u8]) -> Vec<usize> {
     found
 }
 
-/// The offset just past the first `<name …>` tag, matched without case and
-/// only when the name ends there (`<head` does not match `<header>`).
-fn after_open_tag(page: &[u8], name: &[u8]) -> Option<usize> {
-    let mut from = 0;
-    while let Some(found) = page[from..]
-        .windows(name.len())
-        .position(|w| w.eq_ignore_ascii_case(name))
-    {
-        let start = from + found;
-        let next = page.get(start + name.len()).copied();
-        if matches!(next, Some(b'>' | b' ' | b'\t' | b'\n' | b'\r' | b'/')) {
-            let close = page[start..].iter().position(|&b| b == b'>')?;
-            return Some(start + close + 1);
-        }
-        from = start + 1;
-    }
-    None
-}
-
 /// Headers every response carries.
+/// The kind is kept on the response too, so [`admit_endpoint`] can build its
+/// policy again from the same parts.
 fn respond(status: StatusCode, kind: Kind, body: Vec<u8>) -> Response<Vec<u8>> {
-    let policy = match kind {
-        Kind::Sandboxed(_) => format!("{CONTENT_POLICY}{SANDBOXED_POLICY_SUFFIX}"),
-        Kind::Html => format!("{CONTENT_POLICY}{DOCUMENT_POLICY_SUFFIX}"),
-        Kind::Other(_) => CONTENT_POLICY.to_string(),
-    };
     Response::builder()
         .status(status)
+        .extension(kind)
         .header(CONTENT_TYPE, kind.content_type())
-        .header("Content-Security-Policy", policy)
+        .header("Content-Security-Policy", content_policy(&kind, None))
         .header("Permissions-Policy", PERMISSIONS_POLICY)
         .header("X-Content-Type-Options", "nosniff")
         .header("Referrer-Policy", "no-referrer")
