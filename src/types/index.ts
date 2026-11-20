@@ -417,8 +417,11 @@ export interface RecordScope {
 
 export type RecipientKind = 'destination' | 'share'
 
-/** The identifier a recipient sees: one made only for it, or the learner's own DID. */
-export type IdentifierChoice = 'pairwise' | 'real_did'
+/**
+ * The identifier a recipient sees: one made only for it, the learner's own
+ * DID, or (record shares only) the account the organisation proposed.
+ */
+export type IdentifierChoice = 'pairwise' | 'real_did' | 'proposed'
 
 export interface CourseChoice {
   id: string
@@ -479,6 +482,38 @@ export interface RecordDestination {
 export interface RemovalReport {
   voided: number
   void_error: string | null
+}
+
+/** An xAPI account (`homePage`, `name`) records name the learner by. */
+export interface RecordAccount {
+  home_page: string
+  name: string
+}
+
+/** What a record share request offers the learner to decide on. */
+export interface RecordShareOffer {
+  courses: CourseChoice[]
+  interactions_requested: boolean
+  pairwise_actor: string
+  real_did_actor: string
+  proposed_account: RecordAccount | null
+}
+
+/** The learner's answer to the records part of an access request. */
+export interface RecordShareDecision {
+  course_ids: string[]
+  include_interactions: boolean
+  identifier: IdentifierChoice
+}
+
+/** A grant's record share as the learner sees it. */
+export interface GrantRecords {
+  courses: CourseChoice[]
+  include_interactions: boolean
+  identifier: '' | 'pairwise' | 'real_did' | 'proposed'
+  actor_name: string
+  /** Absent once the share has stopped sending. */
+  status: OutboxStatus | null
 }
 
 /** One send in the learner-readable access log. */
@@ -3436,6 +3471,15 @@ export interface AccessRequest {
   network_id: string
   created_at: number
   expires_at: number
+  /** Learning records asked for, beside or instead of skills. */
+  records?: AccessRecordScope
+}
+
+/** The records part of an access request or grant (alexandria_verify::access::RecordScope). */
+export interface AccessRecordScope {
+  course_ids: string[]
+  kinds: ('completion' | 'interaction')[]
+  account?: RecordAccount
 }
 
 /** One requested skill, as the learner can answer it. */
@@ -3456,6 +3500,8 @@ export interface AccessRequestItem {
   orgProof: OrgProof | null
   org: OrgCheck
   skills: SkillChoice[]
+  /** The records part of the request, as the consent screen shows it. */
+  records: RecordShareOffer | null
 }
 
 /** Access the learner has given an organisation. Times are unix seconds unless noted. */
@@ -3473,6 +3519,8 @@ export interface GrantView {
   /** RFC 3339, as Alexandria Cloud reports it. */
   lastViewedAt: string | null
   viewCount: number | null
+  /** The learning records this grant shares, if any. */
+  records: GrantRecords | null
 }
 
 export interface GrantsView {
