@@ -131,8 +131,10 @@ impl SessionFacts {
 /// attestation verifies right now against `trust` (see
 /// `sentinel::attestation::effective_assurance`); the stored level is never
 /// copied. The profile, signals, rung, probe summary and coverage statement
-/// are derived from the session (`sentinel::surface`). No anchor reference
-/// is embedded.
+/// are derived from the session (`sentinel::surface`). Answer custody is
+/// always `device`: the answers were on the device that ran the attempt, and
+/// only an issuer whose answers never left it may state `issuer`. No anchor
+/// reference is embedded.
 pub(crate) fn build_integrity_assertion(
     conn: &Connection,
     session_id: &str,
@@ -221,7 +223,7 @@ pub(crate) fn build_integrity_assertion(
         signals_degraded: surface.signals_degraded,
         signals_not_run: surface.signals_not_run,
         camera_coverage: surface.camera_coverage,
-        answer_custody: None,
+        answer_custody: Some(alexandria_verify::integrity::AnswerCustody::Device),
         probe: surface.probe.map(|p| ProbeSummary {
             outcome: p.outcome.as_str().to_string(),
             policies: p.policies,
@@ -497,7 +499,10 @@ pub fn issue_with_evidence(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::credentials::fixtures::{sample_request, setup, test_key, NOW};
+    use crate::credentials::fixtures::{
+        assessed, sample_request, scored_with_history, session_on_profile, setup, test_key,
+        verified, NOW,
+    };
     use crate::credentials::{CredentialError, PolicyRefusal, SupersessionRequires};
 
     /// Insert a terminal integrity session row for bridge tests.
@@ -532,82 +537,6 @@ mod tests {
                      (id, session_id, camera_score, composite_score, captured_at, anomaly_flags)
                  VALUES (?1, ?2, ?3, 0.9, ?4, ?5)",
                 params![format!("{session}-w{i}"), session, camera, NOW, flags],
-            )
-            .unwrap();
-        }
-    }
-
-    /// A live session that selected `profile` (with the camera benchmark
-    /// passing), then judged `floor` at attempt start and ended clean.
-    fn session_on_profile(
-        conn: &Connection,
-        id: &str,
-        attested: bool,
-        camera: bool,
-        floor: Option<crate::sentinel::scoring::TrustProfile>,
-    ) {
-        use crate::sentinel::trust_profile::{
-            record_policy_floor, select_for_session, BenchmarkResult, Capabilities, ProfileRequest,
-        };
-        conn.execute(
-            "INSERT INTO integrity_sessions (id, status, assurance_level, started_at)
-             VALUES (?1, 'active', ?2, ?3)",
-            params![id, if attested { "device_attested" } else { "local" }, NOW],
-        )
-        .unwrap();
-        let caps = Capabilities {
-            camera,
-            ..Default::default()
-        };
-        let request = ProfileRequest {
-            capabilities: caps,
-            consent: caps,
-            role_assessment_id: None,
-            exchange_request_id: None,
-        };
-        let fast = BenchmarkResult {
-            detect_ms: 9.0,
-            liveness_ms: 7.0,
-            track_ms: 1.0,
-        };
-        select_for_session(conn, id, &request, Some(&fast)).unwrap();
-        record_policy_floor(conn, id, floor).unwrap();
-        conn.execute(
-            "UPDATE integrity_sessions SET status = 'completed', ended_at = ?2 WHERE id = ?1",
-            params![id, NOW],
-        )
-        .unwrap();
-    }
-
-    /// A finished assessment session on a profile chosen from `camera`, whose
-    /// attempt served `served` items, `observed` of which the response
-    /// tracker saw the learner work through.
-    fn assessed(conn: &Connection, id: &str, camera: bool, served: usize, observed: usize) {
-        session_on_profile(conn, id, false, camera, None);
-        conn.execute(
-            "INSERT OR IGNORE INTO question_banks (id, skill_id, label) VALUES ('bank', 'skill_test', 'Test')",
-            [],
-        )
-        .unwrap();
-        let ids: Vec<String> = (0..served).map(|i| format!("q{i}")).collect();
-        conn.execute(
-            "INSERT INTO assessment_attempts
-                 (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders,
-                  integrity_session_id, started_at)
-             VALUES (?1, ?5, 'bank', 'skill_test', 1, ?2, '[]', ?3, ?4)",
-            params![
-                format!("att-{id}"),
-                serde_json::to_string(&ids).unwrap(),
-                id,
-                NOW,
-                format!("did:key:{id}")
-            ],
-        )
-        .unwrap();
-        for item in ids.iter().take(observed) {
-            conn.execute(
-                "INSERT INTO integrity_observed_items (session_id, item_id) VALUES (?1, ?2)",
-                params![id, item],
             )
             .unwrap();
         }
@@ -699,6 +628,31 @@ mod tests {
     }
 
     /// The `relatedResource` entry of `vc`, as a verifier receives it.
+    #[test]
+    fn a_self_issued_credential_states_device_custody_and_the_library_accepts_it() {
+        use crate::domain::vc::{verify_credential_db, VerificationPolicy};
+        let (db, key, issuer, _) = setup();
+        assessed(db.conn(), "mine", false, 2, 2);
+        // Self-issued: the learner signs about themselves.
+        let mut req = sample_request(issuer);
+        req.integrity_session_id = Some("mine".into());
+        let vc = issue(db.conn(), &key, &req, NOW).unwrap();
+        let json = serde_json::to_value(&vc).unwrap();
+        assert_eq!(
+            json.pointer("/integrity/answerCustody"),
+            Some(&"device".into()),
+            "the custody is written, not left to the missing-field default"
+        );
+        let stored: VerifiableCredential = serde_json::from_value(json).unwrap();
+        let verified =
+            verify_credential_db(db.conn(), &stored, NOW, &VerificationPolicy::default());
+        assert!(verified.custody_defects.is_empty());
+        assert_eq!(
+            verified.acceptance_decision,
+            crate::domain::vc::AcceptanceDecision::Accept
+        );
+    }
+
     fn related_resources(vc: &VerifiableCredential) -> Vec<serde_json::Value> {
         serde_json::to_value(vc).unwrap()["relatedResource"]
             .as_array()
@@ -787,75 +741,6 @@ mod tests {
         session_on_profile(db.conn(), "bare", false, false, None);
         let a = assertion_for(db.conn(), &key, &subject, "bare");
         assert_eq!(a.verification_rung.as_deref(), Some("none"));
-    }
-
-    /// Record a verification result in a finished session, as if it had
-    /// been recorded before monitoring ended.
-    /// Record a verification result. A probe's source is its policy's own:
-    /// `reseed` asks the same item again, `authored` a new question.
-    fn verified(conn: &Connection, session: &str, step: &str, policy: &str, outcome: &str) {
-        use crate::sentinel::verification::{record_verification, NewVerification};
-        let outcome = match outcome {
-            "satisfied" => crate::sentinel::verification::VerificationOutcome::Satisfied,
-            "failed" => crate::sentinel::verification::VerificationOutcome::Failed,
-            _ => crate::sentinel::verification::VerificationOutcome::Skipped,
-        };
-        conn.execute(
-            "UPDATE integrity_sessions SET ended_at = NULL WHERE id = ?1",
-            [session],
-        )
-        .unwrap();
-        record_verification(
-            conn,
-            &NewVerification {
-                session_id: session,
-                attempt_id: None,
-                step,
-                policy,
-                outcome,
-                reason: None,
-                subject_ref: None,
-                detail: serde_json::json!({ "source": policy }),
-            },
-        )
-        .unwrap();
-        conn.execute(
-            "UPDATE integrity_sessions SET ended_at = ?2 WHERE id = ?1",
-            params![session, NOW],
-        )
-        .unwrap();
-    }
-
-    /// The session's attempt scored `score`, after `prior` graded items on
-    /// the same skill scored `prior_score` a day before it started.
-    fn scored_with_history(
-        conn: &Connection,
-        session: &str,
-        score: f64,
-        prior: usize,
-        prior_score: f64,
-    ) {
-        conn.execute(
-            "UPDATE assessment_attempts SET score = ?2 WHERE integrity_session_id = ?1",
-            params![session, score],
-        )
-        .unwrap();
-        let earlier = format!("prior-{session}");
-        conn.execute(
-            "INSERT INTO assessment_attempts
-                 (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, started_at)
-             VALUES (?1, ?2, 'bank', 'skill_test', 2, '[]', '[]', '2026-04-11T00:00:00Z')",
-            params![earlier, format!("did:key:{session}")],
-        )
-        .unwrap();
-        for i in 0..prior {
-            conn.execute(
-                "INSERT INTO attempt_items (attempt_id, ordinal, item_id, score, graded_at)
-                 VALUES (?1, ?2, ?3, ?4, '2026-04-12T00:00:00Z')",
-                params![earlier, i as i64, format!("p{i}"), prior_score],
-            )
-            .unwrap();
-        }
     }
 
     #[test]

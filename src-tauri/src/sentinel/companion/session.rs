@@ -134,12 +134,16 @@ mod tests {
     }
 
     #[test]
-    fn a_desktop_paired_with_an_attested_phone_runs_attested_and_issues_companion_attested() {
+    fn a_desktop_paired_with_an_attested_phone_issues_companion_attested_on_its_own_profile() {
         let db = desktop_session();
         let trust = paired(&db);
 
+        // The phone's attestation says nothing about the desktop, so it
+        // does not credit the desktop's device attestation signal: the
+        // `attested` profile is not open to the session.
         let chosen = select_for_session(db.conn(), SESSION, &companion_consented(), None).unwrap();
-        assert_eq!(chosen.record.selection.profile, TrustProfile::Attested);
+        assert_eq!(chosen.record.selection.profile, TrustProfile::Core);
+        assert!(!chosen.record.selection.inputs.device_attested);
 
         // The pairing is the first link of the chain; the selection folds
         // on top of it.
@@ -171,14 +175,9 @@ mod tests {
         .unwrap();
         // A genuine phone was present; nothing is claimed about the desktop.
         assert_eq!(assertion.assurance_level, att::ASSURANCE_COMPANION_ATTESTED);
-        // The paired phone is the desktop's device axis in the assertion.
-        assert_eq!(assertion.trust_profile.as_deref(), Some("attested"));
-        assert!(assertion
-            .signals_run
-            .iter()
-            .any(|s| s == "device_attestation"));
+        assert_eq!(assertion.trust_profile.as_deref(), Some("core"));
         assert!(!assertion
-            .signals_degraded
+            .signals_run
             .iter()
             .any(|s| s == "device_attestation"));
 
@@ -186,6 +185,61 @@ mod tests {
         assert!(pairable_started_at(db.conn(), SESSION)
             .unwrap_err()
             .contains("before the trust profile"));
+    }
+
+    #[test]
+    fn a_paired_phone_does_not_meet_an_attested_floor_in_the_app_or_the_library() {
+        use alexandria_verify::attestation::{AttestationOutcome, Platform};
+        use alexandria_verify::policy::{evaluate, IssuancePolicy, PolicyRefusal};
+        let db = desktop_session();
+        let trust = paired(&db);
+        let request = ProfileRequest {
+            consent: Capabilities {
+                companion_phone: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        select_for_session(db.conn(), SESSION, &request, None).unwrap();
+
+        // The app's floor judgement, at attempt start.
+        let floor = crate::sentinel::trust_profile::record_policy_floor(
+            db.conn(),
+            SESSION,
+            Some(TrustProfile::Attested),
+        )
+        .unwrap();
+        assert!(!floor.satisfied);
+        assert!(floor
+            .missing
+            .contains(&crate::sentinel::scoring::ProfileSignal::DeviceAttestation));
+
+        // The library's, over the assertion the session issues with the
+        // companion's verified evidence: the same answer.
+        let (assertion, _) = crate::credentials::issue::build_integrity_assertion(
+            db.conn(),
+            SESSION,
+            "2026-11-12T11:00:00Z",
+            &trust,
+        )
+        .unwrap();
+        let companion = AttestationOutcome::VerifiedCredentialBound {
+            platform: Platform::Ios,
+            companion: true,
+        };
+        let refusal = evaluate(
+            &IssuancePolicy {
+                min_trust_profile: Some(TrustProfile::Attested),
+                ..Default::default()
+            },
+            &assertion,
+            &companion,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(refusal, PolicyRefusal::TrustProfileBelowFloor { .. }),
+            "{refusal:?}"
+        );
     }
 
     #[test]

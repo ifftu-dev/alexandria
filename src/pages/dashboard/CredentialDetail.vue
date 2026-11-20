@@ -7,6 +7,7 @@ import { useCredentials } from '@/composables/useCredentials'
 import { anchorBadge } from '@/components/credential/anchorStatus'
 import { explorerTxUrl } from '@/utils/cardanoExplorer'
 import CoverageStatementView from '@/components/integrity/CoverageStatementView.vue'
+import { secondDeviceLine } from '@/utils/sentinel/secondDevice'
 import type {
   AttestationPlatform,
   CredentialAnchorState,
@@ -31,6 +32,8 @@ const verification = ref<VerificationResult | null>(null)
 /** What the trust command states; the page renders it and judges nothing. */
 const view = ref<CredentialTrustView | null>(null)
 const trust = computed(() => view.value?.trust ?? null)
+/** Below `live`: the statement's own line that a second device or person was not ruled out. */
+const secondDevice = computed(() => secondDeviceLine(view.value?.coverage_statement))
 const anchor = ref<CredentialAnchorState | null>(null)
 const retryingAnchor = ref(false)
 const loading = ref(true)
@@ -393,6 +396,7 @@ const decisionVariant = computed(() => {
           <AppBadge :variant="suspensionVariant"><span data-suspension>{{ suspensionLabel }}</span></AppBadge>
         </div>
         <p v-if="suspensionDetail" class="mt-1 text-xs text-muted-foreground">{{ suspensionDetail }}</p>
+        <p v-if="secondDevice" class="mt-4 text-sm font-medium text-foreground" data-second-device>{{ secondDevice }}</p>
         <details v-if="credential.integrity?.coverageStatementDigest" class="mt-4 text-sm" open>
           <summary class="cursor-pointer text-muted-foreground">{{ $t('sentinel.trust.coverage.title') }}</summary>
           <CoverageStatementView class="mt-2" :statement="view.coverage_statement" :digest="credential.integrity.coverageStatementDigest" />
@@ -536,6 +540,10 @@ const decisionVariant = computed(() => {
           <div v-if="credential.integrity.trustProfile" class="flex items-center justify-between">
             <span class="text-muted-foreground">{{ $t('credentials.detail.integrityProfile') }}</span>
             <span class="text-foreground">{{ $t(`sentinel.trust.profile.${credential.integrity.trustProfile}`) }}</span>
+          </div>
+          <div class="flex items-center justify-between" data-answer-custody>
+            <span class="text-muted-foreground">{{ $t('credentials.detail.custodyLabel') }}</span>
+            <span class="text-foreground">{{ $t(`credentials.detail.custody.${credential.integrity.answerCustody ?? 'device'}`) }}</span>
           </div>
           <div v-if="credential.integrity.verificationRung" class="flex items-center justify-between">
             <span class="text-muted-foreground">{{ $t('credentials.detail.integrityRung') }}</span>

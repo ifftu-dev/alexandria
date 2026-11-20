@@ -78,7 +78,7 @@
         "probes": "Follow-up questions after you submit: {policy}",
         "noCamera": "This device has no camera, so it cannot run the {profile} profile.",
         "noAttestation": "This device cannot prove it runs a genuine app, so it cannot run the {profile} profile on its own.",
-        "pairPhone": "Pair an attested phone before you start to meet it from this device.",
+        "custodyIssuer": "The organisation holds the answers: take it as an attempt on their service. A credential issued on your own device does not count.",
         "verifiedDevice": {
           "iphone": "Open this request in Alexandria on your iPhone to take it. It cannot be started on this device, even with a paired phone.",
           "phone": "Open this request in Alexandria on your iPhone or Android phone to take it. It cannot be started on this device, even with a paired phone."
