@@ -88,6 +88,10 @@ const key = async (wrapper: VueWrapper, name: string) => {
   await nextTick()
 }
 
+/** Line segments drawn by the paths matching a selector: each starts with a move. */
+const segments = (wrapper: VueWrapper, selector: string) => wrapper.findAll(selector).reduce((sum, path) => sum + (path.attributes('d')?.match(/M/g)?.length ?? 0), 0)
+const places = (wrapper: VueWrapper) => dots(wrapper).map(item => `${item.attributes('data-skill')} ${item.attributes('style')}`)
+
 describe('Web graph', () => {
   it('draws every skill as a dot named as in the other views, behind one Tab stop at the selection', () => {
     const wrapper = setup({ selectedId: 'b' })
@@ -166,5 +170,29 @@ describe('Web graph', () => {
     await wrapper.setProps({ names: false, narrowed: true, shownIds: new Set(['a', 'b']) })
     expect(names(wrapper)).toEqual(['Algebra', 'Bridges'])
     expect(dots(wrapper)).toHaveLength(2)
+  })
+
+  it('draws prerequisites as lines with arrowheads when lit or with Arrows, and relations as dotted lines that Related hides without moving a dot', async () => {
+    const wrapper = setup()
+    expect(segments(wrapper, '.web-line')).toBe(2)
+    expect(segments(wrapper, '.web-relation')).toBe(1)
+    expect(segments(wrapper, '.web-head')).toBe(0)
+    // Edge to edge: the Algebra–Bridges line leaves Algebra's dot, not its centre (400 - 50, 260 - 50 on screen).
+    const first = wrapper.get('.web-line').attributes('d')!.match(/M ([\d.]+) ([\d.]+)/)!
+    expect(Number(first[1])).toBeGreaterThan(352)
+    expect(Number(first[2])).toBe(210)
+    await wrapper.setProps({ selectedId: 'b' })
+    expect(segments(wrapper, '.web-line.is-lit')).toBe(2)
+    expect(segments(wrapper, '.web-head.is-lit')).toBe(2)
+    expect(segments(wrapper, '.web-head:not(.is-lit)')).toBe(0)
+    await wrapper.setProps({ selectedId: null, arrows: true })
+    expect(segments(wrapper, '.web-head')).toBe(2)
+    const before = places(wrapper)
+    await wrapper.setProps({ related: false })
+    expect(segments(wrapper, '.web-relation')).toBe(0)
+    expect(places(wrapper)).toEqual(before)
+    // Without Related, a relation is not a step: hovering Algebra leaves Data faded.
+    await dot(wrapper, ALGEBRA).trigger('pointerenter')
+    expect(faded(wrapper)).toEqual(['c', 'd', 'e'])
   })
 })

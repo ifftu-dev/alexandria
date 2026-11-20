@@ -25,7 +25,15 @@ export const WEB_COMPACT_DEFAULT_SIZE = { width: 260, height: 200 }
 export const WEB_DOT_MIN_PIXELS = 4
 export const WEB_HIT_PIXELS = 14
 
+/** Length of an arrowhead, in pixels. */
+export const WEB_ARROW_PIXELS = 7
+
 export type WebDotState = 'earned' | 'ready-next' | 'ready'
+
+/** One SVG path per emphasis: lines in the lit set, faded outside it (or outside a search), plain when nothing is lit. */
+export interface WebLinePaths { plain: string; lit: string; faded: string }
+/** Prerequisite lines, dotted relation lines and the arrowheads at the dependent end of prerequisite lines. */
+export interface WebLines { prerequisites: WebLinePaths; relations: WebLinePaths; heads: WebLinePaths }
 
 /** One dot as drawn: screen position and size in pixels, and how it reads now. */
 export interface WebDot {
@@ -209,6 +217,47 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
     })
   })
 
+  // Lines run from dot edge to dot edge in screen pixels, so their width and
+  // arrowheads stay the same at any zoom.
+  const lines = computed<WebLines>(() => {
+    const byId = new Map(dots.value.map(dot => [dot.id, dot]))
+    const lit = litIds.value, arrows = input().arrows
+    const out = { prerequisites: { plain: [] as string[], lit: [] as string[], faded: [] as string[] },
+      relations: { plain: [] as string[], lit: [] as string[], faded: [] as string[] },
+      heads: { plain: [] as string[], lit: [] as string[], faded: [] as string[] } }
+    const n = (value: number) => value.toFixed(1)
+    const emphasis = (a: string, b: string): keyof WebLinePaths =>
+      lit.size > 0 && lit.has(a) && lit.has(b) ? 'lit' : lit.size > 0 || fadedByMatch(a) || fadedByMatch(b) ? 'faded' : 'plain'
+    const segment = (fromId: string, toId: string) => {
+      const from = byId.get(fromId), to = byId.get(toId)
+      if (!from || !to) return null
+      const dx = to.x - from.x, dy = to.y - from.y, length = Math.hypot(dx, dy)
+      if (length <= from.size / 2 + to.size / 2) return null
+      const ux = dx / length, uy = dy / length
+      return { x1: from.x + ux * from.size / 2, y1: from.y + uy * from.size / 2, x2: to.x - ux * to.size / 2, y2: to.y - uy * to.size / 2, ux, uy }
+    }
+    for (const link of graph.value.prerequisites) {
+      // Drawn from the prerequisite to the skill that builds on it.
+      const line = segment(link.prerequisite, link.skill)
+      if (!line) continue
+      const kind = emphasis(link.prerequisite, link.skill)
+      out.prerequisites[kind].push(`M ${n(line.x1)} ${n(line.y1)} L ${n(line.x2)} ${n(line.y2)}`)
+      if (kind !== 'lit' && !arrows) continue
+      const back = WEB_ARROW_PIXELS, wing = WEB_ARROW_PIXELS / 2
+      const bx = line.x2 - line.ux * back, by = line.y2 - line.uy * back
+      out.heads[kind].push(`M ${n(line.x2)} ${n(line.y2)} L ${n(bx - line.uy * wing)} ${n(by + line.ux * wing)} L ${n(bx + line.uy * wing)} ${n(by - line.ux * wing)} Z`)
+    }
+    if (input().related) {
+      for (const [a, b] of graph.value.relations) {
+        const line = segment(a, b)
+        if (line) out.relations[emphasis(a, b)].push(`M ${n(line.x1)} ${n(line.y1)} L ${n(line.x2)} ${n(line.y2)}`)
+      }
+    }
+    const join = (paths: { plain: string[]; lit: string[]; faded: string[] }): WebLinePaths =>
+      ({ plain: paths.plain.join(' '), lit: paths.lit.join(' '), faded: paths.faded.join(' ') })
+    return { prerequisites: join(out.prerequisites), relations: join(out.relations), heads: join(out.heads) }
+  })
+
   function dotClick(id: string): void { events.select(id) }
 
   function skillOf(target: EventTarget | null): string | null {
@@ -265,7 +314,7 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
   function hover(id: string | null): void { hoverId.value = id }
 
   return {
-    size, camera, dots, graph, motionReduced, rovingId, namedIds, litIds,
+    size, camera, dots, lines, graph, motionReduced, rovingId, namedIds, litIds,
     dotClick, focus, focusIn, focusOut, keyDown, keyUp, hover, pressStart, pressEnd,
   }
 }
