@@ -331,6 +331,8 @@ export const TAURI_COMMANDS = [
   "package_extract",
   "package_get",
   "package_import",
+  "package_launch_close",
+  "package_launch_open",
   "package_open_file",
   "pairing_accept_code",
   "pairing_generate_code",
