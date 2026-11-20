@@ -5,7 +5,7 @@ Updated: 2026-11-20
 Triage: ready-for-agent
 Repos: alexandria, alexandria-cloud
 
-A reassessment of how easy it is to cheat an assessment after the trust profiles and credential trust work landed. It found four ways to earn a credential dishonestly that need little or no skill, one of which earns the top device label and an organisation's signature. This spec closes the ones that can be closed, and labels the one that cannot. Background: [sentinel-trust-profiles-spec.md](sentinel-trust-profiles-spec.md), [credential-trust-spec.md](credential-trust-spec.md), [course-access-spec.md](course-access-spec.md), [enterprise-boundary.md](enterprise-boundary.md), [ADR 0006](adr/0006-checkable-integrity-evidence.md), [ADR 0008](adr/0008-hosted-organisation-issued-credentials.md). Vocabulary: [GLOSSARY.md](../GLOSSARY.md).
+A reassessment of how easy it is to cheat an assessment after the trust profiles and credential trust work landed. It found four ways to earn a credential dishonestly that need little or no skill, one of which earns the top device label and an organisation's signature. This spec closes the ones that can be closed, and labels the one that cannot. Background: [sentinel-trust-profiles-spec.md](sentinel-trust-profiles-spec.md), [credential-trust-spec.md](credential-trust-spec.md), the course access spec (in review on its own branch), [enterprise-boundary.md](enterprise-boundary.md), [ADR 0006](adr/0006-checkable-integrity-evidence.md), [ADR 0008](adr/0008-hosted-organisation-issued-credentials.md). Vocabulary: [GLOSSARY.md](../GLOSSARY.md).
 
 ## Problem Statement
 
