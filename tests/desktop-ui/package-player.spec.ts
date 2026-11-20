@@ -1,6 +1,6 @@
 import { expect, test, type Frame, type Page } from '@playwright/test'
 import {
-  called, commits, failCommits, lessonFrame, navigate, openLaunches, openLesson, openPlayer, seenIn, wrapperFrame,
+  called, commits, failCommits, lessonFrame, navigate, openLaunches, openLesson, openPlayer, runningLesson, seenIn, wrapperFrame,
 } from './packageHarness'
 
 // The package player at the player seam: the real course player, the real
@@ -11,8 +11,12 @@ import {
 // so the browser enforces what the app would. A request to anywhere else
 // fails the test.
 
-/** The welcome lesson, once it is the only lesson frame and has started (optionally under `prefix`). */
-const welcome = (page: Page, prefix?: string) => openLesson(page, 'welcome', 'welcome/index.html', prefix)
+/**
+ * The welcome lesson the player resumes at, once it is the only lesson frame
+ * and has started (under `prefix`, if given). Nothing is clicked: a second
+ * open of the same lesson would end the first and change what it resumes.
+ */
+const welcome = (page: Page, prefix?: string) => runningLesson(page, 'welcome/index.html', prefix)
 const quiz = (page: Page) => openLesson(page, 'quiz', 'quiz/index.html')
 
 async function seenValue(frame: Frame, name: string) {
@@ -175,11 +179,12 @@ test('the player says which blocked thing the content asked for', async ({ page 
 test('a failed save shows a player-level error and the next save clears it', async ({ page }) => {
   await openPlayer(page, { fixture: 'package-player' })
   const lesson = await welcome(page)
+  const before = (await commits(page)).length
   await failCommits(page, true)
   await lesson.locator('#leave').click()
   const error = page.locator('[data-package-save-error]')
   await expect(error).toBeVisible()
-  expect(await commits(page)).toEqual([])
+  expect(await commits(page)).toHaveLength(before)
 
   await failCommits(page, false)
   await (await quiz(page)).locator('#fail').click()
