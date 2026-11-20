@@ -28,6 +28,7 @@ pub mod network_profile;
 pub mod notifications;
 pub mod org_trust;
 pub mod p2p;
+pub mod package_serving;
 pub mod packages;
 pub mod plugins;
 pub mod profile;
@@ -116,6 +117,9 @@ pub struct AppState {
     /// memory only and cleared on lock — nothing here has been persisted, and
     /// nothing will be unless the learner says yes. See `sentinel::evidence`.
     pub evidence_staging: Arc<crate::sentinel::evidence::EvidenceStaging>,
+    /// Open standards package launches, read by the `package` scheme
+    /// handler. Emptied when the profile stops.
+    pub package_launches: Arc<package_serving::Launches>,
 
     // ─── per-profile resources (populated while active) ─────────────
     pub db: Arc<std::sync::Mutex<Option<Database>>>,
@@ -410,6 +414,9 @@ impl AppState {
         // not been written anywhere, and it must not survive into the next
         // profile's session — see `sentinel::evidence`.
         self.evidence_staging.clear_all();
+        // Package launches belong to this profile's session; their prefixes
+        // must not serve anything once it ends.
+        self.package_launches.close_all();
 
         // Seeding can write through the shared DB/content handles. Join it
         // before either resource can be closed or repointed at another user.
@@ -1384,6 +1391,7 @@ pub fn run() {
                 last_activity: Arc::new(std::sync::Mutex::new(std::time::Instant::now())),
                 ipc_limiter: Arc::new(std::sync::Mutex::new(ratelimit::IpcRateLimiter::new())),
                 evidence_staging: Arc::new(sentinel::evidence::EvidenceStaging::new()),
+                package_launches: Arc::new(package_serving::Launches::new()),
                 db,
                 db_executor,
                 keystore,
@@ -1556,6 +1564,27 @@ pub fn run() {
             };
             plugins::asset_protocol::handle(&plugins_dir, request)
         })
+        // Standards package content: asynchronous and range-aware, and
+        // answers only under an open launch prefix (`package_serving`).
+        .register_asynchronous_uri_scheme_protocol(
+            package_serving::SCHEME,
+            |ctx, request, responder| {
+                let launches = ctx
+                    .app_handle()
+                    .state::<AppState>()
+                    .package_launches
+                    .clone();
+                tauri::async_runtime::spawn(async move {
+                    let response = package_serving::serve(
+                        &launches,
+                        package_serving::ServeLimits::DEFAULT,
+                        request,
+                    )
+                    .await;
+                    responder.respond(response);
+                });
+            },
+        )
         .invoke_handler(tauri::generate_handler![
             commands::personhood_lab::personhood_lab_status,
             commands::personhood_lab::personhood_lab_action,
@@ -1630,6 +1659,9 @@ pub fn run() {
             commands::enrollment::get_progress,
             commands::enrollment::record_element_submission,
             commands::enrollment::get_element_submission,
+            // Standards package launches (package scheme)
+            commands::package_launches::package_launch_open,
+            commands::package_launches::package_launch_close,
             // Standards packages
             commands::packages::package_import,
             commands::packages::package_open_file,

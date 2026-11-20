@@ -18,6 +18,7 @@ pub mod integrity_commitment;
 pub mod notification;
 pub mod opinions;
 pub mod package;
+pub mod package_launch;
 pub mod plugin;
 pub mod profile;
 pub mod reputation;

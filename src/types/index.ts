@@ -324,6 +324,18 @@ export interface PackageExtractProgress {
   bytes_total: number
 }
 
+/**
+ * An open launch (src-tauri/src/domain/package_launch.rs): the package's
+ * files are served under `base_url` until `package_launch_close(prefix)`.
+ * `base_url` is `package://localhost/<prefix>/` on macOS, iOS and Linux and
+ * `http://package.localhost/<prefix>/` on Windows and Android.
+ */
+export interface OpenedPackageLaunch {
+  prefix: string
+  package_hash: string
+  base_url: string
+}
+
 export interface AuthorizedCourseAttestor {
   did: string
   public_key_hex: string

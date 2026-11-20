@@ -32,6 +32,7 @@ pub(crate) fn state_in(directory: &std::path::Path) -> Arc<AppState> {
             crate::ratelimit::IpcRateLimiter::new(),
         )),
         evidence_staging: Arc::new(crate::sentinel::evidence::EvidenceStaging::new()),
+        package_launches: Arc::new(crate::package_serving::Launches::new()),
         db_executor: crate::db::executor::DatabaseExecutor::new(db.clone()),
         db,
         keystore: Arc::new(Mutex::new(None)),
@@ -61,6 +62,40 @@ async fn profile_cleanup_clears_classroom_subscriptions() {
         .stop_active_profile()
         .await
         .expect("idempotent cleanup");
+}
+
+#[tokio::test]
+async fn profile_cleanup_closes_every_package_launch() {
+    let directory = tempfile::TempDir::new().expect("temporary profile directory");
+    let state = state_in(directory.path());
+    let files = directory.path().join("package");
+    std::fs::create_dir(&files).expect("package files");
+    std::fs::write(files.join("index.html"), b"<html></html>").expect("page");
+    let hash = "a".repeat(64);
+    let launch = state
+        .package_launches
+        .open(&hash, &files)
+        .expect("open launch");
+
+    let cleanup_state = state.clone();
+    state
+        .profile_operations
+        .lock(async move { cleanup_state.stop_active_profile().await })
+        .await
+        .expect("profile cleanup");
+
+    assert!(!state.package_launches.is_package_open(&hash));
+    let request = tauri::http::Request::builder()
+        .uri(format!("package://localhost/{}/index.html", launch.prefix))
+        .body(Vec::new())
+        .expect("request");
+    let response = crate::package_serving::serve(
+        &state.package_launches,
+        crate::package_serving::ServeLimits::DEFAULT,
+        request,
+    )
+    .await;
+    assert_eq!(response.status(), tauri::http::StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
