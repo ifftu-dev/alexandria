@@ -60,9 +60,8 @@ fn check(name: &str) {
             .map(|(name, data)| fixture::file(name, data))
             .collect::<Vec<_>>(),
     );
-    let description: PackageDescription =
-        import_package(Cursor::new(archive), &Limits::default())
-            .unwrap_or_else(|refusal| panic!("{name} does not import: {refusal:?}"));
+    let description: PackageDescription = import_package(Cursor::new(archive), &Limits::default())
+        .unwrap_or_else(|refusal| panic!("{name} does not import: {refusal:?}"));
     let rendered = serde_json::to_string_pretty(&description).expect("serialise") + "\n";
 
     let golden = fixture_dir(name).join("description.json");
