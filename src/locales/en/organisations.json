@@ -197,6 +197,7 @@
     "cancel": "Cancel",
     "remove": "Remove",
     "removeTitle": "Remove {store}?",
+    "guardianRequired": "On a supervised profile a guardian decides where your records are sent. Nothing was added or sent; ask your guardian to approve this destination.",
     "removeMessage": "Nothing more will be sent. The store will be asked to void the records it was sent, but they stay with whoever runs it: Alexandria cannot recall them.",
     "removed": "Removed. The store was asked to void {count} records.",
     "removedVoidFailed": "Removed, and nothing more will be sent. The store could not be asked to void what it holds: {error}",

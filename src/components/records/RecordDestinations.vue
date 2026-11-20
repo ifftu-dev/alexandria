@@ -59,6 +59,18 @@ async function refresh() {
   await sendLog.refresh()
 }
 
+/**
+ * What to tell the learner when the host refused to look up or add a
+ * destination. A supervised profile cannot add one on its own: the host
+ * answers `guardian_approval_required`, and the learner is told a guardian
+ * decides, not shown the refusal.
+ */
+function refusal(cause: unknown): string {
+  const message = String(cause)
+  if (message.startsWith('guardian_approval_required')) return t('organisations.records.guardianRequired')
+  return message
+}
+
 function resetForm() {
   adding.value = false
   preview.value = null
@@ -78,7 +90,7 @@ async function next() {
       username: username.value.trim(),
     })
   } catch (e) {
-    formError.value = String(e)
+    formError.value = refusal(e)
   } finally {
     busy.value = false
   }
@@ -99,7 +111,7 @@ async function approve(decision: RecordConsentDecision) {
     resetForm()
     await refresh()
   } catch (e) {
-    formError.value = String(e)
+    formError.value = refusal(e)
   } finally {
     busy.value = false
   }
