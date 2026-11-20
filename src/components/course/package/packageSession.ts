@@ -164,6 +164,8 @@ export function createPackageSession(options: PackageSessionOptions) {
   let lessonId: string | null = null
   let saving: Promise<void> = Promise.resolve()
   let closed = false
+  /** Counts lesson requests; only the latest one launches. */
+  let requests = 0
   /** SCORM 2004: the package's lessons by activity id, once sequencing started. */
   let delivering: Map<string, PackageActivity> | null = null
   const launchOrigin = new URL(launch.base_url).origin
@@ -351,8 +353,11 @@ export function createPackageSession(options: PackageSessionOptions) {
 
   /** Starts `activity` in a fresh API session with its stored state. */
   async function openLesson(activity: PackageActivity): Promise<PackageLaunchInit> {
+    const request = ++requests
     await endLesson()
     const init = await invoke<PackageLaunchInit>('package_attempt_initialise', { attemptId, activityId: activity.id })
+    // The learner picked another lesson while this one was starting.
+    if (request !== requests) return init
     lessonId = activity.id
     post({
       type: 'launch',

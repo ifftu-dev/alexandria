@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>A page that replaces itself</title>
+  </head>
+  <body>
+    <script>
+      // Replaces this document with one made from a javascript: address. That
+      // document is never served, so it would carry no bootstrap.
+      location.href = 'javascript:"<script>try { parent.__hostileVisit(window, \'page replaced from a javascript address\') } catch (e) {}<\/script>"';
+    </script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Long media</title>
+  </head>
+  <body>
+    <h1>Long media</h1>
+    <!-- The checks serve `media/long.wav` themselves, larger than the
+         handler sends whole, so it plays only by range. -->
+    <audio id="clip" src="media/long.wav" preload="metadata" controls></audio>
+    <pre id="seen" data-ready data-values="{}"></pre>
+  </body>
+</html>

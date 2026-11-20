@@ -6,9 +6,9 @@
 <script>
 // Clears what package content can leave behind at the package origin:
 // local and session storage, IndexedDB databases, cache storage, service
-// worker registrations and cookies. The player loads this page in the package
-// frame before a launch's wrapper and again before it closes the launch, and
-// waits for the `storage-cleared` message. The response also carries a
+// worker registrations, cookies and the frame's name. The player loads this
+// page in the package frame before a launch's wrapper and again before it
+// closes the launch, and waits for the `storage-cleared` message. The response also carries a
 // Clear-Site-Data header for the engines that honour it.
 (function () {
   'use strict';
@@ -30,6 +30,7 @@
   }
 
   var steps = [
+    attempt('name', function () { window.name = ''; }),
     attempt('localStorage', function () { window.localStorage.clear(); }),
     attempt('sessionStorage', function () { window.sessionStorage.clear(); }),
     attempt('indexedDB', function () {
