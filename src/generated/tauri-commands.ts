@@ -333,6 +333,7 @@ export const TAURI_COMMANDS = [
   "p2p_start",
   "p2p_status",
   "p2p_stop",
+  "package_attempt_activities",
   "package_attempt_commit",
   "package_attempt_fresh",
   "package_attempt_initialise",

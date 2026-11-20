@@ -130,6 +130,13 @@ async function claimCredential() {
 // trigger in markComplete fires at most once per visit.
 const autoMintFired = ref(false)
 
+// Every element is a standards package: finishing the course earns no
+// credential, because a package result is a self-report from its own script.
+const isPackageOnlyCourse = computed(() =>
+  flatElements.value.length > 0 && flatElements.value.every(item => item.element.element_type === 'package'),
+)
+const packageCourseComplete = ref(false)
+
 // Claim the completion credentials and raise the celebration modal. Skills are
 // minted by default at the end of a course/tutorial, so this runs automatically
 // when the final element completes (see markComplete) — the "Get completion
@@ -139,8 +146,14 @@ const autoMintFired = ref(false)
 // NOT navigate away — the modal's "View credential" / "Continue" own that.
 async function mintAndCelebrate() {
   if (claiming.value) return
-  const session = getProfileSessionToken()
   autoMintFired.value = true
+  // A course made only of package elements issues no credential: package
+  // results are self-reported. Say so instead of asking for one.
+  if (isPackageOnlyCourse.value) {
+    packageCourseComplete.value = true
+    return
+  }
+  const session = getProfileSessionToken()
   await refreshCompletionStatus()
   if (!session || session !== getProfileSessionToken()) return
   claimTxHash.value = null
@@ -307,7 +320,10 @@ const isPluginElement = computed(() => currentElement.value?.element_type === 'p
 
 // Element types that should get an edge-to-edge content area (no host padding),
 // letting the renderer own all available space on desktop and mobile.
-const isFullBleedElement = computed(() => isVideoElement.value || isPluginElement.value)
+// Package elements run in their own player with a frame that fills the area.
+const isPackageElement = computed(() => currentElement.value?.element_type === 'package')
+
+const isFullBleedElement = computed(() => isVideoElement.value || isPluginElement.value || isPackageElement.value)
 
 // Check if an element type is MCQ
 function isMcqType(type: string): boolean {
@@ -804,10 +820,12 @@ async function onDownloadClick() {
 /** Element types that should NOT auto-advance on `markComplete`. Plugin
  *  elements are interactive (replay, retry, review results), so jumping
  *  forward on completion is almost always wrong. The learner clicks Next
- *  themselves. Future: plugin manifest can opt back into auto-advance. */
+ *  themselves. Future: plugin manifest can opt back into auto-advance.
+ *  Package elements never auto-advance either: the package has its own
+ *  navigation, and its completion arrives through `onPackageProgress`. */
 function shouldAutoAdvance(elementType: string | undefined): boolean {
   if (!elementType) return true
-  const NO_AUTO_ADVANCE: ReadonlyArray<string> = ['plugin']
+  const NO_AUTO_ADVANCE: ReadonlyArray<string> = ['plugin', 'package']
   return !NO_AUTO_ADVANCE.includes(elementType)
 }
 
@@ -906,7 +924,35 @@ function elementTypeLabel(elementType: string): string {
     case 'subjective_mcq': return t('learn.player.elementType.subjective')
     case 'essay': return t('learn.player.elementType.essay')
     case 'interactive': return t('learn.player.elementType.interactive')
+    case 'package': return t('learn.player.elementType.package')
     default: return t('learn.player.elementType.content')
+  }
+}
+
+// The package label names the course's publisher; a package file the learner
+// opened on this device has none.
+const coursePublisher = computed(() => {
+  const value = course.value
+  if (!value || value.provenance === 'package_file') return null
+  return value.author_name || value.author_address || null
+})
+
+// A package element's progress comes from the host, which rolled up the
+// package's own report. Never auto-advances; completing the last element
+// finishes the course the same way any other element does.
+function onPackageProgress(next: ElementProgress) {
+  if (!enrollment.value || next.enrollment_id !== enrollment.value.id) return
+  const wasComplete = progress.value[next.element_id]?.status === 'completed'
+  progress.value[next.element_id] = next
+  if (wasComplete || next.status !== 'completed') return
+  void refreshCompletionStatus()
+  if (
+    totalElements.value > 0 &&
+    completedElements.value === totalElements.value &&
+    !autoMintFired.value &&
+    !courseCompleted.value
+  ) {
+    void mintAndCelebrate()
   }
 }
 
@@ -930,6 +976,9 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
     onComplete: () => { void markComplete() },
     onScoredComplete: (score: number) => { void markComplete(score) },
     onQuizComplete: (result: QuizResult) => { void markComplete(result.score) },
+    onPackageProgress,
+    progress: progress.value[el.id] ?? null,
+    publisher: coursePublisher.value,
     elementTypeLabel,
   }
 })
@@ -1101,6 +1150,12 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                  offer the completion credential once everything is consumed.
                  Re-claiming is idempotent, so this also re-mints for a course
                  finished before credentials existed. -->
+            <p
+              v-else-if="isPackageOnlyCourse && (progressPercent === 100 || courseCompleted)"
+              class="rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground"
+            >
+              {{ $t('learn.package.courseComplete') }}
+            </p>
             <div
               v-else-if="progressPercent === 100 || courseCompleted"
               class="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3"
@@ -1351,6 +1406,9 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                     <span v-if="progress[currentElement.id]?.score != null" class="ms-0.5">
                       {{ Math.round((progress[currentElement.id]!.score!) * 100) }}%
                     </span>
+                    <span v-if="currentElement.element_type === 'package'" class="ms-0.5 font-normal">
+                      · {{ $t('learn.package.selfReportedShort') }}
+                    </span>
                   </span>
                 </div>
                 <div v-else-if="elementStatus(currentElement.id) === 'in_progress'" class="flex-shrink-0">
@@ -1427,6 +1485,14 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
         <div v-if="currentElement" class="flex-shrink-0 border-t border-border bg-card/60 px-3 pt-2 pb-[calc(0.5rem+3.25rem+env(safe-area-inset-bottom))] md:px-6 md:py-3 md:pb-3">
           <p v-if="claimError" class="mx-auto mb-2 max-w-4xl text-xs text-destructive">
             {{ $t('learn.player.finishError', { error: claimError }) }}
+          </p>
+          <p
+            v-if="packageCourseComplete"
+            data-package-course-complete
+            role="status"
+            class="mx-auto mb-2 max-w-4xl text-xs text-muted-foreground"
+          >
+            {{ $t('learn.package.courseComplete') }}
           </p>
           <div :class="['mx-auto flex items-center justify-between gap-2', isVideoElement ? 'max-w-7xl' : 'max-w-4xl']">
             <!-- Previous -->

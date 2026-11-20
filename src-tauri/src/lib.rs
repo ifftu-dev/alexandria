@@ -1692,6 +1692,7 @@ pub fn run() {
             commands::package_attempts::package_attempt_initialise,
             commands::package_attempts::package_attempt_commit,
             commands::package_attempts::package_attempt_terminate,
+            commands::package_attempts::package_attempt_activities,
             commands::learning_records::learning_records_usage,
             commands::learning_records::learning_records_list,
             commands::learning_records::learning_records_export,

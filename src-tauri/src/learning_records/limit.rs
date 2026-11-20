@@ -83,7 +83,8 @@ pub fn enforce_limit(conn: &Connection, limit_bytes: u64) -> Result<usize, Recor
         })?;
         rows.collect::<Result<_, _>>()?
     };
-    let mut groups: BTreeMap<(String, String), Vec<Member>> = BTreeMap::new();
+    type Group = Vec<(i64, String, bool)>;
+    let mut groups: BTreeMap<(String, String), Group> = BTreeMap::new();
     for (seq, registration, activity, verb, removable) in completions {
         groups
             .entry((registration, activity))
@@ -109,10 +110,6 @@ pub fn enforce_limit(conn: &Connection, limit_bytes: u64) -> Result<usize, Recor
     }
     Ok(removed)
 }
-
-/// One completion-level record of an attempt at an activity: its write
-/// order, its verb and whether it may be removed.
-type Member = (i64, String, bool);
 
 /// A record not waiting in any outbox.
 const REMOVABLE: &str = "NOT EXISTS (SELECT 1 FROM learning_record_outbox o \
