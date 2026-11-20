@@ -3121,6 +3121,89 @@ export interface RequestAttemptTarget {
   attestation_required: boolean
 }
 
+// ── Hosted attempts (`hosted_attempt_*`) ──────────────────────────
+// An assessment request whose organisation holds the answers runs on its
+// hosted service. Mirrors `assessment::hosted::wire` and
+// `commands::hosted_attempt`.
+
+/** What the candidate sees and accepts before the first item. */
+export interface HostedTerms {
+  format: string
+  organisation: string
+  role: string
+  items: number
+  max_probes: number
+  /** `any` or `device_attested`. */
+  device_requirement: string
+  retakes: { limit: number; wait_days: number; abandoned_counts: boolean }
+  disconnect_grace_secs: number
+  retention_days: number
+  /** The consent text, in order. */
+  statements: string[]
+}
+
+export interface HostedTermsReply {
+  terms: HostedTerms
+  terms_digest: string
+  /** An attempt to resume. */
+  open_attempt: string | null
+  attempts_used: number
+  attempts_allowed: number
+  /** Set while a retake wait runs. */
+  next_attempt_at: string | null
+  can_open: boolean
+}
+
+/** One item, held in memory while shown and never stored. */
+export interface HostedItem {
+  seq: number
+  probe: boolean
+  question: string
+  options: string[]
+  select: 'one' | 'many'
+  time_limit_ms: number
+  sent_at: string
+  /** On the service's clock, which keeps running while disconnected. */
+  remaining_ms: number
+}
+
+export interface HostedAttemptState {
+  attempt: {
+    id: string
+    status: string
+    opened_at: string
+    items: number
+    answered: number
+    max_probes: number
+    requires_attested: boolean
+    ready_to_close: boolean
+  }
+  item: HostedItem | null
+}
+
+/** A refusal code in plain words (`assessment::hosted::refusal`). */
+export interface HostedRefusal {
+  code: string
+  message: string
+  retake_may_help: boolean
+}
+
+export type HostedIssuance =
+  | { state: 'issued'; credential_id: string; collected: string | null }
+  | { state: 'refused'; refusal: HostedRefusal }
+  | { state: 'held'; waiting_for: string }
+  | { state: 'none' }
+
+export interface HostedOutcome {
+  attempt_id: string
+  result: {
+    score: { correct: number; total: number; fraction: number }
+    probes: { max: number; asked: number; passed: number; failed: number; late: number; unavailable: number; probed: boolean }
+    flagged: boolean
+  }
+  issuance: HostedIssuance
+}
+
 /** What this device can contribute to a trust profile floor (`integrity_device_support`). */
 export interface DeviceSupport {
   platform_attestation: boolean

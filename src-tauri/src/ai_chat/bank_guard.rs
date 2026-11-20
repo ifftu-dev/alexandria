@@ -84,12 +84,55 @@ fn item_text(content_public: &str) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(" "))
 }
 
-/// Whether `text` contains a stored assessment item, by prompt and options.
-/// Fails closed: if the items cannot be read, the text is treated as a match.
+/// Most hosted items held at once; the oldest goes first.
+const MAX_HELD: usize = 2_000;
+
+/// Shingles of items hosted attempts showed in this run of the app. Only the
+/// hashes are kept: a hosted item's text is never stored anywhere.
+fn held() -> &'static std::sync::Mutex<std::collections::VecDeque<HashSet<u64>>> {
+    static HELD: std::sync::OnceLock<std::sync::Mutex<std::collections::VecDeque<HashSet<u64>>>> =
+        std::sync::OnceLock::new();
+    HELD.get_or_init(Default::default)
+}
+
+/// Register an item a hosted attempt showed, so chat refuses it as it refuses
+/// a stored item: the question on its own and with its options. The item's
+/// text is not kept, only its shingle hashes, for the rest of this run.
+pub fn hold_hosted_item(question: &str, options: &[String]) {
+    let whole = format!("{question} {}", options.join(" "));
+    let Ok(mut held) = held().lock() else {
+        return;
+    };
+    for text in [question, whole.as_str()] {
+        let normalized = normalize(text);
+        if normalized.chars().count() < MIN_ITEM_CHARS {
+            continue;
+        }
+        if held.len() >= MAX_HELD {
+            held.pop_front();
+        }
+        held.push_back(shingles(&normalized));
+    }
+}
+
+/// Whether `text` contains an item a hosted attempt showed. Fails closed.
+fn matches_held_item(text: &HashSet<u64>) -> bool {
+    let Ok(held) = held().lock() else {
+        return true;
+    };
+    held.iter().any(|item| containment(item, text) >= THRESHOLD)
+}
+
+/// Whether `text` contains a stored assessment item, by prompt and options,
+/// or an item a hosted attempt showed ([`hold_hosted_item`]). Fails closed:
+/// if the items cannot be read, the text is treated as a match.
 pub fn matches_assessment_item(conn: &Connection, text: &str) -> bool {
     let text = shingles(&normalize(text));
     if text.is_empty() {
         return false;
+    }
+    if matches_held_item(&text) {
+        return true;
     }
     let Ok(mut stmt) =
         conn.prepare("SELECT content_public FROM assessment_items ORDER BY id LIMIT ?1")

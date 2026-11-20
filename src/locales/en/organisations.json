@@ -53,6 +53,7 @@
     "assessment": {
       "skill": "Skill: {skill}",
       "assess": "Take requested assessment",
+      "assessHosted": "Take it on their service",
       "choose": "Choose a credential",
       "noCredentials": "No matching credential yet. If they asked for a new assessment, take it from this request.",
       "preview": "Preview what will be sent",

@@ -38,6 +38,7 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton } from '@/components/ui'
 import OrgBadge from './OrgBadge.vue'
 import RequestPolicy from './RequestPolicy.vue'
+import { isHostedRequest } from '@/utils/hostedAttempt'
 import { bloomName } from '@/utils/bloom'
 import { floorNeedsDevice, type DeviceAbility } from '@/utils/requestPolicy'
 import { needsVerifiedDevice } from '@/utils/verifiedDevice'
@@ -332,6 +333,14 @@ function hide(entry: Entry) {
 }
 
 function startAssessment(item: OrgCredentialRequest) {
+  if (isHostedRequest(item.request.issuance_policy)) {
+    // The organisation holds the answers: the attempt runs on its service.
+    void router.push({
+      path: `/assessment/hosted/${encodeURIComponent(item.request.id)}`,
+      query: { directory: item.directory_url },
+    })
+    return
+  }
   void router.push({
     path: `/assessment/${encodeURIComponent(item.request.skill_id)}`,
     query: { request: item.request.id, directory: item.directory_url },
@@ -560,12 +569,15 @@ onUnmounted(() => {
         />
         <div class="flex flex-wrap gap-2">
           <AppButton
-            v-if="entry.item.request.require_new_assessment"
+            v-if="entry.item.request.require_new_assessment || isHostedRequest(entry.item.request.issuance_policy)"
             size="sm"
             :disabled="!entry.org.verified || !!busy"
+            :data-testid="isHostedRequest(entry.item.request.issuance_policy) ? 'hosted-assess' : undefined"
             @click="startAssessment(entry.item)"
           >
-            {{ t('organisations.requests.assessment.assess') }}
+            {{ isHostedRequest(entry.item.request.issuance_policy)
+              ? t('organisations.requests.assessment.assessHosted')
+              : t('organisations.requests.assessment.assess') }}
           </AppButton>
           <AppButton size="sm" variant="outline" :disabled="!entry.org.verified || !!busy" @click="chooseCredential(entry)">
             {{ t('organisations.requests.assessment.choose') }}
