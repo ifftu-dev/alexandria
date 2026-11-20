@@ -17,6 +17,8 @@ export function previewInvoke(invoke: LocalInvoke, elementId: string): PackageIn
       case 'package_attempt_commit': return invoke<T>('package_preview_commit', args)
       case 'package_attempt_activities': return invoke<T>('package_preview_activities', args)
       case 'package_attempt_terminate': return invoke<T>('package_preview_terminate', args)
+      case 'package_attempt_sequencing': return invoke<T>('package_preview_sequencing', args)
+      case 'package_attempt_sequencing_save': return invoke<T>('package_preview_sequencing_save', args)
       default: return invoke<T>(command as Parameters<LocalInvoke>[0], args)
     }
   }

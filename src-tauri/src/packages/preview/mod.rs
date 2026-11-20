@@ -22,14 +22,14 @@ use alexandria_studio::package::progress::{self, ActivityOutcome, HostValues};
 use rusqlite::OptionalExtension;
 use serde_json::Value;
 
-use super::attempts::{AttemptError, MAX_RUNTIME_BYTES};
+use super::attempts::{AttemptError, MAX_RUNTIME_BYTES, MAX_SEQUENCING_BYTES};
 use super::PackageDb;
 use crate::domain::course_document::PACKAGE_ELEMENT_TYPE;
 use crate::domain::enrollment::ElementProgress;
 use crate::domain::package::Package;
 use crate::domain::package_attempt::{
     PackageActivityResult, PackageAttempt, PackageAttemptProgress, PackageAttemptStatus,
-    PackageCommit, PackageLaunchInit,
+    PackageCommit, PackageLaunchInit, PackageSequencingState, RootStatus,
 };
 
 /// Every preview attempt id starts with this.
@@ -52,6 +52,8 @@ struct Preview {
     attempt: PackageAttempt,
     package: Package,
     activities: BTreeMap<String, ActivityState>,
+    /// SCORM 2004: the engine's last snapshot and its rollup of the root.
+    sequencing: Option<(String, RootStatus)>,
     opened_order: u64,
 }
 
@@ -115,6 +117,7 @@ impl Previews {
                 attempt,
                 package,
                 activities: BTreeMap::new(),
+                sequencing: None,
                 opened_order: order,
             },
         );
@@ -232,6 +235,19 @@ pub async fn initialise(
     attempt_id: &str,
     activity_id: &str,
 ) -> Result<PackageLaunchInit, AttemptError> {
+    initialise_delivery(db, previews, learner_key, attempt_id, activity_id, false).await
+}
+
+/// [`initialise`] for an activity the SCORM 2004 sequencing engine delivered,
+/// `resumed` as for [`super::attempts::initialise_delivery`].
+pub async fn initialise_delivery(
+    db: &impl PackageDb,
+    previews: &Previews,
+    learner_key: &[u8; 32],
+    attempt_id: &str,
+    activity_id: &str,
+    resumed: bool,
+) -> Result<PackageLaunchInit, AttemptError> {
     let learner_name = db
         .run("packages.preview-initialise", |db| {
             let name: Option<Option<String>> = db
@@ -281,7 +297,8 @@ pub async fn initialise(
             launched = Some(roll_up(preview));
         }
         let standard = package.standard;
-        let entry = progress::entry(standard, stored.as_ref().map(|s| &s.runtime));
+        let entry =
+            progress::delivery_entry(standard, stored.as_ref().map(|s| &s.runtime), resumed);
         let learner_id = progress::learner_id(learner_key, &package.hash);
         let runtime = progress::initial_runtime(
             standard,
@@ -368,6 +385,34 @@ pub fn commit(
     })
 }
 
+/// Holds the SCORM 2004 engine's state in the preview and rolls it up as an
+/// attempt would: complete when the engine reports the root completed.
+pub fn save_sequencing(
+    previews: &Previews,
+    state: PackageSequencingState,
+) -> Result<PackageAttemptProgress, AttemptError> {
+    if state.snapshot.len() > MAX_SEQUENCING_BYTES {
+        return Err(AttemptError::InvalidCommit(format!(
+            "sequencing state is {} bytes; the limit is {MAX_SEQUENCING_BYTES}",
+            state.snapshot.len()
+        )));
+    }
+    previews.with(&state.attempt_id, |preview| {
+        preview.sequencing = Some((state.snapshot, state.root));
+        Ok(roll_up(preview))
+    })
+}
+
+/// The SCORM 2004 engine snapshot the preview holds, if any.
+pub fn sequencing(previews: &Previews, attempt_id: &str) -> Result<Option<String>, AttemptError> {
+    previews.with(attempt_id, |preview| {
+        Ok(preview
+            .sequencing
+            .as_ref()
+            .map(|(snapshot, _)| snapshot.clone()))
+    })
+}
+
 /// What every lesson of a preview has reported, in learner order.
 pub fn activities(
     previews: &Previews,
@@ -424,7 +469,11 @@ fn roll_up(preview: &mut Preview) -> PackageAttemptProgress {
             )
         })
         .collect();
-    let rollup = progress::rollup(&preview.package.description, &outcomes);
+    let rollup = progress::rollup(
+        &preview.package.description,
+        &outcomes,
+        preview.sequencing.as_ref().map(|(_, root)| root),
+    );
     let now = crate::clock::now_rfc3339();
     if rollup.complete && preview.attempt.status == PackageAttemptStatus::InProgress {
         preview.attempt.status = PackageAttemptStatus::Completed;

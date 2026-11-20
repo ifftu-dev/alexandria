@@ -7,8 +7,10 @@ const BACKEND_PREFIXES = [
   "patches/",
   "scripts/",
   "src-tauri/",
-  // The player's fixture package: a backend test pins its description.
+  // The player's fixture packages: a backend test pins their descriptions.
   "tests/desktop-ui/package-player/",
+  "tests/desktop-ui/package-isolation/",
+  "tests/desktop-ui/scorm12-conformance/",
   "world/",
 ]
 

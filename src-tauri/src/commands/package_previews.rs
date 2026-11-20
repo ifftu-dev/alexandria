@@ -6,7 +6,8 @@
 use crate::credentials::Issuer;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::package_attempt::{
-    PackageActivityResult, PackageAttempt, PackageAttemptProgress, PackageCommit, PackageLaunchInit,
+    PackageActivityResult, PackageAttempt, PackageAttemptProgress, PackageCommit,
+    PackageLaunchInit, PackageSequencingState,
 };
 use crate::packages::{preview, ExecutorDb};
 use crate::profile::scope::ProfileState as State;
@@ -50,20 +51,40 @@ pub async fn package_preview_initialise(
     state: State<'_, AppState>,
     attempt_id: String,
     activity_id: String,
+    resumed: Option<bool>,
 ) -> Result<PackageLaunchInit, String> {
     let (key, _) = Issuer::from_keystore(&state.keystore)
         .await
         .map_err(|e| e.to_string())?
         .into_parts();
-    preview::initialise(
+    preview::initialise_delivery(
         &db(&state),
         &state.package_previews,
         &key.to_bytes(),
         &attempt_id,
         &activity_id,
+        resumed.unwrap_or(false),
     )
     .await
     .map_err(|e| e.to_string())
+}
+
+/// The SCORM 2004 engine snapshot a preview holds, if any.
+#[tauri::command]
+pub async fn package_preview_sequencing(
+    state: State<'_, AppState>,
+    attempt_id: String,
+) -> Result<Option<String>, String> {
+    preview::sequencing(&state.package_previews, &attempt_id).map_err(|e| e.to_string())
+}
+
+/// Holds the SCORM 2004 engine's state in a preview; nothing is stored.
+#[tauri::command]
+pub async fn package_preview_sequencing_save(
+    state: State<'_, AppState>,
+    sequencing: PackageSequencingState,
+) -> Result<PackageAttemptProgress, String> {
+    preview::save_sequencing(&state.package_previews, sequencing).map_err(|e| e.to_string())
 }
 
 /// Holds one coalesced commit in the preview; nothing is stored.
