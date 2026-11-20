@@ -147,6 +147,18 @@ pub async fn add<D: RecordDb>(
 ) -> Result<RecordDestination, String> {
     let username = request.username.trim().to_string();
     check_credentials(&username, Some(&request.secret)).map_err(|e| e.to_string())?;
+    let supervised = db
+        .run("records.destinations.supervised", |db| {
+            supervised(db.conn()).map_err(|e| e.to_string())
+        })
+        .await?;
+    if supervised {
+        return Err(SendError::Supervised(
+            "a supervised profile's records go only where its guardian can see the consent; a store you add yourself is not one of those"
+                .into(),
+        )
+        .to_string());
+    }
     let identity = match request.identifier {
         IdentifierChoice::Pairwise => Identity::Pairwise,
         IdentifierChoice::RealDid => Identity::RealDid,
@@ -208,6 +220,23 @@ pub async fn add<D: RecordDb>(
         .await?;
     wake();
     Ok(view)
+}
+
+/// Whether the profile is supervised: its holder is a minor, or a guardian
+/// link to it is active. Such a profile adds no record destination: there
+/// is no guardian approval for one yet (story 42), so it is refused rather
+/// than left as a side door.
+fn supervised(conn: &Connection) -> Result<bool, SendError> {
+    let (birthdate, ward): (Option<String>, bool) = conn.query_row(
+        "SELECT (SELECT birthdate FROM local_identity WHERE id = 1), \
+                EXISTS (SELECT 1 FROM guardian_links WHERE side = 'ward' AND status = 'active')",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let minor = birthdate.as_deref().is_some_and(|birthdate| {
+        crate::domain::identity::is_minor(birthdate, Utc::now().date_naive())
+    });
+    Ok(minor || ward)
 }
 
 fn insert(conn: &Connection, destination: &Destination, secret: &str) -> Result<(), SendError> {

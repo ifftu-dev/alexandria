@@ -67,6 +67,10 @@ pub enum SendError {
     InvalidScope(String),
     #[error("invalid_credentials: {0}")]
     InvalidCredentials(String),
+    /// The profile is supervised: its records are not sent by a route its
+    /// guardian has no say in.
+    #[error("supervised: {0}")]
+    Supervised(String),
     #[error("{0}")]
     Store(#[from] LrsError),
     #[error("invalid_record: {0}")]

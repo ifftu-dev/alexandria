@@ -628,6 +628,39 @@ async fn a_store_added_again_after_removal_gets_fresh_statement_ids() {
 }
 
 #[tokio::test]
+async fn a_supervised_profile_cannot_add_a_destination() {
+    let store = XapiStub::start(&["2.0.0"]).await;
+    let minor = Learner::new().await;
+    minor.with_conn(|conn| {
+        let birthdate = (Utc::now() - Duration::days(365 * 12)).format("%Y-%m-%d");
+        conn.execute(
+            "UPDATE local_identity SET birthdate = ?1 WHERE id = 1",
+            [birthdate.to_string()],
+        )
+        .unwrap();
+    });
+    let ward = Learner::new().await;
+    ward.with_conn(|conn| {
+        conn.execute(
+            "INSERT INTO guardian_links (id, side, peer_did, shared_key, status) \
+             VALUES ('link-1', 'ward', 'did:key:z6Mkguardian', x'00', 'active')",
+            [],
+        )
+        .unwrap();
+    });
+
+    for learner in [&minor, &ward] {
+        let refused = learner
+            .add(learner.request(&store, "learner-key", &[&learner.course]))
+            .await
+            .unwrap_err();
+        assert!(refused.starts_with("supervised:"), "{refused}");
+        assert!(learner.destinations().is_empty());
+    }
+    assert!(store.statement_posts().is_empty());
+}
+
+#[tokio::test]
 async fn the_same_store_and_key_cannot_be_added_twice() {
     let learner = Learner::new().await;
     let store = XapiStub::start(&["2.0.0"]).await;
