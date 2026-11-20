@@ -34,6 +34,7 @@ pub mod packages;
 pub mod plugins;
 pub mod profile;
 pub mod ratelimit;
+pub mod record_sending;
 pub mod sentinel;
 pub mod settings;
 pub mod studio;
@@ -366,6 +367,7 @@ impl AppState {
         }
 
         self.start_registry_refresh().await;
+        self.start_record_sender().await;
         commands::discussions::start_relay(self).await?;
         tutoring::presence::start(self).await?;
 
@@ -384,6 +386,19 @@ impl AppState {
         }
         log::info!("profile {} fully initialized", paths.id);
         Ok(())
+    }
+
+    /// Sends learning records to the learner's record destinations while the
+    /// profile is open. Fenced like the registry refresh: the job starts
+    /// before admission opens and is joined by profile cleanup.
+    async fn start_record_sender(&self) {
+        let db = p2p::inbound::InboundDatabase::pin_on_first_use(
+            self.db_executor.clone(),
+            self.profile_operations.clone(),
+        );
+        self.profile_operations
+            .spawn_job(record_sending::destinations::run(db, self.keystore.clone()))
+            .await;
     }
 
     async fn start_registry_refresh(&self) {
@@ -1705,6 +1720,16 @@ pub fn run() {
             commands::package_previews::package_preview_activities,
             commands::package_previews::package_preview_terminate,
             commands::learning_records::learning_records_usage,
+            commands::record_destinations::record_destination_preview,
+            commands::record_destinations::record_destination_add,
+            commands::record_destinations::record_destinations,
+            commands::record_destinations::record_destination_remove,
+            commands::record_destinations::record_destinations_send_now,
+            commands::record_destinations::record_access_log,
+            commands::learning_records::learning_records_list,
+            commands::learning_records::learning_records_export,
+            commands::learning_records::learning_records_delete,
+            commands::learning_records::learning_records_delete_all,
             // Content (iroh blob store)
             commands::content::content_add,
             commands::content::content_get_text,

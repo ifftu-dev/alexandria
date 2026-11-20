@@ -8,7 +8,6 @@
   "resolve_profile": "inner fn unit-tested (content_store/profile.rs)",
   "content_has": "content CRUD; read half unused",
   "package_extract": "package extraction with progress (learning standards ticket 03); the player launch is ticket 06",
-  "learning_records_usage": "activity log size and limit (learning standards ticket 14); the activity log view is ticket 15",
   "content_node_status": "content diagnostics; pending UI",
   "content_resolve": "documented content path; pending UI",
   "update_chapter": "chapter CRUD; edit UI pending",

@@ -24,6 +24,12 @@ function arm(grants: GrantView[]) {
       case 'org_grants': return { grants, problems: [] }
       case 'fetch_visibility': return { items: [{ directory: 'Alexandria Cloud', organisationId: 'org-9', institution: 'City College', visibleToAdministrators: false }], problems: [] }
       case 'fetch_access_log': return { items: [], problems: [] }
+      case 'record_access_log': return [{
+        seq: 1, at: '2026-11-20T09:01:00.000Z', recipient_id: 'd-1', recipient_kind: 'destination',
+        recipient_name: 'https://lrs.example.org/xapi/', action: 'send',
+        scope: { course_ids: ['c-1'], include_interactions: false }, record_count: 4,
+        identifier: 'z6MkMadeForThisStore', accepted: true, detail: null,
+      }]
       // The follow-up commands answer from the local record: no view counts.
       case 'org_grant_set_sync': return { ...grant(), sync: args!.sync as boolean, lastViewedAt: null, viewCount: null }
       case 'org_grant_revoke': return { ...grant(), revokedAt: 1_900_100_000, lastViewedAt: null, viewCount: null }
@@ -115,5 +121,13 @@ describe('OrgAccess', () => {
     const wrapper = mountAccess(); await flushPromises()
     await button(wrapper, 'organisations.access.visibility.allow').trigger('click'); await flushPromises()
     expect(mocks.invoke).toHaveBeenCalledWith('set_visibility', { directoryUrl: CLOUD, organisationId: 'org-9', visible: true })
+  })
+
+  it('lists what this device sent beside who has looked', async () => {
+    arm([])
+    const wrapper = mountAccess(); await flushPromises()
+    const sends = wrapper.findAll('[data-testid=record-send-entry]')
+    expect(sends).toHaveLength(1)
+    expect(sends[0]!.text()).toContain('organisations.records.log.sent')
   })
 })
