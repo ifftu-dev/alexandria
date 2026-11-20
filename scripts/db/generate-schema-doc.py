@@ -64,6 +64,7 @@ DOMAINS = [
     ("AI chat", r"^(chat_|learning_memory$|ai_connection_approvals$)"),
     ("Notifications", r"^(notification|push_)"),
     ("Standards packages", r"^(packages|package_attempts|package_activity_state|package_sequencing_state)$"),
+    ("Learning records", r"^(learning_records|learning_record_outbox)$"),
 ]
 
 

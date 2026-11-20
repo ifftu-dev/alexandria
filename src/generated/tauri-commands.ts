@@ -274,6 +274,7 @@ export const TAURI_COMMANDS = [
   "is_biometric_available",
   "issue_credential",
   "issue_role_credential",
+  "learning_records_usage",
   "list_chapters",
   "list_courses",
   "list_credential_anchors",

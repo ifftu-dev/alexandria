@@ -28,6 +28,11 @@ pub const PACKAGE_ELEMENT_TYPE: &str = "package";
 /// result is a self-report from untrusted script (ADR 0003).
 pub const ASSESSED_ELEMENT_TYPES: [&str; 3] = ["quiz", "interactive", "assessment"];
 
+/// The score (0..1) at which an assessed element counts as passed: for a
+/// course-completion witness and for the pass or fail a learning record
+/// states.
+pub const ASSESSMENT_PASS_SCORE: f64 = 0.6;
+
 /// The unsigned course document payload (everything that gets signed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CourseDocumentPayload {

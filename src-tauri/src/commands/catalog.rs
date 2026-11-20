@@ -250,6 +250,57 @@ mod tests {
             assert_eq!(count, 0, "{table} must roll back as one hydration unit");
         }
     }
+
+    /// Learning records anchor activity identifiers to the DID that created
+    /// the course, so hydration keeps it, and keeps the first one it saw.
+    #[test]
+    fn hydrating_a_course_keeps_the_did_that_created_it() {
+        let db = test_db();
+        let row = CatalogHydrateRow {
+            course_id: "course-creator".into(),
+            author_address: "author-creator".into(),
+            content_cid: "cid-creator".into(),
+            version: 1,
+        };
+        let did = |seed: u8| {
+            alexandria_verify::did::derive_did_key(&ed25519_dalek::SigningKey::from_bytes(
+                &[seed; 32],
+            ))
+        };
+        let document = |author: u8| SignedCourseDocument {
+            version: 2,
+            course_id: row.course_id.clone(),
+            author_address: row.author_address.clone(),
+            author_did: Some(did(author)),
+            title: "Hydrated course".into(),
+            description: None,
+            thumbnail_hash: None,
+            tags: vec![],
+            skill_ids: vec![],
+            chapters: vec![],
+            created_at: 1,
+            updated_at: 1,
+            kind: "course".into(),
+            completion_policy: None,
+            tutor_policy: Default::default(),
+            signature: "verified-before-persistence".into(),
+            public_key: "verified-before-persistence".into(),
+        };
+        let creator = || -> Option<String> {
+            db.conn()
+                .query_row(
+                    "SELECT creator_did FROM courses WHERE id = 'course-creator'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap()
+        };
+
+        hydrate_catalog_course_db(db.conn(), &row, &document(1)).unwrap();
+        assert_eq!(creator().as_deref(), Some(did(1).as_str()));
+        hydrate_catalog_course_db(db.conn(), &row, &document(2)).unwrap();
+        assert_eq!(creator().as_deref(), Some(did(1).as_str()));
+    }
 }
 
 /// Get a single catalog entry by course_id.
@@ -427,9 +478,10 @@ fn hydrate_catalog_course_db(
             .map_err(|error| error.to_string())?;
 
         conn.execute(
-            "INSERT INTO courses (id, title, description, author_address, content_cid, thumbnail_cid, tags, skill_ids, version, course_document_version, completion_policy_json, status, published_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'published', datetime('now'), datetime('now')) \
+            "INSERT INTO courses (id, title, description, author_address, content_cid, thumbnail_cid, tags, skill_ids, version, course_document_version, completion_policy_json, creator_did, status, published_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'published', datetime('now'), datetime('now')) \
              ON CONFLICT(id) DO UPDATE SET \
+             creator_did = COALESCE(courses.creator_did, excluded.creator_did), \
              title = excluded.title, description = excluded.description, \
              author_address = excluded.author_address, content_cid = excluded.content_cid, \
              thumbnail_cid = excluded.thumbnail_cid, tags = excluded.tags, \
@@ -449,6 +501,7 @@ fn hydrate_catalog_course_db(
                 row.version,
                 i64::from(signed_doc.version),
                 completion_policy_json,
+                signed_doc.author_did.as_ref().map(|did| did.as_str()),
             ],
         )
         .map_err(|e| format!("upsert course failed: {e}"))?;

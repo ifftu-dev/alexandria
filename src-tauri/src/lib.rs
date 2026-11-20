@@ -24,6 +24,7 @@ pub mod interview_panel;
 #[cfg(test)]
 mod json_limit_boundaries;
 pub mod launch_window;
+pub mod learning_records;
 pub mod network_profile;
 pub mod notifications;
 pub mod org_trust;
@@ -340,6 +341,25 @@ impl AppState {
                 Err(e) => log::warn!("package idle check failed: {e}"),
             },
             Err(e) => log::warn!("package cache cleanup failed: {e}"),
+        }
+
+        // 6d. Cache the profile's DID, which learning records name the
+        // learner by and readers without the keystore look up. Best-effort.
+        match credentials::issuer::Issuer::from_keystore(&self.keystore).await {
+            Ok(issuer) => {
+                if let Ok(guard) = self.db.lock() {
+                    if let Some(db) = guard.as_ref() {
+                        if let Err(e) = settings::SettingsStore::set(
+                            db.conn(),
+                            settings::registry::keys::IDENTITY_LOCAL_DID,
+                            issuer.did().as_str().to_string(),
+                        ) {
+                            log::warn!("caching the profile DID failed: {e}");
+                        }
+                    }
+                }
+            }
+            Err(e) => log::warn!("profile DID unavailable at start: {e}"),
         }
 
         self.start_registry_refresh().await;
@@ -1672,6 +1692,7 @@ pub fn run() {
             commands::package_attempts::package_attempt_initialise,
             commands::package_attempts::package_attempt_commit,
             commands::package_attempts::package_attempt_terminate,
+            commands::learning_records::learning_records_usage,
             // Content (iroh blob store)
             commands::content::content_add,
             commands::content::content_get_text,
