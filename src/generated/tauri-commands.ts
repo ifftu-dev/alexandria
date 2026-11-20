@@ -334,6 +334,8 @@ export const TAURI_COMMANDS = [
   "package_attempt_fresh",
   "package_attempt_initialise",
   "package_attempt_open",
+  "package_attempt_sequencing",
+  "package_attempt_sequencing_save",
   "package_attempt_terminate",
   "package_extract",
   "package_get",
