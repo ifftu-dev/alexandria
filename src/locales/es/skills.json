@@ -132,6 +132,14 @@
   "atlas": {
     "bloomSummary": "Resaltando {level} · Coincidencias en la lista: {count}. Las demás habilidades siguen disponibles.",
     "title": "Atlas de habilidades",
+    "sidebar": {
+      "graph": "Your skill web",
+      "summary": "Every skill as a dot, coloured by field: {earned} earned and {ready} Ready of {total} skills. Lines join skills that build on each other; dotted lines join related skills. Use the arrow keys to move between skills and Enter to select one.",
+      "captionEarned": "Earned · {level}",
+      "openLabel": "Open skill {name}",
+      "expand": "Expand",
+      "expandLabel": "Expand {name} in the skill map"
+    },
     "ready": "Lista",
     "readyNext": "Lista para empezar",
     "earned": "Adquirida",

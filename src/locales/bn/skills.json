@@ -132,6 +132,14 @@
   "atlas": {
     "bloomSummary": "{level} তুলে ধরা হচ্ছে · তালিকায় মিল: {count}। অন্যান্য দক্ষতাও উপলব্ধ আছে।",
     "title": "দক্ষতার অ্যাটলাস",
+    "sidebar": {
+      "graph": "Your skill web",
+      "summary": "Every skill as a dot, coloured by field: {earned} earned and {ready} Ready of {total} skills. Lines join skills that build on each other; dotted lines join related skills. Use the arrow keys to move between skills and Enter to select one.",
+      "captionEarned": "Earned · {level}",
+      "openLabel": "Open skill {name}",
+      "expand": "Expand",
+      "expandLabel": "Expand {name} in the skill map"
+    },
     "ready": "প্রস্তুত",
     "readyNext": "শুরু করতে প্রস্তুত",
     "earned": "অর্জিত",

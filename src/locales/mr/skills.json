@@ -132,6 +132,14 @@
   "atlas": {
     "bloomSummary": "{level} ठळक केले आहे · यादीतील जुळणारे कौशल्य: {count}. इतर कौशल्येही उपलब्ध आहेत.",
     "title": "कौशल्यांचा अॅटलस",
+    "sidebar": {
+      "graph": "Your skill web",
+      "summary": "Every skill as a dot, coloured by field: {earned} earned and {ready} Ready of {total} skills. Lines join skills that build on each other; dotted lines join related skills. Use the arrow keys to move between skills and Enter to select one.",
+      "captionEarned": "Earned · {level}",
+      "openLabel": "Open skill {name}",
+      "expand": "Expand",
+      "expandLabel": "Expand {name} in the skill map"
+    },
     "ready": "तयार",
     "readyNext": "सुरू करण्यास तयार",
     "earned": "मिळवलेले",
