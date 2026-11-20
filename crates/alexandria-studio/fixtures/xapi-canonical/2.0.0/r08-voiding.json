@@ -1,0 +1,21 @@
+{
+  "id": "1ac77490-3552-8c3e-a309-db2ac3c02589",
+  "actor": {
+    "objectType": "Agent",
+    "account": {
+      "homePage": "urn:uuid:044eac38-2871-47c7-a8d8-5c25a8a9479c",
+      "name": "z6Mkj9TgfkWPT8imPBwQQYfDBh9QAiQksXmkb4vgzotjCNYx"
+    }
+  },
+  "verb": {
+    "id": "http://adlnet.gov/expapi/verbs/voided",
+    "display": {
+      "en-US": "voided"
+    }
+  },
+  "object": {
+    "objectType": "StatementRef",
+    "id": "a0b710c5-3063-8f90-9cb7-e12be31fb75b"
+  },
+  "timestamp": "2026-11-19T10:00:00.000Z"
+}

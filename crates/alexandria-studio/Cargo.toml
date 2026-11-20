@@ -28,6 +28,12 @@ zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 quick-xml = "0.41"
 percent-encoding = "2"
+# xAPI statement builder (`xapi`): per-recipient identifiers are HKDF-SHA256
+# subkeys of the learner's key and HMAC-SHA256 keyed hashes. Already in the
+# tree through the app's keystore.
+hkdf = "0.12"
+hmac = "0.12"
+sha2 = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 tokio = { version = "1", features = ["net", "io-util", "rt", "sync", "time"] }
