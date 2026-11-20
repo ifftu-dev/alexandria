@@ -1,3 +1,5 @@
+import type { BloomRank } from '@/utils/skillAtlas'
+
 /** What the Web layout reads from the atlas model: plain data, no credentials. */
 export interface WebGraph {
   /** Every skill with its field's atlas slot; null for unassigned skills. */
@@ -397,4 +399,19 @@ export function continueWebLayout(graph: WebGraph, positions: ReadonlyMap<string
   })
   for (let t = 0; t < ticks; t++) tick(sim, alpha)
   return positionsOf(sim)
+}
+
+// Dot size is the Bloom level earned and never feeds the layout, so earning
+// a level never moves a dot. Radii are layout units, like positions.
+/** Radius of a dot earned at the first Bloom level (Remember) and at the sixth (Create); the four between step evenly in area. */
+export const WEB_DOT_FIRST_RADIUS = 5
+export const WEB_DOT_SIXTH_RADIUS = 10
+/** Radius of a dot not yet earned, or earned at a level that is unavailable, so no level is ever invented. */
+export const WEB_DOT_BASE_RADIUS = 4
+
+/** A dot's radius for the Bloom rank earned (0 is Remember, 5 is Create), or the base size for none. */
+export function webDotRadius(rank: BloomRank | null | undefined): number {
+  if (rank == null) return WEB_DOT_BASE_RADIUS
+  const first = WEB_DOT_FIRST_RADIUS ** 2, sixth = WEB_DOT_SIXTH_RADIUS ** 2
+  return Math.sqrt(first + (sixth - first) * rank / 5)
 }

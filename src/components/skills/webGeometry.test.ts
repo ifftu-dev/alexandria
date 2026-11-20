@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import taxonomy from '../../../bootstrap/public_taxonomy.json'
 import { scaleTaxonomy } from '../../../tests/desktop-ui/atlasBackend'
-import { WEB_MIN_DISTANCE, continueWebLayout, webLayout, type WebGraph } from './webGeometry'
+import { WEB_MIN_DISTANCE, continueWebLayout, webDotRadius, webLayout, type WebGraph } from './webGeometry'
 
 type Point = { x: number; y: number }
 
@@ -140,6 +140,22 @@ describe('Continuing the Web layout', () => {
     const next = continueWebLayout(BUNDLED, partial)
     expect(next.has('not-a-skill')).toBe(false)
     expect(Number.isFinite(next.get(neighbour)!.x)).toBe(true)
+  })
+})
+
+describe('Web dot size', () => {
+  it('grows by even steps of area across the six Bloom ranks, from a smaller base for unearned or unknown levels', () => {
+    const radii = ([0, 1, 2, 3, 4, 5] as const).map(rank => webDotRadius(rank))
+    const areas = radii.map(radius => Math.PI * radius * radius)
+    const steps = areas.slice(1).map((area, index) => area - areas[index]!)
+    for (const step of steps) {
+      expect(step).toBeGreaterThan(0)
+      expect(step).toBeCloseTo(steps[0]!, 6)
+    }
+    expect(webDotRadius(null)).toBeLessThan(radii[0]!)
+    expect(webDotRadius(undefined)).toBe(webDotRadius(null))
+    // The biggest dots still never touch: the layout keeps centres further apart than two of them.
+    expect(2 * radii[5]!).toBeLessThan(WEB_MIN_DISTANCE)
   })
 })
 
