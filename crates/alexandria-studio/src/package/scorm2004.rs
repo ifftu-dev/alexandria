@@ -9,7 +9,7 @@
 //! engine given such a definition would quietly do something else.
 //! Elements SCORM 2004 tells a player to ignore are not read.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::{Read, Seek};
 
 use super::archive::Archive;
@@ -124,7 +124,7 @@ impl Scorm2004 {
     /// An item's own sequencing with its collection applied, checked whole.
     fn sequencing(&self, element: &Element) -> Read2004<Sequencing> {
         let own = definition(element)?;
-        let sequencing = match element.attribute("IDRef").map(str::trim) {
+        let mut sequencing = match element.attribute("IDRef").map(str::trim) {
             None | Some("") => own,
             Some(reference) => {
                 let collection = self.collections.get(reference).ok_or_else(|| {
@@ -133,7 +133,7 @@ impl Scorm2004 {
                 applied(own, collection, reference)
             }
         };
-        check_references(&sequencing)?;
+        check_references(&mut sequencing)?;
         Ok(sequencing)
     }
 }
@@ -165,42 +165,54 @@ fn applied(own: Sequencing, collection: &Sequencing, reference: &str) -> Sequenc
 }
 
 /// Objective ids are unique, and every rule and ADL objective names one that
-/// exists.
-fn check_references(sequencing: &Sequencing) -> Read2004<()> {
-    let mut ids = HashSet::new();
+/// exists. Ids are URIs: a reference names the objective whose id it equals
+/// once escapes are decoded and runs of white space collapsed (the test
+/// suite writes `" %20obj%20%201%20 "` for `obj%201`), and is rewritten to
+/// that id as the manifest spells it, so the run-time compares plain strings.
+fn check_references(sequencing: &mut Sequencing) -> Read2004<()> {
+    let mut ids: HashMap<String, String> = HashMap::new();
     if let Some(objectives) = &sequencing.objectives {
         let all = std::iter::once(&objectives.primary).chain(&objectives.others);
         for id in all.filter_map(|objective| objective.id.as_deref()) {
-            if !ids.insert(id) {
+            if ids.insert(uri_key(id), id.to_owned()).is_some() {
                 return Err(format!("the objective {id} is defined more than once"));
             }
         }
     }
-    let rules = sequencing.sequencing_rules.iter().flat_map(|rules| {
+    let rules = sequencing.sequencing_rules.iter_mut().flat_map(|rules| {
         rules
             .pre_condition_rules
-            .iter()
-            .chain(&rules.exit_condition_rules)
-            .chain(&rules.post_condition_rules)
+            .iter_mut()
+            .chain(&mut rules.exit_condition_rules)
+            .chain(&mut rules.post_condition_rules)
     });
-    for condition in rules.flat_map(|rule| &rule.conditions) {
-        if let Some(objective) = condition.referenced_objective.as_deref() {
-            if !ids.contains(objective) {
+    for condition in rules.flat_map(|rule| &mut rule.conditions) {
+        if let Some(objective) = condition.referenced_objective.as_mut() {
+            let Some(id) = ids.get(&uri_key(objective)) else {
                 return Err(format!(
                     "a rule condition refers to objective {objective}, which the activity does not define"
                 ));
-            }
+            };
+            objective.clone_from(id);
         }
     }
-    for objective in &sequencing.adl_objectives {
-        if !ids.contains(objective.id.as_str()) {
+    for objective in &mut sequencing.adl_objectives {
+        let Some(id) = ids.get(&uri_key(&objective.id)) else {
             return Err(format!(
                 "adlseq:objective {} extends an objective the activity does not define",
                 objective.id
             ));
-        }
+        };
+        objective.id.clone_from(id);
     }
     Ok(())
+}
+
+/// What two objective ids are compared by: escapes decoded, white space
+/// collapsed to single spaces and trimmed.
+fn uri_key(id: &str) -> String {
+    let decoded = percent_encoding::percent_decode_str(id).decode_utf8_lossy();
+    decoded.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// One `imsss:sequencing` element as written, collection not applied.

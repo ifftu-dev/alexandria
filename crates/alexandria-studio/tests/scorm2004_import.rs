@@ -806,6 +806,44 @@ fn values_written_in_the_wrong_case_are_still_read() {
 }
 
 #[test]
+fn an_objective_reference_written_with_escapes_and_spaces_names_the_objective_it_decodes_to() {
+    // The test suite's OB-02a and OB-12a: identifiers are URIs, compared once
+    // escapes are decoded and runs of white space collapsed.
+    let package = import(&lesson_with(
+        r#"<imsss:sequencing>
+             <imsss:sequencingRules><imsss:preConditionRule>
+               <imsss:ruleConditions>
+                 <imsss:ruleCondition condition="satisfied" referencedObjective="  %20obj%20%201%20  "/>
+                 <imsss:ruleCondition condition="objectiveStatusKnown" referencedObjective="ob%20%20j"/>
+               </imsss:ruleConditions>
+               <imsss:ruleAction action="skip"/>
+             </imsss:preConditionRule></imsss:sequencingRules>
+             <imsss:objectives>
+               <imsss:primaryObjective objectiveID="obj%201"/>
+               <imsss:objective objectiveID=" ob%20j  "/>
+             </imsss:objectives>
+           </imsss:sequencing>"#,
+        "",
+    ));
+    let sequencing = package.tree.children[0].sequencing.as_ref().unwrap();
+    let conditions = &sequencing
+        .sequencing_rules
+        .as_ref()
+        .unwrap()
+        .pre_condition_rules[0]
+        .conditions;
+    // Each reference now spells the id of the objective it names, as written.
+    assert_eq!(
+        conditions[0].referenced_objective.as_deref(),
+        Some("obj%201")
+    );
+    assert_eq!(
+        conditions[1].referenced_objective.as_deref(),
+        Some("ob%20j")
+    );
+}
+
+#[test]
 fn the_package_refusals_apply_to_scorm2004_with_its_edition_attached() {
     let missing = manifest("2004 3rd Edition", PLAIN, "", RESOURCES);
     let refused = import_package(
