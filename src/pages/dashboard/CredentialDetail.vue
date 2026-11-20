@@ -8,6 +8,7 @@ import { anchorBadge } from '@/components/credential/anchorStatus'
 import { explorerTxUrl } from '@/utils/cardanoExplorer'
 import CoverageStatementView from '@/components/integrity/CoverageStatementView.vue'
 import { secondDeviceLine } from '@/utils/sentinel/secondDevice'
+import { gradedBy } from '@/utils/hostedEvidence'
 import type {
   AttestationPlatform,
   CredentialAnchorState,
@@ -34,6 +35,8 @@ const view = ref<CredentialTrustView | null>(null)
 const trust = computed(() => view.value?.trust ?? null)
 /** Below `live`: the statement's own line that a second device or person was not ruled out. */
 const secondDevice = computed(() => secondDeviceLine(view.value?.coverage_statement))
+/** Who computed the score: the issuer, from a hosted attempt entry, or the device. */
+const grader = computed(() => (credential.value ? gradedBy(credential.value) : null))
 const anchor = ref<CredentialAnchorState | null>(null)
 const retryingAnchor = ref(false)
 const loading = ref(true)
@@ -138,6 +141,7 @@ function invalidReasonLabel(reason: TrustInvalidReason): string {
     case 'type_not_allowed': return t('credentials.detail.trustReason.typeNotAllowed')
     case 'invalid_attestation': return t('credentials.detail.trustReason.invalidAttestation')
     case 'issuer_custody_self_issued': return t('credentials.detail.trustReason.issuerCustodySelfIssued')
+    case 'issuer_custody_unproven': return t('credentials.detail.trustReason.issuerCustodyUnproven')
     case 'hosted_attempt_self_issued': return t('credentials.detail.trustReason.hostedAttemptSelfIssued')
     case 'hosted_attempt_invalid': return t('credentials.detail.trustReason.hostedAttemptInvalid')
     case 'hosted_attempt_custody_mismatch': return t('credentials.detail.trustReason.hostedAttemptCustodyMismatch')
@@ -544,6 +548,14 @@ const decisionVariant = computed(() => {
           <div class="flex items-center justify-between" data-answer-custody>
             <span class="text-muted-foreground">{{ $t('credentials.detail.custodyLabel') }}</span>
             <span class="text-foreground">{{ $t(`credentials.detail.custody.${credential.integrity.answerCustody ?? 'device'}`) }}</span>
+          </div>
+          <div v-if="grader" class="flex items-center justify-between" data-graded-by>
+            <span class="text-muted-foreground">{{ $t('credentials.detail.gradedByLabel') }}</span>
+            <span class="text-foreground">{{ $t(`credentials.detail.gradedBy.${grader.by}`) }}</span>
+          </div>
+          <div v-if="grader?.level" class="flex items-center justify-between" data-issuer-level>
+            <span class="text-muted-foreground">{{ $t('credentials.detail.issuerLevelLabel') }}</span>
+            <span class="text-foreground">{{ $t(`credentials.detail.assuranceLevel.${grader.level}`) }}</span>
           </div>
           <div v-if="credential.integrity.verificationRung" class="flex items-center justify-between">
             <span class="text-muted-foreground">{{ $t('credentials.detail.integrityRung') }}</span>

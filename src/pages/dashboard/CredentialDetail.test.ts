@@ -342,6 +342,23 @@ describe('CredentialDetail provenance', () => {
     expect(live.find('[data-second-device]').exists()).toBe(false)
   })
 
+  it('states who graded the attempt and the level the issuer verified', async () => {
+    const hosted = {
+      type: 'HostedAttemptEvidence', attemptId: 'hatt', answerCustody: 'issuer', gradedBy: 'issuer',
+      score: 0.75, attestation: { outcome: 'verified_credential_bound', platform: 'ios' },
+      verifiedAssuranceLevel: 'device_attested',
+    }
+    const issuer = (await open({
+      ...credential, integrity: { ...integrity, answerCustody: 'issuer' }, evidence: [hosted],
+    })).get('[data-integrity-section]')
+    expect(issuer.get('[data-graded-by]').text()).toContain('credentials.detail.gradedBy.issuer')
+    expect(issuer.get('[data-issuer-level]').text()).toContain('credentials.detail.assuranceLevel.device_attested')
+
+    const device = (await open({ ...credential, integrity })).get('[data-integrity-section]')
+    expect(device.get('[data-graded-by]').text()).toContain('credentials.detail.gradedBy.device')
+    expect(device.find('[data-issuer-level]').exists()).toBe(false)
+  })
+
   it('says when the named coverage statement could not be resolved', async () => {
     const section = await openWithTrust(trustView(), { ...credential, integrity })
     const coverage = section.get('[data-testid="coverage-statement"]')
