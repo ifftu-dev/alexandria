@@ -1,6 +1,6 @@
 # 08 Hosted attempts
 
-Triage: ready-for-agent
+Triage: done
 Type: task
 Repos: alexandria-cloud
 Part of: alexandria/docs/assessment-hardening-spec.md
@@ -27,10 +27,19 @@ The service runs the attempt and the device only shows it.
 
 ## Acceptance criteria
 
-- [ ] HTTP tests: full lifecycle; no key or correctness in any candidate response; forged score and forged timings ignored; late probe fails and flags; resume inside the window, abandoned after it; retake limit and wait; non-invited and closed-attempt requests refused identically; unsigned or wrongly signed requests refused; attested-request refusal when required.
-- [ ] Retention deletion covers answers and timings.
-- [ ] Migrations, fmt, clippy pass.
+- [x] HTTP tests: full lifecycle; no key or correctness in any candidate response; forged score and forged timings ignored; late probe fails and flags; resume inside the window, abandoned after it; retake limit and wait; non-invited and closed-attempt requests refused identically; unsigned or wrongly signed requests refused; attested-request refusal when required.
+- [x] Retention deletion covers answers and timings.
+- [x] Migrations, fmt, clippy pass.
 
 ## Pointers
 
 - Signed fetch prior art: `GET /api/assessment-requests/for/{did}` in `src/http/assessment.rs`; App Attest checks in `vendor/alexandria-verify/src/attestation/`; retention in `src/http/api.rs`.
+
+## Notes
+
+2026-11-20: built in the Cloud repo (`0958d34`). Migration 0058 adds `hosted_attempts` and `hosted_attempt_items` (cascading with the run, so retention deletes answers and timings), retake columns on `role_definitions` (default one retake after seven days) and four audit actions. The candidate's signed routes live under `/api/hosted-attempts/for/{did}`: terms, open with consent by terms digest, resume, answers, close. Any refusal of service is one identical 404. Attested roles register an App Attest key at open and need an assertion over every answer and the close. Probes are unseen items on the same skill with the app's time-limit rule plus 2 s grace; a failed probe flags the attempt and run. Close stores the device's assertion and evidence with the close digest `SHA-256("alexandria-hosted-attempt-close-v1\0" || commitmentRoot || 0x00 || did || 0x00 || attempt id)`. Ticket 09 reads results through `hosted_attempts::closed`. The API is documented in the Cloud repo's `docs/hosted-attempts.md`; administrators set retakes through `PUT /api/roles/{id}/retakes` and on the bank page.
+
+- Probes run when the policy names a probe policy other than `none` or requires `probed` or higher; at most two, placed at random. No unseen probe item left counts as `unavailable`.
+- Retakes count per role and DID across invites. Close is refused until every item is answered; an answered attempt never closed lapses as abandoned.
+- The candidate's signature does not cover request bodies, as with the existing signed fetches; attested roles have bodies covered by the App Attest assertion. Attested means iOS only.
+- Run status is left alone, so the invite-expiry sweep would mark hosted runs `expired`; ticket 09 decides.
