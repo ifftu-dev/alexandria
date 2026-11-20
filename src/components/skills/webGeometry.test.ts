@@ -91,16 +91,20 @@ describe('Web layout', () => {
   })
 
   it('lays the 1,500-skill scale taxonomy out inside the time budget', () => {
-    webLayout(SCALE)
-    const times = [0, 1, 2].map(() => {
-      const started = performance.now()
-      webLayout(SCALE)
-      return performance.now() - started
-    })
     // The atlas budget is no main-thread task over 50 ms; this runs near 40 ms
     // on a laptop, and the bound allows twice that for shared CI runners. A
-    // layout that lost its grid and went quadratic takes seconds.
-    expect(Math.min(...times)).toBeLessThan(100)
+    // layout that lost its grid and went quadratic takes seconds on every run.
+    // Other test files share the machine, so one slow run says little: the
+    // best of up to ten runs must meet the bound, stopping at the first that does.
+    const BUDGET_MS = 100
+    webLayout(SCALE)
+    let best = Infinity
+    for (let run = 0; run < 10 && best >= BUDGET_MS; run++) {
+      const started = performance.now()
+      webLayout(SCALE)
+      best = Math.min(best, performance.now() - started)
+    }
+    expect(best).toBeLessThan(BUDGET_MS)
   })
 
   it('draws linked skills closer together than unlinked ones of the same field, on average', () => {
