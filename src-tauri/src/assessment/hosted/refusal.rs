@@ -133,6 +133,10 @@ pub fn explain(refusal: &Value) -> Explanation {
                 .to_string(),
             true,
         ),
+        "score_below_pass" => (
+            "The organisation's grade of your answers was below the pass mark.".to_string(),
+            true,
+        ),
         "no_integrity_assertion" => ("The attempt carried no integrity result.".to_string(), true),
         "unverified_assurance_claim" => (
             "The session claimed a stronger device check than the organisation could verify."
@@ -207,6 +211,13 @@ mod tests {
             "This device's proof that it runs the genuine Alexandria app did not check out, \
              so the organisation could not rely on the session."
         );
+
+        let score = explain(&json!({"code": "score_below_pass"}));
+        assert_eq!(
+            score.message,
+            "The organisation's grade of your answers was below the pass mark."
+        );
+        assert!(score.retake_may_help);
 
         let unverified = explain(&json!({"code": "organisation_not_verified"}));
         assert!(
