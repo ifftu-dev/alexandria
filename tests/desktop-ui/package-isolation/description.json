@@ -1,0 +1,77 @@
+{
+  "standard": "scorm12",
+  "identifier": "dev.alexandria.fixture.hostile",
+  "title": "Hostile package",
+  "tree": {
+    "id": "hostile",
+    "title": "Hostile package",
+    "visible": true,
+    "children": [
+      {
+        "id": "network",
+        "title": "Requests elsewhere",
+        "visible": true,
+        "launch": {
+          "path": "network.html",
+          "kind": "sco"
+        }
+      },
+      {
+        "id": "peer",
+        "title": "Peer connection",
+        "visible": true,
+        "launch": {
+          "path": "peer.html",
+          "kind": "sco"
+        }
+      },
+      {
+        "id": "navigation",
+        "title": "Leaving the frame",
+        "visible": true,
+        "launch": {
+          "path": "navigation.html",
+          "kind": "sco"
+        }
+      },
+      {
+        "id": "popup",
+        "title": "New windows",
+        "visible": true,
+        "launch": {
+          "path": "popup.html",
+          "kind": "sco"
+        }
+      },
+      {
+        "id": "storage",
+        "title": "Left behind",
+        "visible": true,
+        "launch": {
+          "path": "storage.html",
+          "kind": "sco"
+        }
+      },
+      {
+        "id": "bridge",
+        "title": "Command bridge",
+        "visible": true,
+        "launch": {
+          "path": "bridge.html",
+          "kind": "sco"
+        }
+      },
+      {
+        "id": "label",
+        "title": "Covering the label",
+        "visible": true,
+        "launch": {
+          "path": "label.html",
+          "kind": "sco"
+        }
+      }
+    ]
+  },
+  "files": 12,
+  "uncompressed_bytes": 32127
+}

@@ -186,8 +186,10 @@ if (screen === 'motion') {
   // The real course player over a course whose only element is the SCORM 1.2
   // fixture package, with a fake host bridge. The spec serves the package
   // origin itself and reads what the host received from `packageFixture`.
-  const { packageBackend } = await import('./packageBackend')
-  const backend = packageBackend()
+  // `?package=` picks another fixture package (see `packageBackend.ts`).
+  const { packageBackend, isPackageFixtureName } = await import('./packageBackend')
+  const requested = params.get('package')
+  const backend = packageBackend(isPackageFixtureName(requested) ? requested : 'package-player')
   Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
   Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
     invoke: (command: string, args?: Record<string, unknown>) => backend.invoke(command, args),
@@ -203,6 +205,8 @@ if (screen === 'motion') {
   createApp({ render: () => h('div', { class: 'flex h-dvh flex-col' }, [h(RouterView)]) }).use(i18n).use(router).mount('#app')
   Object.assign(window, { packageFixture: {
     commits: backend.commits,
+    commitTimes: backend.commitTimes,
+    openLaunches: () => [...backend.openLaunches],
     control: backend.control,
     called: (command: string) => backend.called(command).length,
     navigate: (path: string) => router.push(path),
