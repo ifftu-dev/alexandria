@@ -14,6 +14,13 @@ pub use alexandria_verify::course::CourseCompletionPolicy;
 
 pub const COURSE_DOCUMENT_VERSION: u32 = 2;
 
+/// The element type of a package element: one whole standards package
+/// (SCORM 1.2, SCORM 2004 or cmi5), whose `content_hash` is the hash of the
+/// package archive. A new value of the free `element_type` string, so the
+/// document format version does not change; a node that does not know it
+/// shows its unknown-element notice. See `crate::packages`.
+pub const PACKAGE_ELEMENT_TYPE: &str = "package";
+
 /// The unsigned course document payload (everything that gets signed).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CourseDocumentPayload {
@@ -86,9 +93,11 @@ pub struct DocumentElement {
     pub position: i64,
     /// Element title.
     pub title: String,
-    /// Element type: video, text, quiz, interactive, assessment.
+    /// Element type: video, text, quiz, interactive, assessment, plugin,
+    /// [`PACKAGE_ELEMENT_TYPE`], among others.
     pub element_type: String,
-    /// BLAKE3 hash of the element content blob (video, PDF, etc.).
+    /// BLAKE3 hash of the element content blob (video, PDF, package
+    /// archive, etc.).
     pub content_hash: Option<String>,
     /// Duration in seconds (for video/audio elements).
     pub duration_seconds: Option<i64>,

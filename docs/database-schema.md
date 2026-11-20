@@ -9,8 +9,8 @@ Status: live
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 43 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 139 tables, 132 indexes, 1 view, 6 triggers.
+**Schema**: 44 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 140 tables, 132 indexes, 1 view, 6 triggers.
 
 ---
 
@@ -66,6 +66,7 @@ and requires a database's history to be an exact prefix of this list:
 41. `key_registry_lookup_only`
 42. `status_list_valid_from`
 43. `exchange_requests`
+44. `packages`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -1772,6 +1773,20 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `network_id` TEXT
 - `put_body` TEXT
 - `last_error_detail` TEXT
+
+### Standards packages (1)
+
+#### `packages`
+
+- `hash` TEXT PK — BLAKE3 of the archive's own bytes (hex); a package element's content hash
+- `standard` TEXT NOT NULL
+- `edition` TEXT — SCORM 2004 only
+- `title` TEXT NOT NULL
+- `description_json` TEXT NOT NULL — parsed package description, including the activity tree
+- `archive_bytes` INTEGER NOT NULL
+- `location` TEXT NOT NULL — draft: the profile's packages directory, never served; store: the served content store
+- `imported_at` TEXT NOT NULL
+- `last_opened_at` TEXT — last extraction for a launch; the idle check drops the extracted files after a period without one
 
 ---
 

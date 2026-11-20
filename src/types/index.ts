@@ -253,6 +253,77 @@ export interface PublishCourseResult {
   size: number
 }
 
+// ---- Standards packages (src-tauri/src/domain/package.rs) ----
+// A package element has `element_type === 'package'` and its `content_cid`
+// is the archive hash.
+
+export type PackageStandard = 'scorm12' | 'scorm2004' | 'cmi5'
+export type PackageEdition = '2nd' | '3rd' | '4th'
+
+export interface PackageLaunch {
+  /** Archive path, '/'-separated, percent-decoded. */
+  path: string
+  /** Starts with '?' or '#'; appended verbatim after the path. */
+  parameters?: string
+  kind: 'sco' | 'asset'
+  launch_data?: string
+  /** On the scale of the package's own standard. */
+  mastery_score?: number
+  max_time_allowed?: string
+  time_limit_action?: string
+}
+
+export interface PackageActivity {
+  id: string
+  title: string
+  visible: boolean
+  /** Absent for a heading. */
+  launch?: PackageLaunch
+  prerequisites?: string
+  children?: PackageActivity[]
+}
+
+export interface PackageDescription {
+  standard: PackageStandard
+  edition?: PackageEdition
+  identifier: string
+  title: string
+  /** Root is the default organization and is never launchable. */
+  tree: PackageActivity
+  files: number
+  uncompressed_bytes: number
+}
+
+/** `draft`: kept on this device only, never served. `store`: in the served content store. */
+export type PackageArchiveLocation = 'draft' | 'store'
+
+export interface Package {
+  hash: string
+  standard: PackageStandard
+  edition?: PackageEdition
+  title: string
+  description: PackageDescription
+  archive_bytes: number
+  location: PackageArchiveLocation
+  imported_at: string
+  last_opened_at: string | null
+}
+
+export interface OpenedPackageFile {
+  package: Package
+  course_id: string
+  chapter_id: string
+  element_id: string
+}
+
+export interface PackageExtractProgress {
+  hash: string
+  files_done: number
+  files_total: number
+  bytes_done: number
+  bytes_total: number
+}
+
 export interface AuthorizedCourseAttestor {
   did: string
   public_key_hex: string
