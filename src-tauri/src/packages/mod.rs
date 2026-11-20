@@ -423,6 +423,35 @@ pub async fn drop_idle(
     .await
 }
 
+/// Removes draft packages nothing uses: a package picked in the course
+/// editor and then cancelled or replaced, which no element and no attempt
+/// refers to. Its record, its draft archive and any extracted files go.
+/// Call at profile start, before an editor can hold a fresh pick. Returns
+/// the hashes removed.
+pub async fn sweep_unused_drafts(
+    db: &impl PackageDb,
+    dirs: &PackageDirs,
+) -> Result<Vec<String>, PackageError> {
+    let candidates = run_step(db, "packages.unused-drafts", |db| {
+        rows::unused_drafts(db.conn())
+    })
+    .await?;
+    let mut swept = Vec::new();
+    for hash in candidates {
+        let for_db = hash.clone();
+        let deleted = run_step(db, "packages.sweep-draft", move |db| {
+            rows::delete_unused_draft(db.conn(), &for_db)
+        })
+        .await?;
+        if deleted {
+            archive::discard_draft(&dirs.archives, &hash)?;
+            drop_extracted(dirs, &hash).await?;
+            swept.push(hash);
+        }
+    }
+    Ok(swept)
+}
+
 /// Removes what an interrupted import, export or extraction left behind.
 /// Call at profile start, before any package work can begin.
 pub fn clear_scratch(dirs: &PackageDirs) -> Result<(), PackageError> {

@@ -127,6 +127,30 @@ pub(super) fn record_received(
     }
 }
 
+/// Draft packages no course element and no attempt refers to.
+pub(super) fn unused_drafts(conn: &Connection) -> Result<Vec<String>, PackageError> {
+    let mut statement = conn.prepare(
+        "SELECT p.hash FROM packages p WHERE p.location = 'draft' \
+           AND NOT EXISTS (SELECT 1 FROM course_elements e WHERE e.content_cid = p.hash) \
+           AND NOT EXISTS (SELECT 1 FROM package_attempts a WHERE a.package_hash = p.hash) \
+         ORDER BY p.hash",
+    )?;
+    let hashes = statement
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<Vec<String>, _>>()?;
+    Ok(hashes)
+}
+
+/// Forgets a draft package, unless something came to refer to it.
+pub(super) fn delete_unused_draft(conn: &Connection, hash: &str) -> Result<bool, PackageError> {
+    Ok(conn.execute(
+        "DELETE FROM packages WHERE hash = ?1 AND location = 'draft' \
+           AND NOT EXISTS (SELECT 1 FROM course_elements e WHERE e.content_cid = ?1) \
+           AND NOT EXISTS (SELECT 1 FROM package_attempts a WHERE a.package_hash = ?1)",
+        params![hash],
+    )? > 0)
+}
+
 /// Packages not extracted for a launch since `cutoff` (RFC 3339, UTC).
 pub(super) fn idle_since(conn: &Connection, cutoff: &str) -> Result<Vec<String>, PackageError> {
     let mut statement = conn.prepare(

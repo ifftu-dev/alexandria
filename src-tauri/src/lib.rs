@@ -349,6 +349,14 @@ impl AppState {
             },
             Err(e) => log::warn!("package cache cleanup failed: {e}"),
         }
+        // Draft archives a cancelled or replaced pick in the editor left.
+        match packages::sweep_unused_drafts(&*self.db, &package_dirs).await {
+            Ok(swept) if !swept.is_empty() => {
+                log::info!("removed {} unused draft packages", swept.len())
+            }
+            Ok(_) => {}
+            Err(e) => log::warn!("unused draft sweep failed: {e}"),
+        }
 
         // 6d. Cache the profile's DID, which learning records name the
         // learner by and readers without the keystore look up. Best-effort.

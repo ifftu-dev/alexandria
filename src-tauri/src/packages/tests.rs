@@ -631,6 +631,54 @@ async fn only_a_published_course_on_this_device_brings_a_package_in() {
 }
 
 #[tokio::test]
+async fn a_draft_archive_no_course_uses_is_swept_at_profile_start() {
+    let profile = Profile::new().await;
+    // Picked in the editor, then the pick was cancelled or replaced.
+    let abandoned = import(
+        &profile.db,
+        &profile.dirs,
+        &profile.outside_file("abandoned.zip", &induction_package()),
+    )
+    .await
+    .expect("import");
+    // Opened from disk: its draft course keeps it.
+    let other = fixture::zip(&[
+        ("imsmanifest.xml", MANIFEST.as_bytes()),
+        ("welcome/index.html", WELCOME),
+        ("lifting/index.html", LIFTING),
+        ("notes.txt", b"a different archive"),
+    ]);
+    let kept = open_file(
+        &profile.db,
+        &profile.dirs,
+        &profile.outside_file("kept.zip", &other),
+    )
+    .await
+    .expect("open");
+
+    let swept = sweep_unused_drafts(&profile.db, &profile.dirs)
+        .await
+        .expect("sweep");
+
+    assert_eq!(swept, vec![abandoned.hash.clone()]);
+    assert_eq!(get(&profile.db, &abandoned.hash).await.expect("get"), None);
+    assert!(!profile
+        .dirs
+        .archives
+        .join(format!("{}.zip", abandoned.hash))
+        .exists());
+    assert!(get(&profile.db, &kept.package.hash)
+        .await
+        .expect("get")
+        .is_some());
+    assert!(profile
+        .dirs
+        .archives
+        .join(format!("{}.zip", kept.package.hash))
+        .exists());
+}
+
+#[tokio::test]
 async fn a_received_blob_that_is_not_a_package_is_refused() {
     let profile = Profile::new().await;
     let added = content::add_bytes_unencrypted(&profile.node, b"a text lesson")
