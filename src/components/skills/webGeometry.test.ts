@@ -130,17 +130,17 @@ describe('Web graph from the atlas model', () => {
   const model = buildSkillAtlas({
     skills: [skill('m1', 'math'), skill('m2', 'math'), skill('d1', 'data'), skill('u1', null)],
     edges: [edge('m2', 'm1'), edge('d1', 'm1'), edge('u1', 'unloaded')],
+    relations: [{ skill_id: 'm2', related_skill_id: 'd1', relation_type: 'related' }, { skill_id: 'u1', related_skill_id: 'unloaded', relation_type: 'alternative' }],
     activeCredentials: [], subjectDid: 'did:me',
     subjectFields: [{ id: 'math', name: 'Mathematics', atlas_slot: 3 }, { id: 'data', name: 'Data', atlas_slot: 0 }],
   })
 
-  it('carries every skill with its field slot and the loaded prerequisites, and relations as given', () => {
-    expect(webGraphFromAtlas(model, [['m2', 'd1']])).toEqual({
+  it('carries every skill with its field slot, and the prerequisites and relations between loaded skills, each relation once', () => {
+    expect(webGraphFromAtlas(model)).toEqual({
       nodes: [{ id: 'd1', slot: 0 }, { id: 'm1', slot: 3 }, { id: 'm2', slot: 3 }, { id: 'u1', slot: null }],
       prerequisites: [{ skill: 'm2', prerequisite: 'm1' }, { skill: 'd1', prerequisite: 'm1' }],
-      relations: [['m2', 'd1']],
+      relations: [['d1', 'm2']],
     })
-    expect(webGraphFromAtlas(model).relations).toEqual([])
   })
 })
 
