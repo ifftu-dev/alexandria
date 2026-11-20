@@ -187,19 +187,29 @@ export function createPackageSession(options: PackageSessionOptions) {
   let requests = 0
   /** SCORM 2004: the package's lessons by activity id, once sequencing started. */
   let delivering: Map<string, PackageActivity> | null = null
-  const launchOrigin = new URL(launch.base_url).origin
+  const launchUrl = new URL(launch.base_url)
+  const launchOrigin = launchUrl.origin
+  /**
+   * The origins a message from the launch can carry. A URL on an app scheme
+   * (`package://localhost`) has an opaque origin to the URL parser, but
+   * WebKit names its scheme-handler origins by scheme and host; the opaque
+   * `null` covers engines that do not.
+   */
+  const wrapperOrigins: ReadonlySet<string> = launchOrigin === 'null'
+    ? new Set([`${launchUrl.protocol}//${launchUrl.host}`, 'null'])
+    : new Set([launchOrigin])
+  /** Where messages for the wrapper may go; `*` only when the origin is opaque. */
+  const postTarget = launchOrigin === 'null' ? '*' : launchOrigin
 
   /**
    * The message comes from the wrapper page. WebKit delivers what a frame
    * posts while it is being removed (the player unmounting) with no source
    * window, so once the frame has left the page a sourceless message from
-   * the launch's origin is taken as the wrapper's last words. Some app
-   * schemes have an opaque origin (`null`), which then cannot narrow it.
+   * the launch's origin is taken as the wrapper's last words.
    */
   function fromWrapper(event: MessageEvent): boolean {
     if (wrapper !== null && event.source === wrapper) return true
-    return wrapper !== null && event.source === null && !frame.isConnected
-      && (event.origin === launchOrigin || launchOrigin === 'null')
+    return wrapper !== null && event.source === null && !frame.isConnected && wrapperOrigins.has(event.origin)
   }
 
   function waitFor(matches: (event: MessageEvent) => boolean, timeoutMs: number): Promise<boolean> {
@@ -327,7 +337,7 @@ export function createPackageSession(options: PackageSessionOptions) {
   }
 
   function post(message: Record<string, unknown>) {
-    wrapper?.postMessage({ ...message, source: FROM_PLAYER }, '*')
+    wrapper?.postMessage({ ...message, source: FROM_PLAYER }, postTarget)
   }
 
   /**
