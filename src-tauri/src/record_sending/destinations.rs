@@ -40,8 +40,9 @@ use crate::domain::record_sending::{
 use crate::p2p::inbound::InboundDatabase;
 
 /// The recipient label of a destination: the store's address and the key it
-/// issued. Never change the format: it keys every identifier the store has
-/// seen.
+/// issued. Never change the format: it keys the actor the store sees, and
+/// with the approval's id ([`recipients::instance_label`]) its statement and
+/// registration identifiers.
 pub fn label(endpoint: &str, username: &str) -> String {
     format!("destination|{endpoint}|{username}")
 }

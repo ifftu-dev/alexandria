@@ -1,6 +1,6 @@
 //! The recipients the learner approved, and the identifier each one sees.
 
-use alexandria_studio::xapi::{Account, Recipient, StatementError};
+use alexandria_studio::xapi::{Account, IdKey, Recipient, StatementError};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 
 use super::{Identity, RecipientEntry, RecipientKind, Scope, SendError};
@@ -23,14 +23,32 @@ pub fn recipient(
 }
 
 impl RecipientEntry {
-    /// The statement recipient this entry's records are built for.
+    /// The statement recipient this entry's records are built for. A record
+    /// destination's statement and registration identifiers are keyed by
+    /// this entry too, not only its label: a store removed (its records
+    /// voided) and added again must not see the voided identifiers repeat,
+    /// or it would ignore the new statements as duplicates. Its actor stays
+    /// the one the label gives, as the consent screen showed it.
     pub fn recipient(
         &self,
         learner_secret: &[u8; 32],
         learner_did: &str,
     ) -> Result<Recipient, StatementError> {
-        recipient(&self.identity, learner_secret, learner_did, &self.label)
+        let recipient = recipient(&self.identity, learner_secret, learner_did, &self.label)?;
+        match self.kind {
+            RecipientKind::Destination => Ok(Recipient::new(
+                recipient.account().clone(),
+                IdKey::derive(learner_secret, &instance_label(&self.label, &self.id))?,
+            )),
+            RecipientKind::Share => Ok(recipient),
+        }
     }
+}
+
+/// What a record destination's identifiers are keyed by: its label and the
+/// id of this approval of it.
+pub fn instance_label(label: &str, recipient_id: &str) -> String {
+    format!("{label}|{recipient_id}")
 }
 
 /// Stores an approved recipient. A label already in use is refused: two

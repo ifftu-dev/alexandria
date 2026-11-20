@@ -212,12 +212,22 @@ impl Learner {
 }
 
 /// The recipient's statement id for a local record id, worked out the way
-/// the recipient's label prescribes.
+/// the destination's label and approval prescribe.
 fn statement_id(learner: &Learner, endpoint: &str, username: &str, local_id: &str) -> String {
     let label = destinations::label(endpoint, username);
-    xapi::Recipient::pairwise(&learner.secret, &label)
-        .unwrap()
-        .statement_id(local_id)
+    let approval = learner
+        .destinations()
+        .into_iter()
+        .find(|d| d.endpoint == endpoint && d.username == username)
+        .expect("the destination is approved")
+        .id;
+    // Its identifier key is derived from the instance label alone.
+    xapi::Recipient::pairwise(
+        &learner.secret,
+        &recipients::instance_label(&label, &approval),
+    )
+    .unwrap()
+    .statement_id(local_id)
 }
 
 pub(super) fn actor_names(statements: &[Value]) -> Vec<String> {
@@ -586,6 +596,35 @@ async fn removal_stops_sending_even_when_voiding_cannot_reach_the_store() {
     assert_eq!(report.voided, 0);
     assert!(report.void_error.unwrap().starts_with("unreachable:"));
     assert!(learner.destinations().is_empty());
+}
+
+#[tokio::test]
+async fn a_store_added_again_after_removal_gets_fresh_statement_ids() {
+    let learner = Learner::new().await;
+    let store = XapiStub::start(&["2.0.0"]).await;
+    let first = learner
+        .add(learner.request(&store, "learner-key", &[&learner.course]))
+        .await
+        .unwrap();
+    learner.pass(t0()).await;
+    let sent = ids(&store.accepted());
+    destinations::remove(&learner.db, &first.id, &learner.secret, &learner.did, t0())
+        .await
+        .unwrap();
+    let after_voids = store.accepted().len();
+
+    learner
+        .add(learner.request(&store, "learner-key", &[&learner.course]))
+        .await
+        .unwrap();
+    learner.pass(t0() + Duration::hours(1)).await;
+
+    // The voided ids would be duplicates the store ignores; these are new.
+    let resent = ids(&store.accepted()[after_voids..]);
+    assert_eq!(resent.len(), sent.len());
+    for id in &resent {
+        assert!(!sent.contains(id), "{id} was voided at this store");
+    }
 }
 
 #[tokio::test]
