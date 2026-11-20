@@ -378,7 +378,8 @@ onBeforeUnmount(() => {
 
     <div v-else class="flex min-h-0 flex-1 flex-col md:flex-row">
       <!-- Table of contents -->
-      <!-- SCORM 2004: the engine's tree; a lesson is offered only when a choice of it is valid. -->
+      <!-- SCORM 2004: the engine's tree; a lesson is offered only when a choice of it is valid,
+           and a cluster is offered when a choice of it is (the engine then delivers a lesson in it). -->
       <nav
         v-if="!focus && sequenced && sequencedLessonCount > 1"
         data-package-toc
@@ -388,7 +389,7 @@ onBeforeUnmount(() => {
         <p class="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{{ t('learn.package.toc') }}</p>
         <template v-for="row in sequencedRows" :key="row.node.id">
           <button
-            v-if="row.lesson"
+            v-if="row.lesson || row.node.choosable"
             type="button"
             :data-activity="row.node.id"
             :data-complete="row.node.completion === 'completed' ? 'true' : 'false'"
