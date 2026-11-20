@@ -708,7 +708,7 @@ export interface SkillGraphEdge {
 export interface SkillGraphRelation {
   skill_id: string
   related_skill_id: string
-  /** `related`, `complementary` or `alternative`. */
+  /** `related`, `complementary` or `alternative`; the backend reads any other stored value as `related`. */
   relation_type: string
 }
 

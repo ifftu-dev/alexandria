@@ -6,14 +6,15 @@ import { atlasFieldColor, createAtlasPresenter } from './atlasPresentation'
 import { SIMPLE_DISC_SIZE, simpleLayout } from './simpleLayout'
 import { edgePaths as sortEdgePaths, simpleArrowHead, simpleDenseIds, simpleDimmed, simpleEdgeFaded, simpleEdgeShapes as buildSimpleEdgeShapes, simpleEmphasis as emphasisAround, simpleLabelQuiet, simpleNodeBoxes, type EdgeShape, type NodeBox } from './simpleGeometry'
 import AtlasNodeLayer from './AtlasNodeLayer.vue'
-import { useWebGraph, WEB_MAX_ZOOM, WEB_MIN_ZOOM, WEB_ZOOM_STEP, type WebDot } from './useWebGraph'
+import AtlasMapTools from './AtlasMapTools.vue'
+import { useExplorerWeb } from './useExplorerWeb'
 import WebGraphDot from './WebGraphDot.vue'
 import WebGraphLines from './WebGraphLines.vue'
-import { webGraphFromAtlas, webLayout, webNarrowedIds, type WebPoint } from './webGeometry'
+import type { WebPoint } from '@/utils/webGeometry'
 import { animateMotion, motionDuration, useMotion } from '@/composables/useMotion'
 import type { SkillGraphView } from '@/composables/useSkillGraphView'
 import { BLOOM_ORDER } from '@/utils/bloom'
-import { createAtlasViewState, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
+import { ATLAS_DEPTHS, createAtlasViewState, isAtlasDepth, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
 import { isBloomRank, type AtlasField, type AtlasModel, type AtlasNode, type SkillRelationType } from '@/utils/skillAtlas'
 import type { AtlasFeedback } from '@/composables/useSkillAtlas'
 
@@ -115,36 +116,10 @@ const webMode = computed(() => props.viewMode === 'web')
 const detailedMode = computed(() => props.viewMode === 'detailed')
 const simpleGeometry = computed(() => simpleLayout(props.model, width.value))
 
-// Web: the same node elements placed by the Web graph's geometry and wearing
-// its dot skin. Everything the Web graph reads is empty outside Web, so the
-// other views never pay for its layout or emphasis.
-const EMPTY_POSITIONS: ReadonlyMap<string, WebPoint> = new Map()
-/** The explorer's own layout and drags, used when the owner passes no positions. */
-const ownWebLayout = computed(() => webLayout(webGraphFromAtlas(props.model)))
-const ownWebDragged = shallowRef<{ model: AtlasModel; positions: ReadonlyMap<string, WebPoint> } | null>(null)
-const webPositions = computed(() => props.webPositions ??
-  (ownWebDragged.value?.model === props.model ? ownWebDragged.value.positions : ownWebLayout.value))
-const webGraphData = computed(() => webGraphFromAtlas(props.model))
-/** Narrowed to the selection: only skills within the chosen steps show. */
-const webNarrowed = computed(() => webMode.value && props.view.webNarrowed && selectedId.value !== null && nodesById.value.has(selectedId.value))
-const webShownIds = computed(() => webNarrowed.value
-  ? webNarrowedIds(webGraphData.value, selectedId.value!, neighborhoodDepth.value, props.view.webRelated) : null)
-/** Skills in the focused field. */
-const fieldIds = computed(() => fieldFocused.value
-  ? new Set(props.model.nodes.filter(node => node.fieldId === focusedFieldId.value).map(node => node.skill.id)) : null)
-/** Search and field focus fade every skill outside them. */
-const webMatchIds = computed(() => {
-  if (!webMode.value || (!query.value && !fieldFocused.value)) return null
-  return new Set([...matchIds.value].filter(skillId => !fieldIds.value || fieldIds.value.has(skillId)))
-})
 /** Where each node's element sits on the canvas, in the current view. */
 const nodeBoxes = computed(() => {
   if (simple.value) return simpleNodeBoxes(simpleGeometry.value)
-  if (webMode.value) {
-    const boxes = new Map<string, NodeBox>()
-    for (const dot of webGraph.dots.value) boxes.set(dot.id, { x: dot.x - dot.hit / 2, y: dot.y - dot.hit / 2, width: dot.hit, height: dot.hit })
-    return boxes
-  }
+  if (web.nodeBoxes.value) return web.nodeBoxes.value
   const boxes = new Map<string, NodeBox>()
   for (const [skillId, point] of layout.value.positions) boxes.set(skillId, { x: point.x, y: point.y, width: NODE_WIDTH, height: NODE_HEIGHT })
   return boxes
@@ -234,8 +209,7 @@ const canvasNodes = computed(() => canvasIds.value.flatMap(id => { const node = 
 // layer and not the whole explorer.
 const nodeLayer = { get items(): readonly AtlasNode[] {
   if (simple.value) return props.model.nodes
-  if (webMode.value) return webGraph.dots.value.map(dot => dot.node)
-  return canvasNodes.value
+  return web.nodes.value ?? canvasNodes.value
 } }
 let fillScheduled = false
 /** Drops nodes that left the drawn area and adds those on screen; with `more`, also a few of the rest. */
@@ -270,11 +244,7 @@ const canvasBox = computed(() => {
     const h = simpleGeometry.value.height
     return { viewBox: `0 0 ${width.value} ${h}`, width: width.value, height: h }
   }
-  if (webMode.value) {
-    // Web draws in screen pixels: one canvas unit per pixel of the map.
-    const { width: w, height: h } = webGraph.size.value
-    return { viewBox: `0 0 ${w} ${h}`, width: w, height: h }
-  }
+  if (web.canvasBox.value) return web.canvasBox.value
   const pad = canvasPad.value, w = worldBounds.value.x + 2 * pad.x, h = worldBounds.value.y + 2 * pad.y
   return { viewBox: `${-pad.x} ${-pad.y} ${w} ${h}`, width: w * camera.value.zoom, height: h * camera.value.zoom }
 })
@@ -318,7 +288,6 @@ const focusSummary = computed(() => {
   })
 })
 const DEPTH_KEYS = { 1: 'skills.atlas.oneStep', 2: 'skills.atlas.twoSteps', 3: 'skills.atlas.threeSteps' } as const
-const DEPTHS = [1, 2, 3] as const
 // A string computed only notifies when the query text changes, so other view
 // updates (selection, camera) keep the same match list and its window.
 // Simple offers no search, so its list holds every skill; the query waits for Detailed.
@@ -349,72 +318,20 @@ const bloomMatches = computed(() => matches.value.filter(bloomMatch))
 function bloomMatch(node: AtlasNode): boolean { return detailedMode.value && bloomEmphasis.value !== null && node.earnedBloom?.rank === bloomEmphasis.value }
 const matchIds = computed(() => new Set(matches.value.map(node => node.skill.id)))
 const mapElement = ref<HTMLElement>()
-const webGraph = useWebGraph(() => ({
-  model: props.model,
-  positions: webMode.value ? webPositions.value : EMPTY_POSITIONS,
-  selectedId: webMode.value ? selectedId.value : null,
-  // The inspector's focus lights its neighbourhood; narrowed, everything shown is lit, so no shown name fades.
-  focusIds: !webMode.value ? null : neighborhoodIds.value.size > 0 ? neighborhoodIds.value : webShownIds.value,
-  matchIds: webMatchIds.value,
-  shownIds: webShownIds.value,
-  fitIds: webMode.value ? fieldIds.value : null,
-  narrowed: webNarrowed.value,
-  names: props.view.webNames, arrows: props.view.webArrows, related: props.view.webRelated,
-  camera: props.view.webCamera, compact: false, reducedMotion: props.reducedMotion === true,
-}), {
-  select: skillId => { if (skillId) select(skillId); else clearWebSelection() },
-  active: () => {},
-  camera: webCameraMoved,
-  drag: positions => {
-    if (!props.webPositions) ownWebDragged.value = { model: props.model, positions }
-    emit('web-drag', positions)
-  },
-}, computed(() => webMode.value ? mapElement.value : undefined))
-const webDotById = computed(() => new Map(webGraph.dots.value.map(dot => [dot.id, dot])))
-function webDot(node: AtlasNode): WebDot | undefined { return webMode.value ? webDotById.value.get(node.skill.id) : undefined }
-// The Web lines and zoom tools follow every pan and zoom. Read through getters
-// by layers of their own, so a camera move re-renders them, not the explorer.
-const webLineLayer = { get items() { return webMode.value ? [webGraph.lines.value] : [] } }
-const webZoomLayer = { get items() { return webMode.value ? [webGraph.camera.value.zoom] : [] } }
-/** The Web camera on the map element, for checks that follow it, set directly so a pan renders nothing else. */
-watch(() => webMode.value ? webGraph.camera.value : null, at => {
-  if (at && mapElement.value) mapElement.value.dataset.camera = `${at.x} ${at.y} ${at.zoom}`
-}, { flush: 'post' })
-// The Web graph draws a moved camera at once; the view hears of it when the
-// gesture ends (or when idle, for the wheel and the zoom buttons), so a pan
-// re-renders the graph and not the explorer and its owner on every frame.
-let pendingWebCamera: AtlasCamera | null = null
-/** Pointers pressed on the Web map. */
-const webPointers = new Set<number>()
-let webCameraScheduled = false
-function webCameraMoved(at: AtlasCamera): void {
-  pendingWebCamera = at
-  if (webPointers.size > 0 || webCameraScheduled) return
-  webCameraScheduled = true
-  whenIdle(() => { webCameraScheduled = false; if (webPointers.size === 0) publishWebCamera() })
-}
-function publishWebCamera(): void {
-  const at = pendingWebCamera
-  pendingWebCamera = null
-  if (at) update({ webCamera: at })
-}
-watch(() => props.viewMode, publishWebCamera, { flush: 'sync' })
-onBeforeUnmount(publishWebCamera)
-function clearWebSelection(): void {
-  update({ selectedSkillId: null, webNarrowed: false, ...(props.view.webNarrowed ? { webCamera: null } : {}) })
-}
-function narrow(around: boolean): void {
-  update({ webNarrowed: around, webCamera: null })
-}
+// Web: the same node elements placed by the Web graph's geometry and wearing
+// its dot skin. The adapter holds every Web-only branch and the camera a
+// gesture moves; each handler below delegates to it once.
+const web = useExplorerWeb({
+  input: () => ({ model: props.model, view: props.view, viewMode: props.viewMode, reducedMotion: props.reducedMotion === true,
+    webPositions: props.webPositions, neighborhoodIds: neighborhoodIds.value, matchIds: matchIds.value, searching: query.value !== '' }),
+  update, dragged: positions => emit('web-drag', positions), reset: () => emit('web-reset'), whenIdle, map: mapElement,
+})
 function setDepth(event: Event): void {
-  const value = Number((event.target as HTMLSelectElement).value)
-  update({ neighborhoodDepth: value === 3 ? 3 : value === 2 ? 2 : 1, ...(webNarrowed.value ? { webCamera: null } : {}) })
+  const value = event.target instanceof HTMLSelectElement ? Number(event.target.value) : null
+  if (!isAtlasDepth(value)) return
+  update({ neighborhoodDepth: value, ...web.depthPatch() })
 }
-function webMapEvent<E extends Event>(handler: (event: E) => void): (event: E) => void {
-  return event => { if (webMode.value) handler(event) }
-}
-const webKeyUp = webMapEvent(webGraph.keyUp), webFocusIn = webMapEvent(webGraph.focusIn), webFocusOut = webMapEvent(webGraph.focusOut), webWheel = webMapEvent(webGraph.wheel)
-function webHover(skillId: string | null): void { if (webMode.value) webGraph.hover(skillId) }
+function webPan(x: number, y: number): void { web.pan(x * PAN_STEP, y * PAN_STEP) }
 function fieldName(fieldId: string | null): string {
   return present.fieldName(props.model.fieldById.get(fieldId) ?? { id: fieldId, name: null })
 }
@@ -457,10 +374,7 @@ const RELATION_TYPE_KEYS = {
 function relationTypeText(type: SkillRelationType): string { return t(RELATION_TYPE_KEYS[type]) }
 function color(fieldId: string | null): string { return atlasFieldColor(props.model.fieldById.get(fieldId) ?? { id: fieldId, slot: null }) }
 function update(patch: Partial<AtlasViewState>): void {
-  // A camera set on purpose (Fit, Reset, a field, narrowing) replaces one a gesture has not published yet.
-  if ('webCamera' in patch) pendingWebCamera = null
-  emit('update:view', { ...props.view, ...(pendingWebCamera ? { webCamera: pendingWebCamera } : {}), ...patch })
-  if (!('webCamera' in patch)) pendingWebCamera = null
+  emit('update:view', { ...props.view, ...web.withPendingCamera(patch) })
 }
 function preserveOverviewFocus(): void {
   if (!viewport.value?.querySelector('.atlas-overview')?.contains(document.activeElement)) return
@@ -485,21 +399,13 @@ function select(skillId: string, fromElsewhere = false): void {
     if (fromElsewhere) reveal(skillId)
     return
   }
-  if (webMode.value) {
-    // Narrowed, the graph re-centres on the new selection and fits it; a
-    // choice made off the map is brought to the middle at the same zoom.
-    const at = webPositions.value.get(skillId)
-    update({ selectedSkillId: skillId, inspectorCollapsed: false,
-      ...(props.view.webNarrowed ? { webCamera: null } : fromElsewhere && at ? { webCamera: { x: at.x, y: at.y, zoom: webGraph.camera.value.zoom } } : {}) })
-    return
-  }
+  if (web.select(skillId, fromElsewhere)) return
   update({ selectedSkillId: skillId, focusedFieldId: node.fieldId, unassignedFocused: node.fieldId === null,
     inspectorCollapsed: false, camera: { x: point.x + NODE_WIDTH / 2, y: point.y + NODE_HEIGHT / 2, zoom: camera.value.zoom } })
   preserveOverviewFocus()
 }
 function focus(field: AtlasField): void {
-  // Web fades the other fields and fits the camera to this one.
-  if (webMode.value) { update({ focusedFieldId: field.id, unassignedFocused: field.id === null, webCamera: null }); return }
+  if (web.focusField(field)) return
   const region = layout.value.regions.find(item => item.field.id === field.id)
   if (!region) return
   update({ focusedFieldId: field.id, unassignedFocused: field.id === null,
@@ -539,7 +445,7 @@ function stopDrag(): void {
   if (wasMoving) void nextTick(() => placeCanvas(camera.value))
 }
 function pointerDown(event: PointerEvent): void {
-  if (webMode.value) { if (event.pointerType !== 'mouse' || event.button === 0) webPointers.add(event.pointerId); webGraph.pointerDown(event); return }
+  if (web.pointerDown(event)) return
   if (simple.value) return
   // Native vertical scrolling and browser pinch zoom stay available on touch.
   if (event.isPrimary === false) { stopDrag(); return }
@@ -548,7 +454,7 @@ function pointerDown(event: PointerEvent): void {
   drag = { id: event.pointerId, x: event.clientX, y: event.clientY, camera: { ...camera.value }, moved: false, touch: event.pointerType === 'touch', target: null }
 }
 function pointerMove(event: PointerEvent): void {
-  if (webMode.value) { webGraph.pointerMove(event); return }
+  if (web.pointerMove(event)) return
   if (!drag || event.pointerId !== drag.id) return
   const dx = event.clientX - drag.x, dy = event.clientY - drag.y
   if (!drag.moved && Math.hypot(dx, dy) < 6) return
@@ -564,11 +470,7 @@ function pointerMove(event: PointerEvent): void {
   followDrag()
 }
 function pointerEnd(event: PointerEvent): void {
-  if (webMode.value) {
-    webGraph.pointerUp(event)
-    if (webPointers.delete(event.pointerId) && webPointers.size === 0) publishWebCamera()
-    return
-  }
+  if (web.pointerEnd(event)) return
   if (drag?.id !== event.pointerId) return
   const moved = drag.target
   stopDrag()
@@ -577,12 +479,11 @@ function pointerEnd(event: PointerEvent): void {
   if (moved) update({ camera: moved })
 }
 function mapClick(event: MouseEvent): void {
-  if (webMode.value) { webGraph.clickCapture(event); return }
+  if (web.click(event)) return
   if (suppressMapClick && event.detail !== 0) { event.stopPropagation(); event.preventDefault() }
 }
 function keyPan(event: KeyboardEvent): void {
-  // In Web the arrow keys rove between dots and never pan.
-  if (webMode.value) { webGraph.keyDown(event); return }
+  if (web.keyDown(event)) return
   if (simple.value || event.target !== event.currentTarget) return
   const moves: Record<string, [number, number]> = { ArrowLeft: [-PAN_STEP, 0], ArrowRight: [PAN_STEP, 0], ArrowUp: [0, -PAN_STEP], ArrowDown: [0, PAN_STEP] }
   const move = moves[event.key]
@@ -601,9 +502,7 @@ function escapeFocus(event: KeyboardEvent): void {
 function reset(): void {
   const { webNames, webArrows, webRelated } = props.view
   update({ ...createAtlasViewState(), webNames, webArrows, webRelated })
-  if (!webMode.value) return
-  ownWebDragged.value = null
-  emit('web-reset')
+  web.reset()
 }
 /**
  * Set when the learner switches here, until the view arrives. A change made
@@ -745,7 +644,7 @@ function setBloom(event: Event): void {
 </script>
 
 <template>
-  <section class="atlas" :class="{ 'motion-reduced': motionReduced }" :aria-label="t('skills.atlas.title')" @keydown="escapeFocus">
+  <section class="atlas" :class="{ 'motion-reduced': motionReduced, 'is-web': webMode }" :aria-label="t('skills.atlas.title')" @keydown="escapeFocus">
     <header class="atlas-heading">
       <div><p class="atlas-eyebrow">{{ t('skills.atlas.title') }}</p><h2>{{ t('skills.atlas.fieldCounts', model.counts) }}</h2></div>
       <div class="atlas-heading-actions">
@@ -757,16 +656,17 @@ function setBloom(event: Event): void {
         <button type="button" @click="reset">{{ t('skills.atlas.reset') }}</button>
       </div>
     </header>
-    <div v-if="!simple" class="atlas-toolbar">
-      <label class="atlas-search"><span>{{ t('skills.atlas.search') }}</span><input type="search" :value="view.query" @input="update({ query: ($event.target as HTMLInputElement).value })"></label>
+    <div v-if="!simple" class="atlas-toolbar" :class="{ 'is-web': webMode }">
+      <!-- In Web the graph comes first: the search, the Web tools and the field chips each take one compact row. -->
+      <label class="atlas-search"><span :class="{ 'sr-only': webMode }">{{ t('skills.atlas.search') }}</span><input type="search" :value="view.query" :placeholder="webMode ? t('skills.atlas.search') : undefined" @input="update({ query: ($event.target as HTMLInputElement).value })"></label>
       <button v-if="view.query" type="button" @click="update({ query: '' })">{{ t('skills.atlas.clearSearch') }}</button>
       <label v-if="detailedMode"><span>{{ t('skills.atlas.bloomLegend') }}</span><select :value="view.bloomEmphasis ?? ''" @change="setBloom"><option value="">{{ t('skills.atlas.allBloom') }}</option><option v-for="option in bloomOptions" :key="option.rank" :value="option.rank">{{ option.label }}</option></select></label>
       <!-- Web: what the graph shows, and how. -->
       <div v-if="webMode" class="web-tools">
         <div class="web-tool-group" role="group" :aria-label="t('skills.atlas.webShow')">
-          <button type="button" :aria-pressed="!webNarrowed" @click="narrow(false)">{{ t('skills.atlas.webWhole') }}</button>
-          <button type="button" :aria-pressed="webNarrowed" :disabled="!selected" @click="narrow(true)">{{ t('skills.atlas.webAround') }}</button>
-          <label><span>{{ t('skills.atlas.depth') }}</span><select :value="view.neighborhoodDepth" :disabled="!webNarrowed" @change="setDepth"><option v-for="depth in DEPTHS" :key="depth" :value="depth">{{ t(DEPTH_KEYS[depth]) }}</option></select></label>
+          <button type="button" :aria-pressed="!web.narrowed.value" @click="web.narrow(false)">{{ t('skills.atlas.webWhole') }}</button>
+          <button type="button" :aria-pressed="web.narrowed.value" :disabled="!selected" @click="web.narrow(true)">{{ t('skills.atlas.webAround') }}</button>
+          <label class="web-depth"><span class="sr-only">{{ t('skills.atlas.depth') }}</span><select :value="view.neighborhoodDepth" :disabled="!web.narrowed.value" @change="setDepth"><option v-for="depth in ATLAS_DEPTHS" :key="depth" :value="depth">{{ t(DEPTH_KEYS[depth]) }}</option></select></label>
         </div>
         <div class="web-tool-group" role="group" :aria-label="t('skills.atlas.webDisplay')">
           <button type="button" :aria-pressed="view.webNames" @click="update({ webNames: !view.webNames })">{{ t('skills.atlas.webNames') }}</button>
@@ -784,8 +684,8 @@ function setBloom(event: Event): void {
         <p v-if="simple" class="atlas-fields">
           <span v-for="field in model.fields" :key="field.id === null ? 'unassigned' : `field:${field.id}`" class="field-chip" :style="{ '--field': color(field.id) }"><i class="field-dot" aria-hidden="true" />{{ fieldName(field.id) }} <small>{{ t('skills.atlas.fieldEarned', { earned: field.earned, total: field.total }) }}</small></span>
         </p>
-        <nav v-else class="atlas-fields" :aria-label="t('skills.atlas.overview')">
-          <button v-if="webMode" type="button" :aria-pressed="!fieldFocused" @click="update({ focusedFieldId: null, unassignedFocused: false, webCamera: null })">{{ t('skills.atlas.webAllFields') }}</button>
+        <nav v-else class="atlas-fields" :class="{ 'is-web': webMode }" :aria-label="t('skills.atlas.overview')">
+          <button v-if="webMode" type="button" :aria-pressed="!fieldFocused" @click="web.allFields()">{{ t('skills.atlas.webAllFields') }}</button>
           <button v-else type="button" :aria-pressed="overview" @click="update({ focusedFieldId: null, unassignedFocused: false, camera: null, neighborhood: 'none' })">{{ t('skills.atlas.overview') }}</button>
           <button v-for="field in model.fields" :key="field.id === null ? 'unassigned' : `field:${field.id}`" type="button" :style="{ '--field': color(field.id) }" :aria-pressed="fieldFocused && field.id === view.focusedFieldId" @click="focus(field)"><i class="field-dot" aria-hidden="true" />{{ fieldName(field.id) }} <small>{{ t('skills.atlas.fieldEarned', { earned: field.earned, total: field.total }) }}</small></button>
         </nav>
@@ -804,34 +704,14 @@ function setBloom(event: Event): void {
             <p v-if="!model.nodes.length">{{ t('skills.atlas.empty') }}</p>
           </div>
           <template v-else>
-            <!-- Web zoom follows every gesture, so these tools are a layer of their own. -->
-            <AtlasNodeLayer v-if="webMode" v-slot="{ items }" :source="webZoomLayer">
-              <div v-for="webZoom in items" :key="0" class="map-tools" :aria-label="t('skills.atlas.map')">
-                <button type="button" :aria-label="t('skills.atlas.zoomIn')" :disabled="webZoom >= WEB_MAX_ZOOM" @click="webGraph.zoomBy(WEB_ZOOM_STEP)">+</button>
-                <button type="button" :aria-label="t('skills.atlas.zoomOut')" :disabled="webZoom <= WEB_MIN_ZOOM" @click="webGraph.zoomBy(1 / WEB_ZOOM_STEP)">−</button>
-                <span>{{ Math.round(webZoom * 100) }}%</span>
-                <button type="button" @click="update({ webCamera: null })">{{ t('skills.atlas.webFit') }}</button>
-                <button type="button" :aria-label="t('skills.atlas.panLeft')" @click="webGraph.panBy(-PAN_STEP, 0)">←</button>
-                <button type="button" :aria-label="t('skills.atlas.panUp')" @click="webGraph.panBy(0, -PAN_STEP)">↑</button>
-                <button type="button" :aria-label="t('skills.atlas.panDown')" @click="webGraph.panBy(0, PAN_STEP)">↓</button>
-                <button type="button" :aria-label="t('skills.atlas.panRight')" @click="webGraph.panBy(PAN_STEP, 0)">→</button>
-              </div>
-            </AtlasNodeLayer>
-            <div v-if="detailedMode" class="map-tools" :aria-label="t('skills.atlas.map')">
-              <button type="button" :aria-label="t('skills.atlas.zoomIn')" :disabled="camera.zoom >= 1.8" @click="zoom(.2)">+</button>
-              <button type="button" :aria-label="t('skills.atlas.zoomOut')" :disabled="camera.zoom <= 1" @click="zoom(-.2)">−</button>
-              <span>{{ Math.round(camera.zoom * 100) }}%</span>
-              <button type="button" :aria-label="t('skills.atlas.panLeft')" @click="pan(-PAN_STEP, 0)">←</button>
-              <button type="button" :aria-label="t('skills.atlas.panUp')" @click="pan(0, -PAN_STEP)">↑</button>
-              <button type="button" :aria-label="t('skills.atlas.panDown')" @click="pan(0, PAN_STEP)">↓</button>
-              <button type="button" :aria-label="t('skills.atlas.panRight')" @click="pan(PAN_STEP, 0)">→</button>
-            </div>
+            <AtlasMapTools v-if="detailedMode" :percent="Math.round(camera.zoom * 100)" :can-zoom-in="camera.zoom < 1.8" :can-zoom-out="camera.zoom > 1" @zoom="direction => zoom(direction * .2)" @pan="(x, y) => pan(x * PAN_STEP, y * PAN_STEP)" />
             <div class="map-focus" :class="{ 'is-active': focusSummary }">
               <p role="status">{{ focusSummary }}</p>
               <button v-if="focusSummary" type="button" @click="update({ neighborhood: 'none' })">{{ t('skills.atlas.clearFocus') }}</button>
             </div>
             <!-- One canvas and one element per node in every view: a switch re-skins and moves them. -->
-            <div ref="mapElement" class="atlas-map" :class="{ 'is-simple': simple, 'is-web': webMode, 'is-switching': switching }" :style="{ height: webMode ? undefined : `${simple ? simpleGeometry.height : height}px`, '--disc-size': `${SIMPLE_DISC_SIZE}px` }" :data-camera="detailedMode ? cameraLabel : undefined" :tabindex="detailedMode ? 0 : undefined" role="group" :aria-label="t('skills.atlas.map')" :aria-describedby="simple ? undefined : `${id}-map-help`" @keydown="keyPan" @keyup="webKeyUp" @focusin="webFocusIn" @focusout="webFocusOut" @wheel="webWheel" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerEnd" @pointercancel="pointerEnd" @lostpointercapture="pointerEnd" @click.capture="mapClick">
+            <div class="atlas-stage">
+            <div ref="mapElement" class="atlas-map" :class="{ 'is-simple': simple, 'is-web': webMode, 'is-switching': switching }" :style="{ height: webMode ? undefined : `${simple ? simpleGeometry.height : height}px`, '--disc-size': `${SIMPLE_DISC_SIZE}px` }" :data-camera="detailedMode ? cameraLabel : undefined" :tabindex="detailedMode ? 0 : undefined" role="group" :aria-label="t('skills.atlas.map')" :aria-describedby="simple ? undefined : `${id}-map-help`" @keydown="keyPan" @keyup="web.keyUp" @focusin="web.focusIn" @focusout="web.focusOut" @wheel="web.wheel" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerEnd" @pointercancel="pointerEnd" @lostpointercapture="pointerEnd" @click.capture="mapClick">
               <svg ref="canvas" class="atlas-canvas" :viewBox="canvasBox.viewBox" :width="canvasBox.width" :height="canvasBox.height">
                 <template v-if="detailedMode">
                   <g v-for="region in layout.regions" :key="region.field.id === null ? 'unassigned' : `field:${region.field.id}`" :style="{ '--field': color(region.field.id) }">
@@ -840,7 +720,7 @@ function setBloom(event: Event): void {
                   </g>
                 </template>
                 <g class="map-edges" aria-hidden="true">
-                  <AtlasNodeLayer v-if="webMode" v-slot="{ items }" :source="webLineLayer"><WebGraphLines v-for="lines in items" :key="0" :lines="lines" /></AtlasNodeLayer>
+                  <AtlasNodeLayer v-if="webMode" v-slot="{ items }" :source="web.lineLayer"><WebGraphLines v-for="lines in items" :key="0" :lines="lines" /></AtlasNodeLayer>
                   <template v-else>
                     <template v-if="simple"><path class="map-edge map-edge-faded" :d="edgePaths.faded.path" /><path class="map-edge-head map-edge-faded" :d="edgePaths.faded.heads" /></template>
                     <path class="map-edge" :d="edgePaths.plain.path" /><path class="map-edge-head" :d="edgePaths.plain.heads" />
@@ -848,12 +728,12 @@ function setBloom(event: Event): void {
                   </template>
                 </g>
                 <AtlasNodeLayer v-slot="{ items }" :source="nodeLayer">
-                  <foreignObject v-for="node in items" :key="node.skill.id" v-memo="[node, nodeBoxes, viewMode, webDot(node), locale, onScreen(node), node.skill.id === view.selectedSkillId, node.readyNext, bloomMatch(node), dimmed(node), labelQuiet(node), highlightedIds.includes(node.skill.id)]" class="map-node-box" :data-skill="node.skill.id" :x="nodeBoxes.get(node.skill.id)?.x" :y="nodeBoxes.get(node.skill.id)?.y" :width="nodeBoxes.get(node.skill.id)?.width" :height="nodeBoxes.get(node.skill.id)?.height" :style="{ '--field': color(node.fieldId) }">
-                    <button class="map-node" :class="{ 'is-selected': node.skill.id === view.selectedSkillId, 'is-earned': node.status === 'earned', 'is-ready-next': node.readyNext, 'is-bloom-match': bloomMatch(node), 'is-dimmed': dimmed(node), 'is-updated': highlightedIds.includes(node.skill.id) }" type="button" :inert="(detailedMode && !onScreen(node)) || undefined" :tabindex="webMode ? (webDot(node)?.roving ? 0 : -1) : undefined" :aria-label="nodeText(node).name" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)" @pointerenter="webHover(node.skill.id)" @pointerleave="webHover(null)">
+                  <foreignObject v-for="node in items" :key="node.skill.id" v-memo="[node, nodeBoxes, viewMode, web.dot(node), locale, onScreen(node), node.skill.id === view.selectedSkillId, node.readyNext, bloomMatch(node), dimmed(node), labelQuiet(node), highlightedIds.includes(node.skill.id)]" class="map-node-box" :data-skill="node.skill.id" :x="nodeBoxes.get(node.skill.id)?.x" :y="nodeBoxes.get(node.skill.id)?.y" :width="nodeBoxes.get(node.skill.id)?.width" :height="nodeBoxes.get(node.skill.id)?.height" :style="{ '--field': color(node.fieldId) }">
+                    <button class="map-node" :class="{ 'is-selected': node.skill.id === view.selectedSkillId, 'is-earned': node.status === 'earned', 'is-ready-next': node.readyNext, 'is-bloom-match': bloomMatch(node), 'is-dimmed': dimmed(node), 'is-updated': highlightedIds.includes(node.skill.id) }" type="button" :inert="(detailedMode && !onScreen(node)) || undefined" :tabindex="webMode ? (web.dot(node)?.roving ? 0 : -1) : undefined" :aria-label="nodeText(node).name" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)" @pointerenter="web.hover(node.skill.id)" @pointerleave="web.hover(null)">
                       <template v-if="simple">
                         <span class="node-disc" aria-hidden="true">{{ node.status === 'earned' && node.earnedBloom ? node.earnedBloom.rank + 1 : '' }}</span><span class="node-label" :class="{ 'is-label-quiet': labelQuiet(node) }" dir="auto">{{ node.skill.name }}</span>
                       </template>
-                      <WebGraphDot v-else-if="webMode && webDot(node)" :state="webDot(node)!.state" :size="webDot(node)!.size" :name="node.skill.name" :labelled="webDot(node)!.labelled" :selected="webDot(node)!.selected" :faded="webDot(node)!.faded" :place="webDot(node)!.namePlace" />
+                      <WebGraphDot v-else-if="webMode && web.dot(node)" :state="web.dot(node)!.state" :size="web.dot(node)!.size" :name="node.skill.name" :labelled="web.dot(node)!.labelled" :selected="web.dot(node)!.selected" :faded="web.dot(node)!.faded" :place="web.dot(node)!.namePlace" :offset="web.dot(node)!.nameOffset" />
                       <template v-else>
                         <span class="skill-name" dir="auto">{{ node.skill.name }}</span><span class="node-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓</span><span v-else-if="node.readyNext" aria-hidden="true">◎</span><span v-else aria-hidden="true">○</span><span>{{ nodeText(node).evidence }}</span></span>
                       </template>
@@ -862,6 +742,11 @@ function setBloom(event: Event): void {
                 </AtlasNodeLayer>
               </svg>
               <div ref="grabCover" class="atlas-grab-cover" hidden />
+            </div>
+            <!-- Web zoom follows every gesture, so its tools are a layer of their own, over the canvas corner. -->
+            <AtlasNodeLayer v-if="webMode" v-slot="{ items }" :source="web.zoomLayer">
+              <AtlasMapTools v-for="tools in items" :key="0" overlay fit :percent="tools.percent" :can-zoom-in="tools.canZoomIn" :can-zoom-out="tools.canZoomOut" @zoom="web.zoom" @fit="web.fit()" @pan="webPan" />
+            </AtlasNodeLayer>
             </div>
             <p v-if="simple && !model.nodes.length" class="simple-empty">{{ t('skills.atlas.empty') }}</p>
             <p v-if="simple" class="simple-legend">
@@ -902,7 +787,7 @@ function setBloom(event: Event): void {
             <p v-if="!selected.prerequisites.length && selected.skill.prerequisite_count === 0" class="atlas-muted">{{ t('skills.atlas.noPrerequisites') }}</p>
             <p v-else-if="selected.prerequisitesSatisfied" class="atlas-muted">{{ t('skills.atlas.satisfied') }}</p>
             <p v-else-if="selected.prerequisites.some(relation => !relation.loaded) || selected.prerequisites.length < selected.skill.prerequisite_count" class="atlas-muted">{{ t('skills.atlas.incomplete') }}</p>
-            <div class="neighborhood-controls"><button type="button" :aria-pressed="view.neighborhood === 'prerequisites'" @click="update({ neighborhood: view.neighborhood === 'prerequisites' ? 'none' : 'prerequisites' })">{{ t('skills.atlas.focusPrerequisites') }}</button><button type="button" :aria-pressed="view.neighborhood === 'dependents'" @click="update({ neighborhood: view.neighborhood === 'dependents' ? 'none' : 'dependents' })">{{ t('skills.atlas.focusDependents') }}</button><button v-if="view.neighborhood !== 'none'" type="button" @click="update({ neighborhood: 'none' })">{{ t('skills.atlas.allConnections') }}</button><label v-if="view.neighborhood !== 'none'"><span>{{ t('skills.atlas.depth') }}</span><select :value="view.neighborhoodDepth" @change="setDepth"><option v-for="depth in DEPTHS" :key="depth" :value="depth">{{ t(DEPTH_KEYS[depth]) }}</option></select></label></div>
+            <div class="neighborhood-controls"><button type="button" :aria-pressed="view.neighborhood === 'prerequisites'" @click="update({ neighborhood: view.neighborhood === 'prerequisites' ? 'none' : 'prerequisites' })">{{ t('skills.atlas.focusPrerequisites') }}</button><button type="button" :aria-pressed="view.neighborhood === 'dependents'" @click="update({ neighborhood: view.neighborhood === 'dependents' ? 'none' : 'dependents' })">{{ t('skills.atlas.focusDependents') }}</button><button v-if="view.neighborhood !== 'none'" type="button" @click="update({ neighborhood: 'none' })">{{ t('skills.atlas.allConnections') }}</button><label v-if="view.neighborhood !== 'none'"><span>{{ t('skills.atlas.depth') }}</span><select :value="view.neighborhoodDepth" @change="setDepth"><option v-for="depth in ATLAS_DEPTHS" :key="depth" :value="depth">{{ t(DEPTH_KEYS[depth]) }}</option></select></label></div>
             <section v-for="direction in (['prerequisites', 'dependents'] as const)" :key="direction" class="inspector-relations">
               <h3>{{ t(`skills.atlas.${direction}`) }} <span>{{ selected[direction].length }}</span></h3>
               <ul><li v-for="relation in selected[direction]" :key="relation.skillId"><button v-if="relation.loaded" type="button" :aria-label="relationLabel(relation)" @click="select(relation.skillId, true)"><strong dir="auto">{{ relation.name }}</strong><small>{{ fieldName(nodesById.get(relation.skillId)?.fieldId ?? null) }} · {{ present.state(relationNode(relation)) }}</small></button><p v-else>{{ relation.name }} · {{ t('skills.atlas.notLoaded') }}</p></li></ul>
@@ -971,9 +856,6 @@ function setBloom(event: Event): void {
 .field-connections { display: flex; flex-wrap: wrap; gap: 4px; margin-block-start: 10px; border-block-start: 1px solid var(--app-border); padding-block-start: 8px; }
 .field-connections > span { width: 100%; font-size: 11px; color: var(--app-muted-foreground); }
 .atlas .field-connections button { font-size: 11px; padding: 4px 7px; border: 0; }
-.map-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 8px; border-block-end: 1px solid var(--app-border); }
-.map-tools span { font-size: 12px; margin-inline: 6px; }
-.map-tools button { min-width: 44px; text-align: center; }
 /* Stays rendered while empty so its live region announces the next focus. */
 .map-focus.is-active { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 6px 14px; border-block-end: 1px solid var(--app-border); border-inline-start: 3px solid var(--app-primary); background: var(--app-muted); font-size: 13px; }
 .map-focus p { min-width: 0; overflow-wrap: anywhere; }
@@ -1030,9 +912,18 @@ function setBloom(event: Event): void {
 .atlas-map.is-web .map-node-box { overflow: visible; }
 .atlas .atlas-map.is-web .map-node { display: grid; place-items: center; box-sizing: border-box; width: 100%; height: 100%; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; box-shadow: none; overflow: visible; }
 .atlas .atlas-map.is-web .map-node:focus-visible { outline: 3px solid var(--app-ring); outline-offset: 2px; }
-.web-tools { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 18px; width: 100%; }
-.web-tool-group { display: flex; flex-wrap: wrap; align-items: end; gap: 6px; }
-.web-tool-group button { font-size: 13px; }
+/* Web chrome: compact rows, so the graph starts high on the screen. */
+.atlas.is-web .atlas-heading { margin-block-end: 12px; }
+.atlas-toolbar.is-web { align-items: center; gap: 8px 12px; margin-block-end: 10px; }
+.atlas-toolbar.is-web .atlas-search { flex: 1 1 220px; min-width: 180px; }
+.atlas-toolbar.is-web input, .atlas .atlas-toolbar.is-web > button { min-height: 36px; padding: 5px 10px; font-size: 13px; }
+.web-tools { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; }
+.web-tool-group { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; }
+.atlas .web-tool-group button { min-height: 36px; padding: 5px 10px; font-size: 13px; white-space: nowrap; }
+.atlas .web-depth select { min-height: 36px; padding: 5px 8px; font-size: 13px; }
+.atlas-fields.is-web { flex-wrap: nowrap; overflow-x: auto; margin-block-end: 8px; padding-block-end: 2px; scrollbar-width: thin; }
+.atlas .atlas-fields.is-web button { flex-shrink: 0; min-height: 34px; padding: 4px 10px; white-space: nowrap; }
+.atlas-stage { position: relative; }
 .legend-key.is-ring { border: 2px solid var(--app-muted-foreground); }
 .legend-key.is-pale { border: 0; background: color-mix(in srgb, var(--app-muted-foreground) 30%, var(--app-background)); }
 .legend-key.is-small, .legend-key.is-large { border: 0; background: var(--app-muted-foreground); }
@@ -1100,6 +991,9 @@ function setBloom(event: Event): void {
   .atlas .atlas-view-switch button { flex: 1; }
   .atlas-toolbar > label { width: 100%; }
   .atlas-fields { flex-wrap: nowrap; overflow-x: auto; padding-block-end: 4px; }
+  /* Thumb-sized Web tools, wrapping onto a second row. */
+  .web-tools { flex-wrap: wrap; }
+  .atlas .web-tool-group button, .atlas .web-depth select, .atlas-toolbar.is-web input { min-height: 44px; }
   .atlas-fields button { flex-shrink: 0; max-width: 230px; }
   .atlas-overview { max-height: 560px; }
   /* The whole web is wider than tall: a shorter map wastes less of a phone screen. */

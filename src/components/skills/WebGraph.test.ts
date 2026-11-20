@@ -3,10 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { createI18n } from 'vue-i18n'
 import en from '@/locales/en'
-import { buildSkillAtlas } from '@/utils/skillAtlas'
+import { buildSkillAtlas, type AtlasModel } from '@/utils/skillAtlas'
 import type { AtlasCamera } from '@/utils/skillAtlasView'
 import type { SkillInfo, VerifiableCredential } from '@/types'
-import type { WebPoint } from './webGeometry'
+import type { WebPoint } from '@/utils/webGeometry'
 import WebGraph from './WebGraph.vue'
 import { motionDuration } from '@/composables/useMotion'
 
@@ -47,6 +47,7 @@ const positions: ReadonlyMap<string, WebPoint> = new Map([
 const CAMERA: AtlasCamera = { x: 50, y: 50, zoom: 1 }
 
 interface Props {
+  model?: AtlasModel
   positions?: ReadonlyMap<string, WebPoint>
   selectedId?: string | null
   names?: boolean
@@ -304,24 +305,33 @@ describe('Web graph', () => {
     expect(wrapper.emitted('update:camera')).toHaveLength(1)
   })
 
-  it('in compact form leaves out a lit name that would overlap one already shown wherever it goes, the hovered and selected first, but never with Names on', async () => {
+  it('in compact form leaves out a neighbour\'s name that has no free side, always shows the hovered and selected names, and never leaves one out with Names on', async () => {
     const names = (wrapper: VueWrapper) => wrapper.findAll('.web-name').map(item => item.text()).sort()
-    // Bridges sits on Algebra, with Calculus above and Essays to the right:
-    // every side of Bridges' dot is taken, so its name has nowhere to go.
-    const crowded: ReadonlyMap<string, WebPoint> = new Map([
-      ['a', { x: 0, y: 0 }], ['b', { x: 1, y: 0 }], ['c', { x: 0, y: -14 }], ['d', { x: 0, y: 80 }], ['e', { x: 30, y: 0 }],
-    ])
-    const wrapper = setup({ compact: true, positions: crowded, selectedId: 'a' })
-    expect(names(wrapper)).toEqual(['Algebra', 'Data'])
-    await dot(wrapper, BRIDGES).trigger('pointerenter')
-    expect(names(wrapper)).toEqual(['Bridges', 'Calculus', 'Data'])
-    await dot(wrapper, BRIDGES).trigger('pointerleave')
-    expect(names(wrapper)).toEqual(['Algebra', 'Data'])
+    // A hub and six skills that build on it, all on one spot: around one spot
+    // at most four names fit, one to a side.
+    const spokes = ['n1', 'n2', 'n3', 'n4', 'n5', 'n6']
+    const hub = buildSkillAtlas({
+      skills: [skill('h', 'Hub', 'math'), ...spokes.map(id => skill(id, `Spoke ${id}`, 'math', { prerequisite_count: 1 }))],
+      edges: spokes.map(id => edge(id, 'h')), relations: [], activeCredentials: [], subjectDid: 'did:me',
+    })
+    const spot: ReadonlyMap<string, WebPoint> = new Map(['h', ...spokes].map((id, index) => [id, { x: index * 0.5, y: 0 }]))
+    const wrapper = setup({ model: hub, compact: true, positions: spot, selectedId: 'h' })
+    const shown = names(wrapper)
+    expect(shown).toContain('Hub')
+    expect(shown.length).toBeGreaterThan(1)
+    expect(shown.length).toBeLessThan(7)
+    // A hovered spoke whose name was left out shows, beside the selected name.
+    const hidden = spokes.find(id => !shown.includes(`Spoke ${id}`))!
+    const hiddenDot = wrapper.get(`[data-skill="${hidden}"]`)
+    await hiddenDot.trigger('pointerenter')
+    expect(names(wrapper)).toEqual(expect.arrayContaining(['Hub', `Spoke ${hidden}`]))
+    await hiddenDot.trigger('pointerleave')
+    expect(names(wrapper)).toEqual(shown)
+    // With Names on, and in the full graph, every lit name shows, moved further out where it must.
     await wrapper.setProps({ names: true })
-    expect(names(wrapper)).toEqual(['Algebra', 'Bridges', 'Calculus', 'Data', 'Essays'])
-    // The full graph never leaves a lit name out.
+    expect(names(wrapper)).toHaveLength(7)
     await wrapper.setProps({ names: false, compact: false })
-    expect(names(wrapper)).toEqual(['Algebra', 'Bridges', 'Data'])
+    expect(names(wrapper)).toHaveLength(7)
   })
 
   it('fades dots outside a search or field match, and lights an owner-given neighbourhood in place of the selection', async () => {

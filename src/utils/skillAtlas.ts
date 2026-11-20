@@ -93,7 +93,8 @@ function relationType(value: string): SkillRelationType {
   return SKILL_RELATION_TYPES.find((type) => type === value) ?? 'related'
 }
 
-function compareIds(left: string, right: string): number {
+/** Orders skill and field IDs by code unit, the same in every locale. */
+export function compareIds(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0
 }
 

@@ -5,9 +5,9 @@ import type { SkillGraphEdge, SkillInfo } from '@/types'
 import { buildSkillAtlas } from '@/utils/skillAtlas'
 import {
   WEB_MIN_DISTANCE, WEB_SIDEBAR_NODE_LIMIT, continueWebLayout, webDotRadius, webLayout, webNearestInDirection, webNearestTo, webSidebarSubset,
-  webGraphFromAtlas, webNamePlaces, webNarrowedIds,
-  type WebGraph,
-} from './webGeometry'
+  webGraphFromAtlas, webLayoutEntry, webNamePlaces, webNarrowedIds,
+  type WebGraph, type WebNamePlacement,
+} from '../webGeometry'
 
 type Point = { x: number; y: number }
 
@@ -91,16 +91,22 @@ describe('Web layout', () => {
   })
 
   it('lays the 1,500-skill scale taxonomy out inside the time budget', () => {
-    webLayout(SCALE)
-    const times = [0, 1, 2].map(() => {
-      const started = performance.now()
-      webLayout(SCALE)
-      return performance.now() - started
-    })
     // The atlas budget is no main-thread task over 50 ms; this runs near 40 ms
     // on a laptop, and the bound allows twice that for shared CI runners. A
-    // layout that lost its grid and went quadratic takes seconds.
-    expect(Math.min(...times)).toBeLessThan(100)
+    // layout that lost its grid and went quadratic takes seconds on every run.
+    // Other test files share the machine, so the run is timed in this
+    // process's CPU time, which waiting for a core does not add to, and the
+    // best of up to ten runs must meet the bound.
+    const BUDGET_MS = 100
+    const cpuMs = () => { const { user, system } = process.cpuUsage(); return (user + system) / 1000 }
+    webLayout(SCALE)
+    let best = Infinity
+    for (let run = 0; run < 10 && best >= BUDGET_MS; run++) {
+      const started = cpuMs()
+      webLayout(SCALE)
+      best = Math.min(best, cpuMs() - started)
+    }
+    expect(best).toBeLessThan(BUDGET_MS)
   })
 
   it('draws linked skills closer together than unlinked ones of the same field, on average', () => {
@@ -127,13 +133,14 @@ describe('Web graph from the atlas model', () => {
     skill_id: skillId, skill_name: skillId, skill_bloom: 'apply',
     prerequisite_id: prerequisiteId, prerequisite_name: prerequisiteId, prerequisite_bloom: 'apply',
   })
-  const model = buildSkillAtlas({
+  const input = {
     skills: [skill('m1', 'math'), skill('m2', 'math'), skill('d1', 'data'), skill('u1', null)],
     edges: [edge('m2', 'm1'), edge('d1', 'm1'), edge('u1', 'unloaded')],
     relations: [{ skill_id: 'm2', related_skill_id: 'd1', relation_type: 'related' }, { skill_id: 'u1', related_skill_id: 'unloaded', relation_type: 'alternative' }],
     activeCredentials: [], subjectDid: 'did:me',
     subjectFields: [{ id: 'math', name: 'Mathematics', atlas_slot: 3 }, { id: 'data', name: 'Data', atlas_slot: 0 }],
-  })
+  }
+  const model = buildSkillAtlas(input)
 
   it('carries every skill with its field slot, and the prerequisites and relations between loaded skills, each relation once', () => {
     expect(webGraphFromAtlas(model)).toEqual({
@@ -141,6 +148,17 @@ describe('Web graph from the atlas model', () => {
       prerequisites: [{ skill: 'm2', prerequisite: 'm1' }, { skill: 'd1', prerequisite: 'm1' }],
       relations: [['d1', 'm2']],
     })
+  })
+
+  it('computes the graph and layout once per model, and a new model of the same graph reuses them', () => {
+    const entry = webLayoutEntry(model)
+    expect(webLayoutEntry(model)).toBe(entry)
+    expect(entry.graph).toEqual(webGraphFromAtlas(model))
+    expect(entry.layout).toEqual(webLayout(entry.graph))
+    // A credential refresh builds a new model of the same graph.
+    const refreshed = buildSkillAtlas({ ...input, activeCredentials: [] })
+    expect(refreshed).not.toBe(model)
+    expect(webLayoutEntry(refreshed).layout).toBe(entry.layout)
   })
 })
 
@@ -273,42 +291,73 @@ describe('Sidebar subset of the Web graph', () => {
 })
 
 describe('Placing Web names', () => {
-  const label = (id: string, x: number, y: number, width = 80) => ({ id, x, y, radius: 5, width, height: 16 })
+  const label = (id: string, x: number, y: number, width = 80, optional?: boolean) => ({ id, x, y, radius: 5, width, height: 16, optional })
   type Box = { left: number; top: number; right: number; bottom: number }
-  /** Where each name lands, from its dot and place, as the dot skin draws it. */
-  function boxes(labels: ReturnType<typeof label>[], places: ReadonlyMap<string, string>): Box[] {
-    return labels.map(item => {
-      const place = places.get(item.id)
-      const left = place === 'right' ? item.x + item.radius + 4 : place === 'left' ? item.x - item.radius - 4 - item.width : item.x - item.width / 2
-      const top = place === 'below' ? item.y + item.radius + 3 : place === 'above' ? item.y - item.radius - 3 - item.height : item.y - item.height / 2
-      return { left, top, right: left + item.width, bottom: top + item.height }
+  /** Where each placed name lands, from its dot, place and offset, as the dot skin draws it. */
+  function boxes(labels: ReturnType<typeof label>[], places: ReadonlyMap<string, WebNamePlacement>): Box[] {
+    return labels.flatMap(item => {
+      const placement = places.get(item.id)
+      if (!placement) return []
+      const { place, offset } = placement
+      const side = item.radius + 4 + offset, under = item.radius + 3 + offset
+      const left = place === 'right' ? item.x + side : place === 'left' ? item.x - side - item.width : item.x - item.width / 2
+      const top = place === 'below' ? item.y + under : place === 'above' ? item.y - under - item.height : item.y - item.height / 2
+      return [{ left, top, right: left + item.width, bottom: top + item.height }]
     })
   }
   const overlapping = (all: Box[]) => all.some((a, i) => all.slice(i + 1).some(b => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom))
 
   it('puts a name under its dot when there is room', () => {
-    expect([...webNamePlaces([label('a', 0, 0), label('b', 0, 200)])]).toEqual([['a', 'below'], ['b', 'below']])
+    expect([...webNamePlaces([label('a', 0, 0), label('b', 0, 200)])]).toEqual([['a', { place: 'below', offset: 0 }], ['b', { place: 'below', offset: 0 }]])
   })
 
   it('moves a later name above, beside or to the other side of its dot so names in a cluster do not overlap', () => {
     // Three dots in a close row and one under the middle: names under the row would collide.
     const cluster = [label('first', 0, 0), label('second', 30, 0), label('third', 60, 0), label('fourth', 30, 30)]
     const places = webNamePlaces(cluster)
-    expect(places.get('first')).toBe('below')
+    expect(places.get('first')).toEqual({ place: 'below', offset: 0 })
     expect(overlapping(boxes(cluster, places))).toBe(false)
   })
 
   it('keeps names off other dots where there is room', () => {
     // A dot sits right under the first one: its name goes above instead.
-    const places = webNamePlaces([label('first', 0, 0)], [{ x: 0, y: 16, radius: 5 }])
-    expect(places.get('first')).toBe('above')
+    const places = webNamePlaces([label('first', 0, 0)], { obstacles: [{ x: 0, y: 16, radius: 5 }] })
+    expect(places.get('first')?.place).toBe('above')
   })
 
-  it('keeps every name, under its dot, when no place is free', () => {
-    const crowd = Array.from({ length: 12 }, (_, index) => label(`n${index}`, index % 2, Math.floor(index / 2)))
-    const places = webNamePlaces(crowd)
+  it('moves a name further out from its dot until it is free when no side is, so no two names ever overlap', () => {
+    // A selected skill and its neighbours packed tighter than their names: the
+    // selected name goes first and keeps its place; every other name is shown
+    // and clear of all the rest, the selected one included.
+    const crowd = [label('selected', 0, 0, 96), ...Array.from({ length: 11 }, (_, index) => label(`n${index}`, (index % 4) * 9 - 12, Math.floor(index / 4) * 9 - 9, 110))]
+    const places = webNamePlaces(crowd, { obstacles: crowd.map(({ x, y, radius }) => ({ x, y, radius })) })
     expect(places.size).toBe(12)
-    expect([...places.values()].filter(place => place === 'below').length).toBeGreaterThan(0)
+    expect(places.get('selected')).toEqual({ place: 'below', offset: 0 })
+    expect([...places.values()].some(placement => placement.offset > 0)).toBe(true)
+    expect(overlapping(boxes(crowd, places))).toBe(false)
+  })
+
+  it('never covers a firm dot, such as the selected one, moving the name out instead', () => {
+    // A big selected dot right beside a small one: every side of the small dot's name at the usual gap reaches it.
+    const small = label('small', 0, 0, 120)
+    const places = webNamePlaces([small], { obstacles: [{ x: 0, y: 0, radius: 5 }, { x: 14, y: 0, radius: 40, firm: true }] })
+    const [box] = boxes([small], places)
+    const reaches = (b: Box) => b.left < 54 && b.right > -26 && b.top < 40 && b.bottom > -40
+    expect(reaches(box!)).toBe(false)
+    expect(places.get('small')!.offset).toBeGreaterThan(0)
+  })
+
+  it('in compact placement leaves out an optional name with no free side, and still moves out a required one', () => {
+    const crowd = [label('hovered', 0, 0), label('kept', 200, 0, 80, true), ...Array.from({ length: 6 }, (_, index) => label(`n${index}`, index * 6, 4, 80, true))]
+    const places = webNamePlaces(crowd, { compact: true })
+    expect(places.get('hovered')).toEqual({ place: 'below', offset: 0 })
+    expect(places.get('kept')).toEqual({ place: 'below', offset: 0 })
+    // Some optional neighbours had nowhere to go at the normal gap, so they are left out, never offset.
+    expect(places.size).toBeLessThan(crowd.length)
+    expect([...places.values()].every(placement => placement.offset === 0)).toBe(true)
+    expect(overlapping(boxes(crowd, places))).toBe(false)
+    // Outside compact placement every name is kept.
+    expect(webNamePlaces(crowd).size).toBe(crowd.length)
   })
 })
 

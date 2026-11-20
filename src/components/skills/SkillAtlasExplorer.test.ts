@@ -920,6 +920,37 @@ describe('Web view', () => {
     expect(shownSkills(wrapper)).toEqual(['a', 'b', 'c', 'd', 'e', 'f'])
   })
 
+  it('narrowed, fades nothing shown at rest, lights a hovered or roving dot\'s neighbourhood, and draws arrowheads by the usual rule', async () => {
+    const wrapper = await web()
+    const heads = () => wrapper.findAll('.web-head').reduce((sum, path) => sum + (path.attributes('d')?.match(/M/g)?.length ?? 0), 0)
+    const litLines = () => wrapper.findAll('.web-line.is-lit').reduce((sum, path) => sum + (path.attributes('d')?.match(/M/g)?.length ?? 0), 0)
+    await node(wrapper, W_BRIDGES).trigger('click')
+    await node(wrapper, W_BRIDGES).trigger('pointerleave')
+    await button(wrapper, 'Around selection').trigger('click')
+    expect(shownSkills(wrapper)).toEqual(['a', 'b', 'c'])
+    // At rest nothing shown fades, no line is lit, and with Arrows off no line has a head.
+    expect(fadedSkills(wrapper)).toEqual([])
+    expect(litLines()).toBe(0)
+    expect(heads()).toBe(0)
+    // Hovering Algebra lights it and Bridges, fades Calculus, and heads its lit line.
+    await node(wrapper, W_ALGEBRA).trigger('pointerenter')
+    expect(fadedSkills(wrapper)).toEqual(['c'])
+    expect(litLines()).toBe(1)
+    expect(heads()).toBe(1)
+    await node(wrapper, W_ALGEBRA).trigger('pointerleave')
+    expect(fadedSkills(wrapper)).toEqual([])
+    // Keyboard roving lights the active dot's neighbourhood the same way.
+    ;(node(wrapper, W_CALCULUS).element as HTMLElement).focus()
+    await nextTick()
+    expect(fadedSkills(wrapper)).toEqual(['a'])
+    ;(node(wrapper, W_CALCULUS).element as HTMLElement).blur()
+    await nextTick()
+    expect(fadedSkills(wrapper)).toEqual([])
+    // Arrows on: every shown prerequisite line has a head, lit or not.
+    await button(wrapper, 'Arrows').trigger('click')
+    expect(heads()).toBe(2)
+  })
+
   it('fades skills outside a search or a focused field, fitting the camera to the field', async () => {
     const wrapper = await web({ ...initialView(), webCamera: { x: 10, y: 10, zoom: 3 } })
     await wrapper.get('input[type="search"]').setValue('ssays')

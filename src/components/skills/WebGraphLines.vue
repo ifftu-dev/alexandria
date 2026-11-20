@@ -7,12 +7,12 @@
  */
 import type { WebLines } from './useWebGraph'
 
-defineProps<{ lines: WebLines }>()
+defineProps<{ lines: WebLines; compact?: boolean }>()
 const EMPHASES = ['faded', 'plain', 'lit'] as const
 </script>
 
 <template>
-  <g class="web-lines" aria-hidden="true">
+  <g class="web-lines" :class="{ 'is-compact': compact }" aria-hidden="true">
     <template v-for="emphasis in EMPHASES" :key="emphasis">
       <path v-if="lines.relations[emphasis]" class="web-relation" :class="`is-${emphasis}`" :d="lines.relations[emphasis]" />
       <path v-if="lines.prerequisites[emphasis]" class="web-line" :class="`is-${emphasis}`" :d="lines.prerequisites[emphasis]" />
@@ -29,4 +29,10 @@ const EMPHASES = ['faded', 'plain', 'lit'] as const
 .web-line.is-lit, .web-relation.is-lit { stroke: var(--app-foreground); stroke-width: 1.5; opacity: .8; }
 .web-head.is-lit { fill: var(--app-foreground); opacity: .8; }
 .is-faded { opacity: .1; }
+/* The small graph: lighter lines at rest, so the dots and their field colours carry it. */
+.web-lines.is-compact .web-line, .web-lines.is-compact .web-relation { stroke-width: .8; opacity: .24; }
+.web-lines.is-compact .web-head { opacity: .24; }
+.web-lines.is-compact .web-line.is-lit, .web-lines.is-compact .web-relation.is-lit { stroke-width: 1.2; opacity: .8; }
+.web-lines.is-compact .web-head.is-lit { opacity: .8; }
+.web-lines.is-compact .is-faded { opacity: .08; }
 </style>

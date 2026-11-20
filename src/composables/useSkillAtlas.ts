@@ -8,7 +8,7 @@ import { CREDENTIALS_CHANGED } from '@/composables/credentialEvents'
 import type { SkillGraphEdge, SkillGraphRelation, SkillInfo, SubjectFieldInfo, VerifiableCredential } from '@/types'
 import { buildSkillAtlas, type AtlasModel } from '@/utils/skillAtlas'
 import { createAtlasViewState, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
-import { webGraphFromAtlas, webLayout, type WebGraph, type WebPoint } from '@/components/skills/webGeometry'
+import { webLayoutEntry, type WebPoint } from '@/utils/webGeometry'
 import { errorMessage } from '@/utils/errorMessage'
 
 export type AtlasSurface = 'page' | 'modal'
@@ -31,34 +31,13 @@ export interface AtlasFeedback {
 // Each load replaces the whole snapshot, so it is never made deeply reactive.
 const model = shallowRef<AtlasModel | null>(null)
 
-/** The Web graph of a model with its resting layout, under a key that names the graph alone. */
-interface WebLayoutEntry { key: string; graph: WebGraph; layout: ReadonlyMap<string, WebPoint> }
-const webEntries = new WeakMap<AtlasModel, WebLayoutEntry>()
-let lastWebEntry: WebLayoutEntry | null = null
-/**
- * The Web layout depends only on the graph, and a credential refresh loads a
- * new model of the same graph, so the layout is memoised per graph: a model
- * whose skills, slots, prerequisites and relations match the last one reuses
- * its layout.
- */
-function webEntry(atlas: AtlasModel): WebLayoutEntry {
-  const known = webEntries.get(atlas)
-  if (known) return known
-  const graph = webGraphFromAtlas(atlas)
-  const key = JSON.stringify([graph.nodes.map(node => [node.id, node.slot]),
-    graph.prerequisites.map(link => [link.skill, link.prerequisite]), graph.relations])
-  const entry = lastWebEntry?.key === key ? lastWebEntry : { key, graph, layout: markRaw(webLayout(graph)) }
-  lastWebEntry = entry
-  webEntries.set(atlas, entry)
-  return entry
-}
 /** Dragged Web dots: one set for the graph named by `key`, shared by every Web surface. */
 const webDragged = shallowRef<{ key: string; positions: ReadonlyMap<string, WebPoint> } | null>(null)
 const EMPTY_POSITIONS: ReadonlyMap<string, WebPoint> = markRaw(new Map())
-const webGraph = computed(() => model.value ? webEntry(model.value).graph : null)
+const webGraph = computed(() => model.value ? webLayoutEntry(model.value).graph : null)
 const webPositions = computed<ReadonlyMap<string, WebPoint>>(() => {
   if (!model.value) return EMPTY_POSITIONS
-  const entry = webEntry(model.value), dragged = webDragged.value
+  const entry = webLayoutEntry(model.value), dragged = webDragged.value
   if (dragged?.key !== entry.key) return entry.layout
   return markRaw(new Map([...entry.layout].map(([id, point]) => [id, dragged.positions.get(id) ?? point])))
 })
@@ -66,7 +45,7 @@ const webPositions = computed<ReadonlyMap<string, WebPoint>>(() => {
 /** Records dragged Web dots for the loaded graph; dots it does not hold are ignored. */
 function setWebPositions(positions: ReadonlyMap<string, WebPoint>): void {
   if (!model.value) return
-  const entry = webEntry(model.value)
+  const entry = webLayoutEntry(model.value)
   const previous = webDragged.value?.key === entry.key ? webDragged.value.positions : null
   const next = new Map(previous ?? [])
   for (const [id, point] of positions) if (entry.layout.has(id)) next.set(id, { x: point.x, y: point.y })

@@ -19,15 +19,18 @@
  *   button per dot.
  * - The explorer (ticket 05) does not mount this component, because its node
  *   elements must stay the same DOM nodes across Web, Simple and Detailed so
- *   they can travel and keep focus. In Web it calls `useWebGraph` with its
- *   map element as root, places its existing node elements at each dot's
- *   `x`, `y` and `hit` (screen pixels), renders `WebGraphDot` inside them in
+ *   they can travel and keep focus. In Web its adapter (`useExplorerWeb`)
+ *   calls `useWebGraph` with the explorer's map element as root; the
+ *   explorer places its existing node elements at each dot's `x`, `y` and
+ *   `hit` (screen pixels), renders `WebGraphDot` inside them in
  *   place of the Simple or Detailed skin, binds the same attributes and
  *   handlers as the template below (`data-skill`, `tabindex` from `roving`,
  *   `aria-pressed`, click, pointerenter and pointerleave on the node; key,
  *   focus, pointer, click-capture and wheel handlers on the root), and draws
  *   `WebGraphLines` in its canvas. `zoomBy` and `panBy` serve its zoom and pan
- *   buttons; a null camera fits what is shown.
+ *   buttons (`AtlasMapTools`); a null camera fits what is shown.
+ * - The memoised Web graph and layout of a model come from `webLayoutEntry`
+ *   (`@/utils/webGeometry`), computed once per model for every surface.
  *
  * Positions and camera are controlled: the owner passes the shared dragged
  * positions (`useSkillAtlas().webPositions`) and stores every `drag` event
@@ -40,8 +43,8 @@ import { useI18n } from 'vue-i18n'
 import type { AtlasModel } from '@/utils/skillAtlas'
 import type { AtlasCamera } from '@/utils/skillAtlasView'
 import { createAtlasPresenter } from './atlasPresentation'
-import { WEB_NAME_GAP, WEB_NAME_SIDE_GAP, type WebPoint } from './webGeometry'
-import { useWebGraph, WEB_NAMES_ZOOM, type WebDot } from './useWebGraph'
+import { webLayoutEntry, type WebPoint } from '@/utils/webGeometry'
+import { useWebGraph } from './useWebGraph'
 import WebGraphDot from './WebGraphDot.vue'
 import WebGraphLines from './WebGraphLines.vue'
 
@@ -72,59 +75,27 @@ const emit = defineEmits<{
 const { t, locale } = useI18n()
 const present = createAtlasPresenter(t)
 const root = ref<HTMLElement>()
-/** The hovered or keyboard-focused dot, whose name the compact graph places first. */
-const activeId = ref<string | null>(null)
 const web = useWebGraph(() => ({
-  model: props.model, positions: props.positions, selectedId: props.selectedId, focusIds: props.focusIds, matchIds: props.matchIds,
+  model: props.model, graph: webLayoutEntry(props.model).graph, positions: props.positions, selectedId: props.selectedId, focusIds: props.focusIds, matchIds: props.matchIds,
   shownIds: props.shownIds, fitIds: props.fitIds, narrowed: props.narrowed, names: props.names, arrows: props.arrows, related: props.related,
   camera: props.camera, compact: props.compact, reducedMotion: props.reducedMotion,
 }), {
-  select: id => emit('select', id), active: id => { activeId.value = id; emit('active', id) },
+  select: id => emit('select', id), active: id => emit('active', id),
   camera: camera => emit('update:camera', camera), drag: positions => emit('drag', positions),
 }, root)
 const { dots, lines, size } = web
-/** Rough on-screen box of a compact name (10px type, at most 110px wide, beside the dot on its chosen side), in pixels. */
-const COMPACT_NAME = { charWidth: 5.6, maxWidth: 110, height: 13, gap: WEB_NAME_GAP, sideGap: WEB_NAME_SIDE_GAP, margin: 2 }
-/**
- * In the compact graph, names of the lit set (not every name, which the
- * learner asked for with Names or by zooming in) are placed hovered dot
- * first, then the selection, then the rest, and a name that would still
- * overlap one already placed on the side the graph chose for it is left
- * out, so the small graph stays readable.
- */
-const named = computed<ReadonlySet<string>>(() => {
-  const labelled = dots.value.filter(dot => dot.labelled)
-  const everyName = props.names || props.narrowed || web.camera.value.zoom >= WEB_NAMES_ZOOM
-  if (!props.compact || everyName) return new Set(labelled.map(dot => dot.id))
-  const rank = (dot: WebDot) => dot.id === activeId.value ? 0 : dot.selected ? 1 : 2
-  const placed: Array<{ left: number; right: number; top: number; bottom: number }> = []
-  const kept = new Set<string>()
-  for (const dot of [...labelled].sort((a, b) => rank(a) - rank(b))) {
-    const width = Math.min(COMPACT_NAME.maxWidth, dot.node.skill.name.length * COMPACT_NAME.charWidth)
-    const r = dot.size / 2, h = COMPACT_NAME.height, place = dot.namePlace
-    const left = place === 'right' ? dot.x + r + COMPACT_NAME.sideGap : place === 'left' ? dot.x - r - COMPACT_NAME.sideGap - width : dot.x - width / 2
-    const top = place === 'below' ? dot.y + r + COMPACT_NAME.gap : place === 'above' ? dot.y - r - COMPACT_NAME.gap - h : dot.y - h / 2
-    const box = { left, right: left + width, top, bottom: top + h }
-    const m = COMPACT_NAME.margin
-    if (placed.some(other => box.left < other.right + m && other.left < box.right + m && box.top < other.bottom + m && other.top < box.bottom + m)) continue
-    placed.push(box)
-    kept.add(dot.id)
-  }
-  return kept
-})
 /** Accessible names, once per model and language: a pan or zoom only looks them up. */
 const accessibleNames = computed(() => {
   void locale.value
   return new Map(props.model.nodes.map(node => [node.skill.id, present.accessibleName(node)]))
 })
-defineExpose({ focus: web.focus, zoomBy: web.zoomBy, panBy: web.panBy })
 </script>
 
 <template>
   <div ref="root" class="web-graph" :class="{ 'is-compact': compact }" role="group" :aria-label="label" :aria-describedby="describedBy" @keydown="web.keyDown" @keyup="web.keyUp" @focusin="web.focusIn" @focusout="web.focusOut" @pointerdown="web.pointerDown" @pointermove="web.pointerMove" @pointerup="web.pointerUp" @pointercancel="web.pointerUp" @lostpointercapture="web.pointerUp" @click.capture="web.clickCapture" @wheel="web.wheel">
-    <svg class="web-canvas" :width="size.width" :height="size.height" :viewBox="`0 0 ${size.width} ${size.height}`" aria-hidden="true"><WebGraphLines :lines="lines" /></svg>
+    <svg class="web-canvas" :width="size.width" :height="size.height" :viewBox="`0 0 ${size.width} ${size.height}`" aria-hidden="true"><WebGraphLines :lines="lines" :compact="compact" /></svg>
     <button v-for="dot in dots" :key="dot.id" class="web-node" type="button" :data-skill="dot.id" :tabindex="dot.roving ? 0 : -1" :aria-label="accessibleNames.get(dot.id)" :aria-pressed="dot.selected" :style="{ '--field': dot.color, '--hit': `${dot.hit}px`, transform: `translate(${dot.x - dot.hit / 2}px, ${dot.y - dot.hit / 2}px)` }" @click="web.dotClick(dot.id)" @pointerenter="web.hover(dot.id)" @pointerleave="web.hover(null)">
-      <WebGraphDot :state="dot.state" :size="dot.size" :name="dot.node.skill.name" :labelled="named.has(dot.id)" :selected="dot.selected" :faded="dot.faded" :compact="compact" :place="dot.namePlace" />
+      <WebGraphDot :state="dot.state" :size="dot.size" :name="dot.node.skill.name" :labelled="dot.labelled" :selected="dot.selected" :faded="dot.faded" :compact="compact" :place="dot.namePlace" :offset="dot.nameOffset" />
     </button>
   </div>
 </template>
