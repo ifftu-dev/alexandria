@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import taxonomy from '../../../bootstrap/public_taxonomy.json'
 import { scaleTaxonomy } from '../../../tests/desktop-ui/atlasBackend'
-import { WEB_MIN_DISTANCE, continueWebLayout, webDotRadius, webLayout, type WebGraph } from './webGeometry'
+import { WEB_MIN_DISTANCE, continueWebLayout, webDotRadius, webLayout, webNearestInDirection, webNearestTo, type WebGraph } from './webGeometry'
 
 type Point = { x: number; y: number }
 
@@ -156,6 +156,46 @@ describe('Web dot size', () => {
     expect(webDotRadius(undefined)).toBe(webDotRadius(null))
     // The biggest dots still never touch: the layout keeps centres further apart than two of them.
     expect(2 * radii[5]!).toBeLessThan(WEB_MIN_DISTANCE)
+  })
+})
+
+describe('Keyboard roving between Web dots', () => {
+  // Screen coordinates: y grows downward.
+  const dots = new Map<string, Point>([
+    ['centre', { x: 0, y: 0 }],
+    ['right-far', { x: 100, y: 10 }],
+    ['right-steep', { x: 30, y: 50 }],
+    ['up', { x: 5, y: -40 }],
+    ['left', { x: -60, y: 0 }],
+    ['down', { x: -10, y: 80 }],
+  ])
+
+  it('moves to the nearest dot within 45 degrees of the arrow, before any nearer dot further off it', () => {
+    expect(webNearestInDirection('centre', 'right', dots)).toBe('right-far')
+    expect(webNearestInDirection('centre', 'up', dots)).toBe('up')
+    expect(webNearestInDirection('centre', 'left', dots)).toBe('left')
+    // Down: right-steep (58 away, 31 degrees off the arrow) is nearer than down (81 away).
+    expect(webNearestInDirection('centre', 'down', dots)).toBe('right-steep')
+  })
+
+  it('falls back to the nearest dot on that side when none lies within 45 degrees, and stays put when none lies on it', () => {
+    const sparse = new Map<string, Point>([['a', { x: 0, y: 0 }], ['b', { x: 20, y: -60 }]])
+    expect(webNearestInDirection('a', 'right', sparse)).toBe('b')
+    expect(webNearestInDirection('a', 'left', sparse)).toBeNull()
+    expect(webNearestInDirection('a', 'down', sparse)).toBeNull()
+    expect(webNearestInDirection('missing', 'up', sparse)).toBeNull()
+  })
+
+  it('skips dots that are not shown and breaks exact ties by skill ID', () => {
+    expect(webNearestInDirection('centre', 'right', dots, new Set(['centre', 'right-steep', 'left']))).toBe('right-steep')
+    const tied = new Map<string, Point>([['o', { x: 0, y: 0 }], ['q', { x: 10, y: 10 }], ['p', { x: 10, y: -10 }]])
+    expect(webNearestInDirection('o', 'right', tied)).toBe('p')
+  })
+
+  it('finds the shown dot nearest a point, where roving starts with nothing selected', () => {
+    expect(webNearestTo({ x: 0, y: 0 }, dots)).toBe('centre')
+    expect(webNearestTo({ x: 0, y: 0 }, dots, new Set(['left', 'up']))).toBe('up')
+    expect(webNearestTo({ x: 0, y: 0 }, dots, new Set())).toBeNull()
   })
 })
 

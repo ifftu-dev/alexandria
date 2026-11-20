@@ -415,3 +415,45 @@ export function webDotRadius(rank: BloomRank | null | undefined): number {
   const first = WEB_DOT_FIRST_RADIUS ** 2, sixth = WEB_DOT_SIXTH_RADIUS ** 2
   return Math.sqrt(first + (sixth - first) * rank / 5)
 }
+
+/** An arrow key, in screen terms: down is toward larger y. */
+export type WebDirection = 'up' | 'down' | 'left' | 'right'
+
+const DIRECTIONS: Record<WebDirection, WebPoint> = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } }
+
+/**
+ * The dot the keyboard moves to from `from` for an arrow key: the nearest
+ * shown dot within 45 degrees of the arrow, or failing that the nearest on
+ * the arrow's side; null when no shown dot lies on that side. Exact ties go
+ * to the lower skill ID. With no `shown` set, every positioned dot is shown.
+ */
+export function webNearestInDirection(from: string, direction: WebDirection, positions: ReadonlyMap<string, WebPoint>,
+  shown?: ReadonlySet<string>): string | null {
+  const origin = positions.get(from)
+  if (!origin) return null
+  const arrow = DIRECTIONS[direction]
+  let best: { id: string; inCone: boolean; distance: number } | null = null
+  for (const [id, point] of positions) {
+    if (id === from || (shown && !shown.has(id))) continue
+    const dx = point.x - origin.x, dy = point.y - origin.y
+    const along = dx * arrow.x + dy * arrow.y
+    if (along <= 0) continue
+    const inCone = Math.abs(dx * arrow.y - dy * arrow.x) <= along
+    const distance = Math.hypot(dx, dy)
+    const better = !best || (inCone !== best.inCone ? inCone
+      : distance !== best.distance ? distance < best.distance : compareIds(id, best.id) < 0)
+    if (better) best = { id, inCone, distance }
+  }
+  return best?.id ?? null
+}
+
+/** The shown dot nearest a point, such as the centre of the view; ties go to the lower skill ID. */
+export function webNearestTo(point: WebPoint, positions: ReadonlyMap<string, WebPoint>, shown?: ReadonlySet<string>): string | null {
+  let best: { id: string; distance: number } | null = null
+  for (const [id, at] of positions) {
+    if (shown && !shown.has(id)) continue
+    const distance = Math.hypot(at.x - point.x, at.y - point.y)
+    if (!best || distance < best.distance || (distance === best.distance && compareIds(id, best.id) < 0)) best = { id, distance }
+  }
+  return best?.id ?? null
+}
