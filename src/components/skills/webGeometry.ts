@@ -1,4 +1,4 @@
-import type { BloomRank } from '@/utils/skillAtlas'
+import type { AtlasModel, BloomRank } from '@/utils/skillAtlas'
 
 /** What the Web layout reads from the atlas model: plain data, no credentials. */
 export interface WebGraph {
@@ -11,6 +11,22 @@ export interface WebGraph {
 }
 
 export type WebPoint = { x: number; y: number }
+
+/**
+ * The Web graph of an atlas model: every skill with its field's slot and the
+ * prerequisites between loaded skills. Relations are passed in as skill ID
+ * pairs (the model does not carry them yet); the layout always uses them,
+ * whether or not they are drawn.
+ */
+export function webGraphFromAtlas(model: AtlasModel, relations: readonly (readonly [string, string])[] = []): WebGraph {
+  return {
+    nodes: model.nodes.map(node => ({ id: node.skill.id, slot: model.fieldById.get(node.fieldId)?.slot ?? null })),
+    prerequisites: model.edges
+      .filter(edge => model.nodeById.has(edge.skill_id) && model.nodeById.has(edge.prerequisite_id))
+      .map(edge => ({ skill: edge.skill_id, prerequisite: edge.prerequisite_id })),
+    relations: [...relations],
+  }
+}
 
 // Coordinates are layout units centred on the origin; the camera scales them.
 // They depend only on the graph: never on credentials, sizes or view state.

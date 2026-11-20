@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import taxonomy from '../../../bootstrap/public_taxonomy.json'
 import { scaleTaxonomy } from '../../../tests/desktop-ui/atlasBackend'
+import type { SkillGraphEdge, SkillInfo } from '@/types'
+import { buildSkillAtlas } from '@/utils/skillAtlas'
 import {
   WEB_MIN_DISTANCE, WEB_SIDEBAR_NODE_LIMIT, continueWebLayout, webDotRadius, webLayout, webNearestInDirection, webNearestTo, webSidebarSubset,
+  webGraphFromAtlas,
   type WebGraph,
 } from './webGeometry'
 
@@ -110,6 +113,33 @@ describe('Web layout', () => {
     const far = meanDistance(layout, (a, b) => sameField(a, b) && !linked.has(pairKey(a, b)))
     // Inside one field the springs, not the field pull, set who sits beside whom.
     expect(near * 1.2).toBeLessThan(far)
+  })
+})
+
+describe('Web graph from the atlas model', () => {
+  const skill = (id: string, field: string | null): SkillInfo => ({
+    id, name: id, description: '', subject_id: 'subject', subject_name: 'Subject',
+    subject_field_id: field, subject_field_name: field, bloom_level: 'apply',
+    prerequisite_count: 0, dependent_count: 0, created_at: null,
+  })
+  const edge = (skillId: string, prerequisiteId: string): SkillGraphEdge => ({
+    skill_id: skillId, skill_name: skillId, skill_bloom: 'apply',
+    prerequisite_id: prerequisiteId, prerequisite_name: prerequisiteId, prerequisite_bloom: 'apply',
+  })
+  const model = buildSkillAtlas({
+    skills: [skill('m1', 'math'), skill('m2', 'math'), skill('d1', 'data'), skill('u1', null)],
+    edges: [edge('m2', 'm1'), edge('d1', 'm1'), edge('u1', 'unloaded')],
+    activeCredentials: [], subjectDid: 'did:me',
+    subjectFields: [{ id: 'math', name: 'Mathematics', atlas_slot: 3 }, { id: 'data', name: 'Data', atlas_slot: 0 }],
+  })
+
+  it('carries every skill with its field slot and the loaded prerequisites, and relations as given', () => {
+    expect(webGraphFromAtlas(model, [['m2', 'd1']])).toEqual({
+      nodes: [{ id: 'd1', slot: 0 }, { id: 'm1', slot: 3 }, { id: 'm2', slot: 3 }, { id: 'u1', slot: null }],
+      prerequisites: [{ skill: 'm2', prerequisite: 'm1' }, { skill: 'd1', prerequisite: 'm1' }],
+      relations: [['m2', 'd1']],
+    })
+    expect(webGraphFromAtlas(model).relations).toEqual([])
   })
 })
 
