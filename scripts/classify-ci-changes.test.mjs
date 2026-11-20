@@ -77,13 +77,19 @@ test("the package wrapper and bootstrap run the browser checks as well as backen
   })
 })
 
-test("the player's fixture package runs the backend test that pins its description", () => {
-  assert.deepEqual(classifyChangedFiles(["tests/desktop-ui/package-player/package/quiz/index.html"]), {
-    backend: true,
-    frontend: true,
-    security: true,
-    release: false,
-  })
+test("the player's fixture packages run the backend test that pins their descriptions", () => {
+  for (const path of [
+    "tests/desktop-ui/package-player/package/quiz/index.html",
+    "tests/desktop-ui/package-isolation/package/peer.html",
+    "tests/desktop-ui/scorm12-conformance/package/imsmanifest.xml",
+  ]) {
+    assert.deepEqual(classifyChangedFiles([path]), {
+      backend: true,
+      frontend: true,
+      security: true,
+      release: false,
+    }, path)
+  }
 })
 
 test("future committee world and core packages run backend gates", () => {
