@@ -301,4 +301,15 @@ describe('Web graph', () => {
     expect(event.defaultPrevented).toBe(true)
     expect(wrapper.emitted('update:camera')).toHaveLength(1)
   })
+
+  it('fades dots outside a search or field match, and lights an owner-given neighbourhood in place of the selection', async () => {
+    const wrapper = setup({ matchIds: new Set(['a', 'b']) })
+    expect(faded(wrapper)).toEqual(['c', 'd', 'e'])
+    // The selection never fades, even when it does not match.
+    await wrapper.setProps({ selectedId: 'e' })
+    expect(faded(wrapper)).toEqual(['a', 'b', 'c', 'd'])
+    await wrapper.setProps({ matchIds: null, selectedId: 'c', focusIds: new Set(['a', 'b', 'c']) })
+    expect(faded(wrapper)).toEqual(['d', 'e'])
+    expect(segments(wrapper, '.web-line.is-lit')).toBe(2)
+  })
 })
