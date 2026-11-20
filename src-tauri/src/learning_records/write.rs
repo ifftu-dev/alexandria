@@ -22,7 +22,7 @@ use crate::settings::{registry::keys, SettingsStore};
 const NAME_LANGUAGE: &str = "und";
 
 /// The profile's DID, which every local record names its learner by.
-fn learner_did(conn: &Connection) -> Result<String, RecordError> {
+pub(super) fn learner_did(conn: &Connection) -> Result<String, RecordError> {
     let did = SettingsStore::get(conn, keys::IDENTITY_LOCAL_DID);
     if did.is_empty() {
         return Err(RecordError::Unnamed("the profile has no DID yet".into()));

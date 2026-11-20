@@ -16,7 +16,8 @@ use alexandria_verify::record_export;
 use ed25519_dalek::SigningKey;
 use rusqlite::{params, Connection};
 
-use super::{list, local_recipient, statement, RecordError};
+use super::write::learner_did;
+use super::{list, local_recipient, statement, unit_records, RecordError};
 use crate::domain::learning_record::LearningRecordEntry;
 
 /// The most rows one [`page`] returns.
@@ -29,17 +30,11 @@ pub fn page(
     offset: u32,
     limit: u32,
 ) -> Result<Vec<LearningRecordEntry>, RecordError> {
-    let mut statement = conn.prepare(
-        "SELECT r.id, r.kind, r.verb, r.course_id, c.title, r.element_id, e.title, \
-                r.activity_id, r.summary, r.bytes, r.recorded_at, r.event_json \
-         FROM learning_records r \
-         LEFT JOIN courses c ON c.id = r.course_id \
-         LEFT JOIN course_elements e ON e.id = r.element_id \
-         ORDER BY r.seq DESC LIMIT ?1 OFFSET ?2",
-    )?;
+    let mut statement = conn.prepare(unit_records::LOG_PAGE)?;
     let rows = statement.query_map(params![limit.min(MAX_PAGE), offset], |row| {
         let bytes: i64 = row.get(9)?;
-        let event_json: String = row.get(11)?;
+        let body: String = row.get(11)?;
+        let unit: bool = row.get(12)?;
         Ok((
             LearningRecordEntry {
                 id: row.get(0)?,
@@ -56,13 +51,18 @@ pub fn page(
                 percent: None,
                 score: None,
             },
-            event_json,
+            body,
+            unit,
         ))
     })?;
     rows.map(|row| {
-        let (mut entry, event_json) = row?;
-        let event: LearningEvent = serde_json::from_str(&event_json)?;
-        (entry.percent, entry.score) = detail(&event.action);
+        let (mut entry, body, unit) = row?;
+        if unit {
+            unit_records::complete_entry(&mut entry, &serde_json::from_str(&body)?);
+        } else {
+            let event: LearningEvent = serde_json::from_str(&body)?;
+            (entry.percent, entry.score) = detail(&event.action);
+        }
         Ok(entry)
     })
     .collect()
@@ -95,20 +95,38 @@ pub struct Export {
     pub signature: Vec<u8>,
 }
 
-/// Builds every record into one statement file, oldest first, and signs it
+/// One statement of the export file.
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+enum Exported {
+    Record(alexandria_studio::xapi::Statement),
+    Unit(serde_json::Value),
+}
+
+/// Builds every record into one statement file, oldest first, then what
+/// cmi5 units wrote on their own (rewritten for the learner), and signs it
 /// with the learner's key.
 pub fn export(conn: &Connection, key: &SigningKey) -> Result<Export, RecordError> {
     let secret = key.to_bytes();
     let mut records = list(conn)?;
     records.reverse();
     let options = BuildOptions::default();
-    let statements = records
+    let mut statements = records
         .iter()
         .map(|record| {
             let recipient = local_recipient(&secret, &record.learner_did)?;
-            statement(record, &recipient, &options)
+            Ok(Exported::Record(statement(record, &recipient, &options)?))
         })
-        .collect::<Result<Vec<_>, _>>()?;
+        .collect::<Result<Vec<_>, RecordError>>()?;
+    let (_, unit_count) = unit_records::usage(conn)?;
+    if unit_count > 0 {
+        let recipient = local_recipient(&secret, &learner_did(conn)?)?;
+        statements.extend(
+            unit_records::export(conn, &recipient)?
+                .into_iter()
+                .map(Exported::Unit),
+        );
+    }
     let mut file = serde_json::to_vec_pretty(&statements)?;
     file.push(b'\n');
     let signature = record_export::signature_file(&record_export::sign(&file, key));
@@ -127,13 +145,18 @@ pub fn delete(conn: &Connection, ids: &[String]) -> Result<usize, RecordError> {
         let mut statement = tx.prepare("DELETE FROM learning_records WHERE id = ?1")?;
         for id in ids {
             removed += statement.execute([id])?;
+            removed += unit_records::delete(&tx, id)?;
         }
     }
     tx.commit()?;
     Ok(removed)
 }
 
-/// Deletes every record in the log, and with them the whole outbox.
+/// Deletes every record in the log, and with them the whole outbox, and
+/// what cmi5 units wrote on their own, except where a session is still open.
 pub fn delete_all(conn: &Connection) -> Result<usize, RecordError> {
-    Ok(conn.execute("DELETE FROM learning_records", [])?)
+    let tx = conn.unchecked_transaction()?;
+    let removed = tx.execute("DELETE FROM learning_records", [])? + unit_records::delete_all(&tx)?;
+    tx.commit()?;
+    Ok(removed)
 }
