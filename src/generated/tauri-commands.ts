@@ -222,6 +222,7 @@ export const TAURI_COMMANDS = [
   "hosted_attempt_open",
   "hosted_attempt_result",
   "hosted_attempt_resume",
+  "hosted_attempt_start_probe",
   "hosted_attempt_terms",
   "hydrate_catalog_courses",
   "import_course_completion_endorsement",

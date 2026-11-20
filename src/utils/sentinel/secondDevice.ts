@@ -11,3 +11,15 @@ const SECOND_DEVICE_LINE = 'Whether a second device or person helped:'
 export function secondDeviceLine(statement: CoverageStatement | null | undefined): string | null {
   return statement?.not_checked.find(line => line.startsWith(SECOND_DEVICE_LINE)) ?? null
 }
+
+/** The version-3 statement's line, for surfaces that know the rung but hold
+ *  no statement (a hosted attempt's result, a request's policy, before any
+ *  credential exists). The statement's own text, verbatim. */
+export const SECOND_DEVICE_NOT_RULED_OUT
+  = 'Whether a second device or person helped: not ruled out. Only a live segment, where a person asks unscripted questions, rules it out.'
+
+/** The second-device line for a rung: the statement's text below `live`
+ *  (a missing rung included), `null` at `live`. */
+export function secondDeviceNote(rung: string | null | undefined): string | null {
+  return rung === 'live' ? null : SECOND_DEVICE_NOT_RULED_OUT
+}

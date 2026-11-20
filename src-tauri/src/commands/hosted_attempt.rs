@@ -14,7 +14,6 @@
 //! which keeps its own `verified_device_required:` form.
 
 use serde::Serialize;
-use serde_json::Value;
 
 use crate::assessment::hosted::refusal::{self, Explanation};
 use crate::assessment::hosted::wire::{
@@ -153,8 +152,7 @@ pub async fn hosted_attempt_open(
     }
     let attested = terms.terms.requires_device_attested();
     if attested {
-        crate::sentinel::attestation::require_verified_device(
-            Some(crate::sentinel::attestation::ASSURANCE_DEVICE_ATTESTED),
+        crate::sentinel::attestation::require_device_attested(
             crate::sentinel::attestation::AttemptDevice::current(),
         )?;
     }
@@ -190,26 +188,31 @@ pub async fn hosted_attempt_answer(
     state: State<'_, AppState>,
     directory_url: String,
     attempt_id: String,
-    seq: i32,
-    selected: Vec<i64>,
-    submission: Option<Value>,
-    device_timings: Option<Value>,
+    answer: AnswerBody,
 ) -> Result<AttemptState, String> {
     let next = service(&state, &directory_url)
         .await?
-        .answer(
-            &attempt_id,
-            &AnswerBody {
-                seq,
-                selected,
-                submission,
-                device_timings,
-            },
-            platform(),
-        )
+        .answer(&attempt_id, &answer, platform())
         .await
         .map_err(HostedError::into_command_error)?;
     with_plugin_installed(&state, next).await
+}
+
+/// Start the probe the last reply said is waiting, once the candidate has
+/// read its time limit and pressed Start: its text arrives and its clock
+/// starts now (story 15).
+#[tauri::command]
+pub async fn hosted_attempt_start_probe(
+    state: State<'_, AppState>,
+    directory_url: String,
+    attempt_id: String,
+) -> Result<AttemptState, String> {
+    let probe = service(&state, &directory_url)
+        .await?
+        .start_probe(&attempt_id)
+        .await
+        .map_err(HostedError::into_command_error)?;
+    with_plugin_installed(&state, probe).await
 }
 
 /// Close the attempt with the ended integrity session's assertion and, for

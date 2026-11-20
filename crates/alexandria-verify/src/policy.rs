@@ -29,8 +29,16 @@
 //! field (issued before it existed) gets the strict reading: a degraded
 //! camera never carries a floor. Any other degraded signal never does.
 //!
-//! The required answer custody is judged against the custody the assertion
-//! states (`device` when it states none): `issuer` is met only by `issuer`.
+//! The required answer custody is judged against the custody the rule can
+//! prove, not the one the assertion states: `issuer` is met only by an
+//! assertion stating `issuer` beside a [`HostedAttemptEvidence`] entry that
+//! says the issuer held the answers and graded ([`evaluate_hosted`]). Anyone
+//! can sign an assertion stating `issuer`, a candidate with a second key
+//! among them, so [`evaluate`] and [`evaluate_assessed`] credit `device`
+//! whatever the assertion states. The entry is the issuer's word: a verifier
+//! relies on it as far as it relies on the issuer, which for an
+//! organisation's credential means its organisation backing
+//! ([`crate::org::organisation_backing`]).
 //! The required rung (`min_verification_rung`) is judged on the strict
 //! ladder: the stated rung counts as far as the assertion shows its
 //! evidence, so `probed` and every rung above it need a probe step whose
@@ -140,9 +148,11 @@ pub struct IssuancePolicy {
     /// Minimum verification rung.
     #[serde(default)]
     pub min_verification_rung: Option<VerificationRung>,
-    /// Required answer custody: `issuer` is met only by an assertion stating
-    /// `issuer`; `device` accepts either. An assertion that states none
-    /// reads as `device`. Omitted from the stored shape while unset.
+    /// Required answer custody: `issuer` is met only by a credential from a
+    /// hosted attempt ([`evaluate_hosted`]) whose assertion states `issuer`;
+    /// `device` accepts either. [`evaluate`] and [`evaluate_assessed`] credit
+    /// `device` whatever the assertion states. Omitted from the stored shape
+    /// while unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required_answer_custody: Option<AnswerCustody>,
 }
@@ -190,7 +200,8 @@ pub enum PolicyRefusal {
     ProbePolicyNotRun { policy: String },
     #[error("issuance policy: a '{policy}' probe failed")]
     ProbeFailed { policy: String },
-    /// `custody` is the assertion's answer custody (`device` when unstated).
+    /// `custody` is the answer custody the rule credits: the assertion's
+    /// only on a credential from a hosted attempt, else `device`.
     #[error("issuance policy: answer custody '{custody}' does not meet required '{required}'")]
     CustodyBelowRequired { custody: String, required: String },
 }
@@ -219,6 +230,8 @@ impl PolicyRefusal {
 /// Requirements are judged in a fixed order (custody, status, score, flags,
 /// assurance, floor, rung, probes); the first unmet one is returned. Custody
 /// comes first because no retake of the same kind of attempt can meet it.
+/// Answer custody is credited as `device` whatever the assertion states:
+/// only a hosted attempt entry proves `issuer` ([`evaluate_hosted`]).
 pub fn evaluate(
     policy: &IssuancePolicy,
     integrity: &IntegrityAssertion,
@@ -230,6 +243,7 @@ pub fn evaluate(
         attestation,
         attestation.verified_assurance_level(),
         integrity.probe.as_ref(),
+        AnswerCustody::Device,
     )
 }
 
@@ -240,7 +254,8 @@ pub fn evaluate(
 /// role credential's own attestation evidence (none, or session-bound: the
 /// issuer's device cannot bind the candidate's session) is not judged.
 /// The entry's level counts only as far as its own outcome verifies it
-/// ([`AssessedCredentialEvidence::assurance_level`]).
+/// ([`AssessedCredentialEvidence::assurance_level`]). Answer custody is
+/// credited as `device`: an assessed credential is the candidate's own.
 pub fn evaluate_assessed(
     policy: &IssuancePolicy,
     integrity: &IntegrityAssertion,
@@ -252,6 +267,7 @@ pub fn evaluate_assessed(
         &assessed.attestation,
         assessed.assurance_level(),
         integrity.probe.as_ref(),
+        AnswerCustody::Device,
     )
 }
 
@@ -261,9 +277,10 @@ pub fn evaluate_assessed(
 /// the issuer's signed statement of what it found. The issuer graded,
 /// timed and probed the attempt itself, so the probe step judged (for the
 /// probe policy and for the rung's evidence) is the entry's, never the probe
-/// summary the device reported in the assertion. Custody, status, score,
-/// flags, trust profile and rung are read from the assertion, which the
-/// issuer writes. The entry's level counts only as far as its own outcome
+/// summary the device reported in the assertion. Status, score, flags,
+/// trust profile and rung are read from the assertion, which the issuer
+/// writes; its answer custody counts only when the entry says what a hosted
+/// attempt is (the issuer held the answers and graded), else `device`. The entry's level counts only as far as its own outcome
 /// verifies it ([`HostedAttemptEvidence::assurance_level`]).
 pub fn evaluate_hosted(
     policy: &IssuancePolicy,
@@ -276,7 +293,19 @@ pub fn evaluate_hosted(
         &hosted.attestation,
         hosted.assurance_level(),
         hosted.probe.as_ref(),
+        hosted_custody(integrity, hosted),
     )
+}
+
+/// The custody [`evaluate_hosted`] credits: the assertion's, when the entry
+/// says what a hosted attempt is (the issuer held the answers and graded);
+/// otherwise `device`.
+fn hosted_custody(integrity: &IntegrityAssertion, hosted: &HostedAttemptEvidence) -> AnswerCustody {
+    if hosted.states_a_hosted_attempt() {
+        integrity.answer_custody()
+    } else {
+        AnswerCustody::Device
+    }
 }
 
 fn judge(
@@ -285,10 +314,10 @@ fn judge(
     attestation: &AttestationOutcome,
     level: VerifiedAssuranceLevel,
     probe: Option<&ProbeSummary>,
+    custody: AnswerCustody,
 ) -> Result<(), PolicyRefusal> {
     let a = integrity;
     if let Some(required) = policy.required_answer_custody {
-        let custody = a.answer_custody();
         if custody < required {
             return Err(PolicyRefusal::CustodyBelowRequired {
                 custody: custody.as_str().to_string(),

@@ -11,11 +11,15 @@
 //! attempt itself, there is no candidate credential to name, so the role
 //! credential it signs carries one [`HostedAttemptEvidence`] entry instead of
 //! an [`AssessedCredentialEvidence`](crate::assessed::AssessedCredentialEvidence):
-//! the attempt's identifier, that the issuer held the answers and graded, the
-//! probe outcome, and the attestation outcome and verified assurance level
+//! the attempt's identifier, that the issuer held the answers and graded, its
+//! score, the probe outcome, and the attestation outcome and verified assurance level
 //! the issuer found. The issuer's signature is what vouches for it. The
 //! entry is valid only on an issuer-signed credential whose assertion states
 //! `issuer` custody.
+//!
+//! `issuer` custody stands only on a hosted attempt entry: a credential
+//! stating it without one is invalid however it is signed, since a
+//! candidate's second key is not self-issued by the DID test.
 //!
 //! [`custody_defects`] finds what is wrong with a credential's custody from
 //! its own content, with no trust inputs; verification rejects a credential
@@ -52,14 +56,16 @@ pub enum Grader {
 ///   "attemptId": "…",
 ///   "answerCustody": "issuer",
 ///   "gradedBy": "issuer",
+///   "score": 0.75,
 ///   "probe": { "outcome": "satisfied", "policies": ["authored"], "satisfied": 1, "failed": 0, "skipped": 0 },
 ///   "attestation": { "outcome": "verified_credential_bound", "platform": "ios" },
 ///   "verifiedAssuranceLevel": "device_attested"
 /// }
 /// ```
 ///
-/// `probe` is omitted when no probe step ran.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// `probe` is omitted when no probe step ran, `score` when the issuer states
+/// none.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HostedAttemptEvidence {
     /// Always [`HOSTED_ATTEMPT_EVIDENCE_TYPE`].
@@ -71,6 +77,11 @@ pub struct HostedAttemptEvidence {
     pub answer_custody: AnswerCustody,
     /// Always `issuer`: the issuer computed the score.
     pub graded_by: Grader,
+    /// The issuer's score: the fraction of the attempt's drawn items it
+    /// graded correct, in `[0,1]`. Probes are reported apart. Omitted when
+    /// the issuer states none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<f64>,
     /// The probe step the issuer ran, timed and graded; `None` when none ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe: Option<ProbeSummary>,
@@ -104,16 +115,27 @@ impl HostedAttemptEvidence {
             attempt_id: attempt_id.into(),
             answer_custody: AnswerCustody::Issuer,
             graded_by: Grader::Issuer,
+            score: None,
             probe,
             verified_assurance_level: attestation.verified_assurance_level(),
             attestation,
         }
     }
 
+    /// The entry with the issuer's `score`, a fraction in `[0,1]`.
+    pub fn with_score(mut self, score: f64) -> Self {
+        self.score = Some(score);
+        self
+    }
+
     /// Whether the entry says what a hosted attempt is: the issuer held the
-    /// answers and graded.
+    /// answers and graded, and any score it states is a fraction in `[0,1]`.
     pub fn states_a_hosted_attempt(&self) -> bool {
-        self.answer_custody == AnswerCustody::Issuer && self.graded_by == Grader::Issuer
+        self.answer_custody == AnswerCustody::Issuer
+            && self.graded_by == Grader::Issuer
+            && self
+                .score
+                .is_none_or(|s| s.is_finite() && (0.0..=1.0).contains(&s))
     }
 
     /// The level a policy judges: the entry's stated level when its own
@@ -163,6 +185,11 @@ impl HostedAttemptEvidence {
 pub enum CustodyDefect {
     /// A self-issued credential states `issuer` answer custody.
     IssuerCustodySelfIssued,
+    /// A credential signed by someone other than its subject states `issuer`
+    /// answer custody with no hosted attempt entry. Only a hosted attempt
+    /// shows the issuer held the answers, and a second key of the
+    /// candidate's own is not self-issued by the DID test.
+    IssuerCustodyUnproven,
     /// A self-issued credential carries a hosted attempt entry.
     HostedAttemptSelfIssued,
     /// The hosted attempt entry is duplicated, does not parse, or does not
@@ -175,8 +202,9 @@ pub enum CustodyDefect {
 
 impl CustodyDefect {
     /// Every defect, in the order [`custody_defects`] reports them.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::IssuerCustodySelfIssued,
+        Self::IssuerCustodyUnproven,
         Self::HostedAttemptSelfIssued,
         Self::HostedAttemptInvalid,
         Self::HostedAttemptCustodyMismatch,
@@ -186,6 +214,7 @@ impl CustodyDefect {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::IssuerCustodySelfIssued => "issuer_custody_self_issued",
+            Self::IssuerCustodyUnproven => "issuer_custody_unproven",
             Self::HostedAttemptSelfIssued => "hosted_attempt_self_issued",
             Self::HostedAttemptInvalid => "hosted_attempt_invalid",
             Self::HostedAttemptCustodyMismatch => "hosted_attempt_custody_mismatch",
@@ -211,6 +240,10 @@ pub fn custody_defects(credential: &VerifiableCredential) -> Vec<CustodyDefect> 
         (
             self_issued && custody == Some(AnswerCustody::Issuer),
             CustodyDefect::IssuerCustodySelfIssued,
+        ),
+        (
+            !self_issued && custody == Some(AnswerCustody::Issuer) && !has_entry,
+            CustodyDefect::IssuerCustodyUnproven,
         ),
         (
             self_issued && has_entry,

@@ -2003,6 +2003,7 @@ export type AnswerCustody = 'device' | 'issuer'
 /** Mirrors `alexandria_verify::custody::CustodyDefect`. */
 export type CustodyDefect =
   | 'issuer_custody_self_issued'
+  | 'issuer_custody_unproven'
   | 'hosted_attempt_self_issued'
   | 'hosted_attempt_invalid'
   | 'hosted_attempt_custody_mismatch'
@@ -2033,6 +2034,9 @@ export interface VerifiableCredential {
   integrity?: IntegrityAssertion | null
   /** VC 2.0 `relatedResource`; names the coverage statement when `integrity` does. */
   relatedResource?: RelatedResource[]
+  /** VC 2.0 `evidence`: attestation, assessed-credential or hosted-attempt
+   *  entries, read with guards (`utils/hostedEvidence`). */
+  evidence?: unknown[]
   proof: Proof
 }
 
@@ -2065,7 +2069,7 @@ export interface IssuancePolicy {
   max_critical?: number | null
   max_warning?: number | null
   require_clean?: boolean
-  required_assurance_level?: string | null
+  required_assurance_level?: VerifiedAssuranceLevel | null
   /**
    * Probe policy for attempts made for this role; overrides the assessment's
    * unless 'none'. At issuance anything but 'none' requires the probe step to
@@ -2120,7 +2124,7 @@ export interface RoleAssessment {
   course_id?: string | null
   skill_ids: string[]
   issuance_policy?: IssuancePolicy | null
-  required_assurance_level?: string | null
+  required_assurance_level?: VerifiedAssuranceLevel | null
   status: string
   created_at: string
   updated_at: string
@@ -2183,7 +2187,7 @@ export interface CreateRoleAssessmentRequest {
   course_id?: string | null
   skill_ids?: string[]
   issuance_policy?: IssuancePolicy | null
-  required_assurance_level?: string | null
+  required_assurance_level?: VerifiedAssuranceLevel | null
 }
 
 export interface VerificationResult {
@@ -2270,6 +2274,7 @@ export type TrustInvalidReason =
   | 'type_not_allowed'
   | 'invalid_attestation'
   | 'issuer_custody_self_issued'
+  | 'issuer_custody_unproven'
   | 'hosted_attempt_self_issued'
   | 'hosted_attempt_invalid'
   | 'hosted_attempt_custody_mismatch'
@@ -3191,7 +3196,11 @@ export interface HostedAttemptState {
     requires_attested: boolean
     ready_to_close: boolean
   }
+  /** Null once every item is answered, and while a probe waits for Start. */
   item: HostedItem | null
+  /** A probe is next: its limit, shown before Start; its text and clock
+   *  arrive with `hosted_attempt_start_probe`. */
+  pending_probe?: { time_limit_ms: number } | null
 }
 
 /** A refusal code in plain words (`assessment::hosted::refusal`). */

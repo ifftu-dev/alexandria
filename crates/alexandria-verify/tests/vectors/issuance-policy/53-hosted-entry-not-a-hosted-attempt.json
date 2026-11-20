@@ -1,0 +1,72 @@
+{
+  "description": "A hosted attempt entry that says the device graded, beside an assertion stating `issuer` custody. The entry does not say what a hosted attempt is, so it proves nothing about custody: the rule credits `device`.",
+  "policy": {
+    "min_integrity": null,
+    "max_critical": null,
+    "max_warning": null,
+    "require_clean": false,
+    "required_assurance_level": "device_attested",
+    "probe_policy": "authored",
+    "min_trust_profile": null,
+    "min_verification_rung": "probed",
+    "required_answer_custody": "issuer"
+  },
+  "integrity": {
+    "sessionId": "isess_policy_vector",
+    "status": "completed",
+    "integrityScore": 0.91,
+    "criticalCount": 0,
+    "warningCount": 1,
+    "assuranceLevel": "device_attested",
+    "generatedAt": "2026-06-01T00:00:00Z",
+    "trustProfile": "attested",
+    "verificationRung": "probed",
+    "signalsRun": [
+      "core",
+      "device_attestation"
+    ],
+    "signalsNotRun": [
+      "camera"
+    ],
+    "probe": {
+      "outcome": "failed",
+      "policies": [
+        "reseed"
+      ],
+      "satisfied": 0,
+      "failed": 1,
+      "skipped": 0
+    },
+    "answerCustody": "issuer"
+  },
+  "attestation": {
+    "outcome": "not_supplied"
+  },
+  "hosted": {
+    "type": "HostedAttemptEvidence",
+    "attemptId": "hatt_policy_vector",
+    "answerCustody": "issuer",
+    "gradedBy": "device",
+    "probe": {
+      "outcome": "satisfied",
+      "policies": [
+        "authored"
+      ],
+      "satisfied": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "attestation": {
+      "outcome": "verified_credential_bound",
+      "platform": "ios"
+    },
+    "verifiedAssuranceLevel": "device_attested"
+  },
+  "expect": {
+    "refusal": {
+      "code": "custody_below_required",
+      "custody": "device",
+      "required": "issuer"
+    }
+  }
+}

@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use alexandria_verify::assessed::{AssessedCredentialEvidence, ASSESSED_CREDENTIAL_EVIDENCE_TYPE};
 use alexandria_verify::attestation::{AttestationOutcome, Platform, VerifiedAssuranceLevel};
-use alexandria_verify::custody::HostedAttemptEvidence;
+use alexandria_verify::custody::{Grader, HostedAttemptEvidence};
 use alexandria_verify::integrity::{AnswerCustody, TrustProfile, VerificationRung};
 use alexandria_verify::policy::{
     evaluate, evaluate_assessed, evaluate_hosted, IssuancePolicy, PolicyRefusal, ProbePolicy,
@@ -797,11 +797,17 @@ fn build_all() -> Vec<(&'static str, Vector)> {
         (
             "34-custody-issuer-required-issuer-stated",
             vector(
-                "`issuer` answer custody is required and the assertion states it.",
+                "`issuer` answer custody is required and the assertion states it, with no \
+                 hosted attempt entry to stand on. Anyone can sign an assertion stating \
+                 `issuer` (a candidate with a second key, say): only a hosted attempt entry \
+                 proves it, so the rule credits `device`.",
                 custody(AnswerCustody::Issuer),
                 stating(Some(AnswerCustody::Issuer)),
                 none,
-                None,
+                Some(PolicyRefusal::CustodyBelowRequired {
+                    custody: "device".into(),
+                    required: "issuer".into(),
+                }),
             ),
         ),
         (
@@ -1033,6 +1039,57 @@ fn build_all() -> Vec<(&'static str, Vector)> {
                 None,
                 below("process", "probed"),
             ),
+        ),
+        (
+            "52-assessed-issuer-custody-not-credited",
+            Vector {
+                description: "A role credential issued on an assessed credential whose \
+                     assertion states `issuer` custody, for a role requiring it. An \
+                     assessed credential is the candidate's own result: only a hosted \
+                     attempt entry proves `issuer`, so the rule credits `device`."
+                    .into(),
+                policy: custody(AnswerCustody::Issuer),
+                integrity: IntegrityAssertion {
+                    answer_custody: Some(AnswerCustody::Issuer),
+                    ..attested()
+                },
+                ..role_on(
+                    "",
+                    credential_bound,
+                    VerifiedAssuranceLevel::DeviceAttested,
+                    Some(PolicyRefusal::CustodyBelowRequired {
+                        custody: "device".into(),
+                        required: "issuer".into(),
+                    }),
+                )
+            },
+        ),
+        (
+            "53-hosted-entry-not-a-hosted-attempt",
+            Vector {
+                description: "A hosted attempt entry that says the device graded, beside \
+                     an assertion stating `issuer` custody. The entry does not say what a \
+                     hosted attempt is, so it proves nothing about custody: the rule \
+                     credits `device`."
+                    .into(),
+                hosted: Some(HostedAttemptEvidence {
+                    graded_by: Grader::Device,
+                    ..HostedAttemptEvidence::new(
+                        "hatt_policy_vector",
+                        Some(service_probe.clone()),
+                        credential_bound,
+                    )
+                }),
+                ..from_hosted(
+                    "",
+                    credential_bound,
+                    Some(service_probe.clone()),
+                    Some(PolicyRefusal::CustodyBelowRequired {
+                        custody: "device".into(),
+                        required: "issuer".into(),
+                    }),
+                )
+            },
         ),
     ]
 }

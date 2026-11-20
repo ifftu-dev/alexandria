@@ -400,12 +400,23 @@ pub(crate) fn shareable_credentials(
 }
 
 /// The first requirement of `policy` that `vc` does not meet, as a code and
-/// its words; `None` when the policy accepts it.
+/// its words; `None` when the policy accepts it. A role that requires
+/// issuer-held answers refuses every shared credential with the custody code
+/// before anything else, as the organisation's share path does (ADR 0009):
+/// only a hosted attempt meets it.
 fn policy_refusal(
     policy: &IssuancePolicy,
     vc: &alexandria_verify::vc::VerifiableCredential,
     trust: &alexandria_verify::attestation::AttestationTrust,
 ) -> Option<(String, String)> {
+    use alexandria_verify::integrity::AnswerCustody;
+    if policy.required_answer_custody == Some(AnswerCustody::Issuer) {
+        let refusal = alexandria_verify::policy::PolicyRefusal::CustodyBelowRequired {
+            custody: AnswerCustody::Device.as_str().into(),
+            required: AnswerCustody::Issuer.as_str().into(),
+        };
+        return Some((refusal.code().into(), refusal.to_string()));
+    }
     let Some(assertion) = &vc.integrity else {
         return Some((
             "no_integrity_assertion".into(),
@@ -604,6 +615,50 @@ mod tests {
             listed[0].refusal_code.as_deref(),
             Some("no_integrity_assertion")
         );
+    }
+
+    /// A role that requires issuer-held answers refuses the share path with
+    /// the custody code before anything else, as the organisation does
+    /// (ADR 0009): no shared credential can meet it, whatever its assertion
+    /// states and even with none.
+    #[test]
+    fn a_role_requiring_issuer_custody_refuses_every_shared_credential_first() {
+        let db = Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        store_credential(db.conn(), "urn:stating-issuer", "core", &["core"]);
+        db.conn()
+            .execute(
+                "UPDATE credentials SET signed_vc_json =
+                     json_set(signed_vc_json, '$.integrity.answerCustody', 'issuer')",
+                [],
+            )
+            .unwrap();
+        store_credential(db.conn(), "urn:bare", "core", &["core"]);
+        db.conn()
+            .execute(
+                "UPDATE credentials SET signed_vc_json = json_remove(signed_vc_json, '$.integrity')
+                  WHERE id = 'urn:bare'",
+                [],
+            )
+            .unwrap();
+        let mut req = camera_request();
+        req.issuance_policy = Some(IssuancePolicy {
+            required_answer_custody: Some(alexandria_verify::integrity::AnswerCustody::Issuer),
+            min_trust_profile: Some(TrustProfile::Camera),
+            ..IssuancePolicy::default()
+        });
+        let trust = crate::sentinel::attestation::TrustConfig::default().inputs();
+        let listed = shareable_credentials(db.conn(), &req, &trust).unwrap();
+        assert_eq!(listed.len(), 2);
+        for c in &listed {
+            assert!(!c.meets_policy, "{}", c.id);
+            assert_eq!(
+                c.refusal_code.as_deref(),
+                Some("custody_below_required"),
+                "{}",
+                c.id
+            );
+        }
     }
 
     #[test]

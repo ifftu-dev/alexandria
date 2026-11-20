@@ -6,10 +6,11 @@ Verifiable Credentials Data Model 2.0 secured with Data Integrity proofs
 revocation and suspension, `did:key` resolution, and JCS canonicalization
 (RFC 8785).
 
-New in 0.8.0: answer custody and the hosted attempt evidence entry, the
-`companion_attested` level, required custody and the strict rung ladder in the
-issuance policy, and coverage statement version 3. It breaks the 0.7 API; see
-[CHANGELOG.md](CHANGELOG.md).
+New in 0.9.0: answer custody and the hosted attempt evidence entry (with the
+issuer's score), the `companion_attested` level, required custody and the
+strict rung ladder in the issuance policy, and coverage statement version 3.
+`issuer` custody counts only on a credential from a hosted attempt. It breaks
+the 0.7 API; see [CHANGELOG.md](CHANGELOG.md).
 
 `MIT OR Apache-2.0`, while the Alexandria application itself is
 AGPL-3.0-or-later. That split is deliberate. Alexandria promises that checking a

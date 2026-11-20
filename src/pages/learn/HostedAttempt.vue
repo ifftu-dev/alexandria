@@ -35,11 +35,12 @@ import { announceCredentialsChanged } from '@/composables/credentialEvents'
 import { AppButton } from '@/components/ui'
 import TrustProfileNotice from '@/components/integrity/TrustProfileNotice.vue'
 import PluginHost from '@/components/plugin/PluginHost.vue'
-import { needsVerifiedDevice, verifiedDeviceRefusal, verifiedPhones, type VerifiedPhones } from '@/utils/verifiedDevice'
+import { needsVerifiedDevice } from '@/utils/verifiedDevice'
+import { useVerifiedDevice } from '@/composables/useVerifiedDevice'
 import { hostedAttemptError, isDisconnected, isGone } from '@/utils/hostedAttempt'
+import { secondDeviceNote } from '@/utils/sentinel/secondDevice'
 import { errorMessage } from '@/utils/errorMessage'
 import type {
-  DeviceSupport,
   Element,
   HostedAttemptState,
   HostedItem,
@@ -50,7 +51,7 @@ import type {
 } from '@/types'
 import type { DeepReadonly } from 'vue'
 
-type Phase = 'loading' | 'consent' | 'item' | 'reconnecting' | 'closing' | 'result' | 'abandoned' | 'blocked' | 'error'
+type Phase = 'loading' | 'consent' | 'probe' | 'item' | 'reconnecting' | 'closing' | 'result' | 'abandoned' | 'blocked' | 'error'
 
 const route = useRoute()
 const router = useRouter()
@@ -70,6 +71,8 @@ const attemptId = ref('')
 const progress = ref<HostedAttemptState['attempt'] | null>(null)
 /** The item on screen: in memory only, dropped as soon as it is answered. */
 const item = ref<HostedItem | null>(null)
+/** A probe's limit, shown before Start; its text and clock come after. */
+const pendingProbeMs = ref<number | null>(null)
 const selected = ref<Set<number>>(new Set())
 const remainingMs = ref(0)
 const sending = ref(false)
@@ -78,8 +81,6 @@ const resumedAfterDrop = ref(false)
 const outcome = ref<HostedOutcome | null>(null)
 const checkingAgain = ref(false)
 const floorBlocked = ref<DeepReadonly<SelectedProfile> | null>(null)
-const deviceSupport = ref<DeviceSupport | null>(null)
-const deviceRefused = ref<VerifiedPhones | null>(null)
 
 let shownAt = 0
 let clock: ReturnType<typeof setInterval> | null = null
@@ -104,10 +105,12 @@ const verifiedDeviceRequired = computed(() =>
   terms.value?.terms.device_requirement === 'device_attested'
   || needsVerifiedDevice(target.value?.issuance_policy?.required_assurance_level),
 )
-const phones = computed<VerifiedPhones>(() => deviceRefused.value ?? verifiedPhones(deviceSupport.value))
-const verifiedDeviceBlocked = computed(() =>
-  verifiedDeviceRequired.value && (deviceRefused.value !== null || deviceSupport.value?.verified_device === false),
-)
+const {
+  phones,
+  blocked: verifiedDeviceBlocked,
+  detect: detectDeviceSupport,
+  refuse: refuseOnDevice,
+} = useVerifiedDevice(verifiedDeviceRequired)
 const resuming = computed(() => !!terms.value?.open_attempt)
 const canStart = computed(() =>
   !!terms.value
@@ -115,6 +118,9 @@ const canStart = computed(() =>
   && !(cameraRequired.value && !cameraStream.value)
   && !verifiedDeviceBlocked.value,
 )
+/** Below a required `live` rung, the result says a second device or person
+ *  is not ruled out: only a live segment rules it out. */
+const secondDevice = computed(() => secondDeviceNote(target.value?.issuance_policy?.min_verification_rung))
 const retakeRule = computed(() => {
   const r = terms.value?.terms.retakes
   if (!r) return ''
@@ -175,8 +181,10 @@ function show(state: HostedAttemptState) {
   stopClock()
   item.value = state.item
   selected.value = new Set()
+  pendingProbeMs.value = state.item ? null : state.pending_probe?.time_limit_ms ?? null
   if (!state.item) {
-    if (state.attempt.ready_to_close) void close()
+    if (pendingProbeMs.value !== null) phase.value = 'probe'
+    else if (state.attempt.ready_to_close) void close()
     return
   }
   phase.value = 'item'
@@ -194,14 +202,6 @@ function show(state: HostedAttemptState) {
     difficulty: null,
     input: plugin ? 'plugin' : 'choice',
   })
-}
-
-async function detectDeviceSupport(): Promise<void> {
-  try {
-    deviceSupport.value = await invoke<DeviceSupport>('integrity_device_support')
-  } catch {
-    /* unknown: nothing is claimed; the backend still refuses */
-  }
 }
 
 onMounted(async () => {
@@ -253,9 +253,7 @@ async function start() {
     show(state)
   } catch (e) {
     await stopMonitoring()
-    const refused = verifiedDeviceRefusal(e)
-    if (refused) {
-      deviceRefused.value = refused
+    if (refuseOnDevice(e)) {
       phase.value = 'consent'
     } else if (hostedAttemptError(e)?.code === 'consent_required') {
       // The terms changed since they were read: read them again.
@@ -302,10 +300,36 @@ function answerArgs(pending: PendingAnswer) {
   return {
     directoryUrl,
     attemptId: attemptId.value,
-    seq: pending.seq,
-    selected: pending.selected,
-    submission: pending.submission,
-    deviceTimings: { shown_ms: pending.shownMs },
+    answer: {
+      seq: pending.seq,
+      selected: pending.selected,
+      submission: pending.submission,
+      device_timings: { shown_ms: pending.shownMs },
+    },
+  }
+}
+
+/** The candidate read the probe's limit and pressed Start: fetch it now, so
+ *  its clock starts now on the service's side. */
+async function startProbe() {
+  if (sending.value) return
+  sending.value = true
+  error.value = ''
+  try {
+    const state = await invoke<HostedAttemptState>('hosted_attempt_start_probe', { directoryUrl, attemptId: attemptId.value })
+    if (disposed) return
+    show(state)
+  } catch (e) {
+    if (isGone(e)) {
+      await stopMonitoring()
+      phase.value = 'abandoned'
+    } else if (isDisconnected(e)) {
+      error.value = t('learn.hosted.closeRetry')
+    } else {
+      failWith(e)
+    }
+  } finally {
+    sending.value = false
   }
 }
 
@@ -505,6 +529,16 @@ async function checkAgain() {
       <AppButton variant="outline" @click="router.go(0)">{{ $t('sentinel.trust.notice.tryAgain') }}</AppButton>
     </div>
 
+    <!-- A probe states its limit before its clock starts -->
+    <div v-else-if="phase === 'probe' && pendingProbeMs !== null" class="space-y-4" data-testid="hosted-probe-start">
+      <p class="text-xs text-muted-foreground">{{ $t('learn.hosted.followUp') }}</p>
+      <p class="rounded-lg border border-border bg-card p-3 text-sm text-foreground">
+        {{ $t('learn.hosted.followUpStart', { seconds: Math.round(pendingProbeMs / 1000) }) }}
+      </p>
+      <p v-if="error" class="text-sm text-warning">{{ error }}</p>
+      <AppButton :loading="sending" data-testid="hosted-probe-go" @click="startProbe">{{ $t('learn.assessment.probeStart') }}</AppButton>
+    </div>
+
     <!-- One item at a time -->
     <div v-else-if="(phase === 'item' || phase === 'reconnecting') && item && progress" class="space-y-4" data-testid="hosted-item">
       <div class="flex items-center justify-between text-xs text-muted-foreground">
@@ -575,6 +609,7 @@ async function checkAgain() {
       <p v-if="outcome.result.probes.asked > 0" class="text-sm text-muted-foreground">
         {{ $t('learn.hosted.probes', { passed: outcome.result.probes.passed, asked: outcome.result.probes.asked }) }}
       </p>
+      <p v-if="secondDevice" class="text-sm text-muted-foreground" data-testid="hosted-second-device">{{ secondDevice }}</p>
 
       <div v-if="outcome.issuance.state === 'issued'" class="rounded-lg border border-success/40 bg-success/5 p-3 text-sm" data-testid="hosted-issued">
         <p class="font-medium text-success">{{ $t('learn.hosted.issued') }}</p>

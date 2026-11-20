@@ -395,7 +395,7 @@ describe('role targeting', () => {
     expect(mocks.stop).toHaveBeenCalledOnce()
     const notice = wrapper.get('[data-testid="trust-profile-notice"]')
     expect(notice.text()).toContain('sentinel.trust.notice.floorUnmet')
-    expect(notice.text()).toContain('sentinel.trust.raise.pair_phone')
+    expect(notice.text()).toContain('sentinel.trust.raise.attested_device')
     expect(notice.text()).not.toContain('sentinel.trust.raise.connect_camera')
     expect(wrapper.text()).not.toContain('Question')
     await wrapper.get('[data-testid="trust-profile-retry"]').trigger('click')

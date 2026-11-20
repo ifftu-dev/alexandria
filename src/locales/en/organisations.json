@@ -100,7 +100,8 @@
         "probe_policy_not_run": "their follow-up questions were not run",
         "probe_failed": "a follow-up question was not satisfied",
         "no_integrity_assertion": "it carries no integrity result",
-        "unreadable_evidence": "its evidence could not be read"
+        "unreadable_evidence": "its evidence could not be read",
+        "custody_below_required": "they only issue for an attempt taken on their own service, which holds the answers"
       }
     },
     "interview": {

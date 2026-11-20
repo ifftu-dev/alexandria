@@ -82,12 +82,24 @@ pub struct OpenBody {
     pub device_key: Option<DeviceKey>,
 }
 
-/// Open, resume and answer all reply with this.
+/// Open, resume, answer and start-probe all reply with this.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AttemptState {
     pub attempt: AttemptInfo,
-    /// `None` once every item is answered.
+    /// `None` once every item is answered, and while a probe waits for
+    /// Start.
     pub item: Option<Item>,
+    /// A probe is next: its time limit, shown before the candidate presses
+    /// Start. Its text is sent, and its clock started, only on
+    /// `POST …/attempts/{attempt}/probe`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_probe: Option<PendingProbe>,
+}
+
+/// A probe waiting for Start.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PendingProbe {
+    pub time_limit_ms: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -163,16 +175,17 @@ impl std::fmt::Debug for Item {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnswerBody {
     pub seq: i32,
     /// Displayed positions; empty for no answer, and for a plugin item.
+    #[serde(default)]
     pub selected: Vec<i64>,
     /// A plugin item's submission, as its plugin produced it.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub submission: Option<Value>,
     /// Stored beside the service's timings and never read by it.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_timings: Option<Value>,
 }
 

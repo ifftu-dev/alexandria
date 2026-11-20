@@ -27,7 +27,10 @@ use crate::assessment::policy::{
 use crate::assessment::randomizer::{draw, DifficultyBand, DrawContext, QuestionMeta};
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
-use crate::sentinel::attestation::{require_verified_device, AttemptDevice};
+use crate::sentinel::attestation::{
+    require_device_attested, require_verified_device, requires_device_attested, AttemptDevice,
+    VerifiedAssuranceLevel,
+};
 #[cfg(test)]
 use crate::sentinel::attestation::{DeviceKind, VERIFIED_DEVICE_REQUIRED};
 use crate::sentinel::trust_profile::{self, PolicyFloor};
@@ -136,8 +139,11 @@ fn map_role_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RoleRow> {
             .as_ref()
             .and_then(|p| p.required_assurance_level.clone())
     });
-    let verified_device_required =
-        require_verified_device(required_level.as_deref(), AttemptDevice::DESKTOP).is_err();
+    let verified_device_required = requires_device_attested(
+        required_level
+            .as_deref()
+            .and_then(VerifiedAssuranceLevel::parse),
+    );
     Ok(RoleRow {
         target: AttemptRoleTarget {
             role_assessment_id: r.get(0)?,
@@ -994,13 +1000,12 @@ fn require_device_for(
     device: AttemptDevice,
 ) -> Result<(), String> {
     match role {
-        Some(role) if role.verified_device_required => require_verified_device(
-            Some(crate::sentinel::attestation::ASSURANCE_DEVICE_ATTESTED),
-            device,
-        ),
+        Some(role) if role.verified_device_required => require_device_attested(device),
         Some(_) => Ok(()),
         None => require_verified_device(
-            request_policy.and_then(|p| p.required_assurance_level.as_deref()),
+            request_policy
+                .and_then(|p| p.required_assurance_level.as_deref())
+                .and_then(VerifiedAssuranceLevel::parse),
             device,
         ),
     }

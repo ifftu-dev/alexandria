@@ -193,7 +193,9 @@ for (const f of readdirSync(here('.')).filter(f => f.endsWith('.json')).sort()) 
   // 8: answer custody. A self-issued credential (issuer is the subject)
   // cannot state `issuer` custody or carry a hosted attempt entry; a hosted
   // attempt entry must be the only one, say the issuer held the answers and
-  // graded, and sit beside an assertion stating `issuer` custody. An
+  // graded (with any score a fraction in [0,1]), and sit beside an assertion stating `issuer` custody. Any other
+  // credential stating `issuer` custody without such an entry is unproven:
+  // a candidate's second key is not self-issued by the DID test. An
   // assertion that states no custody reads as `device`.
   const selfIssued = issuerId === String(vc.credentialSubject.id)
   const custody = vc.integrity ? (vc.integrity.answerCustody ?? 'device') : null
@@ -204,10 +206,12 @@ for (const f of readdirSync(here('.')).filter(f => f.endsWith('.json')).sort()) 
   const hostedValid = hostedEntries.length === 1 && (e =>
     typeof e.attemptId === 'string' && e.answerCustody === 'issuer' &&
     e.gradedBy === 'issuer' && typeof e.attestation?.outcome === 'string' &&
+    (e.score === undefined || (typeof e.score === 'number' && e.score >= 0 && e.score <= 1)) &&
     levels.includes(e.verifiedAssuranceLevel))(hostedEntries[0])
   const hasHosted = hostedEntries.length > 0
   const custodyDefects = [
     [selfIssued && custody === 'issuer', 'issuer_custody_self_issued'],
+    [!selfIssued && custody === 'issuer' && hostedEntries.length === 0, 'issuer_custody_unproven'],
     [selfIssued && hasHosted, 'hosted_attempt_self_issued'],
     [hasHosted && !hostedValid, 'hosted_attempt_invalid'],
     [hasHosted && custody !== 'issuer', 'hosted_attempt_custody_mismatch'],

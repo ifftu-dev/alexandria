@@ -902,7 +902,7 @@ At session start the issuing device locks the session to one trust profile: `cor
 
 The verification rung records positive evidence independent of the device, as a strict ladder: `none` → `process` (response-process signals observed over every served item, from the backend's draw) → `probed` (every follow-up probe on the learner's own answers satisfied, at least one of them asking a question the learner had not already answered) → `consistent` (the outcome agrees with the learner's own history on the skill) → `live` (a live segment in an interview held in Alexandria). Missing or skipped evidence leaves a session a rung lower and never counts against the learner; a failed probe flags the session.
 
-Probe rules. A same-item probe (`reseed`: the item again with a new seed) still runs, and a failed one still flags the session, but it never earns `probed`: only an authored follow-up or variant, a plugin's own probe or a generated probe does. A probe's time limit is fixed by the item, never by the attempt's pace: the limit its author set, or else the response-process reading floor over its prompt and option text at its difficulty, times 4, plus 20 seconds, clamped to 15 seconds–5 minutes. Plugin probes keep the grader's time box and generated probes 60 seconds. In a hosted attempt (§14.9.7) a probe is another item on the same skill the candidate was never sent, drawn, timed and graded by the issuer; one answered after its limit fails.
+Probe rules. A same-item probe (`reseed`: the item again with a new seed) still runs, and a failed one still flags the session, but it never earns `probed`: only an authored follow-up or variant, a plugin's own probe or a generated probe does. A probe's time limit is fixed by the item, never by the attempt's pace: the limit its author set, or else the response-process reading floor over its prompt and option text at its difficulty, times 4, plus 20 seconds, clamped to 15 seconds–5 minutes. Plugin probes keep the grader's time box; a generated probe gets the reading-floor default from its own text and the item's difficulty. In a hosted attempt (§14.9.7) a probe is another item on the same skill the candidate was never sent, drawn, timed and graded by the issuer; one answered after its limit fails.
 
 A session reaches the credential through the `integrity` attestation block (§14.9.5), with the terminal status, the composite score, the profile, the rung and the coverage statement digest. Coverage statements and the measurement behind certified rates are specified in [`docs/sentinel.md`](sentinel.md) (Trust profiles, Verification rungs, Integrity Assurance).
 
@@ -1338,7 +1338,7 @@ The `integrityPolicy` (`IssuancePolicy`, snake_case fields) bounds are each opti
 
 | Bound | Refuses issuance when | Code |
 |---|---|---|
-| `required_answer_custody` | The assertion's answer custody is below it (`device` < `issuer`) | `custody_below_required` |
+| `required_answer_custody` | The credited answer custody is below it (`device` < `issuer`). `issuer` is credited only on a role credential from a hosted attempt, an assertion stating `issuer` beside a `HostedAttemptEvidence` entry that says the issuer held the answers and graded (`evaluate_hosted`); `evaluate` and `evaluate_assessed` credit `device` whatever the assertion states, since anyone, a candidate with a second key among them, can sign an assertion stating `issuer` | `custody_below_required` |
 | `require_clean` | The status is not `completed` | `not_clean` |
 | `min_integrity` | The composite score is below it, or absent | `integrity_below_minimum`, `no_integrity_score` |
 | `max_critical`, `max_warning` | A flag count exceeds it | `too_many_critical`, `too_many_warnings` |
@@ -1370,7 +1370,7 @@ An **organization** (sponsor) defines **role assessments** that map a job descri
 An organisation MAY hold a role's items and answers in its hosted service (a hosted item bank) and run the attempt itself. The service draws the items, sends one at a time, stamps its own clock on send and receipt, grades and probes; the candidate's device shows the items and contributes integrity evidence only. A score or timing the device reports decides nothing. See [ADR 0009](./adr/0009-hosted-attempts-issuer-holds-answers.md); the candidate API is specified in the Cloud repository's hosted attempts document.
 
 - **Items on the wire.** A choice item carries `kind: "choice"`, the question, the options in this attempt's shuffled order and `select` (`one` or `many`). A plugin item carries `kind: "plugin"`, `plugin: {cid, starter}` naming a plugin the app bundles by its manifest's BLAKE3, the prompt as `question`, no options and `select: "submission"`; the device answers with `submission`, and the issuer grades it with the exact bundled grader over hidden test cases the device never receives, full marks counting as correct. A device MUST refuse an item naming a plugin it does not bundle. Item text MUST stay in memory and out of storage and logs on the device.
-- **Close.** The device sends its integrity assertion and, on an attested phone, a credential-bound `DeviceAttestationEvidence` whose binding proof covers the close digest `SHA-256("alexandria-hosted-attempt-close-v1" ‖ 0x00 ‖ commitmentRoot ‖ 0x00 ‖ did ‖ 0x00 ‖ attempt id)` (attempt id lowercase hyphenated) instead of a credential's binding digest: an App Attest assertion over it, or a Play Integrity token with it as nonce. Evidence from a companion phone verifies as `companion_attested`.
+- **Close.** The device sends its integrity assertion and, on an attested phone, a credential-bound `DeviceAttestationEvidence` whose binding proof covers the close digest `SHA-256("alexandria-hosted-attempt-close-v1" ‖ 0x00 ‖ commitmentRoot ‖ 0x00 ‖ did ‖ 0x00 ‖ attempt id)` (attempt id lowercase hyphenated) instead of a credential's binding digest: an App Attest assertion over it, or a Play Integrity token with it as nonce. Evidence from a companion phone verifies as `companion_attested`. The issuer checks the evidence's certificates at its own clock when the attempt closes, never at the assertion's `generatedAt`. On an attested role the close request itself carries an assertion from the registered key over its body, which holds the evidence.
 - **Attested requests.** When the role requires `device_attested`, the open request registers an App Attest key (challenge `SHA-256("alexandria-hosted-attempt-key-v1" ‖ 0x00 ‖ did ‖ 0x00 ‖ invite id ‖ 0x00 ‖ nonce)`), and every answer and the close carry an assertion from it over the request's signed challenge, a newline and the hex SHA-256 of the body, with the counter advancing. A request without a valid assertion is refused.
 - **Credential.** When the policy is met (judged by `alexandria_verify::policy::evaluate_hosted`), the issuer signs a `RoleCredential` whose assertion it writes: the device's session facts with `answerCustody: "issuer"`, the issuer's rung, probe step and verified level, and the coverage statement for that profile and rung. Its one evidence entry is a `HostedAttemptEvidence`:
 
@@ -1380,13 +1380,15 @@ An organisation MAY hold a role's items and answers in its hosted service (a hos
   "attemptId": "…",
   "answerCustody": "issuer",
   "gradedBy": "issuer",
+  "score": 0.75,
   "probe": { "outcome": "satisfied", "policies": ["authored"], "satisfied": 1, "failed": 0, "skipped": 0 },
   "attestation": { "outcome": "verified_credential_bound", "platform": "ios" },
   "verifiedAssuranceLevel": "device_attested"
 }
 ```
 
-`probe` is omitted when no probe step ran. The policy rule takes the verified level, the floor's device attestation and the probe step (for the probe policy and the rung) from this entry, and custody, status, score, flags, profile and rung from the assertion. The entry's level counts only as far as its own `attestation` verifies it. The entry is valid only on an issuer-signed credential whose assertion states `issuer` custody (§14.13.1). When the policy is not met the issuer records the first unmet requirement and issues nothing; a role requiring `live` is held until an interview for the candidate and role holds a `live` result.
+`score` is the fraction of drawn items the issuer graded correct, in [0,1] (omitted when it states none). `probe` is omitted when no probe step ran. The policy rule takes the verified level, the floor's device attestation and the probe step (for the probe policy and the rung) from this entry, and status, score, flags, profile and rung from the assertion; the assertion's custody counts only beside an entry that says the issuer held the answers and graded. The entry's level counts only as far as its own `attestation` verifies it. The entry is valid only on an issuer-signed credential whose assertion states `issuer` custody (§14.13.1). When the policy is not met the issuer records the first unmet requirement and issues nothing; a role requiring `live` is held until an interview for the candidate and role, conducted by the panel after the attempt closed, holds a `live` result. The issuer's grade must reach its pass mark whatever the policy asks, so a hosted attempt is never held to less than a shared credential, which exists only once its assessment passed. The rung is the issuer's own finding, never the device's: `process` from its own timing of every item it drew, `probed` from its own probe step, `live` from the panel; never `consistent`, which needs the learner's history on the device.
+- **Probes state their limit first.** A probe is not sent with the answer that earns it: the reply carries the probe's time limit, and the probe's text is sent, and its clock started, only when the device asks for it after the candidate has seen the limit.
 
 ### 14.10 Non-Transferability Semantics
 
@@ -1606,12 +1608,16 @@ described in §14.9.5; `coverageStatementMismatch` (§14.7) appears only when
 true. `custodyDefects` (omitted while empty) lists what is wrong with the
 credential's answer custody, read from its own content; any one rejects:
 `issuer_custody_self_issued` (a self-issued credential, issuer DID equal to
-subject DID, states `issuer`), `hosted_attempt_self_issued` (a self-issued
+subject DID, states `issuer`), `issuer_custody_unproven` (a credential that is
+not self-issued states `issuer` with no `HostedAttemptEvidence` entry: only a
+hosted attempt shows the issuer held the answers, and a candidate's second key
+is not self-issued by the DID test), `hosted_attempt_self_issued` (a self-issued
 credential carries `HostedAttemptEvidence`), `hosted_attempt_invalid` (a
-duplicate or unparsable entry, or one not stating `issuer` custody and grader)
+duplicate or unparsable entry, one not stating `issuer` custody and grader,
+or one stating a score outside [0,1])
 and `hosted_attempt_custody_mismatch` (the entry beside an assertion not
 stating `issuer`). Trust classification (`alexandria_verify::trust`,
-calculation version 5) recomputes them and calls a result that disagrees
+calculation version 6) recomputes them and calls a result that disagrees
 inconsistent. `statusValid` is false when a present status
 reference is malformed or its bit index lies outside the supplied list.
 `integrity_anchor_unavailable` is reported only when the policy requires an

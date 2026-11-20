@@ -1,6 +1,41 @@
 # Changelog
 
-## 0.8.0 (unreleased)
+## 0.9.0 (unreleased)
+
+Review fixes to the unreleased 0.8.0 (never published; read its notes below
+as part of this release): `issuer` answer custody is no longer taken on the
+assertion's word.
+
+### Breaking changes
+
+- **`issuer` custody counts only on a credential from a hosted attempt.**
+  `policy::evaluate` and `policy::evaluate_assessed` credit `device` custody
+  whatever the assertion states; `policy::evaluate_hosted` credits the
+  assertion's custody only beside a `HostedAttemptEvidence` entry that says
+  the issuer held the answers and graded. Before, a candidate signing about
+  themselves with a second key could state `issuer` and meet a policy that
+  required it. Issuance policy vector 34 now expects
+  `custody_below_required`.
+- **New custody defect.** `CustodyDefect::IssuerCustodyUnproven`
+  (`issuer_custody_unproven`): a credential that is not self-issued states
+  `issuer` custody with no `HostedAttemptEvidence` entry. Reported after
+  `issuer_custody_self_issued`. `TrustInvalidReason` gains
+  `IssuerCustodyUnproven`. `TRUST_CALCULATION_VERSION` is 6.
+- **The hosted attempt entry states the issuer's score.**
+  `HostedAttemptEvidence::score: Option<f64>` (`score`, omitted while unset;
+  set with `with_score`): the fraction of drawn items the issuer graded
+  correct. A score outside [0,1] makes the entry `hosted_attempt_invalid`.
+  `HostedAttemptEvidence` no longer derives `Eq`.
+
+### Added
+
+- **Vectors**: credential vectors 30 (`issuer_custody_unproven`) and 31 (a
+  hosted score out of range); issuance policy vectors 52 (`issuer` stated on
+  an assessed credential) and 53 (a hosted entry that does not say what a
+  hosted attempt is). The independent JavaScript verifier checks both new
+  rules.
+
+## 0.8.0 (unreleased, superseded by 0.9.0)
 
 Assessment hardening: a credential says who held the answers, a desktop
 session backed by a paired phone gets its own level, and an organisation's

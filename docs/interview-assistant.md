@@ -144,8 +144,9 @@ live verification, and the report then carries the `live` rung.
 **Roles that require `live`.** An organisation's role can require the `live`
 rung. For a hosted attempt, the organisation's Cloud holds the credential
 (`held`; the candidate's app offers to check again) until an interview for
-that candidate and role, recorded as conducted and not rejected, holds an
-integrity report whose rung is `live`, then issues it. Nothing is added to the
+that candidate and role, recorded as conducted and not rejected after the
+attempt closed, holds an integrity report whose rung is `live`, then issues
+it. Nothing is added to the
 interview itself. Limitation: a role issued from a sponsor's own device
 (answers on the candidate's device) cannot reach `live` this way yet. The
 segment is recorded only in the interview's own integrity check, not in the

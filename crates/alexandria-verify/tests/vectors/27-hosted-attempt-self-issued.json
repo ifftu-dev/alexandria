@@ -72,6 +72,7 @@
           "satisfied": 1,
           "skipped": 0
         },
+        "score": 0.75,
         "type": "HostedAttemptEvidence",
         "verifiedAssuranceLevel": "device_attested"
       }
@@ -89,7 +90,7 @@
       "created": "2026-01-01T00:00:00Z",
       "verificationMethod": "did:key:z6Mks5vHoHvUyy6ZSK4HhxKb1MvLnkXG9fC7ysb6vq9pdeR4#z6Mks5vHoHvUyy6ZSK4HhxKb1MvLnkXG9fC7ysb6vq9pdeR4",
       "proofPurpose": "assertionMethod",
-      "proofValue": "z2SzD8aRxcumKmWLwxJTntuGRLGRiTZufCJKp85tThF8DvEJAHhwSy7JWjWccqg6N3AoffM1h1EsSdjPy3xMbzRV2"
+      "proofValue": "z5AsTnaYZfiKqrevu7oARgAHujAyguR6mstH35DPrH7kszmM9dzEDKRT9aoVMGe4EiqVBSiZKcp95LCoygNQgNwez"
     }
   },
   "store": {

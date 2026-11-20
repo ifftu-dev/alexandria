@@ -49,8 +49,9 @@ import AssessmentProbes from './AssessmentProbes.vue'
 import CompanionPhoneOffer from '@/components/integrity/CompanionPhoneOffer.vue'
 import TrustProfileNotice from '@/components/integrity/TrustProfileNotice.vue'
 import { isMobilePlatform } from '@/composables/usePlatform'
-import { needsVerifiedDevice, verifiedDeviceRefusal, verifiedPhones, type VerifiedPhones } from '@/utils/verifiedDevice'
-import type { AttemptRoleTarget, DeviceSupport, StartedAttempt, GradeResult, RequestAttemptTarget, SelectedProfile, SkillDetail } from '@/types'
+import { needsVerifiedDevice } from '@/utils/verifiedDevice'
+import { useVerifiedDevice } from '@/composables/useVerifiedDevice'
+import type { AttemptRoleTarget, StartedAttempt, GradeResult, RequestAttemptTarget, SelectedProfile, SkillDetail } from '@/types'
 import type { DeepReadonly } from 'vue'
 
 const route = useRoute()
@@ -119,30 +120,21 @@ const cameraRequired = computed(() => {
   if (requestTarget.value) return requestTarget.value.camera_required
   return attempt.value ? !!attempt.value.role?.camera_required : !!selectedRole.value?.camera_required
 })
-/** What this device can reach; asked only when a role or request requires a verified device. */
-const deviceSupport = ref<DeviceSupport | null>(null)
-/** The phones the backend's `verified_device_required` refusal named. */
-const deviceRefused = ref<VerifiedPhones | null>(null)
 const verifiedDeviceRequired = computed(() => {
   if (requestTarget.value) return needsVerifiedDevice(requestTarget.value.issuance_policy?.required_assurance_level)
   return !!(attempt.value?.role ?? selectedRole.value)?.verified_device_required
 })
-const phones = computed<VerifiedPhones>(() => deviceRefused.value ?? verifiedPhones(deviceSupport.value))
-/** Known not to reach `device_attested` here; unknown never blocks (the backend still refuses). */
-const verifiedDeviceBlocked = computed(() =>
-  verifiedDeviceRequired.value && (deviceRefused.value !== null || deviceSupport.value?.verified_device === false),
-)
+/** What this device can reach, asked only when a role or request requires a verified device. */
+const {
+  phones,
+  blocked: verifiedDeviceBlocked,
+  detect: detectDeviceSupport,
+  refuse: refuseOnDevice,
+} = useVerifiedDevice(verifiedDeviceRequired)
 const startBlocked = computed(() =>
   loading.value || (cameraRequired.value && !cameraStream.value) || verifiedDeviceBlocked.value,
 )
 
-async function detectDeviceSupport(): Promise<void> {
-  try {
-    deviceSupport.value = await invoke<DeviceSupport>('integrity_device_support')
-  } catch {
-    /* unknown: nothing is claimed */
-  }
-}
 
 function currentAnswers() {
   if (!attempt.value) return []
@@ -223,10 +215,8 @@ async function begin(roleAssessmentId: string | null) {
     })
   } catch (e) {
     if (!disposed) {
-      const refused = verifiedDeviceRefusal(e)
-      if (refused) {
+      if (refuseOnDevice(e)) {
         // Said where the requirement is shown, not as a raw error.
-        deviceRefused.value = refused
         choosing.value = true
       } else {
         error.value = String(e)

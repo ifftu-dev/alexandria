@@ -658,7 +658,6 @@
       "over_budget": "this device cannot run the camera checks smoothly"
     },
     "raise": {
-      "pair_phone": "Pair your phone before you start.",
       "attested_device": "Use a phone or tablet that passes device attestation.",
       "connect_camera": "Connect a camera.",
       "allow_camera": "Turn on the camera before you start.",

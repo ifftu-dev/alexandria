@@ -126,6 +126,22 @@ impl HostedError {
     pub fn into_command_error(self) -> String {
         format!("{ERROR_PREFIX}:{}: {self}", self.code())
     }
+
+    /// A reply that does not decode. serde's message can quote the value it
+    /// choked on, which may be item text, so only where it failed is kept:
+    /// command errors reach the screen and the logs.
+    fn unreadable(error: &serde_json::Error) -> Self {
+        let kind = match error.classify() {
+            serde_json::error::Category::Io => "could not be read",
+            serde_json::error::Category::Syntax | serde_json::error::Category::Eof => "is not JSON",
+            serde_json::error::Category::Data => "does not have the expected shape",
+        };
+        Self::Protocol(format!(
+            "the reply {kind} (line {}, column {})",
+            error.line(),
+            error.column()
+        ))
+    }
 }
 
 // ── Digests ───────────────────────────────────────────────────────
@@ -182,15 +198,18 @@ pub trait PlatformKey: Send + Sync {
     fn assert(&self, key_id: &str, client_data: &[u8]) -> Result<String, String>;
 }
 
+/// Why a device without a platform key cannot take an attested attempt.
+const CANNOT_ATTEST: &str = "this device cannot attest itself";
+
 /// No platform key: an attested attempt cannot be opened with it.
 pub struct NoPlatformKey;
 
 impl PlatformKey for NoPlatformKey {
     fn register(&self, _: &[u8; 32]) -> Result<DeviceKey, String> {
-        Err("this device cannot attest itself".into())
+        Err(CANNOT_ATTEST.into())
     }
     fn assert(&self, _: &str, _: &[u8]) -> Result<String, String> {
-        Err("this device cannot attest itself".into())
+        Err(CANNOT_ATTEST.into())
     }
 }
 
@@ -204,7 +223,7 @@ impl PlatformKey for NativePlatformKey {
         let captured = tokio::task::block_in_place(|| {
             crate::sentinel::attestation::native::capture(challenge)
         })?
-        .ok_or("this device cannot attest itself")?;
+        .ok_or(CANNOT_ATTEST)?;
         match captured.payload {
             AttestationPayload::AppAttest {
                 key_id_b64,
@@ -224,7 +243,7 @@ impl PlatformKey for NativePlatformKey {
         tokio::task::block_in_place(|| {
             crate::sentinel::attestation::native::assert_bytes(key_id, client_data)
         })?
-        .ok_or_else(|| "this device cannot attest itself".into())
+        .ok_or_else(|| CANNOT_ATTEST.into())
     }
 }
 
@@ -343,7 +362,7 @@ impl HostedService {
                 Err(_) => HostedError::Protocol(format!("the service answered {status}")),
             });
         }
-        serde_json::from_slice(&bytes).map_err(|e| HostedError::Protocol(e.to_string()))
+        serde_json::from_slice(&bytes).map_err(|e| HostedError::unreadable(&e))
     }
 
     fn received(state: AttemptState) -> Result<AttemptState, HostedError> {
@@ -375,7 +394,7 @@ impl HostedService {
             .await?;
         let computed = terms_digest(raw.get("terms").unwrap_or(&Value::Null))?;
         let reply: TermsReply =
-            serde_json::from_value(raw).map_err(|e| HostedError::Protocol(e.to_string()))?;
+            serde_json::from_value(raw).map_err(|e| HostedError::unreadable(&e))?;
         if reply.terms.format != wire::TERMS_FORMAT {
             return Err(HostedError::Protocol(format!(
                 "terms in an unknown format: {}",
@@ -433,6 +452,18 @@ impl HostedService {
         let path = self.path(&format!("attempts/{attempt}"));
         let state = self
             .send(reqwest::Method::GET, &path, None, None, None)
+            .await?;
+        Self::received(state)
+    }
+
+    /// Start the probe the last reply said is waiting
+    /// ([`AttemptState::pending_probe`]), once the candidate has read its time
+    /// limit and pressed Start: its text arrives now and its clock starts on
+    /// the service's side now (story 15).
+    pub async fn start_probe(&self, attempt: &str) -> Result<AttemptState, HostedError> {
+        let path = self.path(&format!("attempts/{attempt}/probe"));
+        let state = self
+            .send(reqwest::Method::POST, &path, None, None, None)
             .await?;
         Self::received(state)
     }

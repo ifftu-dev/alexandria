@@ -615,7 +615,6 @@
       "over_budget": "该设备无法流畅运行摄像头检查"
     },
     "raise": {
-      "pair_phone": "开始前先配对你的手机。",
       "attested_device": "使用能通过设备认证的手机或平板。",
       "connect_camera": "连接一个摄像头。",
       "allow_camera": "开始前开启摄像头。",

@@ -23,6 +23,7 @@
 
 pub mod native;
 
+pub use alexandria_verify::attestation::VerifiedAssuranceLevel;
 pub use alexandria_verify::attestation::{
     app_attest, play_integrity, session_nonce, AttestationPayload, AttestationTrust,
     DeviceAttestation, Platform, PlayIntegrityKeys, Unverified, Verified,
@@ -163,18 +164,30 @@ impl AttemptDevice {
     }
 }
 
+/// Whether a required assurance level must be met on the attempt's own
+/// attested device: only `device_attested`. `local` and
+/// `companion_attested` can be met from a desktop.
+pub fn requires_device_attested(required: Option<VerifiedAssuranceLevel>) -> bool {
+    required == Some(VerifiedAssuranceLevel::DeviceAttested)
+}
+
 /// Refuse to start an attempt whose policy requires `required` when this
-/// device cannot reach it, before any item is shown. Only a required
-/// `device_attested` refuses: `local` and `companion_attested` can be met
-/// from a desktop.
+/// device cannot reach it, before any item is shown
+/// ([`requires_device_attested`]).
 pub fn require_verified_device(
-    required: Option<&str>,
+    required: Option<VerifiedAssuranceLevel>,
     device: AttemptDevice,
 ) -> Result<(), String> {
-    use alexandria_verify::attestation::VerifiedAssuranceLevel;
-    let requires_device = required.and_then(VerifiedAssuranceLevel::parse)
-        == Some(VerifiedAssuranceLevel::DeviceAttested);
-    if !requires_device || device.can_reach_device_attested() {
+    if !requires_device_attested(required) {
+        return Ok(());
+    }
+    require_device_attested(device)
+}
+
+/// Refuse to start an attempt that requires `device_attested` on a device
+/// that cannot reach it, naming the phones that can.
+pub fn require_device_attested(device: AttemptDevice) -> Result<(), String> {
+    if device.can_reach_device_attested() {
         return Ok(());
     }
     let (phones, take_it_on) = if device.android_attestation {

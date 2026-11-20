@@ -1,16 +1,16 @@
 <script setup lang="ts">
 // The learner's pre-attempt notice: which trust profile the backend chose for
 // this session and why, whether the sponsor's minimum is met, and what would
-// raise the profile next time (a paired phone, the camera, a faster device).
+// raise the profile next time (an attested device, the camera, a faster
+// device).
 import { computed } from 'vue'
-import { isMobilePlatform } from '@/composables/usePlatform'
 import { profileNotice } from '@/utils/sentinel/profileNotice'
 import type { DeepReadonly } from 'vue'
 import type { SelectedProfile } from '@/types'
 
 const props = defineProps<{ selected: DeepReadonly<SelectedProfile> }>()
 
-const notice = computed(() => profileNotice(props.selected, { mobile: isMobilePlatform }))
+const notice = computed(() => profileNotice(props.selected))
 </script>
 
 <template>

@@ -68,9 +68,6 @@ use crate::sentinel::verification::VerificationOutcome;
 /// question with its key, graded by the item's grader.
 pub const GENERATED_FORMAT: &str = "mcq_single";
 
-/// Time box for a generated probe.
-pub const GENERATED_TIME_BOX_MS: u64 = 60_000;
-
 /// Upper bound on a generated probe's answer from the model.
 const MAX_OUTPUT_TOKENS: u32 = 1_024;
 const MAX_PROMPT_CHARS: usize = 1_000;
@@ -590,12 +587,16 @@ pub fn store_generated_db(
             )?;
             continue;
         };
+        // Fixed by the probe's own text and the item's difficulty, the
+        // default every probe without an author's limit gets.
+        let time_box_ms = probes::item_time_box_ms(&question, item.difficulty)
+            .clamp(PROBE_TIME_BOX_MIN_MS, PROBE_TIME_BOX_MAX_MS);
         let g = Generated {
             source: probes::GENERATED_SOURCE,
             source_id: None,
             question,
             expectation: Some(expectation),
-            time_box_ms: GENERATED_TIME_BOX_MS.clamp(PROBE_TIME_BOX_MIN_MS, PROBE_TIME_BOX_MAX_MS),
+            time_box_ms,
             pass_score: 1.0,
             generation: Some(generation),
         };

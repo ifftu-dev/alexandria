@@ -37,7 +37,10 @@ use crate::vc::{
 ///    credential, or a hosted attempt entry that is self-issued, malformed or
 ///    beside another custody) is invalid, and a paired phone's session-bound
 ///    outcome says `companion`.
-pub const TRUST_CALCULATION_VERSION: u32 = 5;
+/// 6: a credential signed by someone other than its subject that states
+///    `issuer` custody with no hosted attempt entry is invalid
+///    (`issuer_custody_unproven`).
+pub const TRUST_CALCULATION_VERSION: u32 = 6;
 
 const COURSE_DOCUMENT_EVIDENCE_PREFIX: &str = "course-document:blake3:";
 const COMPLETION_ROOT_EVIDENCE_PREFIX: &str = "completion-root:";
@@ -120,6 +123,9 @@ pub enum TrustInvalidReason {
     /// A self-issued credential states `issuer` answer custody
     /// ([`CustodyDefect::IssuerCustodySelfIssued`]).
     IssuerCustodySelfIssued,
+    /// An issuer-signed credential states `issuer` answer custody with no
+    /// hosted attempt entry ([`CustodyDefect::IssuerCustodyUnproven`]).
+    IssuerCustodyUnproven,
     /// A self-issued credential carries a hosted attempt entry
     /// ([`CustodyDefect::HostedAttemptSelfIssued`]).
     HostedAttemptSelfIssued,
@@ -135,6 +141,7 @@ impl From<CustodyDefect> for TrustInvalidReason {
     fn from(defect: CustodyDefect) -> Self {
         match defect {
             CustodyDefect::IssuerCustodySelfIssued => Self::IssuerCustodySelfIssued,
+            CustodyDefect::IssuerCustodyUnproven => Self::IssuerCustodyUnproven,
             CustodyDefect::HostedAttemptSelfIssued => Self::HostedAttemptSelfIssued,
             CustodyDefect::HostedAttemptInvalid => Self::HostedAttemptInvalid,
             CustodyDefect::HostedAttemptCustodyMismatch => Self::HostedAttemptCustodyMismatch,

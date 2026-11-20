@@ -2103,7 +2103,11 @@ mod tests {
             probe.content.get("correct_indices").is_none(),
             "key stays on the host"
         );
-        assert_eq!(probe.time_box_ms, llm_probe::GENERATED_TIME_BOX_MS);
+        // Fixed by the probe's own text and the item's difficulty, as for any
+        // probe without an author's limit: 18 characters at difficulty 2 is a
+        // reading floor of (800 + 18 × 20) × 1.15 = 1334 ms, four times over
+        // plus 20 s.
+        assert_eq!(probe.time_box_ms, 25_336);
 
         render_probe_db(&ctx.db, &probe.id, LEARNER, NOW_MS).unwrap();
         respond(&ctx, &probe, &["x"], NOW_MS + 4_000);
