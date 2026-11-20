@@ -1,7 +1,7 @@
 # Interview Assistant
 
 Status: live
-Updated: 2026-11-13
+Updated: 2026-11-21
 
 > Local-first support for planning, conducting, transcribing, and reviewing
 > structured interviews — for instructors, and for panelists on an
@@ -140,6 +140,17 @@ not a verdict.
 **Live segments.** After an unscripted stretch of questions, a panelist can
 press **Live segment done**. The candidate's integrity check records it as a
 live verification, and the report then carries the `live` rung.
+
+**Roles that require `live`.** An organisation's role can require the `live`
+rung. For a hosted attempt, the organisation's Cloud holds the credential
+(`held`; the candidate's app offers to check again) until an interview for
+that candidate and role, recorded as conducted and not rejected, holds an
+integrity report whose rung is `live`, then issues it. Nothing is added to the
+interview itself. Limitation: a role issued from a sponsor's own device
+(answers on the candidate's device) cannot reach `live` this way yet. The
+segment is recorded only in the interview's own integrity check, not in the
+role attempt's session, so issuance there stays refused with
+`rung_below_minimum`.
 
 ## Architecture
 

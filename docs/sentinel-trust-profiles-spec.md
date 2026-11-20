@@ -1,7 +1,7 @@
 # Sentinel trust profiles and verified credentials
 
 Status: active
-Updated: 2026-11-17
+Updated: 2026-11-21
 Triage: ready-for-agent
 Repos: alexandria
 
@@ -267,3 +267,9 @@ Owner actions, not agent work (ticket 16):
 
 - **Camera coverage is stated.** The assertion gained `cameraCoverage` (the fraction of committed windows with camera checks), and every verifier judges the 90% camera rule from it through the shared policy rule. A degraded camera still never reads as clean coverage; a credential without the field never counts it towards a floor.
 - **Attestation is checkable by the reader.** Verification moved from `sentinel::attestation` into `alexandria_verify::attestation`, and a credential carries its attestation evidence in `evidence`. "Verified only at issuance" no longer holds: `device_attested` counts for a reader only through its own verified assurance level.
+
+2026-11-20, superseded in part by [assessment-hardening-spec.md](assessment-hardening-spec.md):
+
+- **Companion level.** A desktop paired with an attested phone no longer reaches `device_attested` (user story 13, the device axis and the companion decision above). Its session is `companion_attested`, a third assurance level between `local` and `device_attested`: it weighs as a plain self-claim, never meets a requirement for `device_attested`, and does not credit a floor's device attestation, so a companion session cannot select `attested` or `full`. `device_attested` means the attempt ran in the attested app on the attested device.
+- **Probe rules.** A same-item `reseed` probe still runs and a failed one still flags the session, but it no longer earns `probed`: the rung needs a probe that asks something the learner had not already answered (authored, variant, plugin or generated). A probe's time limit is fixed by the item (the author's, or the reading floor over its text ×4 + 20 s, clamped to 15 s–5 min), never "proportional to the first attempt".
+- **Coverage statements.** Version 3 says, below `live`, that a second device or person was not ruled out.
