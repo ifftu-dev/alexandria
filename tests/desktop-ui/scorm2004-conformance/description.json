@@ -1,0 +1,91 @@
+{
+  "standard": "scorm2004",
+  "edition": "4th",
+  "identifier": "dev.alexandria.fixture.scorm2004-conformance",
+  "title": "SCORM 2004 conformance",
+  "tree": {
+    "id": "conformance",
+    "title": "SCORM 2004 conformance",
+    "visible": true,
+    "sequencing": {
+      "control_mode": {
+        "choice": true,
+        "choice_exit": true,
+        "flow": true,
+        "forward_only": false,
+        "use_current_attempt_objective_info": true,
+        "use_current_attempt_progress_info": true
+      }
+    },
+    "children": [
+      {
+        "id": "probe",
+        "title": "Probe with manifest values",
+        "visible": true,
+        "launch": {
+          "path": "probe.html",
+          "kind": "sco",
+          "launch_data": "chapter=3&mode=practice",
+          "mastery_score": 0.7,
+          "max_time_allowed": "PT30M",
+          "time_limit_action": "exit,message"
+        },
+        "sequencing": {
+          "limit_conditions": {
+            "attempt_absolute_duration_limit": "PT30M"
+          },
+          "objectives": {
+            "primary": {
+              "id": "probe-pass",
+              "satisfied_by_measure": true,
+              "min_normalized_measure": 0.7
+            },
+            "others": [
+              {
+                "id": "probe-extra",
+                "satisfied_by_measure": false,
+                "min_normalized_measure": 1.0
+              }
+            ]
+          }
+        },
+        "completion_threshold": {
+          "completed_by_measure": true,
+          "min_progress_measure": 0.6,
+          "progress_weight": 1.0
+        }
+      },
+      {
+        "id": "plain",
+        "title": "Probe without manifest values",
+        "visible": true,
+        "launch": {
+          "path": "probe.html",
+          "parameters": "?plain",
+          "kind": "sco"
+        }
+      },
+      {
+        "id": "noid",
+        "title": "Probe whose primary objective has no identifier",
+        "visible": true,
+        "launch": {
+          "path": "probe.html",
+          "parameters": "?noid",
+          "kind": "sco",
+          "mastery_score": 0.5
+        },
+        "sequencing": {
+          "objectives": {
+            "primary": {
+              "satisfied_by_measure": true,
+              "min_normalized_measure": 0.5
+            }
+          }
+        }
+      }
+    ]
+  },
+  "files": 2,
+  "uncompressed_bytes": 4925
+}

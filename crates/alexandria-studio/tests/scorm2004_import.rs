@@ -806,6 +806,43 @@ fn values_written_in_the_wrong_case_are_still_read() {
 }
 
 #[test]
+fn objective_ids_are_kept_decoded_and_with_white_space_collapsed() {
+    // The test suite's OB-02a and OB-12a: identifiers are URIs, compared and
+    // reported once escapes are decoded and runs of white space collapsed.
+    let package = import(&lesson_with(
+        r#"<imsss:sequencing>
+             <imsss:sequencingRules><imsss:preConditionRule>
+               <imsss:ruleConditions>
+                 <imsss:ruleCondition condition="satisfied" referencedObjective="  %20obj%20%201%20  "/>
+                 <imsss:ruleCondition condition="objectiveStatusKnown" referencedObjective="ob%20%20j"/>
+               </imsss:ruleConditions>
+               <imsss:ruleAction action="skip"/>
+             </imsss:preConditionRule></imsss:sequencingRules>
+             <imsss:objectives>
+               <imsss:primaryObjective objectiveID="obj%201">
+                 <imsss:mapInfo targetObjectiveID=" g%20one "/>
+               </imsss:primaryObjective>
+               <imsss:objective objectiveID=" ob%20j  "/>
+             </imsss:objectives>
+           </imsss:sequencing>"#,
+        "",
+    ));
+    let sequencing = package.tree.children[0].sequencing.as_ref().unwrap();
+    let objectives = sequencing.objectives.as_ref().unwrap();
+    assert_eq!(objectives.primary.id.as_deref(), Some("obj 1"));
+    assert_eq!(objectives.primary.map_info[0].target_objective_id, "g one");
+    assert_eq!(objectives.others[0].id.as_deref(), Some("ob j"));
+    let conditions = &sequencing
+        .sequencing_rules
+        .as_ref()
+        .unwrap()
+        .pre_condition_rules[0]
+        .conditions;
+    assert_eq!(conditions[0].referenced_objective.as_deref(), Some("obj 1"));
+    assert_eq!(conditions[1].referenced_objective.as_deref(), Some("ob j"));
+}
+
+#[test]
 fn the_package_refusals_apply_to_scorm2004_with_its_edition_attached() {
     let missing = manifest("2004 3rd Edition", PLAIN, "", RESOURCES);
     let refused = import_package(

@@ -411,7 +411,39 @@
         },
       },
     });
+    measureAttemptDurations(p.api);
     return p;
+  }
+
+  // The runtime's activities read `attemptAbsoluteDuration` as the attempt's
+  // duration limit, not its duration, so the limit conditions check finds
+  // every limit already reached and nothing with a duration limit is ever
+  // delivered (test suite CM-01). Point it at the measured duration, which is
+  // what the check, the new-attempt reset and the state restore mean.
+  function measureAttemptDurations(api) {
+    var root = null;
+    try {
+      root = api.getSequencingState().rootActivity;
+    } catch (_) {}
+    (function walk(activity) {
+      if (!activity) return;
+      // Only where a limit is set: with the accessor on every activity the
+      // engine's continue look-ahead stops answering (the player fixture).
+      if (activity.attemptAbsoluteDurationLimit) try {
+        Object.defineProperty(activity, 'attemptAbsoluteDuration', {
+          configurable: true,
+          get: function () {
+            return this.attemptAbsoluteDurationValue;
+          },
+          set: function (value) {
+            try {
+              this.attemptAbsoluteDurationValue = value;
+            } catch (_) {}
+          },
+        });
+      } catch (_) {}
+      (activity.children || []).forEach(walk);
+    })(root);
   }
 
   function sequence(message) {
@@ -436,6 +468,7 @@
     if (snapshot) {
       try {
         restored = api.deserializeSequencingState(snapshot) === true;
+        measureAttemptDurations(api);
       } catch (_) {}
     }
     var resumed = restored && (api.processNavigationRequest('resumeAll')
@@ -455,6 +488,7 @@
     pkg.expecting = null;
     var api = pkg.api;
     api.reset(undefined, { preserveListeners: true, resetTotalTime: true });
+    forgetPreviousLesson(api);
     // Prior state goes in before the lesson exists: the runtime refuses it
     // after initialise.
     try {
@@ -483,6 +517,25 @@
     s.frame = frame;
     document.body.appendChild(frame);
     tell(navigationState());
+  }
+
+  // `reset()` keeps the previous lesson's launch values and learner comments,
+  // so a lesson the manifest gives none would read another lesson's (test
+  // suite DMB: a lesson without a passing score read the one before's). Put
+  // the standard's initial values back; the host's values follow. Written
+  // directly, not through SetValue, so an unset value still reads as unset.
+  var LAUNCH_DEFAULTS = { scaled_passing_score: '', launch_data: '', max_time_allowed: '', time_limit_action: 'continue,no message' };
+  function forgetPreviousLesson(api) {
+    var cmi = api.cmi;
+    Object.keys(LAUNCH_DEFAULTS).forEach(function (name) {
+      try {
+        cmi[name] = LAUNCH_DEFAULTS[name];
+      } catch (_) {}
+    });
+    try {
+      cmi.comments_from_learner.reset(true);
+      cmi.comments_from_lms.reset(true);
+    } catch (_) {}
   }
 
   // The eight functions, bound to one delivered lesson. After that lesson
@@ -527,6 +580,7 @@
       },
       GetValue: function (element) {
         if (!live()) return refuse('', '123');
+        if (isContainer(element) && api.isInitialized()) return refuse('', '401');
         var value = api.GetValue(element);
         // The runtime leaves the previous call's error code in place for
         // these two; a successful read sets 0.
@@ -537,6 +591,8 @@
       },
       SetValue: function (element, value) {
         if (!live()) return refuse('false', '133');
+        // The runtime would replace a part of its data model with the value.
+        if (isContainer(element) && api.isInitialized()) return refuse('false', '401');
         var result = api.SetValue(element, value);
         controlsSoon();
         return pass(result);
@@ -555,6 +611,18 @@
         return api.GetDiagnostic(code);
       },
     };
+  }
+
+  // A name for a group of elements (`cmi`, `cmi.objectives`, `adl.data`, an
+  // entry of a list) names no element: 401 (test suite DMI). The runtime
+  // reads and replaces its own object for it instead.
+  var CONTAINER = new RegExp('^(?:cmi|adl|adl\\.(?:nav|nav\\.request_valid|data(?:\\.\\d+)?)' +
+    '|cmi\\.(?:score|learner_preference|comments_from_learner|comments_from_lms|objectives|interactions)' +
+    '|cmi\\.(?:comments_from_learner|comments_from_lms)\\.\\d+' +
+    '|cmi\\.objectives\\.\\d+(?:\\.score)?' +
+    '|cmi\\.interactions\\.\\d+(?:\\.(?:objectives|correct_responses)(?:\\.\\d+)?)?)$');
+  function isContainer(element) {
+    return typeof element === 'string' && CONTAINER.test(element);
   }
 
   // Ends a delivered lesson's session: `request` (a navigation request, or
@@ -616,6 +684,7 @@
     var api = p.api;
     try {
       api.deserializeSequencingState(snapshot);
+      measureAttemptDurations(api);
     } catch (_) {}
     if (request === 'choice') api.processNavigationRequest('choice', target);
     else if (!api.processNavigationRequest(request)) api.processNavigationRequest('start');
@@ -697,7 +766,30 @@
       previous: allowed('previous'),
       hidden: (validity.hideLmsUi || []).map(String),
       active: !pkg.over && Boolean(current),
-      tree: state.rootActivity ? plain(state.rootActivity, choice) : null,
+      tree: state.rootActivity ? plain(state.rootActivity, choice, hiddenFromChoice(api)) : null,
+    };
+  }
+
+  // Whether an activity's precondition rules hide it from choice now. The
+  // runtime evaluates such a rule only when a choice is made, so ask its rule
+  // engine (semi-internal; recheck on upgrade). A hidden activity is left out
+  // of the table of contents (test suite CM-07c, MS-07).
+  function hiddenFromChoice(api) {
+    var engine = null;
+    try {
+      engine = api.getSequencingService().sequencingProcess.ruleEngine;
+    } catch (_) {}
+    return function (activity) {
+      if (activity.isHiddenFromChoice === true) return true;
+      if (!engine) return false;
+      try {
+        var rules = ((activity.sequencingRules && activity.sequencingRules.preConditionRules) || []).filter(function (rule) {
+          return rule.action === 'hiddenFromChoice';
+        });
+        return rules.length > 0 && engine.checkSequencingRules(activity, rules) === 'hiddenFromChoice';
+      } catch (_) {
+        return false;
+      }
     };
   }
 
@@ -724,11 +816,11 @@
 
   // The engine's activity graph is live and cyclic; the player gets plain
   // data.
-  function plain(activity, choice) {
+  function plain(activity, choice, hidden) {
     return {
       id: String(activity.id),
       title: String(activity.title || ''),
-      visible: activity.isVisible !== false,
+      visible: activity.isVisible !== false && !hidden(activity),
       completion: String(activity.completionStatus || 'unknown'),
       choosable: choice[activity.id] === 'true' || choice[activity.id] === true,
       children: (activity.children || [])
@@ -736,7 +828,7 @@
           return child.isAvailable !== false;
         })
         .map(function (child) {
-          return plain(child, choice);
+          return plain(child, choice, hidden);
         }),
     };
   }

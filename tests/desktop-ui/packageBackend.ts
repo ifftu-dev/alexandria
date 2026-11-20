@@ -5,9 +5,12 @@ import type {
 import playerDescription from './package-player/description.json'
 import isolationDescription from './package-isolation/description.json'
 import scorm12Description from './scorm12-conformance/description.json'
+import scorm2004Description from './scorm2004-conformance/description.json'
+import edition2Description from './scorm2004-edition2/description.json'
+import edition3Description from './scorm2004-edition3/description.json'
 
 export interface PackageBackendOptions {
-  /** One of the SCORM 1.2 fixture packages; `package-player` by default. */
+  /** One of the fixture packages; `package-player` by default. */
   fixture?: PackageFixtureName
   /** Any other package the course's element holds (wins over `fixture`). */
   description?: PackageDescription
@@ -26,10 +29,16 @@ const DESCRIPTIONS = {
   'package-player': playerDescription,
   'package-isolation': isolationDescription,
   'scorm12-conformance': scorm12Description,
+  'scorm2004-conformance': scorm2004Description,
+  'scorm2004-edition2': edition2Description,
+  'scorm2004-edition3': edition3Description,
 } as const
 export type PackageFixtureName = keyof typeof DESCRIPTIONS
 export const isPackageFixtureName = (name: unknown): name is PackageFixtureName =>
   typeof name === 'string' && Object.prototype.hasOwnProperty.call(DESCRIPTIONS, name)
+/** What import made of a fixture package. */
+export const packageDescriptionOf = (name: PackageFixtureName): PackageDescription =>
+  structuredClone(DESCRIPTIONS[name]) as unknown as PackageDescription
 
 /** A CMITimespan, the way the host writes `total_time`. */
 function timespan(seconds: number): string {
@@ -43,6 +52,27 @@ function timespan(seconds: number): string {
 function seconds(span: unknown): number {
   const match = /^(\d+):(\d+):(\d+(?:\.\d+)?)$/.exec(String(span ?? '').trim())
   return match ? Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) : 0
+}
+
+/** Seconds in an ISO 8601 duration (a SCORM 2004 `session_time`); years and months count as 365 and 30 days, as the host counts them. */
+function durationSeconds(text: unknown): number {
+  const match = /^P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/.exec(String(text ?? '').trim())
+  if (!match) return 0
+  const [years, months, days, hours, minutes, secs] = match.slice(1).map(part => Number(part ?? 0)) as [number, number, number, number, number, number]
+  return years * 365 * 86400 + months * 30 * 86400 + days * 86400 + hours * 3600 + minutes * 60 + secs
+}
+
+/** `PT#H#M#S` to the hundredth of a second, the way the host writes a SCORM 2004 `total_time`. */
+function duration(total: number): string {
+  const centis = Math.round(Math.max(0, total) * 100)
+  const whole = Math.floor(centis / 100)
+  const [hours, minutes, secs, fraction] = [Math.floor(whole / 3600), Math.floor(whole / 60) % 60, whole % 60, centis % 100]
+  let out = 'PT'
+  if (hours) out += `${hours}H`
+  if (minutes) out += `${minutes}M`
+  if (fraction) out += `${secs}.${String(fraction).padStart(2, '0')}S`
+  else if (secs || (!hours && !minutes)) out += `${secs}S`
+  return out
 }
 
 type Cmi = Record<string, unknown> & { core?: Record<string, unknown> }
@@ -149,7 +179,8 @@ export function packageBackend(options: PackageBackendOptions = {}) {
 
   // SCORM 2004: a lesson's stored data comes back only when it is resumed
   // (it exited with suspend, or the engine resumed it); otherwise the launch
-  // is a new attempt on the lesson.
+  // is a new attempt on the lesson. The values are the real host's
+  // (`scorm2004::initial` in `progress.rs`).
   function initialise2004(attempt: PackageAttempt, activity: PackageActivity, resumed: boolean): PackageLaunchInit {
     const launch = activity.launch!
     const prior = state.get(attempt.id)!.get(activity.id)
@@ -158,14 +189,25 @@ export function packageBackend(options: PackageBackendOptions = {}) {
     const cmi: Cmi = {
       ...(resume ? structuredClone(prior!.cmi) : {}),
       learner_id: LEARNER_ID, learner_name: 'Ada Learner', entry, credit: 'credit', mode: 'normal',
-      ...(launch.launch_data ? { launch_data: launch.launch_data } : {}),
-      ...(launch.mastery_score !== undefined ? { scaled_passing_score: String(launch.mastery_score) } : {}),
+      // A resumed lesson's time is its learner attempt's, from the total its
+      // last termination rendered; the activity's own total otherwise.
+      total_time: duration(!resume ? 0 : /^P/.test(String(prior!.cmi.total_time ?? '')) ? durationSeconds(prior!.cmi.total_time) : prior!.totalSeconds),
     }
     delete cmi.session_time
     delete cmi.exit
+    const manifestValues: [string, string | null | undefined][] = [
+      ['launch_data', launch.launch_data],
+      ['scaled_passing_score', launch.mastery_score == null ? null : String(launch.mastery_score)],
+      ['max_time_allowed', launch.max_time_allowed],
+      ['time_limit_action', launch.time_limit_action],
+    ]
+    for (const [name, value] of manifestValues) {
+      if (value == null) delete cmi[name]
+      else cmi[name] = value
+    }
     return { attempt_id: attempt.id, activity_id: activity.id, standard: 'scorm2004', learner_id: LEARNER_ID, learner_name: 'Ada Learner',
-      entry, launch_data: launch.launch_data ?? null, mastery_score: launch.mastery_score ?? null, max_time_allowed: null,
-      time_limit_action: null, runtime: { cmi }, progress: null }
+      entry, launch_data: launch.launch_data ?? null, mastery_score: launch.mastery_score ?? null,
+      max_time_allowed: launch.max_time_allowed ?? null, time_limit_action: launch.time_limit_action ?? null, runtime: { cmi }, progress: null }
   }
 
   function initialise(attemptId: unknown, activityId: unknown, resumed = false): PackageLaunchInit {
@@ -213,11 +255,13 @@ export function packageBackend(options: PackageBackendOptions = {}) {
     const cmi = request.runtime.cmi as Cmi
     if (scorm2004) {
       const scaled = (cmi.score as { scaled?: string } | undefined)?.scaled
+      // The lesson's time of finished sessions, as the host keeps it.
+      const before = state.get(attempt.id)!.get(request.activity_id)?.totalSeconds ?? 0
       state.get(attempt.id)!.set(request.activity_id, {
         cmi: structuredClone(cmi),
         complete: cmi.completion_status === 'completed',
         score: scaled ? Math.max(0, Number(scaled)) : null,
-        totalSeconds: 0,
+        totalSeconds: request.session_ended ? before + durationSeconds(cmi.session_time) : before,
       })
       return rollUp(attempt)
     }

@@ -14,11 +14,15 @@ use alexandria_studio::package::{import_package, Limits, PackageDescription};
 mod fixture;
 
 /// The fixture packages: the player's own, the hostile one for the isolation
-/// checks, the SCORM 1.2 conformance probe and the cmi5 course.
+/// checks, the SCORM 1.2 and 2004 conformance probes, the SCORM 2004
+/// 2nd and 3rd Edition packages and the cmi5 course.
 const FIXTURES: &[&str] = &[
     "package-player",
     "package-isolation",
     "scorm12-conformance",
+    "scorm2004-conformance",
+    "scorm2004-edition2",
+    "scorm2004-edition3",
     "package-player/cmi5",
 ];
 
