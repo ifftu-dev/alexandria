@@ -194,6 +194,24 @@ test('the package completes when the sequencing engine reports the course comple
   expect(refused).toEqual([])
 })
 
+test('focus mode keeps the package navigation controls, so a full-screen package can still be left', async ({ page }) => {
+  await open(page)
+  await seen(page, 'intro')
+  await lesson(page).locator('#pass').click()
+  await page.locator('[data-package-label]').getByRole('button').click()
+  await expect(page.locator('[data-package-player]')).toHaveAttribute('data-focus', 'true')
+  // The course's own chrome goes; the package's controls stay.
+  await expect(page.locator('[data-package-toc]')).toBeHidden()
+  await expect(page.locator('[data-package-fresh]')).toBeHidden()
+  for (const name of ['previous', 'continue', 'suspend', 'exit']) await expect(control(page, name)).toBeVisible()
+
+  await control(page, 'continue').click()
+  expect(await seen(page, 'drill')).toMatchObject({ 'cmi.entry': 'ab-initio' })
+  await control(page, 'exit').click()
+  await page.locator('[data-package-exit-confirm]').click()
+  await expect(page.locator('[data-package-sequencing="ended"]')).toBeVisible()
+})
+
 test('the sequencing engine state is handed over at once when the app goes to the background', async ({ page }) => {
   await open(page)
   await seen(page, 'intro')

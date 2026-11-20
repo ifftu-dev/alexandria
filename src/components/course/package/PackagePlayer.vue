@@ -511,14 +511,20 @@ onBeforeUnmount(() => {
       </nav>
 
       <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-        <!-- Result, attempt and controls -->
-        <div v-if="!focus" class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2 text-xs">
-          <p data-package-result class="min-w-0 flex-1 text-muted-foreground">
+        <!-- Result, attempt and controls. Focus mode hides the course's own chrome but keeps
+             a SCORM 2004 package's navigation, which the package's rules may need to leave a lesson. -->
+        <div
+          v-if="!focus || sequenced"
+          data-package-controls
+          class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3 text-xs"
+          :class="focus ? 'justify-end py-1' : 'py-2'"
+        >
+          <p v-if="!focus" data-package-result class="min-w-0 flex-1 text-muted-foreground">
             <span class="font-medium text-foreground">{{ status }}</span>
             <template v-if="scorePercent !== null"> · {{ t('learn.package.score', { score: scorePercent }) }}</template>
             · {{ t('learn.package.selfReported') }}
           </p>
-          <span data-package-attempt class="text-muted-foreground">{{ t('learn.package.attempt', { number: attempt?.attempt_number ?? 1 }) }}</span>
+          <span v-if="!focus" data-package-attempt class="text-muted-foreground">{{ t('learn.package.attempt', { number: attempt?.attempt_number ?? 1 }) }}</span>
           <template v-if="sequenced">
             <AppButton
               v-if="!hidden('previous')"
@@ -569,7 +575,7 @@ onBeforeUnmount(() => {
               {{ t('learn.package.nextLesson') }}
             </AppButton>
           </template>
-          <AppButton data-package-fresh size="xs" variant="secondary" :disabled="phase !== 'ready' || busy" @click="confirmingFresh = true">
+          <AppButton v-if="!focus" data-package-fresh size="xs" variant="secondary" :disabled="phase !== 'ready' || busy" @click="confirmingFresh = true">
             {{ t('learn.package.fresh') }}
           </AppButton>
         </div>
@@ -580,7 +586,7 @@ onBeforeUnmount(() => {
           <AppButton size="xs" variant="ghost" @click="confirmingFresh = false">{{ t('learn.package.freshCancel') }}</AppButton>
         </div>
 
-        <div v-if="confirmingExit && !focus" class="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2 text-xs">
+        <div v-if="confirmingExit" class="flex shrink-0 flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2 text-xs">
           <p class="min-w-0 flex-1">{{ t('learn.package.exitBody') }}</p>
           <AppButton data-package-exit-confirm size="xs" @click="request('exitAll')">{{ t('learn.package.exitConfirm') }}</AppButton>
           <AppButton size="xs" variant="ghost" @click="confirmingExit = false">{{ t('learn.package.freshCancel') }}</AppButton>
