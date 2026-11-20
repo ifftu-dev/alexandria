@@ -130,6 +130,8 @@ export interface OpenOptions {
   bootstrap?: boolean
   /** Files served at the package path without being in the package. */
   extraFiles?: Record<string, Buffer>
+  /** Stand-ins for the player's reserved files (`_alexandria/<name>`), e.g. a broken `clear.html`. */
+  reservedFiles?: Record<string, string>
 }
 
 const RECORD = '__alexandriaHarnessRecord'
@@ -214,9 +216,12 @@ export async function openPlayer(page: Page, options: OpenOptions): Promise<Serv
     let body: Buffer
     try {
       if (path.startsWith('_alexandria/')) {
-        const file = reserved[path.slice('_alexandria/'.length)]
-        if (!file) return notFound()
-        body = await readFile(file)
+        const name = path.slice('_alexandria/'.length)
+        const standIn = options.reservedFiles?.[name]
+        const file = reserved[name]
+        if (standIn !== undefined) body = Buffer.from(standIn)
+        else if (!file) return notFound()
+        else body = await readFile(file)
       } else if (options.extraFiles?.[path]) {
         body = options.extraFiles[path]!
       } else if (options.adl !== undefined) {

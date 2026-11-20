@@ -173,6 +173,30 @@ for (const next of ['fresh attempt', 'leave and return'] as const) {
   })
 }
 
+// Every launch shares the package origin, so clearing its storage is the only
+// thing between one launch's data and the next. A launch whose clearing page
+// does not answer truthfully, for this request, must not start.
+const clearPage = (message: string) => `<!doctype html><html><head><script>
+  var nonce = location.hash.slice(1);
+  window.top.postMessage(${message}, '*');
+</script></head><body></body></html>`
+
+const BAD_CLEARS: Record<string, string> = {
+  'it reports that clearing failed': `{ source: 'alexandria-package', type: 'storage-cleared', nonce: nonce, ok: false, failed: ['indexedDB'] }`,
+  'its answer lacks the request nonce': `{ source: 'alexandria-package', type: 'storage-cleared', ok: true, failed: [] }`,
+  'its answer carries another nonce': `{ source: 'alexandria-package', type: 'storage-cleared', nonce: 'stale', ok: true, failed: [] }`,
+  'its answer does not come from the clearing page': `{ type: 'storage-cleared', nonce: nonce, ok: true, failed: [] }`,
+}
+
+for (const [why, message] of Object.entries(BAD_CLEARS)) {
+  test(`a launch does not start when storage clearing fails: ${why}`, async ({ page }) => {
+    await openPlayer(page, { fixture: 'package-isolation', reservedFiles: { 'clear.html': clearPage(message) } })
+    await expect(page.locator('[data-package-player] [role="alert"]')).toBeVisible({ timeout: 10000 })
+    expect(page.frames().some(frame => frame.url().includes('/_alexandria/wrapper.html'))).toBe(false)
+    expect(await called(page, 'package_attempt_initialise')).toBe(0)
+  })
+}
+
 async function labelUncovered(page: Page): Promise<boolean> {
   const label = page.locator('[data-package-label]')
   const box = await label.boundingBox()

@@ -161,6 +161,12 @@ function within(source: MessageEventSource | null, root: Window | null): boolean
   return false
 }
 
+/** 128 random bits as hex, for answers that must belong to one request. */
+function randomNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
 interface Waiter {
   matches: (event: MessageEvent) => boolean
   resolve: () => void
@@ -322,21 +328,33 @@ export function createPackageSession(options: PackageSessionOptions) {
     wrapper?.postMessage({ ...message, source: FROM_PLAYER }, '*')
   }
 
-  /** Loads the storage clearing page in `target` and waits for its answer. */
+  /**
+   * Loads the storage clearing page in `target` and waits for its answer:
+   * true only when the page says everything was cleared. Every launch shares
+   * the package origin, so this is the only thing between one launch's
+   * storage and the next. The frame keeps its window across navigations, so
+   * the document being replaced could post an answer too; the page echoes a
+   * nonce it reads from its own address, which that document never sees.
+   */
   async function clearStorage(target: HTMLIFrameElement): Promise<boolean> {
     const window = target.contentWindow
-    const cleared = waitFor(
-      (event) => event.source === window && (event.data as { type?: unknown })?.type === 'storage-cleared',
-      CLEAR_TIMEOUT_MS,
-    )
-    target.src = `${launch.base_url}_alexandria/clear.html`
-    return cleared
+    const nonce = randomNonce()
+    let ok = false
+    const answered = waitFor((event) => {
+      const data: unknown = event.data
+      if (event.source !== window || !isRecord(data) || data.source !== FROM_PACKAGE
+        || data.type !== 'storage-cleared' || data.nonce !== nonce) return false
+      ok = data.ok === true
+      return true
+    }, CLEAR_TIMEOUT_MS)
+    target.src = `${launch.base_url}_alexandria/clear.html#${nonce}`
+    return await answered && ok
   }
 
   /** Clears storage, then loads the wrapper and waits until it is ready. */
   async function start(): Promise<void> {
     window.addEventListener('message', onMessage)
-    await clearStorage(frame)
+    if (!await clearStorage(frame)) throw new Error('the package storage could not be cleared')
     wrapper = frame.contentWindow
     const ready = waitFor(
       (event) => event.source === wrapper && (event.data as { type?: unknown, source?: unknown })?.source === FROM_WRAPPER
@@ -493,7 +511,10 @@ export function createPackageSession(options: PackageSessionOptions) {
         helper.setAttribute('allow', '')
         document.body.appendChild(helper)
       }
-      await clearStorage(helper ?? frame)
+      // A launch that cannot be cleared on the way out still closes; the
+      // next launch clears again before anything runs and refuses to start
+      // when that fails.
+      if (!await clearStorage(helper ?? frame)) console.warn('package storage could not be cleared after the launch')
       helper?.remove()
       await invoke<boolean>('package_launch_close', { prefix: launch.prefix })
       const ended = await invoke<PackageAttemptProgress>('package_attempt_terminate', { attemptId })
