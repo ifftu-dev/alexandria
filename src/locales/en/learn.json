@@ -182,6 +182,7 @@
     "followUpNote": "A follow-up on the same skill. You have {seconds} seconds; an answer after that counts as failed.",
     "selectOne": "Choose one.",
     "selectMany": "Choose every answer that applies.",
+    "pluginNote": "Write your answer in the editor and press Submit there. The organisation runs it on test cases this device never receives; you see no result until the end.",
     "next": "Send answer",
     "reconnecting": "Connection lost. Trying again… The question's clock keeps running, and the attempt stays open for {minutes} minutes.",
     "resumed": "You are back at the same question. Its clock kept running while you were disconnected.",

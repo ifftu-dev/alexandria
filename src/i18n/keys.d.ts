@@ -1896,6 +1896,7 @@ export type MessageKey =
   | 'learn.hosted.issuedLater'
   | 'learn.hosted.monitoringOff'
   | 'learn.hosted.next'
+  | 'learn.hosted.pluginNote'
   | 'learn.hosted.probes'
   | 'learn.hosted.progress'
   | 'learn.hosted.reconnecting'
