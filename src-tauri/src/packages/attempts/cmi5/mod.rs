@@ -32,6 +32,8 @@ mod listener;
 mod store;
 
 #[cfg(test)]
+mod conformance;
+#[cfg(test)]
 mod tests;
 
 use std::collections::HashMap;
