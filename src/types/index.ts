@@ -395,6 +395,95 @@ export interface LearningRecordUsage {
   interaction_records: number
 }
 
+// Sending learning records (mirrors src-tauri/src/domain/record_sending.rs).
+
+/** What a recipient receives: these courses' records, completion-level always, interaction-level only when chosen. */
+export interface RecordScope {
+  course_ids: string[]
+  include_interactions: boolean
+}
+
+export type RecipientKind = 'destination' | 'share'
+
+/** The identifier a recipient sees: one made only for it, or the learner's own DID. */
+export type IdentifierChoice = 'pairwise' | 'real_did'
+
+export interface CourseChoice {
+  id: string
+  title: string
+}
+
+/** What the consent screen shows for a store before approval. Producing it sends nothing. */
+export interface DestinationPreview {
+  endpoint: string
+  location: 'device' | 'private_network' | 'remote'
+  needs_confirmation: boolean
+  pairwise_actor: string
+  real_did_actor: string
+  courses: CourseChoice[]
+}
+
+/** What the learner approved on the record consent screen. */
+export interface RecordConsentDecision {
+  course_ids: string[]
+  include_interactions: boolean
+  identifier: IdentifierChoice
+  confirm_private: boolean
+}
+
+export interface NewDestinationRequest {
+  address: string
+  username: string
+  secret: string
+  course_ids: string[]
+  include_interactions: boolean
+  identifier: IdentifierChoice
+  confirm_private: boolean
+}
+
+export interface OutboxStatus {
+  queued: number
+  failed: number
+  sent: number
+  last_error: string | null
+  next_attempt_at: string | null
+  last_sent_at: string | null
+}
+
+/** A record destination; never carries the store's secret. */
+export interface RecordDestination {
+  id: string
+  endpoint: string
+  location: 'device' | 'private_network' | 'remote'
+  username: string
+  identifier: 'pairwise' | 'real_did' | 'proposed'
+  actor_name: string
+  scope: RecordScope
+  xapi_version: string
+  created_at: string
+  status: OutboxStatus
+}
+
+export interface RemovalReport {
+  voided: number
+  void_error: string | null
+}
+
+/** One send in the learner-readable access log. */
+export interface RecordAccessEntry {
+  seq: number
+  at: string
+  recipient_id: string
+  recipient_kind: RecipientKind
+  recipient_name: string
+  action: 'send' | 'void'
+  scope: RecordScope
+  record_count: number
+  identifier: string
+  accepted: boolean
+  detail: string | null
+}
+
 export interface AuthorizedCourseAttestor {
   did: string
   public_key_hex: string

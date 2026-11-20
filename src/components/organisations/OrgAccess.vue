@@ -10,13 +10,15 @@
  *
  * Below the grants sit the two older views of the same question — which
  * institutions see the learner by name, and who has looked — because "who
- * can see me" is one question to the person asking it.
+ * can see me" is one question to the person asking it. Beside who has looked
+ * (hosted) sits what this device sent of the learner's records (local).
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppSwitch, ConfirmDialog } from '@/components/ui'
 import OrgBadge from './OrgBadge.vue'
+import RecordSendLog from '@/components/records/RecordSendLog.vue'
 import { bloomName } from '@/utils/bloom'
 import type { CloudPull, GrantView, GrantsView, OrgCheck, SyncReport } from '@/types'
 
@@ -55,6 +57,7 @@ const error = ref('')
 const syncing = ref(false)
 const syncReport = ref<SyncReport | null>(null)
 const stopping = ref<GrantView | null>(null)
+const sendLog = ref<InstanceType<typeof RecordSendLog> | null>(null)
 let generation = 0
 
 const active = computed(() => grants.value.filter((g) => g.revokedAt === null))
@@ -102,6 +105,7 @@ function replace(next: GrantView) {
 async function refresh() {
   const run = ++generation
   loading.value = true
+  void sendLog.value?.refresh()
   const [g, v, l] = await Promise.allSettled([
     invoke<GrantsView>('org_grants'),
     invoke<CloudPull<Visibility>>('fetch_visibility'),
@@ -317,6 +321,9 @@ onUnmounted(() => { generation++ })
         </li>
       </ul>
     </div>
+
+    <!-- The local half of the access log: what this device sent, and to whom. -->
+    <RecordSendLog ref="sendLog" />
 
     <div v-if="problems.length" class="space-y-1" data-testid="access-problems">
       <h3 class="text-sm font-medium text-foreground">{{ t('organisations.problems.heading') }}</h3>

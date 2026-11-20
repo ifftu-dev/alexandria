@@ -120,6 +120,10 @@ const PENDING_TRANSLATION = [
   // were deleted. English-only pending a translate pass; renders in English
   // via the i18n fallback.
   'common.notFound.',
+  // Record destinations and their consent screen (learning standards ticket
+  // 16). English-only pending a translate pass; consent copy should be
+  // prioritised in that pass.
+  'organisations.records.',
 ]
 
 const isPending = (key) => PENDING_TRANSLATION.some((p) => key.startsWith(p))
