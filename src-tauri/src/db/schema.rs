@@ -157,6 +157,10 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // policy on an attempt started from one, so its floor and probe policy
     // apply the way a sponsor role's do. See `crate::commands::exchange`.
     (43, "exchange_requests", include_str!("exchange_requests.sql")),
+    // Standards packages: each archive's hash, standard and parsed activity
+    // tree, and whether the archive is a draft kept outside the served store
+    // or has moved into it. See `crate::packages`.
+    (44, "packages", include_str!("packages.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"
