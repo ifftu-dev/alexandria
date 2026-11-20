@@ -443,6 +443,14 @@ mod scorm2004 {
 
     pub(super) fn initial(cmi: Map<String, Value>, host: HostValues<'_>) -> Map<String, Value> {
         let resumed = host.entry == Entry::Resume;
+        // A resumed lesson's time is its learner attempt's: the total the
+        // run-time rendered on its last termination. The host's own total
+        // counts every session the lesson has had, earlier attempts too, and
+        // stands in only when no termination left a total.
+        let attempt_total = cmi
+            .get("total_time")
+            .and_then(Value::as_str)
+            .and_then(parse_duration);
         let mut cmi = if resumed { cmi } else { Map::new() };
         cmi.remove("session_time");
         cmi.remove("exit");
@@ -451,7 +459,11 @@ mod scorm2004 {
         cmi.insert("entry".into(), host.entry.as_str().into());
         cmi.insert("credit".into(), "credit".into());
         cmi.insert("mode".into(), "normal".into());
-        let total = if resumed { host.total_seconds } else { 0.0 };
+        let total = if resumed {
+            attempt_total.unwrap_or(host.total_seconds)
+        } else {
+            0.0
+        };
         cmi.insert("total_time".into(), format_duration(total).into());
 
         let launch = host.launch;
