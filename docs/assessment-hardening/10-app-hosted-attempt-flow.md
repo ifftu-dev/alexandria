@@ -41,3 +41,5 @@ Spec sections: *Hosted attempts* (device side), *A role that requires a verified
 - Deviation: refusal messages are composed in the backend in English (the ticket asks for the mapping in Rust), so they are not in the locale files; the new page and button strings are English-only and listed pending in `check-parity.mjs`.
 - Deviation: an attested attempt's App Attest key id is held in memory, so after the app restarts an attested attempt cannot be resumed (its answers would be refused for a missing assertion) and lapses as abandoned.
 - Not done: the page shows multiple-choice items only; plugin items are ticket 11. The device's per-item timings sent are only `shown_ms`.
+
+2026-11-21 review fixes: a hosted probe states its limit before its clock starts. The service replies `pending_probe` with the limit, the page shows it with a Start button, and `hosted_attempt_start_probe` fetches the probe. `hosted_attempt_answer` takes the answer body as sent. A reply that does not decode is refused without quoting it. The result page says, below a required `live` rung, that a second device or person was not ruled out.

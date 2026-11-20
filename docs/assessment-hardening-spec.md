@@ -304,9 +304,16 @@ Taken on 2026-11-20:
 
 2026-11-21: implemented and closed. Tickets 01–12 in [assessment-hardening/](assessment-hardening/) are done; each ticket's notes record what was built. Deviations from the text above, in short:
 
-- The required rung is the existing `min_verification_rung`, judged on a strict ladder; no second field. The assertion has no format version field: `alexandria-verify` 0.8.0 (unreleased) carries the format change. Coverage statement version 3 also rewords the `probed` lines.
+- The required rung is the existing `min_verification_rung`, judged on a strict ladder; no second field. The assertion has no format version field: `alexandria-verify` 0.9.0 (unreleased; 0.8.0 was never published) carries the format change. Coverage statement version 3 also rewords the `probed` lines.
 - Companion evidence no longer credits a floor's device attestation, so a companion session cannot select `attested` or `full`. Android phones are refused for a `device_attested` role too while Android attestation is off.
-- The hosted service credits `consistent` only over its own passed probes plus the device's statement; a role naming no probe policy is recorded as `authored`; invalid close evidence refuses with `attestation_evidence_invalid`.
+- The hosted service never credits `consistent` (2026-11-21, see below); a role naming no probe policy is recorded as `authored`; invalid close evidence refuses with `attestation_evidence_invalid`.
 - An attested hosted attempt's App Attest key is held in memory, so an app restart lapses the attempt.
 - Known gap: a role issued from a sponsor's device that requires `live` cannot issue from a real interview, since the live segment is recorded only in the interview's own check. Closing it needs an interview linked to a role attempt, which this spec ruled out; it needs its own decision.
 - Open for the owner: real-device checks of App Attest on hosted attempts and of the Windows signer reader join the existing device attestation task; translations of the new strings are pending.
+
+2026-11-21, review fixes (tickets 02, 04, 09 and 10 record the detail):
+
+- `issuer` custody stands only on a hosted attempt entry: the policy rule credits `device` on every other path, and a credential stating `issuer` without an entry is invalid (`issuer_custody_unproven`). The share path refuses an `issuer` role with `custody_below_required` before any other check.
+- The hosted service decides on its own findings: its grade must reach 0.7 of the drawn items (`score_below_pass`), and the entry states that score; the rung is `process` from its own timings, `probed` from its own probes and `live` from an interview the panel conducted after the attempt closed, never the device's word; close evidence is checked at its own clock.
+- A hosted probe states its limit before its clock starts; generated probes take their limit from their own text; the second-device line is on every surface below `live`; the credential view says who computed the score; the desktop notice no longer suggests pairing a phone.
+- Left as is: the 2-second grace on a probe's limit for transit, and closing an attempt keeping the run 180 days from then, as recording a share does.
