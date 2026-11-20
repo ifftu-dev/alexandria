@@ -103,18 +103,50 @@ pub struct AttemptInfo {
 }
 
 /// One item as the service sent it, options in this attempt's order.
+///
+/// A plugin item (`kind` `plugin`) is shown in the bundled plugin [`Item::plugin`]
+/// names, with `question` as its prompt and no options, and is answered with
+/// that plugin's submission. Its hidden test cases stay with the service.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Item {
     pub seq: i32,
     pub probe: bool,
+    /// `choice` or `plugin`.
+    #[serde(default = "choice")]
+    pub kind: String,
+    /// For a plugin item, its prompt.
     pub question: String,
+    /// Empty for a plugin item.
     pub options: Vec<String>,
-    /// `one` or `many`.
+    /// `one` or `many`; `submission` for a plugin item.
     pub select: String,
     pub time_limit_ms: i64,
     pub sent_at: String,
     /// On the service's clock: it keeps running while disconnected.
     pub remaining_ms: i64,
+    /// Set for a plugin item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<PluginRef>,
+}
+
+fn choice() -> String {
+    "choice".into()
+}
+
+impl Item {
+    /// Answered with a plugin's submission rather than options.
+    pub fn is_plugin(&self) -> bool {
+        self.kind == "plugin" && self.plugin.is_some()
+    }
+}
+
+/// The bundled plugin a plugin item is shown in.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct PluginRef {
+    /// The plugin's `plugin_cid`: the BLAKE3 of its bundled manifest.
+    pub cid: String,
+    /// The code the editor opens with.
+    pub starter: String,
 }
 
 impl std::fmt::Debug for Item {
@@ -122,6 +154,8 @@ impl std::fmt::Debug for Item {
         f.debug_struct("Item")
             .field("seq", &self.seq)
             .field("probe", &self.probe)
+            .field("kind", &self.kind)
+            .field("plugin", &self.plugin.as_ref().map(|p| &p.cid))
             .field("options", &self.options.len())
             .field("time_limit_ms", &self.time_limit_ms)
             .field("remaining_ms", &self.remaining_ms)
@@ -132,8 +166,11 @@ impl std::fmt::Debug for Item {
 #[derive(Debug, Clone, Serialize)]
 pub struct AnswerBody {
     pub seq: i32,
-    /// Displayed positions; empty for no answer.
+    /// Displayed positions; empty for no answer, and for a plugin item.
     pub selected: Vec<i64>,
+    /// A plugin item's submission, as its plugin produced it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub submission: Option<Value>,
     /// Stored beside the service's timings and never read by it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub device_timings: Option<Value>,

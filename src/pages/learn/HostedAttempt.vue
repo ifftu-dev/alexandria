@@ -15,6 +15,11 @@
 // never stored on the device or logged; the backend registers it with the
 // assistant's bank guard.
 //
+// A plugin item is shown in the bundled plugin it names (the existing editor,
+// through `PluginHost` in its hosted mode) with its prompt and starter; the
+// editor's submission is sent as the answer, and the service grades it on
+// test cases this device never receives.
+//
 // Monitoring runs as for any attempt, under the request's floor. A dropped
 // connection retries and resumes at the same item, saying the clock kept
 // running; an attempt the service abandoned after its window is explained
@@ -29,11 +34,13 @@ import { useCameraPresence } from '@/composables/useCameraPresence'
 import { announceCredentialsChanged } from '@/composables/credentialEvents'
 import { AppButton } from '@/components/ui'
 import TrustProfileNotice from '@/components/integrity/TrustProfileNotice.vue'
+import PluginHost from '@/components/plugin/PluginHost.vue'
 import { needsVerifiedDevice, verifiedDeviceRefusal, verifiedPhones, type VerifiedPhones } from '@/utils/verifiedDevice'
 import { hostedAttemptError, isDisconnected, isGone } from '@/utils/hostedAttempt'
 import { errorMessage } from '@/utils/errorMessage'
 import type {
   DeviceSupport,
+  Element,
   HostedAttemptState,
   HostedItem,
   HostedOutcome,
@@ -119,6 +126,23 @@ const attemptsLeft = computed(() => {
   // The attempt just finished counts once it closed.
   return Math.max(0, reply.attempts_allowed - reply.attempts_used - 1)
 })
+/** A plugin item as an element the plugin host can show: the prompt and
+ *  starter only, in the editor's content shape, with no tests. */
+const pluginElement = computed<Element | null>(() => {
+  const current = item.value
+  if (!current?.plugin) return null
+  return {
+    id: `hosted:${attemptId.value}:${current.seq}`,
+    chapter_id: '',
+    title: '',
+    element_type: 'plugin',
+    content_cid: null,
+    content_inline: JSON.stringify({ prompt: current.question, starter_code: current.plugin.starter, tests: [] }),
+    position: 0,
+    duration_seconds: null,
+    plugin_cid: current.plugin.cid,
+  }
+})
 const remainingLabel = computed(() => {
   const total = Math.ceil(remainingMs.value / 1000)
   const minutes = Math.floor(total / 60)
@@ -163,10 +187,12 @@ function show(state: HostedAttemptState) {
   clock = setInterval(() => {
     remainingMs.value = Math.max(0, startRemaining - (Date.now() - started))
   }, 250)
+  const plugin = state.item.plugin
   sentinel.responses.present(`hosted:${state.attempt.id}:${state.item.seq}`, {
-    chars: state.item.question.length + state.item.options.reduce((sum, o) => sum + o.length, 0),
+    chars: state.item.question.length
+      + (plugin ? plugin.starter.length : state.item.options.reduce((sum, o) => sum + o.length, 0)),
     difficulty: null,
-    input: 'choice',
+    input: plugin ? 'plugin' : 'choice',
   })
 }
 
@@ -264,8 +290,27 @@ function toggle(position: number) {
 
 const RETRY_MS = 3000
 
+/** An answer on its way: options for a choice item, a submission for a plugin item. */
+interface PendingAnswer {
+  seq: number
+  selected: number[]
+  submission: unknown
+  shownMs: number
+}
+
+function answerArgs(pending: PendingAnswer) {
+  return {
+    directoryUrl,
+    attemptId: attemptId.value,
+    seq: pending.seq,
+    selected: pending.selected,
+    submission: pending.submission,
+    deviceTimings: { shown_ms: pending.shownMs },
+  }
+}
+
 /** Resume after a dropped connection; resend the answer if it never arrived. */
-async function reconnect(pending: { seq: number; selected: number[]; shownMs: number }) {
+async function reconnect(pending: PendingAnswer) {
   phase.value = 'reconnecting'
   for (;;) {
     if (disposed) return
@@ -274,13 +319,7 @@ async function reconnect(pending: { seq: number; selected: number[]; shownMs: nu
       let state = await invoke<HostedAttemptState>('hosted_attempt_resume', { directoryUrl, attemptId: attemptId.value })
       if (state.item?.seq === pending.seq) {
         // The answer did not arrive: send it again (a repeat is harmless).
-        state = await invoke<HostedAttemptState>('hosted_attempt_answer', {
-          directoryUrl,
-          attemptId: attemptId.value,
-          seq: pending.seq,
-          selected: pending.selected,
-          deviceTimings: { shown_ms: pending.shownMs },
-        })
+        state = await invoke<HostedAttemptState>('hosted_attempt_answer', answerArgs(pending))
       }
       if (disposed) return
       resumedAfterDrop.value = true
@@ -301,24 +340,19 @@ async function reconnect(pending: { seq: number; selected: number[]; shownMs: nu
   }
 }
 
-async function answer() {
+async function answer(submission: unknown = null) {
   const current = item.value
   if (!current || sending.value) return
-  const pending = {
+  const pending: PendingAnswer = {
     seq: current.seq,
-    selected: [...selected.value].sort((a, b) => a - b),
+    selected: current.plugin ? [] : [...selected.value].sort((a, b) => a - b),
+    submission: current.plugin ? submission : null,
     shownMs: Date.now() - shownAt,
   }
   sending.value = true
   resumedAfterDrop.value = false
   try {
-    const state = await invoke<HostedAttemptState>('hosted_attempt_answer', {
-      directoryUrl,
-      attemptId: attemptId.value,
-      seq: pending.seq,
-      selected: pending.selected,
-      deviceTimings: { shown_ms: pending.shownMs },
-    })
+    const state = await invoke<HostedAttemptState>('hosted_attempt_answer', answerArgs(pending))
     if (disposed) return
     show(state)
   } catch (e) {
@@ -486,28 +520,36 @@ async function checkAgain() {
       <p v-if="phase === 'reconnecting'" role="status" class="rounded-lg border border-warning/40 bg-warning/5 p-3 text-sm text-warning" data-testid="hosted-reconnecting">
         {{ $t('learn.hosted.reconnecting', { minutes: Math.round((terms?.terms.disconnect_grace_secs ?? 600) / 60) }) }}
       </p>
-      <p class="whitespace-pre-wrap text-base text-foreground">{{ item.question }}</p>
-      <p class="text-xs text-muted-foreground">{{ item.select === 'many' ? $t('learn.hosted.selectMany') : $t('learn.hosted.selectOne') }}</p>
-      <div class="space-y-2">
-        <label
-          v-for="(option, position) in item.options"
-          :key="position"
-          class="flex items-start gap-3 rounded-lg border border-border p-2.5 text-sm"
-        >
-          <input
-            :type="item.select === 'many' ? 'checkbox' : 'radio'"
-            name="hosted-option"
-            class="mt-0.5"
-            :checked="selected.has(position)"
-            :disabled="sending || phase === 'reconnecting'"
-            @change="toggle(position)"
-          />
-          <span class="text-foreground">{{ option }}</span>
-        </label>
-      </div>
-      <AppButton :loading="sending" :disabled="phase === 'reconnecting'" data-testid="hosted-answer" @click="answer">
-        {{ $t('learn.hosted.next') }}
-      </AppButton>
+      <template v-if="pluginElement">
+        <p class="text-xs text-muted-foreground">{{ $t('learn.hosted.pluginNote') }}</p>
+        <div class="h-[32rem] overflow-hidden rounded-lg border border-border" data-testid="hosted-plugin">
+          <PluginHost :key="pluginElement.id" :element="pluginElement" hosted @submission="answer" />
+        </div>
+      </template>
+      <template v-else>
+        <p class="whitespace-pre-wrap text-base text-foreground">{{ item.question }}</p>
+        <p class="text-xs text-muted-foreground">{{ item.select === 'many' ? $t('learn.hosted.selectMany') : $t('learn.hosted.selectOne') }}</p>
+        <div class="space-y-2">
+          <label
+            v-for="(option, position) in item.options"
+            :key="position"
+            class="flex items-start gap-3 rounded-lg border border-border p-2.5 text-sm"
+          >
+            <input
+              :type="item.select === 'many' ? 'checkbox' : 'radio'"
+              name="hosted-option"
+              class="mt-0.5"
+              :checked="selected.has(position)"
+              :disabled="sending || phase === 'reconnecting'"
+              @change="toggle(position)"
+            />
+            <span class="text-foreground">{{ option }}</span>
+          </label>
+        </div>
+        <AppButton :loading="sending" :disabled="phase === 'reconnecting'" data-testid="hosted-answer" @click="answer()">
+          {{ $t('learn.hosted.next') }}
+        </AppButton>
+      </template>
     </div>
 
     <div v-else-if="phase === 'closing'" class="space-y-3 py-6 text-center text-sm text-muted-foreground">

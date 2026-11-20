@@ -100,10 +100,21 @@ fn held() -> &'static std::sync::Mutex<std::collections::VecDeque<HashSet<u64>>>
 /// text is not kept, only its shingle hashes, for the rest of this run.
 pub fn hold_hosted_item(question: &str, options: &[String]) {
     let whole = format!("{question} {}", options.join(" "));
+    hold(&[question, whole.as_str()]);
+}
+
+/// Register a plugin item a hosted attempt showed: its prompt, its starter,
+/// and the two together, as hashes only, like [`hold_hosted_item`].
+pub fn hold_hosted_plugin_item(prompt: &str, starter: &str) {
+    let whole = format!("{prompt} {starter}");
+    hold(&[prompt, starter, whole.as_str()]);
+}
+
+fn hold(texts: &[&str]) {
     let Ok(mut held) = held().lock() else {
         return;
     };
-    for text in [question, whole.as_str()] {
+    for text in texts {
         let normalized = normalize(text);
         if normalized.chars().count() < MIN_ITEM_CHARS {
             continue;

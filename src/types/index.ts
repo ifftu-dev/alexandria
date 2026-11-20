@@ -3155,16 +3155,29 @@ export interface HostedTermsReply {
 }
 
 /** One item, held in memory while shown and never stored. */
+/** The bundled plugin a hosted plugin item is shown in (`wire::PluginRef`). */
+export interface HostedPluginRef {
+  /** The plugin's `plugin_cid`. */
+  cid: string
+  /** The code the editor opens with. */
+  starter: string
+}
+
 export interface HostedItem {
   seq: number
   probe: boolean
+  /** `plugin`: shown in the bundled plugin `plugin` names, answered with its submission. */
+  kind: 'choice' | 'plugin'
+  /** A plugin item's prompt. */
   question: string
+  /** Empty for a plugin item. */
   options: string[]
-  select: 'one' | 'many'
+  select: 'one' | 'many' | 'submission'
   time_limit_ms: number
   sent_at: string
   /** On the service's clock, which keeps running while disconnected. */
   remaining_ms: number
+  plugin?: HostedPluginRef | null
 }
 
 export interface HostedAttemptState {

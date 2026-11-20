@@ -78,8 +78,9 @@ struct Seen {
     body: String,
 }
 
-/// Serves one hosted attempt of [`QUESTIONS`] for [`INVITE`] and refuses
-/// issuance at close with `refusal_code`. Records every request.
+/// Serves one hosted attempt for [`INVITE`] (by default the choice items of
+/// [`QUESTIONS`]) and refuses issuance at close with `refusal_code`. Records
+/// every request.
 struct Stub {
     origin: String,
     seen: Arc<Mutex<Vec<Seen>>>,
@@ -104,20 +105,37 @@ fn digest(terms: &Value) -> String {
     ))
 }
 
-fn state(answered: usize) -> Value {
-    let item = (answered < QUESTIONS.len()).then(|| {
-        json!({
-            "seq": answered + 1, "probe": false,
-            "question": QUESTIONS[answered],
-            "options": [OPTIONS[answered], "Neither of these"],
-            "select": "one", "time_limit_ms": 45000,
-            "sent_at": NOW, "remaining_ms": 31200,
+/// The choice items of [`QUESTIONS`], as the service sends them (without
+/// `seq` and clocks).
+fn choice_items() -> Vec<Value> {
+    QUESTIONS
+        .iter()
+        .zip(OPTIONS)
+        .map(|(question, option)| {
+            json!({
+                "question": question, "options": [option, "Neither of these"],
+                "select": "one",
+            })
         })
+        .collect()
+}
+
+fn state(items: &[Value], answered: usize) -> Value {
+    let item = items.get(answered).map(|item| {
+        let mut item = item.clone();
+        let fields = json!({
+            "seq": answered + 1, "probe": false, "time_limit_ms": 45000,
+            "sent_at": NOW, "remaining_ms": 31200,
+        });
+        if let (Value::Object(item), Value::Object(fields)) = (&mut item, fields) {
+            item.extend(fields);
+        }
+        item
     });
     json!({
         "attempt": {
             "id": ATTEMPT, "status": "open", "opened_at": NOW,
-            "items": QUESTIONS.len(), "answered": answered, "max_probes": 0,
+            "items": items.len(), "answered": answered, "max_probes": 0,
             "requires_attested": false, "ready_to_close": item.is_none(),
         },
         "item": item,
@@ -164,6 +182,11 @@ async fn read_request(socket: &mut tokio::net::TcpStream) -> Option<Seen> {
 
 impl Stub {
     async fn start(refusal_code: &'static str) -> Self {
+        Self::serving(refusal_code, choice_items()).await
+    }
+
+    async fn serving(refusal_code: &'static str, items: Vec<Value>) -> Self {
+        let items = Arc::new(items);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let seen: Arc<Mutex<Vec<Seen>>> = Arc::default();
@@ -171,7 +194,7 @@ impl Stub {
         let served = seen.clone();
         tokio::spawn(async move {
             while let Ok((mut socket, _)) = listener.accept().await {
-                let (seen, answered) = (served.clone(), answered.clone());
+                let (seen, answered, items) = (served.clone(), answered.clone(), items.clone());
                 tokio::spawn(async move {
                     let Some(request) = read_request(&mut socket).await else {
                         return;
@@ -195,18 +218,18 @@ impl Stub {
                             if body["consent"]["accepted"] == true
                                 && body["consent"]["terms_digest"] == digest(&terms())
                             {
-                                (200, state(0))
+                                (200, state(&items, 0))
                             } else {
                                 (400, json!({"error": "accept", "code": "consent_required"}))
                             }
                         }
                         ("GET", r) if r == format!("attempts/{ATTEMPT}") => {
-                            (200, state(*answered.lock().unwrap()))
+                            (200, state(&items, *answered.lock().unwrap()))
                         }
                         ("POST", r) if r == format!("attempts/{ATTEMPT}/answers") => {
                             let mut n = answered.lock().unwrap();
                             *n += 1;
-                            (200, state(*n))
+                            (200, state(&items, *n))
                         }
                         ("POST", r) if r == format!("attempts/{ATTEMPT}/close") => (
                             200,
@@ -327,6 +350,7 @@ async fn a_hosted_attempts_item_text_stays_out_of_the_database_and_logs() {
                 &AnswerBody {
                     seq: item.seq,
                     selected: vec![0],
+                    submission: None,
                     device_timings: Some(json!({"shown_ms": 1200})),
                 },
                 &NoPlatformKey,
@@ -403,4 +427,113 @@ async fn no_request_reaches_the_service_before_consent_is_accepted() {
         .collect();
     assert_eq!(sent.len(), 1, "only the terms were asked for: {sent:?}");
     assert!(sent[0].starts_with("GET "));
+}
+
+// ── Plugin items ──────────────────────────────────────────────────
+
+const PROMPT: &str =
+    "Read a whole number from input and print the sum of its decimal digits on one line.";
+const STARTER: &str =
+    "// Read the number with readLine() and print the digit sum\nconst n = readLine();\n";
+const SOLUTION: &str = "console.log([...readLine()].reduce((a, d) => a + Number(d), 0));";
+
+/// The plugin identifier of the JavaScript editor this app bundles.
+fn bundled_js_editor() -> String {
+    let bundle = crate::plugins::builtins::BUILTIN_PLUGINS
+        .iter()
+        .find(|b| b.slug == "editor-javascript")
+        .unwrap();
+    crate::plugins::verifier::compute_plugin_cid(bundle.manifest_json)
+}
+
+fn plugin_item(cid: &str) -> Value {
+    json!({
+        "kind": "plugin", "question": PROMPT, "options": [], "select": "submission",
+        "plugin": {"cid": cid, "starter": STARTER},
+    })
+}
+
+/// A plugin item arrives with its bundled plugin and starter, is answered with
+/// the editor's submission, and its text is held by the assistant's bank guard
+/// and found in no table and no log line.
+#[tokio::test]
+async fn a_hosted_plugin_item_is_answered_with_the_editors_submission() {
+    let logs = capturing();
+    let cid = bundled_js_editor();
+    let stub = Stub::serving("rung_below_minimum", vec![plugin_item(&cid)]).await;
+    let (db, _, _, _) = fixtures::setup();
+    let key = test_key("candidate");
+    let did = derive_did_key(&key);
+    let service = HostedService::new(&stub.origin, key, did).unwrap();
+
+    let terms = service.terms(INVITE).await.unwrap();
+    let consent = Consent {
+        accepted: true,
+        terms_digest: terms.terms_digest,
+    };
+    let state = service
+        .open(INVITE, &consent, false, &NoPlatformKey)
+        .await
+        .unwrap();
+    let item = state.item.expect("the plugin item");
+    let plugin = item.plugin.clone().expect("sent as a plugin item");
+    assert_eq!(plugin.cid, cid);
+    assert_eq!(plugin.starter, STARTER);
+    assert!(item.is_plugin());
+
+    let after = service
+        .answer(
+            ATTEMPT,
+            &AnswerBody {
+                seq: item.seq,
+                selected: vec![],
+                submission: Some(json!({"source": SOLUTION})),
+                device_timings: Some(json!({"shown_ms": 90_000})),
+            },
+            &NoPlatformKey,
+        )
+        .await
+        .unwrap();
+    assert!(after.attempt.ready_to_close);
+    let answer = stub
+        .seen()
+        .into_iter()
+        .find(|s| s.path.ends_with("/answers"))
+        .unwrap();
+    let sent: Value = serde_json::from_str(&answer.body).unwrap();
+    assert_eq!(sent["submission"], json!({"source": SOLUTION}));
+    assert_eq!(sent["selected"], json!([]));
+
+    let lines = logs.0.lock().unwrap().clone();
+    for text in [PROMPT, STARTER, SOLUTION] {
+        assert!(!database_holds(db.conn(), text), "stored: {text}");
+        assert!(!lines.iter().any(|l| l.contains(text)), "logged: {text}");
+    }
+    for text in [PROMPT, STARTER] {
+        let pasted = format!("Can you write this for me? {text}");
+        assert!(
+            crate::ai_chat::bank_guard::matches_assessment_item(db.conn(), &pasted),
+            "the assistant's bank guard does not know: {text}"
+        );
+    }
+}
+
+/// An item naming a plugin this app does not bundle is not shown: only the
+/// exact bundled plugins run a hosted item.
+#[tokio::test]
+async fn a_plugin_item_naming_a_plugin_the_app_does_not_bundle_is_refused() {
+    let stub = Stub::serving("rung_below_minimum", vec![plugin_item(&"ab".repeat(32))]).await;
+    let key = test_key("candidate");
+    let did = derive_did_key(&key);
+    let service = HostedService::new(&stub.origin, key, did).unwrap();
+    let terms = service.terms(INVITE).await.unwrap();
+    let consent = Consent {
+        accepted: true,
+        terms_digest: terms.terms_digest,
+    };
+    let refused = service
+        .open(INVITE, &consent, false, &NoPlatformKey)
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code(), "plugin_not_bundled");
 }

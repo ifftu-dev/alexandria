@@ -14,7 +14,12 @@
 //!   ([`wire::Item`]'s `Debug` leaves it out), and each item received is
 //!   registered with the assistant's bank guard
 //!   ([`crate::ai_chat::bank_guard::hold_hosted_item`]), which keeps only
-//!   hashes of it.
+//!   hashes of it: a plugin item's prompt and starter too.
+//! - **Plugin items** are shown only in a plugin this app bundles, named by
+//!   its `plugin_cid`; an item naming any other plugin is refused
+//!   (`plugin_not_bundled`). The candidate's submission goes to the service,
+//!   which grades it with the same bundled grader over test cases the device
+//!   never receives.
 //! - **Consent**: no open request is sent until the candidate has accepted
 //!   the terms, and the open request names the digest of the terms shown, so
 //!   the service holds the candidate to exactly what they read.
@@ -92,6 +97,10 @@ pub enum HostedError {
     /// This device could not do what the attempt requires of it.
     #[error("{0}")]
     Device(String),
+    /// The item names a plugin this app does not bundle, so it is not shown:
+    /// a hosted plugin item runs only in the exact bundled plugin.
+    #[error("this item needs a plugin this app does not bundle: update the app, then resume the attempt")]
+    PluginNotBundled,
 }
 
 impl HostedError {
@@ -103,6 +112,7 @@ impl HostedError {
             Self::Disconnected(_) => "disconnected",
             Self::Protocol(_) => "protocol",
             Self::Device(_) => "device",
+            Self::PluginNotBundled => "plugin_not_bundled",
         }
     }
 
@@ -336,11 +346,23 @@ impl HostedService {
         serde_json::from_slice(&bytes).map_err(|e| HostedError::Protocol(e.to_string()))
     }
 
-    fn received(state: AttemptState) -> AttemptState {
-        if let Some(item) = &state.item {
-            crate::ai_chat::bank_guard::hold_hosted_item(&item.question, &item.options);
+    fn received(state: AttemptState) -> Result<AttemptState, HostedError> {
+        let Some(item) = &state.item else {
+            return Ok(state);
+        };
+        match &item.plugin {
+            Some(plugin) => {
+                if crate::plugins::builtins::find_bundle_by_cid(&plugin.cid).is_none() {
+                    return Err(HostedError::PluginNotBundled);
+                }
+                crate::ai_chat::bank_guard::hold_hosted_plugin_item(
+                    &item.question,
+                    &plugin.starter,
+                );
+            }
+            None => crate::ai_chat::bank_guard::hold_hosted_item(&item.question, &item.options),
         }
-        state
+        Ok(state)
     }
 
     /// The terms of a hosted attempt from the invitation `invite`, and
@@ -402,7 +424,7 @@ impl HostedService {
         if let (Some(key_id), Ok(mut keys)) = (key_id, device_keys().lock()) {
             keys.insert(state.attempt.id.clone(), key_id);
         }
-        Ok(Self::received(state))
+        Self::received(state)
     }
 
     /// The item the candidate is on, as sent: after a dropped connection the
@@ -412,7 +434,7 @@ impl HostedService {
         let state = self
             .send(reqwest::Method::GET, &path, None, None, None)
             .await?;
-        Ok(Self::received(state))
+        Self::received(state)
     }
 
     /// Answer the current item; the reply carries the next. Nothing in it
@@ -435,7 +457,7 @@ impl HostedService {
                 key.as_deref().map(|k| (platform, k)),
             )
             .await?;
-        Ok(Self::received(state))
+        Self::received(state)
     }
 
     /// Close the attempt with the session's assertion and evidence. The reply
