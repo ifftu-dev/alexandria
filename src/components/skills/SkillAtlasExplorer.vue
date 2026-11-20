@@ -352,8 +352,8 @@ const webGraph = useWebGraph(() => ({
   graph: webEntry.value.graph,
   positions: webMode.value ? webPositions.value : EMPTY_POSITIONS,
   selectedId: webMode.value ? selectedId.value : null,
-  // The inspector's focus lights its neighbourhood; narrowed, everything shown is lit, so no shown name fades.
-  focusIds: !webMode.value ? null : neighborhoodIds.value.size > 0 ? neighborhoodIds.value : webShownIds.value,
+  // The inspector's focus lights its own neighbourhood in place of the selection's.
+  focusIds: webMode.value && neighborhoodIds.value.size > 0 ? neighborhoodIds.value : null,
   matchIds: webMatchIds.value,
   shownIds: webShownIds.value,
   fitIds: webMode.value ? fieldIds.value : null,

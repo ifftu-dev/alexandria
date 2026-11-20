@@ -97,6 +97,7 @@ export interface WebGraphInput {
   shownIds: ReadonlySet<string> | null
   /** When set, a fitted camera frames these dots (field focus) rather than every shown one. */
   fitIds: ReadonlySet<string> | null
+  /** Shown is the selection's surroundings: every shown dot is named and the selection lights nothing at rest. */
   narrowed: boolean
   names: boolean
   arrows: boolean
@@ -228,10 +229,15 @@ export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, 
     const selected = input().selectedId
     return new Set([...(selected ? neighbourhood(selected) : []), ...(transientId.value ? neighbourhood(transientId.value) : [])])
   })
-  /** The lit set; empty when nothing is lit, so nothing fades. */
+  /**
+   * The lit set; empty when nothing is lit, so nothing fades. Narrowed, the
+   * graph already shows only the selection's surroundings, so the selection
+   * keeps nothing lit and only hover, keyboard focus or the inspector's focus
+   * light a part of it.
+   */
   const litIds = computed(() => {
-    const focus = input().focusIds, selected = input().selectedId
-    const kept = focus && focus.size > 0 ? [...focus].filter(id => shownSet.value.has(id)) : selected ? [...neighbourhood(selected)] : []
+    const { focusIds: focus, selectedId: selected, narrowed } = input()
+    const kept = focus && focus.size > 0 ? [...focus].filter(id => shownSet.value.has(id)) : selected && !narrowed ? [...neighbourhood(selected)] : []
     return new Set([...kept, ...(transientId.value ? neighbourhood(transientId.value) : [])])
   })
   function fadedByMatch(id: string): boolean {
