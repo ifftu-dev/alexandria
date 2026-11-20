@@ -77,3 +77,20 @@ pub async fn open_launch(
     let extracted = packages::ensure_extracted(db, node, dirs, &hash, progress).await?;
     Ok(launches.open(&extracted.package.hash, &extracted.root)?)
 }
+
+/// Drops a package's extracted files unless a launch of it is open; returns
+/// whether anything was dropped. It holds the extraction lock [`open_launch`]
+/// holds, so a launch being opened either registered before the check (and
+/// the files stay) or extracts again after the drop.
+pub async fn drop_unless_open(
+    launches: &Launches,
+    dirs: &PackageDirs,
+    hash: &str,
+) -> Result<bool, PackageError> {
+    let hash = hash.to_ascii_lowercase();
+    let _extracting = launches.lock_extraction(&hash).await;
+    if launches.is_package_open(&hash) {
+        return Ok(false);
+    }
+    packages::drop_extracted(dirs, &hash).await
+}

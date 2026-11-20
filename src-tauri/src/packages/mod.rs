@@ -332,8 +332,8 @@ pub async fn ensure_extracted(
 
 /// Drops a package's extracted files; the archive is untouched and the next
 /// [`ensure_extracted`] rebuilds them. Returns whether anything was there.
-/// Called when the learner completes the package. Do not call it while a
-/// launch of the package is open.
+/// Do not call it while a launch of the package is open: callers go through
+/// [`crate::package_serving::drop_unless_open`].
 pub async fn drop_extracted(dirs: &PackageDirs, hash: &str) -> Result<bool, PackageError> {
     let hash = checked_hash(hash)?;
     let cache_dir = dirs.cache.clone();

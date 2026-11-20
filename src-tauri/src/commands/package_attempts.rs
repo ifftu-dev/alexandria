@@ -76,14 +76,14 @@ pub async fn package_attempt_commit(
 }
 
 /// Ends a launch of an attempt; drops the package's extracted files when the
-/// package is complete.
+/// package is complete and no launch of it is open.
 #[tauri::command]
 pub async fn package_attempt_terminate(
     state: State<'_, AppState>,
     attempt_id: String,
 ) -> Result<PackageAttemptProgress, String> {
     let dirs = PackageDirs::for_profile(&state.active_paths()?);
-    attempts::terminate(&db(&state), &dirs, &attempt_id)
+    attempts::terminate(&db(&state), &dirs, &state.package_launches, &attempt_id)
         .await
         .map_err(|e| e.to_string())
 }

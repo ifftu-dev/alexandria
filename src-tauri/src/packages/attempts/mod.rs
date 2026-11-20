@@ -30,6 +30,7 @@ use crate::domain::package::Package;
 use crate::domain::package_attempt::{
     PackageAttempt, PackageAttemptProgress, PackageAttemptStatus, PackageCommit, PackageLaunchInit,
 };
+use crate::package_serving::{drop_unless_open, Launches};
 use crate::packages::{PackageDb, PackageDirs};
 
 /// Why an attempt operation failed. Displays as `code: detail`.
@@ -290,12 +291,13 @@ pub async fn commit(
 /// Ends the launch of an attempt: the player calls this when it closes the
 /// package frame. Every session the content left open ends and its time
 /// joins the total; the rollup and element progress are brought up to date.
-/// When the package reports completion its extracted files are dropped, since
-/// no frame is reading them any more; the next launch rebuilds them from the
-/// archive.
+/// When the package reports completion its extracted files are dropped, unless
+/// a launch of the package is still open (the player closes its launch first);
+/// the next launch rebuilds them from the archive.
 pub async fn terminate(
     db: &impl PackageDb,
     dirs: &PackageDirs,
+    launches: &Launches,
     attempt_id: &str,
 ) -> Result<PackageAttemptProgress, AttemptError> {
     let attempt_id = attempt_id.to_string();
@@ -308,8 +310,7 @@ pub async fn terminate(
     })
     .await?;
     if ended.package_completed {
-        ended.cache_dropped =
-            crate::packages::drop_extracted(dirs, &ended.attempt.package_hash).await?;
+        ended.cache_dropped = drop_unless_open(launches, dirs, &ended.attempt.package_hash).await?;
     }
     Ok(ended)
 }

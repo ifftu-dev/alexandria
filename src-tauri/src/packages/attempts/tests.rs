@@ -14,6 +14,7 @@ use super::*;
 use crate::content_store::node::ContentNode;
 use crate::db::Database;
 use crate::domain::package_attempt::{PackageAttemptProgress, PackageAttemptStatus, PackageCommit};
+use crate::package_serving::Launches;
 use crate::packages::{self, PackageDirs};
 
 mod fixture {
@@ -682,7 +683,7 @@ async fn terminating_an_unfinished_attempt_keeps_the_extracted_files_and_counts_
     .await
     .expect("commit");
 
-    let ended = terminate(&learner.db, &learner.dirs, &attempt.id)
+    let ended = terminate(&learner.db, &learner.dirs, &Launches::new(), &attempt.id)
         .await
         .expect("terminate");
     assert!(!ended.package_completed);
@@ -720,7 +721,7 @@ async fn terminating_a_completed_attempt_drops_the_extracted_files_and_the_packa
         "files stay while the launch is still open"
     );
 
-    let ended = terminate(&learner.db, &learner.dirs, &attempt.id)
+    let ended = terminate(&learner.db, &learner.dirs, &Launches::new(), &attempt.id)
         .await
         .expect("terminate");
     assert!(ended.package_completed);
@@ -733,4 +734,38 @@ async fn terminating_a_completed_attempt_drops_the_extracted_files_and_the_packa
             .await
             .expect("the archive is intact and extracts again");
     assert!(rebuilt.root.join("lifting/index.html").is_file());
+}
+
+#[tokio::test]
+async fn completing_a_package_while_a_launch_of_it_is_open_keeps_the_files_until_it_closes() {
+    let learner = Learner::new().await;
+    let hash = learner.add_package("el_pkg", "com.example.induction").await;
+    let extracted =
+        packages::ensure_extracted(&learner.db, &learner.node, &learner.dirs, &hash, |_| {})
+            .await
+            .expect("extract");
+    let launches = Launches::new();
+    let launch = launches
+        .open(&hash, &extracted.root)
+        .expect("a launch serves the files");
+    let attempt = open(&learner.db, ENROLLMENT, "el_pkg").await.expect("open");
+    finish_lesson(&learner, &attempt.id, "welcome", "completed", json!({})).await;
+    finish_lesson(&learner, &attempt.id, "lifting", "passed", json!({})).await;
+    initialise(&learner.db, &learner.key, &attempt.id, "handout")
+        .await
+        .expect("open the handout");
+
+    let ended = terminate(&learner.db, &learner.dirs, &launches, &attempt.id)
+        .await
+        .expect("terminate");
+    assert!(ended.package_completed);
+    assert!(!ended.cache_dropped, "an open launch still reads the files");
+    assert!(extracted.root.join("welcome/index.html").is_file());
+
+    assert!(launches.close(&launch.prefix));
+    let ended = terminate(&learner.db, &learner.dirs, &launches, &attempt.id)
+        .await
+        .expect("terminate after the launch closed");
+    assert!(ended.cache_dropped);
+    assert!(!extracted.root.exists(), "the extracted files are gone");
 }
