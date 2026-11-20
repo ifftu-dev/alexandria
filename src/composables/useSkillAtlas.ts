@@ -8,6 +8,7 @@ import { CREDENTIALS_CHANGED } from '@/composables/credentialEvents'
 import type { SkillGraphEdge, SkillGraphRelation, SkillInfo, SubjectFieldInfo, VerifiableCredential } from '@/types'
 import { buildSkillAtlas, type AtlasModel } from '@/utils/skillAtlas'
 import { createAtlasViewState, type AtlasViewState } from '@/utils/skillAtlasView'
+import { webGraphFromAtlas, webLayout, type WebGraph, type WebPoint } from '@/components/skills/webGeometry'
 import { errorMessage } from '@/utils/errorMessage'
 
 export type AtlasSurface = 'page' | 'modal'
@@ -29,6 +30,50 @@ export interface AtlasFeedback {
 
 // Each load replaces the whole snapshot, so it is never made deeply reactive.
 const model = shallowRef<AtlasModel | null>(null)
+
+/** The Web graph of a model with its resting layout, under a key that names the graph alone. */
+interface WebLayoutEntry { key: string; graph: WebGraph; layout: ReadonlyMap<string, WebPoint> }
+const webEntries = new WeakMap<AtlasModel, WebLayoutEntry>()
+let lastWebEntry: WebLayoutEntry | null = null
+/**
+ * The Web layout depends only on the graph, and a credential refresh loads a
+ * new model of the same graph, so the layout is memoised per graph: a model
+ * whose skills, slots, prerequisites and relations match the last one reuses
+ * its layout.
+ */
+function webEntry(atlas: AtlasModel): WebLayoutEntry {
+  const known = webEntries.get(atlas)
+  if (known) return known
+  const graph = webGraphFromAtlas(atlas)
+  const key = JSON.stringify([graph.nodes.map(node => [node.id, node.slot]),
+    graph.prerequisites.map(link => [link.skill, link.prerequisite]), graph.relations])
+  const entry = lastWebEntry?.key === key ? lastWebEntry : { key, graph, layout: markRaw(webLayout(graph)) }
+  lastWebEntry = entry
+  webEntries.set(atlas, entry)
+  return entry
+}
+/** Dragged Web dots: one set for the graph named by `key`, shared by every Web surface. */
+const webDragged = shallowRef<{ key: string; positions: ReadonlyMap<string, WebPoint> } | null>(null)
+const EMPTY_POSITIONS: ReadonlyMap<string, WebPoint> = markRaw(new Map())
+const webGraph = computed(() => model.value ? webEntry(model.value).graph : null)
+const webPositions = computed<ReadonlyMap<string, WebPoint>>(() => {
+  if (!model.value) return EMPTY_POSITIONS
+  const entry = webEntry(model.value), dragged = webDragged.value
+  if (dragged?.key !== entry.key) return entry.layout
+  return markRaw(new Map([...entry.layout].map(([id, point]) => [id, dragged.positions.get(id) ?? point])))
+})
+
+/** Records dragged Web dots for the loaded graph; dots it does not hold are ignored. */
+function setWebPositions(positions: ReadonlyMap<string, WebPoint>): void {
+  if (!model.value) return
+  const entry = webEntry(model.value)
+  const previous = webDragged.value?.key === entry.key ? webDragged.value.positions : null
+  const next = new Map(previous ?? [])
+  for (const [id, point] of positions) if (entry.layout.has(id)) next.set(id, { x: point.x, y: point.y })
+  webDragged.value = { key: entry.key, positions: next }
+}
+/** Puts every dragged Web dot back in its resting place, on every surface. */
+function resetWebPositions(): void { webDragged.value = null }
 const phase = ref<AtlasPhase>('idle')
 const error = ref<string | null>(null)
 const refreshing = ref(false)
@@ -101,6 +146,7 @@ function clearProfileState(): void {
   refreshing.value = false
   pageView.value = createAtlasViewState()
   modalView.value = createAtlasViewState()
+  webDragged.value = null
   skillsTab.value = 'credentials'
   modalOpen.value = false
   clearFeedback()
@@ -289,6 +335,7 @@ export function useSkillAtlas() {
   return {
     model: readonly(model), phase: readonly(phase), error: readonly(error), refreshing: readonly(refreshing), isLoading: readonly(isLoading),
     pageView: readonly(pageView), modalView: readonly(modalView), skillsTab: readonly(skillsTab), modalOpen: readonly(modalOpen), feedback: readonly(feedback),
+    webGraph, webPositions, setWebPositions, resetWebPositions,
     ensureLoaded, refresh, openSkill, returnToAtlas, activateSurface, updateView, resetView, setSkillsTab, setModalOpen, feedbackFor, acknowledgeFeedback, reset: clearProfileState,
   }
 }
