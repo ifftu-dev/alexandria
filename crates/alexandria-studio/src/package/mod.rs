@@ -15,12 +15,16 @@
 //! import decompresses every entry to count what is really there, because the
 //! sizes an archive declares are whatever its author typed.
 //!
-//! SCORM 1.2 is parsed. SCORM 2004 and cmi5 are recognised and refused with
-//! [`RefusalCode::UnsupportedStandard`] until their importers exist.
+//! SCORM 1.2 and SCORM 2004 (2nd, 3rd and 4th Editions) are parsed; a SCORM
+//! 2004 activity carries its [`sequencing`] definition. cmi5 is recognised
+//! and refused with [`RefusalCode::UnsupportedStandard`] until its importer
+//! exists.
 
 mod archive;
 mod scorm;
 mod scorm12;
+mod scorm2004;
+pub mod sequencing;
 mod xml;
 
 use std::fmt;
@@ -161,6 +165,19 @@ pub struct Activity {
     /// SCORM 1.2 `adlcp:prerequisites`, as the author wrote it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prerequisites: Option<String>,
+    /// SCORM 2004 `imsss:sequencing`, with any sequencing collection applied.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequencing: Option<sequencing::Sequencing>,
+    /// SCORM 2004 `adlcp:completionThreshold`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_threshold: Option<sequencing::CompletionThreshold>,
+    /// SCORM 2004 `adlnav:hideLMSUI`: navigation controls the player should
+    /// not draw while this activity is delivered.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hide_lms_ui: Vec<sequencing::NavigationControl>,
+    /// SCORM 2004 `adlcp:data`: the shared data stores the lesson may use.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shared_data: Vec<sequencing::SharedDataMap>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Activity>,
 }
@@ -192,17 +209,23 @@ pub struct Launch {
     pub parameters: Option<String>,
     pub kind: LaunchKind,
     /// The text the run-time hands the content as launch data
-    /// (SCORM 1.2 `adlcp:datafromlms`).
+    /// (SCORM 1.2 `adlcp:datafromlms`, SCORM 2004 `adlcp:dataFromLMS`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_data: Option<String>,
     /// The passing score, on the scale of the package's own standard:
-    /// 0 to 100 for SCORM 1.2 (`adlcp:masteryscore`).
+    /// 0 to 100 for SCORM 1.2 (`adlcp:masteryscore`); -1 to 1 for SCORM 2004
+    /// (`cmi.scaled_passing_score`: the primary objective's minimum
+    /// normalized measure, set only when that objective is satisfied by
+    /// measure).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mastery_score: Option<f64>,
-    /// SCORM 1.2 `adlcp:maxtimeallowed`, as the author wrote it.
+    /// SCORM 1.2 `adlcp:maxtimeallowed`, as the author wrote it. SCORM 2004:
+    /// the activity's attempt absolute duration limit, an XML Schema
+    /// duration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_time_allowed: Option<String>,
-    /// SCORM 1.2 `adlcp:timelimitaction`, as the author wrote it.
+    /// SCORM 1.2 `adlcp:timelimitaction` or SCORM 2004
+    /// `adlcp:timeLimitAction`, as the author wrote it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_limit_action: Option<String>,
 }
@@ -335,7 +358,8 @@ pub fn import_package<R: Read + Seek>(
     let (standard, edition) = scorm::detect(&root)?;
     let parsed = match standard {
         Standard::Scorm12 => scorm12::parse(&root, &archive),
-        Standard::Scorm2004 | Standard::Cmi5 => Err(unsupported(standard, edition)),
+        Standard::Scorm2004 => scorm2004::parse(&root, &archive),
+        Standard::Cmi5 => Err(unsupported(standard, edition)),
     }
     .map_err(|refusal| refusal.of(standard, edition))?;
 

@@ -1,13 +1,20 @@
-//! What the SCORM versions share: telling them apart, and turning a
+//! What the SCORM versions share: telling them apart, walking a content
+//! package's default organization into an activity tree, and turning a
 //! resource's address into a file in the archive.
+//!
+//! Each version adds its own reading of an item through [`Version`]:
+//! `scorm12.rs` and `scorm2004.rs`.
 
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Seek};
 
 use percent_encoding::percent_decode_str;
 
 use super::archive::Archive;
 use super::xml::Element;
-use super::{Edition, Refusal, RefusalCode, Standard};
+use super::{
+    Activity, Edition, Launch, LaunchKind, ParsedManifest, Refusal, RefusalCode, Standard,
+};
 
 /// The ADL extension namespace of SCORM 1.2.
 const ADLCP_1_2: &str = "http://www.adlnet.org/xsd/adlcp_rootv1p2";
@@ -161,4 +168,214 @@ fn is_remote(address: &str) -> bool {
         && scheme
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
+}
+
+/// What one SCORM version reads from an element beyond the structure both
+/// versions share.
+pub(crate) trait Version {
+    /// Called for the default `<organization>` (the tree's root) and for each
+    /// `<item>`, once the activity's id, title, visibility, launch and
+    /// children are filled in. Adds what the version's own elements say, to
+    /// the activity and to its launch.
+    fn read(&mut self, element: &Element, activity: &mut Activity) -> Result<(), Refusal>;
+}
+
+/// Walks a content package manifest's default organization into an activity
+/// tree. Each item that names a resource becomes a launchable activity.
+pub(crate) fn parse_content_package<R: Read + Seek>(
+    manifest: &Element,
+    archive: &Archive<R>,
+    version: &mut dyn Version,
+) -> Result<ParsedManifest, Refusal> {
+    let organizations = manifest
+        .child("organizations")
+        .ok_or_else(|| invalid("the manifest has no <organizations>"))?;
+    // A package may carry several organizations; the one it marks as default
+    // is the one a learner is given. A missing or dangling default falls back
+    // to the first.
+    let organization = organizations
+        .attribute("default")
+        .and_then(|default| {
+            organizations
+                .children_named("organization")
+                .find(|organization| organization.attribute("identifier") == Some(default))
+        })
+        .or_else(|| organizations.children_named("organization").next())
+        .ok_or_else(|| invalid("the manifest has no organization, so there is nothing to play"))?;
+
+    let resources = manifest.child("resources");
+    let mut walk = Walk {
+        archive,
+        version,
+        base: format!(
+            "{}{}",
+            manifest.xml_base(),
+            resources.map_or("", Element::xml_base)
+        ),
+        resources: resources
+            .into_iter()
+            .flat_map(|resources| resources.children_named("resource"))
+            .filter_map(|resource| Some((resource.attribute("identifier")?.trim(), resource)))
+            .collect(),
+        seen: HashSet::new(),
+    };
+
+    let identifier = manifest
+        .attribute("identifier")
+        .unwrap_or_default()
+        .trim()
+        .to_owned();
+    let title = title(organization).unwrap_or_else(|| identifier.clone());
+    let tree = walk.activity(organization, "organization", Some(title.clone()))?;
+    if !has_launch(&tree) {
+        return Err(Refusal::new(
+            RefusalCode::LaunchResourceMissing,
+            "no item in the default organization launches anything",
+        ));
+    }
+    Ok(ParsedManifest {
+        identifier,
+        title,
+        tree,
+    })
+}
+
+struct Walk<'a, 'v, R> {
+    archive: &'a Archive<R>,
+    version: &'v mut dyn Version,
+    /// The `xml:base` of the manifest and of `<resources>`, joined.
+    base: String,
+    resources: HashMap<&'a str, &'a Element>,
+    /// Identifiers already used in the tree.
+    seen: HashSet<String>,
+}
+
+impl<R: Read + Seek> Walk<'_, '_, R> {
+    /// The activity for the organization (`what` = "organization", given its
+    /// title) or for an item.
+    fn activity(
+        &mut self,
+        element: &Element,
+        what: &str,
+        title_given: Option<String>,
+    ) -> Result<Activity, Refusal> {
+        let id = identifier(element, what, &mut self.seen)?;
+        let launch = match (what, element.attribute("identifierref").map(str::trim)) {
+            ("item", Some(reference)) if !reference.is_empty() => {
+                Some(self.launch(element, &id, reference)?)
+            }
+            _ => None,
+        };
+        let children = element
+            .children_named("item")
+            .map(|item| self.activity(item, "item", None))
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut activity = Activity {
+            title: title_given
+                .or_else(|| title(element))
+                .unwrap_or_else(|| id.clone()),
+            visible: !element
+                .attribute("isvisible")
+                .is_some_and(|visible| visible.trim().eq_ignore_ascii_case("false")),
+            launch,
+            prerequisites: None,
+            sequencing: None,
+            completion_threshold: None,
+            hide_lms_ui: Vec::new(),
+            shared_data: Vec::new(),
+            children,
+            id,
+        };
+        self.version.read(element, &mut activity)?;
+        Ok(activity)
+    }
+
+    fn launch(&self, item: &Element, id: &str, reference: &str) -> Result<Launch, Refusal> {
+        let resource = self.resources.get(reference).ok_or_else(|| {
+            invalid(format!(
+                "item {id} refers to resource {reference}, which the manifest does not define"
+            ))
+        })?;
+        let href = resource
+            .attribute("href")
+            .map(str::trim)
+            .filter(|href| !href.is_empty())
+            .ok_or_else(|| {
+                Refusal::new(
+                    RefusalCode::LaunchResourceMissing,
+                    format!("item {id} launches resource {reference}, which names no file"),
+                )
+            })?;
+        let address = format!("{}{}{href}", self.base, resource.xml_base());
+        let target = launch_target(&address, self.archive).map_err(|mut refusal| {
+            refusal.detail = format!("item {id}: {}", refusal.detail);
+            refusal
+        })?;
+
+        // The standards require the type and give no default. Where it is
+        // missing the resource is taken for an asset: it is shown, and
+        // nothing is expected of it. SCORM 1.2 spells the attribute
+        // `scormtype`, SCORM 2004 `scormType`.
+        let kind = match resource
+            .attribute("scormtype")
+            .or_else(|| resource.attribute("scormType"))
+            .map(str::trim)
+        {
+            None => LaunchKind::Asset,
+            Some(kind) if kind.eq_ignore_ascii_case("asset") => LaunchKind::Asset,
+            Some(kind) if kind.eq_ignore_ascii_case("sco") => LaunchKind::Sco,
+            Some(other) => {
+                return Err(invalid(format!(
+                    "resource {reference} has scormtype {other:?}; it must be sco or asset"
+                )))
+            }
+        };
+        Ok(Launch {
+            path: target.path,
+            parameters: launch_parameters(
+                &target.suffix,
+                item.attribute("parameters").unwrap_or_default(),
+            ),
+            kind,
+            launch_data: None,
+            mastery_score: None,
+            max_time_allowed: None,
+            time_limit_action: None,
+        })
+    }
+}
+
+/// The element's `<title>` on one line, however the manifest was indented.
+fn title(element: &Element) -> Option<String> {
+    let words: Vec<&str> = element.child("title")?.text.split_whitespace().collect();
+    Some(words.join(" ")).filter(|title| !title.is_empty())
+}
+
+/// An element's identifier, which must be present and not used before:
+/// run-time state is stored against it.
+fn identifier(
+    element: &Element,
+    what: &str,
+    seen: &mut HashSet<String>,
+) -> Result<String, Refusal> {
+    let id = element
+        .attribute("identifier")
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| invalid(format!("an <{what}> has no identifier")))?;
+    if !seen.insert(id.to_owned()) {
+        return Err(invalid(format!(
+            "the identifier {id} is used more than once"
+        )));
+    }
+    Ok(id.to_owned())
+}
+
+fn has_launch(activity: &Activity) -> bool {
+    activity.launch.is_some() || activity.children.iter().any(has_launch)
+}
+
+/// A manifest that is well-formed but breaks a rule of its standard.
+pub(crate) fn invalid(detail: impl Into<String>) -> Refusal {
+    Refusal::new(RefusalCode::ManifestUnparseable, detail)
 }
