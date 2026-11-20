@@ -324,6 +324,54 @@ export interface PackageExtractProgress {
   bytes_total: number
 }
 
+export type PackageAttemptStatus = 'in_progress' | 'completed' | 'closed'
+
+export interface PackageAttempt {
+  id: string
+  enrollment_id: string
+  element_id: string
+  package_hash: string
+  attempt_number: number
+  status: PackageAttemptStatus
+  started_at: string
+  ended_at: string | null
+  updated_at: string
+}
+
+/** What the player's wrapper loads before one lesson of a package starts. */
+export interface PackageLaunchInit {
+  attempt_id: string
+  activity_id: string
+  standard: PackageStandard
+  /** Pseudonymous: per learner and package, never the learner's DID. */
+  learner_id: string
+  learner_name: string
+  /** `ab-initio`, `resume` or empty. */
+  entry: string
+  launch_data: string | null
+  mastery_score: number | null
+  max_time_allowed: string | null
+  time_limit_action: string | null
+  /** Hand to the run-time library's `loadFromJSON` before the lesson loads. */
+  runtime: { cmi: Record<string, unknown> }
+}
+
+/** One coalesced commit: the whole run-time state of one activity. */
+export interface PackageCommit {
+  attempt_id: string
+  activity_id: string
+  /** True for the commit the content's own finish call produced. */
+  session_ended: boolean
+  runtime: { cmi: Record<string, unknown> }
+}
+
+export interface PackageAttemptProgress {
+  attempt: PackageAttempt
+  element_progress: ElementProgress
+  package_completed: boolean
+  cache_dropped: boolean
+}
+
 export interface AuthorizedCourseAttestor {
   did: string
   public_key_hex: string
