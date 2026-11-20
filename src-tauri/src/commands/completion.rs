@@ -29,6 +29,7 @@ use crate::crypto::did::Did;
 use crate::crypto::wallet;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::completion::{element_leaf, merkle_root, ElementCompletion};
+use crate::domain::course_document::{ASSESSED_ELEMENT_TYPES, PACKAGE_ELEMENT_TYPE};
 use crate::domain::vc::{Claim, CredentialType, SkillClaim};
 use crate::AppState;
 use alexandria_verify::course::{
@@ -223,13 +224,12 @@ fn assemble_from_template(
     ensure_enrollment_is_current(conn, course_id, &enrollment)?;
     let enrollment_id = enrollment.id;
 
-    // Template = gradeable elements in chapter→element position order.
+    // Template = assessed elements in chapter→element position order.
     let mut stmt = conn
         .prepare(
             "SELECT ce.id, ce.element_type FROM course_elements ce \
              JOIN course_chapters cc ON cc.id = ce.chapter_id \
              WHERE cc.course_id = ?1 \
-               AND ce.element_type IN ('quiz', 'interactive', 'assessment') \
              ORDER BY cc.position ASC, ce.position ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -239,7 +239,10 @@ fn assemble_from_template(
         })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|(_, element_type)| ASSESSED_ELEMENT_TYPES.contains(&element_type.as_str()))
+        .collect();
 
     let required_count = elements.len();
     let mut inputs = Vec::new();
@@ -394,36 +397,68 @@ pub async fn claim_course_completion(
     course_id: String,
     timestamp_ms: i64,
 ) -> Result<CompletionWitnessResult, String> {
-    // `None` → content-only course (no gradeable elements): issue locally at a
-    // baseline proficiency. `Some(inputs)` → graded course ready to anchor.
     let course_id_for_read = course_id.clone();
-    let inputs: Option<Vec<ElementCompletionInput>> = state
+    let basis = state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "completion.claim.prepare",
-            move |db| {
-                let (inputs, missing, required_count) =
-                    assemble_from_template(db.conn(), &course_id_for_read)?;
-                if required_count == 0 {
-                    Ok(None)
-                } else if !missing.is_empty() {
-                    Err(format!(
-                        "course not complete: {} element(s) lack a passing submission",
-                        missing.len()
-                    ))
-                } else {
-                    Ok(Some(inputs))
-                }
-            },
+            move |db| claim_basis(db.conn(), &course_id_for_read),
         )
         .await?;
 
-    match inputs {
-        Some(inputs) => submit_witness(&state, &course_id, &inputs, timestamp_ms).await,
-        None => issue_content_completion(&state, &course_id, timestamp_ms).await,
+    match basis {
+        ClaimBasis::Graded(inputs) => {
+            submit_witness(&state, &course_id, &inputs, timestamp_ms).await
+        }
+        ClaimBasis::ContentOnly => issue_content_completion(&state, &course_id, timestamp_ms).await,
     }
+}
+
+/// What a completion claim for a course rests on.
+#[derive(Debug)]
+enum ClaimBasis {
+    /// Every assessed element has a passing submission: anchor a witness.
+    Graded(Vec<ElementCompletionInput>),
+    /// No assessed element: issue the learner's self-claim at a baseline
+    /// proficiency.
+    ContentOnly,
+}
+
+/// Decides what a completion claim for the course rests on, or refuses it:
+/// an assessed element still lacks a passing submission, or the course has
+/// nothing but package elements. A package result is a self-report from
+/// untrusted script, so it neither counts toward a content-only completion
+/// nor makes a course claimable (ADR 0003).
+fn claim_basis(conn: &Connection, course_id: &str) -> Result<ClaimBasis, String> {
+    let (inputs, missing, required_count) = assemble_from_template(conn, course_id)?;
+    if required_count > 0 {
+        return if missing.is_empty() {
+            Ok(ClaimBasis::Graded(inputs))
+        } else {
+            Err(format!(
+                "course not complete: {} element(s) lack a passing submission",
+                missing.len()
+            ))
+        };
+    }
+    let (package_elements, other_elements): (i64, i64) = conn
+        .query_row(
+            "SELECT COALESCE(SUM(ce.element_type = ?2), 0), COALESCE(SUM(ce.element_type <> ?2), 0) \
+             FROM course_elements ce JOIN course_chapters cc ON cc.id = ce.chapter_id \
+             WHERE cc.course_id = ?1",
+            rusqlite::params![course_id, PACKAGE_ELEMENT_TYPE],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    if package_elements > 0 && other_elements == 0 {
+        return Err(
+            "no credential: package results are self-reported, and this course has nothing else"
+                .into(),
+        );
+    }
+    Ok(ClaimBasis::ContentOnly)
 }
 
 /// Mark the exact enrollment that produced a completion as completed.
@@ -1340,5 +1375,174 @@ mod tests {
         // The learner's own completion claim is scored but is not independent
         // corroboration, so it contributes no issuer cluster.
         assert_eq!(state[0].unique_issuer_clusters, 0);
+    }
+
+    // A package result is a self-report from untrusted script (ADR 0003,
+    // learning standards spec → Credentials).
+
+    /// Course `c1` with one element per `(id, type)` and an enrolment.
+    fn seed_course(db: &crate::db::Database, elements: &[(&str, &str)]) {
+        let conn = db.conn();
+        conn.execute(
+            "INSERT INTO courses \
+             (id, title, author_address, status, content_cid, course_document_version) \
+             VALUES ('c1', 'Course', 'stake_test1u', 'published', ?1, 2)",
+            ["11".repeat(32)],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO course_chapters (id, course_id, title, position) \
+             VALUES ('ch1', 'c1', 'Chapter', 0)",
+            [],
+        )
+        .unwrap();
+        for (position, (id, element_type)) in elements.iter().enumerate() {
+            conn.execute(
+                "INSERT INTO course_elements (id, chapter_id, title, element_type, content_cid, position) \
+                 VALUES (?1, 'ch1', ?1, ?2, ?3, ?4)",
+                rusqlite::params![id, element_type, "22".repeat(32), position as i64],
+            )
+            .unwrap();
+        }
+        conn.execute(
+            "INSERT INTO enrollments \
+             (id, course_id, status, course_document_cid, course_document_version) \
+             VALUES ('enr1', 'c1', 'active', ?1, 2)",
+            ["11".repeat(32)],
+        )
+        .unwrap();
+    }
+
+    fn migrated() -> crate::db::Database {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        db
+    }
+
+    fn complete_element(db: &crate::db::Database, element_id: &str, score: f64) {
+        crate::enrollment::update_progress(
+            db,
+            "enr1".into(),
+            crate::domain::enrollment::UpdateProgressRequest {
+                element_id: element_id.into(),
+                status: "completed".into(),
+                score: Some(score),
+                time_spent: Some(60),
+                integrity_session_id: None,
+                integrity_score: None,
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn the_package_type_is_never_an_assessed_element_type() {
+        use crate::domain::course_document::{ASSESSED_ELEMENT_TYPES, PACKAGE_ELEMENT_TYPE};
+        assert_eq!(
+            ASSESSED_ELEMENT_TYPES,
+            ["quiz", "interactive", "assessment"]
+        );
+        assert!(!ASSESSED_ELEMENT_TYPES.contains(&PACKAGE_ELEMENT_TYPE));
+    }
+
+    #[test]
+    fn a_completed_package_element_never_enters_completion_evidence() {
+        let db = migrated();
+        seed_course(&db, &[("el_pkg", "package"), ("el_quiz", "quiz")]);
+        complete_element(&db, "el_pkg", 1.0);
+
+        let (inputs, missing, required) = assemble_from_template(db.conn(), "c1").unwrap();
+        assert_eq!(required, 1, "only the quiz is assessed");
+        assert!(inputs.is_empty());
+        assert_eq!(missing, vec!["el_quiz".to_string()]);
+    }
+
+    #[test]
+    fn a_package_element_cannot_be_graded_skill_tagged_or_given_a_grader() {
+        let db = migrated();
+        seed_course(&db, &[("el_pkg", "package")]);
+        db.conn()
+            .execute(
+                "INSERT INTO local_identity (id, stake_address, payment_address) \
+                 VALUES (1, 'stake_test1ulearner', 'addr_test1q123')",
+                [],
+            )
+            .unwrap();
+        db.conn()
+            .execute_batch(
+                "INSERT INTO subject_fields (id, name) VALUES ('sf', 'Field'); \
+                 INSERT INTO subjects (id, name, subject_field_id) VALUES ('sub', 'Subject', 'sf'); \
+                 INSERT INTO skills (id, name, subject_id) VALUES ('sk', 'Skill', 'sub');",
+            )
+            .unwrap();
+
+        let graded = crate::enrollment::record_submission(
+            &db,
+            "enr1".into(),
+            "el_pkg".into(),
+            "quiz".into(),
+            "{}".into(),
+            1.0,
+        );
+        assert!(graded.is_err(), "a package result is never a submission");
+
+        let tagged = db.conn().execute(
+            "INSERT INTO element_skill_tags (element_id, skill_id) VALUES ('el_pkg', 'sk')",
+            [],
+        );
+        assert!(tagged.is_err(), "a package element carries no skill tag");
+
+        let grader = db.conn().execute(
+            "UPDATE course_elements SET plugin_cid = ?1 WHERE id = 'el_pkg'",
+            ["33".repeat(32)],
+        );
+        assert!(grader.is_err(), "a package element carries no grader");
+
+        let submissions: i64 = db
+            .conn()
+            .query_row("SELECT count(*) FROM element_submissions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(submissions, 0);
+    }
+
+    #[test]
+    fn a_course_made_only_of_packages_issues_no_credential() {
+        let db = migrated();
+        seed_course(&db, &[("el_pkg", "package"), ("el_pkg2", "package")]);
+        complete_element(&db, "el_pkg", 1.0);
+        complete_element(&db, "el_pkg2", 1.0);
+
+        let refused = claim_basis(db.conn(), "c1").unwrap_err();
+        assert!(refused.contains("package"), "{refused}");
+    }
+
+    #[test]
+    fn a_mixed_content_course_still_issues_the_self_claim_and_a_graded_one_its_witness() {
+        let db = migrated();
+        seed_course(&db, &[("el_pkg", "package"), ("el_text", "text")]);
+        assert!(matches!(
+            claim_basis(db.conn(), "c1").unwrap(),
+            ClaimBasis::ContentOnly
+        ));
+
+        let graded = migrated();
+        seed_course(&graded, &[("el_pkg", "package"), ("el_quiz", "quiz")]);
+        assert!(
+            claim_basis(graded.conn(), "c1").is_err(),
+            "the quiz is unpassed"
+        );
+        add_submission(&graded, "el_quiz", 0.9);
+        match claim_basis(graded.conn(), "c1").unwrap() {
+            ClaimBasis::Graded(inputs) => {
+                assert_eq!(
+                    inputs
+                        .iter()
+                        .map(|i| i.element_id.as_str())
+                        .collect::<Vec<_>>(),
+                    ["el_quiz"]
+                )
+            }
+            ClaimBasis::ContentOnly => panic!("a graded course claims its witness"),
+        }
     }
 }
