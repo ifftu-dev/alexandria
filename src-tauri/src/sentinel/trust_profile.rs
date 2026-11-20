@@ -167,7 +167,9 @@ pub(crate) fn select_for_session(
         (None, Some(request), _) => crate::exchange_requests::floor(conn, request)?,
         (None, None, _) => None,
     };
-    // A paired phone's attestation counts only with companion consent.
+    // A paired phone's attestation is kept only with companion consent. It
+    // never credits the device attestation signal: it says nothing about
+    // this device.
     let paired =
         crate::sentinel::companion::session::stored_binding(attestation.as_deref()).is_some();
     if paired && !req.consent.companion_phone {
@@ -182,8 +184,7 @@ pub(crate) fn select_for_session(
     let companion = attestation
         .as_deref()
         .filter(|_| paired && req.consent.companion_phone);
-    let device_attested = crate::sentinel::attestation::credits_attestation_signal(&assurance)
-        && (!paired || req.consent.companion_phone);
+    let device_attested = crate::sentinel::attestation::credits_attestation_signal(&assurance);
     let inputs = SelectionInputs {
         device_attested,
         capabilities: req.capabilities,

@@ -205,6 +205,13 @@ describe('CredentialDetail integrity', () => {
     expect(row.text()).toContain('credentials.detail.cameraCoverage')
     expect(row.find('.text-warning').exists()).toBe(true)
   })
+
+  it('states where the answers were held, reading a credential that does not say as device', async () => {
+    const unstated = (await open({ ...credential, integrity })).get('[data-integrity-section]')
+    expect(unstated.get('[data-answer-custody]').text()).toContain('credentials.detail.custody.device')
+    const issuer = (await open({ ...credential, integrity: { ...integrity, answerCustody: 'issuer' } })).get('[data-integrity-section]')
+    expect(issuer.get('[data-answer-custody]').text()).toContain('credentials.detail.custody.issuer')
+  })
 })
 
 // What the provenance section states comes from the trust command alone: the
@@ -317,6 +324,22 @@ describe('CredentialDetail provenance', () => {
     const section = await openWithTrust(trustView({ coverage_statement: statement }), { ...credential, integrity })
     expect(mocks.coverageStatement).not.toHaveBeenCalled()
     expect(section.get('[data-testid="coverage-statement"]').text()).toContain('a second device out of view')
+  })
+
+  it('says below the live rung, in the statement\'s own words, that a second device or person was not ruled out', async () => {
+    const line = 'Whether a second device or person helped: not ruled out. Only a live segment, where a person asks unscripted questions, rules it out.'
+    const below = await openWithTrust(
+      trustView({ coverage_statement: { ...statement, version: '3', not_checked: [...statement.not_checked, line] } }),
+      { ...credential, integrity },
+    )
+    expect(below.get('[data-second-device]').text()).toBe(line)
+
+    // A `live` statement has no such line, and neither has an older version.
+    const live = await openWithTrust(
+      trustView({ coverage_statement: { ...statement, version: '3', rung: 'live' } }),
+      { ...credential, integrity: { ...integrity, verificationRung: 'live' } },
+    )
+    expect(live.find('[data-second-device]').exists()).toBe(false)
   })
 
   it('says when the named coverage statement could not be resolved', async () => {

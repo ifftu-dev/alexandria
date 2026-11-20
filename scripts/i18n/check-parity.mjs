@@ -127,6 +127,12 @@ const PENDING_TRANSLATION = [
   'sentinel.companion.paired',
   'credentials.detail.integrityCompanionAttested',
   'learn.assessment.verifiedDevice',
+  // Answer custody (assessment hardening ticket 05): where a credential's
+  // answers were held, the role form's custody line and a request that needs
+  // issuer custody. English-only pending the next translation pass.
+  'credentials.detail.custody',
+  'dashboard.sponsor.roleModal.custodyDevice',
+  'organisations.requests.assessment.policy.custodyIssuer',
   // Not-found page for stale deep links, added when retired route redirects
   // were deleted. English-only pending a translate pass; renders in English
   // via the i18n fallback.

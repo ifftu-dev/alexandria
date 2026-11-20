@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // A sponsor role's integrity minimums: trust profile, verification rung and
-// follow-up questions, each with plain language beside it, and below them
+// follow-up questions, each with plain language beside it, under the answer
+// custody every role on this device has (candidates' devices), and below them
 // the coverage statement a credential issued under these minimums names.
 // `llm` follow-ups also name the saved model connection that writes them.
 import { computed, onMounted, ref } from 'vue'
@@ -55,6 +56,7 @@ onMounted(async () => {
 
 <template>
   <div class="grid gap-3">
+    <p class="text-xs text-muted-foreground" data-testid="policy-custody">{{ $t('dashboard.sponsor.roleModal.custodyDevice') }}</p>
     <label class="text-xs text-muted-foreground">{{ $t('dashboard.sponsor.roleModal.minProfile') }}
       <select
         :value="modelValue.min_trust_profile"

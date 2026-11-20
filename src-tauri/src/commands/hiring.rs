@@ -716,7 +716,7 @@ pub fn build_integrity_report(
     // or a room, that device is not where the interview happens, so the
     // check vouches for nothing unless an attested phone was there.
     if invite.mode != "alexandria"
-        && !crate::sentinel::attestation::credits_attestation_signal(&run.assurance_level)
+        && !crate::sentinel::attestation::attested_phone_present(&run.assurance_level)
     {
         return Err(
             "an interview held by video call, phone or in person carries no Sentinel \

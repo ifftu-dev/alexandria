@@ -294,10 +294,19 @@ pub fn effective_assurance(
 }
 
 /// Whether a session at `level` credits the device attestation signal of
-/// its trust profile: the device's own verified attestation, or a paired
-/// phone that verified. Profile selection, floors and the verification rung
-/// read it; the assurance a credential claims is the level itself.
+/// its trust profile: only the device's own verified attestation. A paired
+/// phone's (`companion_attested`) says nothing about the device the attempt
+/// ran on, so it does not, as the verifier library's floor rule reads it.
+/// Profile selection, floors and the assertion's degraded signals read it;
+/// the assurance a credential claims is the level itself.
 pub fn credits_attestation_signal(level: &str) -> bool {
+    level == ASSURANCE_DEVICE_ATTESTED
+}
+
+/// Whether a session at `level` had an attested phone present: the device's
+/// own verified attestation or a paired phone's. An interview held outside
+/// Alexandria accepts a check only with one.
+pub fn attested_phone_present(level: &str) -> bool {
     level == ASSURANCE_DEVICE_ATTESTED || level == ASSURANCE_COMPANION_ATTESTED
 }
 

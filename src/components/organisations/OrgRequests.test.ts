@@ -226,8 +226,8 @@ describe('OrgRequests', () => {
       ])
       expect(policy.find('[data-testid=requirement-maxCritical]').text()).toBe('organisations.requests.assessment.policy.noCritical')
       expect(policy.find('[data-testid=floor-blocker-camera]').exists()).toBe(true)
-      // Desktop: a paired phone meets the floor's attestation signal.
-      expect(policy.find('[data-testid=floor-blocker-attestation]').text()).toContain('organisations.requests.assessment.policy.pairPhone')
+      // Desktop: a paired phone does not lend the desktop its attestation.
+      expect(policy.find('[data-testid=floor-blocker-attestation]').text()).toBe('organisations.requests.assessment.policy.noAttestation')
     } finally {
       vi.unstubAllGlobals()
     }

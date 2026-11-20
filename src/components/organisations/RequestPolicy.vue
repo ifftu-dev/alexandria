@@ -29,6 +29,7 @@ const phones = computed(() => verifiedPhones(props.device.support))
 
 function label(r: Requirement): string {
   switch (r.kind) {
+    case 'custody': return t('organisations.requests.assessment.policy.custodyIssuer')
     case 'clean': return t('organisations.requests.assessment.policy.clean')
     case 'minIntegrity': return t('organisations.requests.assessment.policy.minIntegrity', { percent: r.percent })
     case 'maxCritical':
@@ -69,13 +70,8 @@ function label(r: Requirement): string {
     <p v-if="reach.blockers.includes('no_camera')" class="font-medium text-warning" data-testid="floor-blocker-camera">
       {{ t('organisations.requests.assessment.policy.noCamera', { profile: profileName }) }}
     </p>
-    <p
-      v-if="reach.blockers.includes('no_attestation') || reach.pairPhone"
-      class="font-medium text-warning"
-      data-testid="floor-blocker-attestation"
-    >
+    <p v-if="reach.blockers.includes('no_attestation')" class="font-medium text-warning" data-testid="floor-blocker-attestation">
       {{ t('organisations.requests.assessment.policy.noAttestation', { profile: profileName }) }}
-      <template v-if="reach.pairPhone">{{ t('organisations.requests.assessment.policy.pairPhone') }}</template>
     </p>
   </div>
 </template>
