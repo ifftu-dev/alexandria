@@ -1,6 +1,6 @@
 # Record shares on the existing grant mechanism
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria, alexandria-cloud
 Part of: docs/learning-standards-spec.md
 Blocked by: docs/learning-standards/16-record-destinations.md
@@ -24,3 +24,13 @@ Done when: the grant format carries the new scope with test vectors both reposit
 - The verification crate refuses a grant that names no skills. A record-only share needs that rule relaxed for grants that carry a record scope.
 - No command narrows an existing grant today although the format allows it. This ticket adds the narrow operation for record scopes.
 - No guardian rule exists on organisation grants today. "The same consent rules as any other grant for that profile" is therefore met by using the same path; this ticket adds no new guardian step, and says so in the consent screen test. A guardian approval step for grants is a separate decision for the owner.
+
+2026-11-20: done. Decisions and deviations.
+
+- Format. `alexandria-verify` 0.8.0 (version bumped locally, not published; the same version covers the record export module of ticket 15). `AccessRequest` and `GrantStatement` gain an optional `records` scope: `course_ids`, `kinds` (`completion`, `interaction`; completion is always included) and `account`. In a request the account is the organisation's proposal and optional. In a grant it is required and is the account the records will carry (derived, the learner's DID, or the approved proposal), so ingest can tie statements to the share. The field is omitted when absent, so older statements keep their bytes. A grant names skills, records or both. An update may narrow the scope and may not widen it or change the account. Shared vectors are in the crate's `tests/vectors/access/`; the hosted service runs them from its vendored copy.
+- Recipient label. `share|<audience>|<request id>`, not `share|<org>`: it is known before approval, so the consent screen shows the exact identifier, and two shares with one organisation never share identifiers or collide on the unique label.
+- App. The records half lives in `record_sending::shares` (offer, approval, approve, narrowed, narrow, stop, send_pending, the batch format and its transport); the grant commands call it. `org_grant` takes an optional records decision and sends no talent snapshot for a record-only share. `org_grant_narrow_records` is the new narrow operation, for record scopes only. Revoking deletes the share's recipient and queue before the revoke goes to the hosted service, so sends stop even offline. Shares are sent only for grants not revoked and only while the organisations switch is on. The background sender's pass serves destinations, then shares.
+- Batch wire format. Duplicated in both repositories as the ticket says (`record_sending::shares` in the app, `record_batch` in the hosted service), not added to the verification crate. Shared vector: the app's `src-tauri/tests/fixtures/record-share/signed-batch.json`, copied verbatim to the hosted service's `tests/fixtures/record-share/`.
+- Consent. The record consent screen gains the proposed account as a third identifier and the share's revoke text, and is shown on the access request card in the inbox; approval is the same `org_grant` call. No guardian step is added (the inbox test says so); a guardian approval step for grants remains the owner's decision.
+- Left for ticket 18: the ingest endpoint `POST /api/grants/{id}/records` (until it exists, the app's sends fail visibly with 404 and are retried), per-statement scope checks, storage, replay refusal and deletion on revoke.
+- Proposed doc edits, not made: the verification crate's README "New in 0.7.0" line, to mention 0.8.0; its vectors README, to list `access/`; the hosted service's `docs/organisations.md`, to describe record-only grants and `access_grants.records`; the spec's Sending records section, to name the grant's account as the identifier the records carry.
