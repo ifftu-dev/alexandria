@@ -13,8 +13,13 @@
 // - Closing ends the lesson (the wrapper finishes it), waits for its last
 //   commit, clears storage, closes the launch and only then terminates the
 //   attempt, so a completed package's extracted files can be dropped.
+// - cmi5: a unit has no run-time API. `package_cmi5_launch` opens its session
+//   (and on desktop its own window, when it asks for one) and returns its
+//   launch URL; the wrapper only frames it, and the unit talks xAPI to the
+//   session's endpoint itself. Ending the lesson ends the session.
 
 import type {
+  Cmi5Launch,
   OpenedPackageLaunch,
   PackageActivity,
   PackageAttemptProgress,
@@ -38,6 +43,10 @@ export interface PackageSessionEvents {
   focusRequest: () => void
   /** The wrapper refused a launch (unsupported standard, bad address). */
   refused: (reason: string) => void
+  /** cmi5: the unit returned to its return page; its lesson is over. */
+  unitExited?: () => void
+  /** cmi5: the running unit opened in its own window (`launch`) or that ended (`null`). */
+  unitWindow?: (launch: Cmi5Launch | null) => void
 }
 
 export interface PackageSessionOptions {
@@ -95,6 +104,8 @@ export function createPackageSession(options: PackageSessionOptions) {
   let lessonId: string | null = null
   let saving: Promise<void> = Promise.resolve()
   let closed = false
+  /** cmi5: the running unit's session. */
+  let unitSession: Cmi5Launch | null = null
 
   function waitFor(matches: (event: MessageEvent) => boolean, timeoutMs: number): Promise<boolean> {
     return new Promise((resolve) => {
@@ -151,6 +162,7 @@ export function createPackageSession(options: PackageSessionOptions) {
     // The bootstrap posts from any document inside the package frame.
     if (message.source === FROM_PACKAGE && within(event.source, wrapper)) {
       if (message.type === 'focus-mode-request') events.focusRequest()
+      else if (message.type === 'au-exited' && unitSession) events.unitExited?.()
       else if (message.type === 'blocked' && typeof message.what === 'string' && BLOCKED_KINDS.has(message.what)) {
         events.blocked(message.what as BlockedKind, typeof message.detail === 'string' ? message.detail.slice(0, 200) : null)
       }
@@ -200,10 +212,58 @@ export function createPackageSession(options: PackageSessionOptions) {
       lessonId = null
     }
     await saving
+    if (unitSession) await endUnit()
+  }
+
+  /** cmi5: ends the running unit's session and reports the attempt's progress. */
+  async function endUnit(): Promise<void> {
+    const ending = unitSession
+    if (!ending) return
+    unitSession = null
+    if (ending.own_window) events.unitWindow?.(null)
+    try {
+      events.progress(await invoke<PackageAttemptProgress>('package_cmi5_end', { sessionId: ending.session_id }))
+    } catch (error) {
+      events.saveError(String(error))
+    }
+  }
+
+  /** cmi5: the host ended a session without being asked (its own window closed). */
+  function unitEnded(sessionId: string, progress: PackageAttemptProgress | null) {
+    if (unitSession?.session_id !== sessionId) return
+    if (unitSession.own_window) events.unitWindow?.(null)
+    unitSession = null
+    lessonId = null
+    if (progress) events.progress(progress)
+  }
+
+  /** cmi5: brings the running unit's own window to the front. */
+  async function focusUnitWindow(): Promise<boolean> {
+    if (!unitSession?.own_window) return false
+    return invoke<boolean>('package_cmi5_focus', { sessionId: unitSession.session_id })
+  }
+
+  /** cmi5: opens `activity`'s session and frames its launch URL (or its own window opened). */
+  async function openUnit(activity: PackageActivity): Promise<Cmi5Launch> {
+    await endLesson()
+    const unit = await invoke<Cmi5Launch>('package_cmi5_launch', {
+      attemptId,
+      activityId: activity.id,
+      prefix: launch.prefix,
+    })
+    unitSession = unit
+    if (unit.own_window) {
+      events.unitWindow?.(unit)
+      return unit
+    }
+    lessonId = activity.id
+    post({ type: 'launch', standard, activityId: activity.id, title: activity.title, url: unit.url })
+    return unit
   }
 
   /** Starts `activity` in a fresh API session with its stored state. */
-  async function openLesson(activity: PackageActivity): Promise<PackageLaunchInit> {
+  async function openLesson(activity: PackageActivity): Promise<PackageLaunchInit | Cmi5Launch> {
+    if (standard === 'cmi5') return openUnit(activity)
     await endLesson()
     const init = await invoke<PackageLaunchInit>('package_attempt_initialise', { attemptId, activityId: activity.id })
     lessonId = activity.id
@@ -249,7 +309,7 @@ export function createPackageSession(options: PackageSessionOptions) {
     }
   }
 
-  return { start, openLesson, endLesson, close }
+  return { start, openLesson, endLesson, close, unitEnded, focusUnitWindow }
 }
 
 export type PackageSession = ReturnType<typeof createPackageSession>

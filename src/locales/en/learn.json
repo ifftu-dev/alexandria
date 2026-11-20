@@ -195,6 +195,13 @@
       "remoteUnknown": "The package tried to load something from the internet. Packages run offline, so it was blocked."
     },
     "dismiss": "Dismiss",
+    "unitWindow": {
+      "body": "This unit is open in its own window.",
+      "focus": "Bring to front",
+      "end": "End this unit"
+    },
+    "unitExited": "This unit has finished. Choose the next one from the list.",
+    "focusForced": "This unit needs the whole screen, so it stays in focus mode until you leave it.",
     "courseComplete": "Course complete. Package results are self-reported, so this course earns no credential."
   }
 }

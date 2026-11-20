@@ -281,6 +281,19 @@ export interface PackageActivity {
   launch?: PackageLaunch
   prerequisites?: string
   children?: PackageActivity[]
+  /** cmi5 blocks and assignable units only (`Cmi5Activity` in the studio crate). */
+  cmi5?: PackageCmi5Activity
+}
+
+/** What a cmi5 course structure says about a block or unit beyond the tree. */
+export interface PackageCmi5Activity {
+  /** Units only: when the unit counts as satisfied. */
+  move_on?: 'passed' | 'completed' | 'completed_and_passed' | 'completed_or_passed' | 'not_applicable'
+  /** Units only: whether the unit asks for a window of its own. */
+  launch_method?: 'any_window' | 'own_window'
+  entitlement_key?: string
+  activity_type?: string
+  objectives?: string[]
 }
 
 export interface PackageDescription {
@@ -394,6 +407,21 @@ export interface PackageAttemptProgress {
   element_progress: ElementProgress
   package_completed: boolean
   cache_dropped: boolean
+}
+
+/**
+ * One launch of a cmi5 assignable unit (src-tauri/src/domain/package_attempt.rs),
+ * from `package_cmi5_launch`. `url` already carries the cmi5 launch parameters.
+ */
+export interface Cmi5Launch {
+  session_id: string
+  attempt_id: string
+  activity_id: string
+  url: string
+  /** Desktop: the unit opened in a window of its own. */
+  own_window: boolean
+  /** Mobile: the unit asked for its own window; it plays framed in forced focus mode. */
+  focus_forced: boolean
 }
 
 /**
