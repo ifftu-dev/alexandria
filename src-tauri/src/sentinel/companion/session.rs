@@ -3,8 +3,9 @@
 //! A phone can pair only while the session is open and undecided: not
 //! ended, no trust profile, nothing committed, no attestation stored. The
 //! accepted record goes on `attestation_json` (with its binding), and the
-//! level it verified to on `assurance_level`, so profile selection sees an
-//! attested device exactly as it would on a phone.
+//! level it verified to (`companion_attested`) on `assurance_level`, so
+//! profile selection credits the device attestation signal as it would on a
+//! phone.
 
 use rusqlite::{params, OptionalExtension};
 
@@ -117,7 +118,7 @@ mod tests {
         let accepted = accept_hello(&offer, &hello, PHONE, &trust(&w), NOW).unwrap();
         assert_eq!(
             store_pairing(db.conn(), SESSION, &accepted).unwrap(),
-            att::ASSURANCE_DEVICE_ATTESTED
+            att::ASSURANCE_COMPANION_ATTESTED
         );
         trust(&w)
     }
@@ -133,7 +134,7 @@ mod tests {
     }
 
     #[test]
-    fn a_desktop_paired_with_an_attested_phone_runs_attested_and_issues_device_attested() {
+    fn a_desktop_paired_with_an_attested_phone_runs_attested_and_issues_companion_attested() {
         let db = desktop_session();
         let trust = paired(&db);
 
@@ -168,7 +169,8 @@ mod tests {
             &trust,
         )
         .unwrap();
-        assert_eq!(assertion.assurance_level, att::ASSURANCE_DEVICE_ATTESTED);
+        // A genuine phone was present; nothing is claimed about the desktop.
+        assert_eq!(assertion.assurance_level, att::ASSURANCE_COMPANION_ATTESTED);
         // The paired phone is the desktop's device axis in the assertion.
         assert_eq!(assertion.trust_profile.as_deref(), Some("attested"));
         assert!(assertion

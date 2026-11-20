@@ -116,6 +116,17 @@ const PENDING_TRANSLATION = [
   'interviews.',
   'tutoring.captions.',
   'nav.primary.interviews',
+  // Companion-attested wording (assessment hardening ticket 03): pairing no
+  // longer claims to make an attempt device-attested, and a role or request
+  // that requires a verified device says to take it on a phone. English-only
+  // pending the next learner translation pass; the stale translations of the
+  // reworded pairing strings were removed so they cannot keep the old claim.
+  'sentinel.companion.pairToggle',
+  'sentinel.companion.cardDescription',
+  'sentinel.companion.offerNote',
+  'sentinel.companion.paired',
+  'credentials.detail.integrityCompanionAttested',
+  'learn.assessment.verifiedDevice',
   // Not-found page for stale deep links, added when retired route redirects
   // were deleted. English-only pending a translate pass; renders in English
   // via the i18n fallback.

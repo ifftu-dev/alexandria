@@ -837,6 +837,43 @@ mod tests {
     }
 
     #[test]
+    fn a_paired_phones_evidence_reads_self_reported_not_device_attested() {
+        use crate::db::scoring_inputs::test_support::{
+            store_attested_credential, trust, Evidence, TestCredential,
+        };
+        use alexandria_verify::attestation::Platform;
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let learner = SigningKey::from_bytes(&[12; 32]);
+        let did = did_from_verifying_key(&learner.verifying_key());
+        store_attested_credential(
+            &db,
+            &TestCredential {
+                id: "urn:uuid:companion",
+                signer: &learner,
+                subject: &did,
+                credential_type: "SelfAssertion",
+                skill_id: "skill",
+                level: 3,
+                score: 0.8,
+                valid_from: "2026-01-01T00:00:00Z",
+                session_status: "completed",
+                evidence: Evidence::CompanionBound,
+            },
+        );
+        // The view can say a phone was present; it does not back the figures.
+        assert_eq!(
+            view_of(&db, "urn:uuid:companion", trust()).provenance,
+            Some(Provenance::SelfReported {
+                attestation: AttestationOutcome::VerifiedCredentialBound {
+                    platform: Platform::Android,
+                    companion: true,
+                }
+            })
+        );
+    }
+
+    #[test]
     fn a_suspended_credential_says_where_it_came_from_and_that_it_is_suspended() {
         use crate::credentials::fixtures::{sample_request, setup, NOW as ISSUED};
         use crate::credentials::lifecycle::{reinstate, suspend};

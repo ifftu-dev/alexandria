@@ -47,7 +47,8 @@ export type FloorBlocker = 'no_camera' | 'no_attestation'
 export interface FloorReach {
   /** What this device lacks for the floor. Unknown capabilities never block. */
   blockers: FloorBlocker[]
-  /** Device attestation is missing here but a paired phone can lend it. */
+  /** Device attestation is missing here but a paired phone meets the floor's
+   *  attestation signal (the session is `companion_attested`, not `device_attested`). */
   pairPhone: boolean
 }
 

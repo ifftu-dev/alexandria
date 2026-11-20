@@ -2,7 +2,9 @@
 /**
  * Desktop: the one-time code the learner's phone joins a Sentinel session
  * with. Shown while `useCompanionPhone().pairPhone` waits; the learner can
- * continue without the phone at any point.
+ * continue without the phone at any point. Once paired it says what the
+ * pairing is: a genuine phone present and attested (`companion_attested`),
+ * nothing about this computer.
  */
 import { ref } from 'vue'
 import { AppButton } from '@/components/ui'
@@ -25,6 +27,7 @@ async function copy(code: string): Promise<void> {
   <div v-if="companion.offer.value" class="space-y-3 rounded-lg border border-border bg-card p-4 text-sm" data-testid="companion-offer">
     <h2 class="font-semibold text-foreground">{{ $t('sentinel.companion.offerTitle') }}</h2>
     <p class="text-muted-foreground">{{ $t('sentinel.companion.offerBody') }}</p>
+    <p class="text-muted-foreground" data-testid="companion-offer-note">{{ $t('sentinel.companion.offerNote') }}</p>
     <code class="block break-all rounded bg-muted p-2 font-mono text-xs text-foreground" data-testid="companion-code">{{ companion.offer.value.code }}</code>
     <p class="text-muted-foreground">{{ $t('sentinel.companion.waiting') }}</p>
     <div class="flex gap-2">
@@ -36,6 +39,9 @@ async function copy(code: string): Promise<void> {
       </AppButton>
     </div>
   </div>
+  <p v-else-if="companion.paired.value" class="text-sm text-muted-foreground" data-testid="companion-paired">
+    {{ $t('sentinel.companion.paired') }}
+  </p>
   <p v-else-if="companion.error.value" class="text-sm text-error" data-testid="companion-error">
     {{ $t('sentinel.companion.failed', { reason: companion.error.value }) }}
   </p>

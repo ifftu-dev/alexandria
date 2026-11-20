@@ -214,7 +214,7 @@ describe('OrgRequests', () => {
       require_clean: true, min_integrity: 0.8, max_critical: 0, max_warning: 2,
       required_assurance_level: 'local', min_trust_profile: 'full', min_verification_rung: 'process', probe_policy: 'reseed',
     }
-    arm({ assessments: [item], device: { platform_attestation: false, companion_phone: true } })
+    arm({ assessments: [item], device: { platform_attestation: false, companion_phone: true, android_attestation: false, verified_device: false } })
     const enumerateDevices = vi.fn().mockResolvedValue([{ kind: 'audioinput' }])
     vi.stubGlobal('navigator', { mediaDevices: { enumerateDevices } })
     try {
@@ -226,11 +226,21 @@ describe('OrgRequests', () => {
       ])
       expect(policy.find('[data-testid=requirement-maxCritical]').text()).toBe('organisations.requests.assessment.policy.noCritical')
       expect(policy.find('[data-testid=floor-blocker-camera]').exists()).toBe(true)
-      // Desktop: a paired phone can lend the attestation.
+      // Desktop: a paired phone meets the floor's attestation signal.
       expect(policy.find('[data-testid=floor-blocker-attestation]').text()).toContain('organisations.requests.assessment.policy.pairPhone')
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+
+  it('says a request requiring a verified device is taken on an iPhone, not this computer', async () => {
+    const item = assessmentItem()
+    item.request.issuance_policy = { required_assurance_level: 'device_attested' }
+    arm({ assessments: [item], device: { platform_attestation: false, companion_phone: true, android_attestation: false, verified_device: false } })
+    const wrapper = mount(OrgRequests); await flushPromises()
+    const policy = wrapper.find('[data-testid=request-policy]')
+    expect(policy.find('[data-testid=requirement-assurance]').text()).toBe('organisations.requests.assessment.policy.assuranceAttested')
+    expect(policy.find('[data-testid=verified-device-blocker]').text()).toBe('organisations.requests.assessment.policy.verifiedDevice.iphone')
   })
 
   it('shows no requirements for a request without a policy and never asks about the device', async () => {
