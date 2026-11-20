@@ -405,6 +405,7 @@ export const TAURI_COMMANDS = [
   "record_destinations",
   "record_destinations_send_now",
   "record_element_submission",
+  "record_send_failures",
   "reinstate_credential",
   "release_secure_input",
   "rename_profile",

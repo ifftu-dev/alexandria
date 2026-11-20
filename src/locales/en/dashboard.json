@@ -257,6 +257,9 @@
       "label": "Log size",
       "records": "{count} record | {count} records",
       "used": "{used} of {limit}",
+      "bytes": "{size} B",
+      "kilobytes": "{size} KB",
+      "megabytes": "{size} MB",
       "interactions": "Responses from packages: {count}",
       "explain": "Past the limit, the oldest responses from packages are removed first, then each attempt at an activity is kept as one summary."
     },
@@ -303,6 +306,11 @@
       "one": "This removes it from this device. A record waiting to be sent is not sent; a record already sent stays with whoever received it.",
       "many": "This removes them from this device. Records waiting to be sent are not sent; records already sent stay with whoever received them.",
       "delete": "Delete"
+    },
+    "sendFailures": {
+      "label": "Sending problems",
+      "summary": "{count} record was refused by a recipient at its last try. Records that fail to send stay here; check the destination or share they were going to. | {count} records were refused by a recipient at their last try. Records that fail to send stay here; check the destination or share they were going to.",
+      "row": "Refused by a recipient after {attempts} try: {error} | Refused by a recipient after {attempts} tries: {error}"
     },
     "empty": {
       "title": "No learning records yet",

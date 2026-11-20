@@ -1,4 +1,4 @@
-import type { LearningRecordEntry, LearningRecordExport, LearningRecordUsage } from '@/types'
+import type { LearningRecordEntry, LearningRecordExport, LearningRecordUsage, SendFailure } from '@/types'
 
 /** The size limit the fixture reports: 16 MiB, as the app's. */
 export const FIXTURE_LIMIT_BYTES = 16 * 1024 * 1024
@@ -46,9 +46,13 @@ export interface ActivityLogCall {
   args?: Record<string, unknown>
 }
 
-/** An in-memory activity log behind the four activity log commands. */
+/** An in-memory activity log behind the activity log commands and the send failures it shows. */
 export function activityLogBackend(count: number | null) {
   let records = seed(count)
+  // The mixed seed's newest record was refused by a record destination.
+  const failures: SendFailure[] = count === null
+    ? [{ recipient_id: 'destination-1', record_id: 'record-0', attempts: 3, last_error: 'refused: invalid statement', next_attempt_at: null }]
+    : []
   const calls: ActivityLogCall[] = []
   const usage = (): LearningRecordUsage => ({
     bytes: records.reduce((sum, r) => sum + r.bytes, 0),
@@ -66,6 +70,8 @@ export function activityLogBackend(count: number | null) {
         const limit = Number(args?.limit ?? 0)
         return structuredClone(records.slice(offset, offset + limit))
       }
+      case 'record_send_failures':
+        return structuredClone(failures.filter(failure => records.some(r => r.id === failure.record_id)))
       case 'learning_records_export':
         return structuredClone(FIXTURE_EXPORT)
       case 'learning_records_delete': {

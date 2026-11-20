@@ -130,9 +130,27 @@ export interface OpenOptions {
   bootstrap?: boolean
   /** Files served at the package path without being in the package. */
   extraFiles?: Record<string, Buffer>
+  /** Stand-ins for the player's reserved files (`_alexandria/<name>`), e.g. a broken `clear.html`. */
+  reservedFiles?: Record<string, string>
+  /**
+   * How often the wrapper may hand over a running lesson's state, instead of
+   * its two-second default, so a check that nothing more is written need not
+   * wait out the real interval. Served as a changed default in `wrapper.js`.
+   */
+  commitIntervalMs?: number
+  /** More screen parameters, e.g. `flow=off` (a SCORM 2004 package with flow control off). */
+  query?: string
 }
 
 const RECORD = '__alexandriaHarnessRecord'
+
+/** `wrapper.js` with its default commit interval set to `ms`. */
+async function wrapperWithInterval(ms: number): Promise<string> {
+  const source = await readFile(reserved['wrapper.js']!, 'utf8')
+  const changed = source.replace(/var DEFAULT_COMMIT_INTERVAL_MS = \d+;/, `var DEFAULT_COMMIT_INTERVAL_MS = ${ms};`)
+  if (changed === source) throw new Error('DEFAULT_COMMIT_INTERVAL_MS not found in wrapper.js')
+  return changed
+}
 
 /** Opens the player on `fixture`, serving the package origin from disk. */
 export async function openPlayer(page: Page, options: OpenOptions): Promise<Served> {
@@ -141,6 +159,9 @@ export async function openPlayer(page: Page, options: OpenOptions): Promise<Serv
   const permissions = await handlerConstant('PERMISSIONS_POLICY')
   const limits = await handlerLimits()
   const frameSources = await appFrameSources()
+  if (options.commitIntervalMs !== undefined) {
+    options = { ...options, reservedFiles: { 'wrapper.js': await wrapperWithInterval(options.commitIntervalMs), ...options.reservedFiles } }
+  }
   const packageFiles = new URL(`./${options.fixture ?? 'package-player'}/package/`, import.meta.url)
   const adlLesson = new URL('./scorm2004-conformance/package/probe.html', import.meta.url)
   const served: Served = { refused: [], sockets: [], bridge: [], peers: [], missing: [], files: [], popups: [] }
@@ -214,9 +235,12 @@ export async function openPlayer(page: Page, options: OpenOptions): Promise<Serv
     let body: Buffer
     try {
       if (path.startsWith('_alexandria/')) {
-        const file = reserved[path.slice('_alexandria/'.length)]
-        if (!file) return notFound()
-        body = await readFile(file)
+        const name = path.slice('_alexandria/'.length)
+        const standIn = options.reservedFiles?.[name]
+        const file = reserved[name]
+        if (standIn !== undefined) body = Buffer.from(standIn)
+        else if (!file) return notFound()
+        else body = await readFile(file)
       } else if (options.extraFiles?.[path]) {
         body = options.extraFiles[path]!
       } else if (options.adl !== undefined) {
@@ -274,7 +298,7 @@ export async function openPlayer(page: Page, options: OpenOptions): Promise<Serv
   })
 
   const which = options.adl !== undefined ? `adl=${encodeURIComponent(options.adl)}` : `package=${options.fixture ?? 'package-player'}`
-  await page.goto(`/tests/desktop-ui/?screen=package-player&${which}`)
+  await page.goto(`/tests/desktop-ui/?screen=package-player&${which}${options.query ? `&${options.query}` : ''}`)
   await expect(page.locator('[data-package-player]')).toBeVisible()
   return served
 }
@@ -333,18 +357,34 @@ export async function lessonFrame(page: Page, path: string): Promise<Frame> {
 /**
  * Opens the lesson `activityId` from the table of contents and waits until
  * its page (`path`, by default `<activityId>.html`) is the only lesson frame
- * and reports ready, so nothing is read from the lesson it replaced.
+ * and reports ready, so nothing is read from the lesson it replaced. With
+ * `prefix`, the frame must also be under that launch (after a fresh attempt
+ * or a return, the earlier launch's frame shows the same page).
  */
-export async function openLesson(page: Page, activityId: string, path = `${activityId}.html`): Promise<Frame> {
+export async function openLesson(page: Page, activityId: string, path = `${activityId}.html`, prefix?: string): Promise<Frame> {
   const entry = page.locator(`[data-activity="${activityId}"]`)
+  // Let the player pick the lesson it resumes at first: clicking that one
+  // before it is current would open it twice, and the first session would
+  // end under a test that is already driving it.
+  await expect.poll(() => page.locator('[data-activity][aria-current="true"], [data-package-sequencing]').count()).toBeGreaterThan(0)
   if (await entry.getAttribute('aria-current') !== 'true') await entry.click()
   await expect(entry).toHaveAttribute('aria-current', 'true')
+  return runningLesson(page, path, prefix)
+}
+
+/**
+ * The lesson frame once `path` is the only lesson running and reports ready
+ * (under launch `prefix`, if given), however it was opened: the player
+ * resuming, a navigation control, the package's own request.
+ */
+export async function runningLesson(page: Page, path: string, prefix?: string): Promise<Frame> {
+  const wanted = (frame: Frame) => lessonPath(frame) === path && (prefix === undefined || frame.url().includes(`/${prefix}/`))
   await expect.poll(async () => {
     const lessons = page.frames().filter(frame => lessonPath(frame) !== null)
-    if (lessons.length !== 1 || lessonPath(lessons[0]!) !== path) return false
+    if (lessons.length !== 1 || !wanted(lessons[0]!)) return false
     return (await lessons[0]!.locator('#seen[data-ready]').count().catch(() => 0)) === 1
   }).toBe(true)
-  return findLesson(page, path)!
+  return page.frames().find(wanted)!
 }
 
 /** What the running lesson reported in `#seen`. */
@@ -353,3 +393,14 @@ export async function seen(page: Page): Promise<Record<string, unknown>> {
   await expect(values).toBeAttached()
   return JSON.parse(await values.getAttribute('data-values') ?? '{}') as Record<string, unknown>
 }
+
+/** What the lesson in `frame` reported in `#seen`, read from that frame only. */
+export async function seenIn(frame: Frame): Promise<Record<string, unknown>> {
+  const values = frame.locator('#seen[data-ready]')
+  await expect(values).toBeAttached()
+  return JSON.parse(await values.getAttribute('data-values') ?? '{}') as Record<string, unknown>
+}
+
+/** Makes the fake host fail (or stop failing) every commit. */
+export const failCommits = (page: Page, fail: boolean) =>
+  page.evaluate((value) => { (window as unknown as PackageFixtureWindow).packageFixture.control.failCommits = value }, fail)

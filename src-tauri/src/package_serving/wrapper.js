@@ -315,11 +315,13 @@
     }
   });
 
-  // The app went to the background: hand over what is pending now.
+  // The app went to the background: hand over what is pending now, and for
+  // SCORM 2004 the sequencing engine's state too (the app may not come back).
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState !== 'hidden') return;
     if (session) flush(session);
     if (pkg && pkg.lesson) flush(pkg.lesson);
+    if (pkg && !pkg.closing) sendState();
   });
 
   // The package frame is going away (the player closed or navigated it).
@@ -357,6 +359,7 @@
   // Wrapper -> host, after every navigation (a lesson's own termination, a
   // host request, the start):
   //   { type: 'sequencing-state', snapshot, root: { completion_status } }
+  //       (also sent alone when the app goes to the background)
   //   { type: 'navigation', current, continue, previous, hidden, active, tree }
   //       Controls the player draws: enabled from the engine's preview of the
   //       request, hidden as the delivered activity's hideLMSUI says. `tree`

@@ -1756,6 +1756,7 @@ pub fn run() {
             commands::record_destinations::record_destination_remove,
             commands::record_destinations::record_destinations_send_now,
             commands::record_destinations::record_access_log,
+            commands::record_destinations::record_send_failures,
             commands::learning_records::learning_records_list,
             commands::learning_records::learning_records_export,
             commands::learning_records::learning_records_delete,

@@ -40,3 +40,14 @@ Proposed doc edits, not made here:
 - `docs/learning-standards-spec.md` → Runtime: the commit interval, the 301 refusal after finish, and the resume rule above.
 - `docs/plugins.md`, element dispatch note: the `package` element binding.
 - `GLOSSARY.md`: **Focus mode** and **Package label**, if the glossary should carry player terms.
+
+### Review (2026-11-21)
+
+Frontend fix-ups from the integration review:
+
+- Storage clearing: `clear.html` echoes a per-request nonce read from its fragment; the player checks the sender, the nonce and `ok`, and refuses to start a launch whose clearing failed or timed out (error shown). A failed clear on close only warns: the next launch clears again before anything runs. Unproven on devices: if a real webview reports `ok: false` for any step, every launch now stops; check on each platform (ticket 28).
+- Messages for the wrapper target the launch origin. Gap: on app schemes with an opaque URL origin (`package://localhost`) the target stays `*`; sourceless messages after the frame is gone are taken only from `package://localhost` or `null` there.
+- cmi5 unit picks use the lesson request counter and run one at a time; an overtaken session is ended at once. The lesson controls are disabled while a lesson opens.
+- Focus mode keeps a compact bar with the SCORM 2004 navigation controls and the exit confirmation; the table of contents and the course chrome stay hidden.
+- The wrapper hands over the SCORM 2004 engine snapshot on `visibilitychange` hidden (frame unload already did through `closePackage`).
+- Known gaps (judgement, not done): the two table-of-contents blocks in `PackagePlayer.vue` were not merged into a row component (they read different data); `ElementEditorHost` and `OpenPackageFileButton` keep their two-line fallbacks around `packageErrorMessage`; `hideLMSUI` tokens and the session-ended reason stay strings.

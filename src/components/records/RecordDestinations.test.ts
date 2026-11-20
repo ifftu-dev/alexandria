@@ -93,6 +93,25 @@ describe('RecordDestinations', () => {
     expect(wrapper.find('[data-testid=record-consent]').exists()).toBe(false)
   })
 
+  it('on a supervised profile, says a guardian has to approve the destination instead of showing the refusal', async () => {
+    const wrapper = mountPanel(); await flushPromises()
+    await wrapper.get('[data-testid=record-destination-add]').trigger('click')
+    const inputs = wrapper.get('[data-testid=record-destination-form]').findAll('input')
+    await inputs[0]!.setValue(STORE)
+    await inputs[1]!.setValue('learner-key')
+    await inputs[2]!.setValue('issued-secret')
+    await wrapper.get('[data-testid=record-destination-form]').trigger('submit')
+    await flushPromises()
+    await wrapper.get('[data-testid=consent-course-c-safety]').setValue(true)
+    mocks.invoke.mockRejectedValueOnce('guardian_approval_required: a guardian approves where a supervised profile sends records')
+    await wrapper.get('[data-testid=consent-approve]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('organisations.records.guardianRequired')
+    expect(wrapper.text()).not.toContain('guardian_approval_required')
+    expect(wrapper.findAll('[data-testid=record-destination]')).toHaveLength(0)
+  })
+
   it('makes a refused send visible with its reason and when it will be retried', async () => {
     listed = [destination({
       status: { queued: 0, failed: 4, sent: 0, last_error: 'refused: the store answered HTTP 401', next_attempt_at: '2026-11-20T09:01:30.000Z', last_sent_at: null },

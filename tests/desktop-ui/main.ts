@@ -202,44 +202,17 @@ if (screen === 'motion') {
   // origin itself and reads what the host received from `packageFixture`.
   // `?package=` picks another fixture package (see `packageBackend.ts`);
   // `?adl=<id>` one of the SCORM 2004 test suite's LMS test packages.
-  const { packageBackend, isPackageFixtureName } = await import('./packageBackend')
+  // `?flow=off` turns a SCORM 2004 package's flow control off at its root, so
+  // starting delivers nothing and the learner chooses a lesson.
+  const { packageBackend, isPackageFixtureName, packageDescriptionOf } = await import('./packageBackend')
   const requested = params.get('package')
   const adl = params.get('adl')
   const adlDescriptions = adl
     ? (await import('./scorm2004-conformance/adl/descriptions.json')).default as unknown as Record<string, PackageDescription>
     : null
-  const backend = adlDescriptions && adl && adlDescriptions[adl]
-    ? packageBackend({ description: adlDescriptions[adl] })
-    : packageBackend({ fixture: isPackageFixtureName(requested) ? requested : 'package-player' })
-  Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
-  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
-    invoke: (command: string, args?: Record<string, unknown>) => backend.invoke(command, args),
-    transformCallback: () => 1, unregisterCallback: () => {},
-  } })
-  const { useProfiles } = await import('@/composables/useProfiles')
-  await useProfiles().initialize()
-  const router = createRouter({ history: createMemoryHistory(), routes: [
-    { path: '/learn/:id', component: (await import('@/pages/learn/Player.vue')).default },
-    { path: '/:pathMatch(.*)*', component: { render: () => h('p', 'Elsewhere') } },
-  ] })
-  await router.push('/learn/course-safety')
-  createApp({ render: () => h('div', { class: 'flex h-dvh flex-col' }, [h(RouterView)]) }).use(i18n).use(router).mount('#app')
-  Object.assign(window, { packageFixture: {
-    commits: backend.commits,
-    commitTimes: backend.commitTimes,
-    sequencing: backend.sequencing,
-    openLaunches: () => [...backend.openLaunches],
-    control: backend.control,
-    called: (command: string) => backend.called(command).length,
-    navigate: (path: string) => router.push(path),
-  } })
-} else if (screen === 'package-player-2004') {
-  // The same player over the SCORM 2004 fixture package. `flow=off` turns the
-  // organization's flow control off, so starting delivers nothing and the
-  // learner chooses a lesson.
-  const { packageBackend } = await import('./packageBackend')
-  const { default: description } = await import('./package-player-2004/description.json')
-  const packageDescription = structuredClone(description) as unknown as PackageDescription
+  const packageDescription = adlDescriptions && adl && adlDescriptions[adl]
+    ? adlDescriptions[adl]
+    : packageDescriptionOf(isPackageFixtureName(requested) ? requested : 'package-player')
   const controlMode = packageDescription.tree.sequencing?.control_mode
   if (params.get('flow') === 'off' && controlMode) controlMode.flow = false
   const backend = packageBackend({ description: packageDescription })
@@ -258,7 +231,9 @@ if (screen === 'motion') {
   createApp({ render: () => h('div', { class: 'flex h-dvh flex-col' }, [h(RouterView)]) }).use(i18n).use(router).mount('#app')
   Object.assign(window, { packageFixture: {
     commits: backend.commits,
+    commitTimes: backend.commitTimes,
     sequencing: backend.sequencing,
+    openLaunches: () => [...backend.openLaunches],
     control: backend.control,
     called: (command: string) => backend.called(command).length,
     navigate: (path: string) => router.push(path),
@@ -311,6 +286,7 @@ if (screen === 'motion') {
     endpoint: backend.endpoint,
     statements: backend.statements,
     called: backend.called,
+    notEndedByPlayer: backend.notEndedByPlayer,
     navigate: (path: string) => router.push(path),
   } })
 } else if (screen === 'skill-atlas') {

@@ -24,6 +24,7 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton, AppSwitch, ConfirmDialog } from '@/components/ui'
 import OrgBadge from './OrgBadge.vue'
 import RecordSendLog from '@/components/records/RecordSendLog.vue'
+import { useRecordSendLog } from '@/composables/useRecordSendLog'
 import { bloomName } from '@/utils/bloom'
 import type { CloudPull, GrantView, GrantsView, OrgCheck, SyncReport } from '@/types'
 
@@ -62,7 +63,7 @@ const error = ref('')
 const syncing = ref(false)
 const syncReport = ref<SyncReport | null>(null)
 const stopping = ref<GrantView | null>(null)
-const sendLog = ref<InstanceType<typeof RecordSendLog> | null>(null)
+const sendLog = useRecordSendLog()
 /** Per grant: the courses and responses a narrowing would keep. */
 const keptCourses = ref<Record<string, string[]>>({})
 const keptInteractions = ref<Record<string, boolean>>({})
@@ -113,7 +114,7 @@ function replace(next: GrantView) {
 async function refresh() {
   const run = ++generation
   loading.value = true
-  void sendLog.value?.refresh()
+  void sendLog.refresh()
   const [g, v, l] = await Promise.allSettled([
     invoke<GrantsView>('org_grants'),
     invoke<CloudPull<Visibility>>('fetch_visibility'),
@@ -428,7 +429,7 @@ onUnmounted(() => { generation++ })
     </div>
 
     <!-- The local half of the access log: what this device sent, and to whom. -->
-    <RecordSendLog ref="sendLog" />
+    <RecordSendLog />
 
     <div v-if="problems.length" class="space-y-1" data-testid="access-problems">
       <h3 class="text-sm font-medium text-foreground">{{ t('organisations.problems.heading') }}</h3>
