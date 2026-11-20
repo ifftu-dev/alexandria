@@ -1693,6 +1693,10 @@ pub fn run() {
             commands::package_attempts::package_attempt_commit,
             commands::package_attempts::package_attempt_terminate,
             commands::learning_records::learning_records_usage,
+            commands::learning_records::learning_records_list,
+            commands::learning_records::learning_records_export,
+            commands::learning_records::learning_records_delete,
+            commands::learning_records::learning_records_delete_all,
             // Content (iroh blob store)
             commands::content::content_add,
             commands::content::content_get_text,

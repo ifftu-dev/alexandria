@@ -18,7 +18,6 @@
   "package_attempt_initialise": "package launch initialisation data (learning standards ticket 05); the player wrapper is ticket 06",
   "package_attempt_commit": "persist a coalesced package commit (learning standards ticket 05); the player wrapper is ticket 06",
   "package_attempt_terminate": "end a package launch (learning standards ticket 05); the player is ticket 06",
-  "learning_records_usage": "activity log size and limit (learning standards ticket 14); the activity log view is ticket 15",
   "content_node_status": "content diagnostics; pending UI",
   "content_resolve": "documented content path; pending UI",
   "update_chapter": "chapter CRUD; edit UI pending",
