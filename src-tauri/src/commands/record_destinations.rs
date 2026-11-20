@@ -35,7 +35,9 @@ pub async fn record_destination_preview(
 ) -> Result<DestinationPreview, String> {
     let (secret, did) = learner_key(&state).await?;
     let secret = zeroize::Zeroizing::new(secret);
-    destinations::preview(&leased(&state), &address, &username, &secret, &did).await
+    destinations::preview(&leased(&state), &address, &username, &secret, &did)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// The learner approved a store.
@@ -46,7 +48,9 @@ pub async fn record_destination_add(
 ) -> Result<RecordDestination, String> {
     let (secret, did) = learner_key(&state).await?;
     let secret = zeroize::Zeroizing::new(secret);
-    destinations::add(&leased(&state), request, &secret, &did, chrono::Utc::now()).await
+    destinations::add(&leased(&state), request, &secret, &did, chrono::Utc::now())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -72,7 +76,9 @@ pub async fn record_destination_remove(
 ) -> Result<RemovalReport, String> {
     let (secret, did) = learner_key(&state).await?;
     let secret = zeroize::Zeroizing::new(secret);
-    destinations::remove(&leased(&state), &id, &secret, &did, chrono::Utc::now()).await
+    destinations::remove(&leased(&state), &id, &secret, &did, chrono::Utc::now())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Asks the background sender to try every destination now.

@@ -30,8 +30,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use tokio::sync::Notify;
 
 use super::{
-    access_log, outbox, recipients, send_due, timestamp, void_sent, BatchOutcome, Identity,
-    RecipientEntry, RecipientKind, RecordDb, Scope, SendError, Transport,
+    access_log, outbox, recipients, run_step, send_due, timestamp, void_sent, BatchOutcome,
+    Identity, RecipientEntry, RecipientKind, RecordDb, Scope, SendError, Transport,
 };
 use crate::domain::record_sending::{
     CourseChoice, DestinationPreview, IdentifierChoice, NewDestinationRequest, RecordDestination,
@@ -110,21 +110,17 @@ pub async fn preview<D: RecordDb>(
     username: &str,
     learner_secret: &[u8; 32],
     learner_did: &str,
-) -> Result<DestinationPreview, String> {
-    check_credentials(username, None).map_err(|e| e.to_string())?;
-    let store = lrs::resolve(address).await.map_err(|e| e.to_string())?;
+) -> Result<DestinationPreview, SendError> {
+    check_credentials(username, None)?;
+    let store = lrs::resolve(address).await?;
     let endpoint = store.base().to_string();
     let label = label(&endpoint, username.trim());
-    let pairwise_actor = actor_name(&Identity::Pairwise, learner_secret, learner_did, &label)
-        .map_err(|e| e.to_string())?;
-    let real_did_actor = Account::for_did(learner_did)
-        .map_err(|e| e.to_string())?
-        .name;
-    let courses = db
-        .run("records.destinations.courses", |db| {
-            enrolled_courses(db.conn()).map_err(|e| e.to_string())
-        })
-        .await?;
+    let pairwise_actor = actor_name(&Identity::Pairwise, learner_secret, learner_did, &label)?;
+    let real_did_actor = Account::for_did(learner_did)?.name;
+    let courses = run_step(db, "records.destinations.courses", |db| {
+        enrolled_courses(db.conn())
+    })
+    .await?;
     Ok(DestinationPreview {
         endpoint,
         location: store.location().as_str().to_string(),
@@ -144,20 +140,18 @@ pub async fn add<D: RecordDb>(
     learner_secret: &[u8; 32],
     learner_did: &str,
     now: DateTime<Utc>,
-) -> Result<RecordDestination, String> {
+) -> Result<RecordDestination, SendError> {
     let username = request.username.trim().to_string();
-    check_credentials(&username, Some(&request.secret)).map_err(|e| e.to_string())?;
-    let supervised = db
-        .run("records.destinations.supervised", |db| {
-            supervised(db.conn()).map_err(|e| e.to_string())
-        })
-        .await?;
-    if supervised {
+    check_credentials(&username, Some(&request.secret))?;
+    if run_step(db, "records.destinations.supervised", |db| {
+        supervised(db.conn())
+    })
+    .await?
+    {
         return Err(SendError::Supervised(
             "a supervised profile's records go only where its guardian can see the consent; a store you add yourself is not one of those"
                 .into(),
-        )
-        .to_string());
+        ));
     }
     let identity = match request.identifier {
         IdentifierChoice::Pairwise => Identity::Pairwise,
@@ -166,34 +160,29 @@ pub async fn add<D: RecordDb>(
         IdentifierChoice::Proposed => {
             return Err(SendError::InvalidCredentials(
                 "a store you add yourself has no proposed account".into(),
-            )
-            .to_string())
+            ))
         }
     };
     let scope = Scope {
         course_ids: request.course_ids,
         include_interactions: request.include_interactions,
     };
-    scope.validate().map_err(|e| e.to_string())?;
-    let store = lrs::resolve(&request.address)
-        .await
-        .map_err(|e| e.to_string())?;
+    scope.validate()?;
+    let store = lrs::resolve(&request.address).await?;
     if store.location() != Location::Remote && !request.confirm_private {
         return Err(SendError::ConfirmationRequired(
             "this store is on this device or a private network; confirm that you want to send records there"
                 .into(),
-        )
-        .to_string());
+        ));
     }
-    let version = lrs::negotiate(&store).await.map_err(|e| e.to_string())?;
+    let version = lrs::negotiate(&store).await?;
 
     let endpoint = store.base().to_string();
     let label = label(&endpoint, &username);
     let entry = RecipientEntry {
         id: uuid::Uuid::new_v4().to_string(),
         kind: RecipientKind::Destination,
-        actor_name: actor_name(&identity, learner_secret, learner_did, &label)
-            .map_err(|e| e.to_string())?,
+        actor_name: actor_name(&identity, learner_secret, learner_did, &label)?,
         label,
         identity,
         scope,
@@ -207,17 +196,15 @@ pub async fn add<D: RecordDb>(
         xapi_version: version.to_string(),
     };
     let secret = request.secret;
-    let view = db
-        .run("records.destinations.add", move |db| {
-            let conn = db.conn();
-            crate::db::with_typed_transaction(conn, || {
-                insert(conn, &destination, &secret)?;
-                outbox::queue(conn, &destination.recipient, now)?;
-                view(conn, &destination)
-            })
-            .map_err(|e: SendError| e.to_string())
+    let view = run_step(db, "records.destinations.add", move |db| {
+        let conn = db.conn();
+        crate::db::with_typed_transaction(conn, || {
+            insert(conn, &destination, &secret)?;
+            outbox::queue(conn, &destination.recipient, now)?;
+            view(conn, &destination)
         })
-        .await?;
+    })
+    .await?;
     wake();
     Ok(view)
 }
@@ -311,8 +298,8 @@ fn load(
     let Some((endpoint, location, username, xapi_version, secret)) = row else {
         return Ok(None);
     };
-    let location = Location::from_legacy(&location)
-        .ok_or_else(|| SendError::Database(format!("unknown location {location}")))?;
+    let location = serde_json::from_value::<Location>(serde_json::Value::String(location))
+        .map_err(|e| SendError::Database(format!("unknown location: {e}")))?;
     Ok(Some((
         Destination {
             recipient,
@@ -388,12 +375,8 @@ pub async fn send_pending<D: RecordDb>(
     learner_secret: &[u8; 32],
     learner_did: &str,
     now: DateTime<Utc>,
-) -> Result<BatchOutcome, String> {
-    let destinations = db
-        .run("records.destinations.load", |db| {
-            load_all(db.conn()).map_err(|e| e.to_string())
-        })
-        .await?;
+) -> Result<BatchOutcome, SendError> {
+    let destinations = run_step(db, "records.destinations.load", |db| load_all(db.conn())).await?;
     let mut total = BatchOutcome::default();
     for (destination, secret) in destinations {
         let transport = connect(&destination, secret).await;
@@ -428,28 +411,26 @@ pub async fn remove<D: RecordDb>(
     learner_secret: &[u8; 32],
     learner_did: &str,
     now: DateTime<Utc>,
-) -> Result<RemovalReport, String> {
+) -> Result<RemovalReport, SendError> {
     let id = id.to_string();
-    let removed = db
-        .run("records.destinations.remove", move |db| {
-            let conn = db.conn();
-            crate::db::with_typed_transaction(conn, || {
-                let Some(recipient) = recipients::get(conn, &id)? else {
-                    return Ok(None);
-                };
-                if recipient.kind != RecipientKind::Destination {
-                    return Ok(None);
-                }
-                let found = load(conn, recipient)?;
-                let accepted = access_log::accepted_record_ids(conn, &id)?;
-                recipients::delete(conn, &id)?;
-                Ok(found.map(|found| (found, accepted)))
-            })
-            .map_err(|e: SendError| e.to_string())
+    let removed = run_step(db, "records.destinations.remove", move |db| {
+        let conn = db.conn();
+        crate::db::with_typed_transaction(conn, || {
+            let Some(recipient) = recipients::get(conn, &id)? else {
+                return Ok(None);
+            };
+            if recipient.kind != RecipientKind::Destination {
+                return Ok(None);
+            }
+            let found = load(conn, recipient)?;
+            let accepted = access_log::accepted_record_ids(conn, &id)?;
+            recipients::delete(conn, &id)?;
+            Ok(found.map(|found| (found, accepted)))
         })
-        .await?;
+    })
+    .await?;
     let Some(((destination, secret), accepted)) = removed else {
-        return Err(SendError::NotFound("no such record destination".into()).to_string());
+        return Err(SendError::NotFound("no such record destination".into()));
     };
     if accepted.is_empty() {
         return Ok(RemovalReport {
@@ -471,12 +452,12 @@ pub async fn remove<D: RecordDb>(
     .await
     {
         Ok(voided) => RemovalReport {
-            voided: voided as u32,
-            void_error: None,
+            voided: u32::try_from(voided.count).unwrap_or(u32::MAX),
+            void_error: voided.stopped.map(|error| error.to_string()),
         },
         Err(error) => RemovalReport {
             voided: 0,
-            void_error: Some(error),
+            void_error: Some(error.to_string()),
         },
     };
     Ok(report)

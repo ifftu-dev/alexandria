@@ -52,7 +52,7 @@ use alexandria_studio::xapi::lrs::LrsError;
 use alexandria_studio::xapi::{Account, Statement, StatementError};
 
 pub use crate::domain::record_sending::{RecipientKind, RecordScope as Scope};
-pub use send::{send_due, void_sent, BatchOutcome};
+pub use send::{send_due, void_sent, BatchOutcome, Voided};
 
 /// Why sending could not go ahead. Displays as `code: detail`.
 #[derive(Debug, thiserror::Error)]
@@ -197,6 +197,20 @@ pub trait RecordDb: Send + Sync {
     where
         T: Send + 'static,
         F: FnOnce(&Database) -> Result<T, String> + Send + 'static;
+}
+
+/// Runs one database step whose own failures are typed: an error from the
+/// step comes back as it is; a failure to reach the database at all is
+/// [`SendError::Database`].
+pub(crate) async fn run_step<D, T, F>(db: &D, label: &'static str, step: F) -> Result<T, SendError>
+where
+    D: RecordDb,
+    T: Send + 'static,
+    F: FnOnce(&Database) -> Result<T, SendError> + Send + 'static,
+{
+    db.run(label, move |db| Ok(step(db)))
+        .await
+        .map_err(SendError::Database)?
 }
 
 /// Background work (the sender), fenced to its profile session.

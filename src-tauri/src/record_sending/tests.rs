@@ -141,12 +141,17 @@ impl Learner {
 
     /// A response a package reported, as the package writer stores it.
     pub(super) fn add_interaction_record(&self) -> String {
+        self.add_numbered_interaction_record(0)
+    }
+
+    /// The `n`th response a package reported in the attempt.
+    pub(super) fn add_numbered_interaction_record(&self, n: usize) -> String {
         let activity = ActivityRef::course(did(CREATOR_SEED), &self.course)
             .element(&self.video)
             .package_activity("ab".repeat(32), "lifting")
             .interaction("q1");
         let event = LearningEvent {
-            local_id: "package|attempt|lifting|interaction|0".into(),
+            local_id: format!("package|attempt|lifting|interaction|{n}"),
             timestamp: t0(),
             registration: Some("attempt".into()),
             action: xapi::Action::Responded {
@@ -193,7 +198,9 @@ impl Learner {
     }
 
     async fn add(&self, request: NewDestinationRequest) -> Result<RecordDestination, String> {
-        destinations::add(&self.db, request, &self.secret, &self.did, t0()).await
+        destinations::add(&self.db, request, &self.secret, &self.did, t0())
+            .await
+            .map_err(|e| e.to_string())
     }
 
     async fn pass(&self, at: DateTime<Utc>) -> BatchOutcome {
@@ -625,6 +632,29 @@ async fn a_store_added_again_after_removal_gets_fresh_statement_ids() {
     for id in &resent {
         assert!(!sent.contains(id), "{id} was voided at this store");
     }
+}
+
+#[tokio::test]
+async fn a_removal_whose_voiding_stops_partway_reports_what_was_voided() {
+    let learner = Learner::new().await;
+    for n in 0..60 {
+        learner.add_numbered_interaction_record(n);
+    }
+    let store = XapiStub::start(&["2.0.0"]).await;
+    let mut request = learner.request(&store, "learner-key", &[&learner.course]);
+    request.include_interactions = true;
+    let added = learner.add(request).await.unwrap();
+    learner.pass(t0()).await;
+    let sent = ids(&store.accepted());
+    assert!(sent.len() > send::BATCH_SIZE, "two void batches");
+
+    // The second void batch is refused; the first went through.
+    store.refuse_containing(&sent[send::BATCH_SIZE + 1]);
+    let report = destinations::remove(&learner.db, &added.id, &learner.secret, &learner.did, t0())
+        .await
+        .unwrap();
+    assert_eq!(report.voided as usize, send::BATCH_SIZE);
+    assert!(report.void_error.is_some());
 }
 
 #[tokio::test]
