@@ -8,7 +8,7 @@ import { CREDENTIALS_CHANGED } from '@/composables/credentialEvents'
 import type { SkillGraphEdge, SkillGraphRelation, SkillInfo, SubjectFieldInfo, VerifiableCredential } from '@/types'
 import { buildSkillAtlas, type AtlasModel } from '@/utils/skillAtlas'
 import { createAtlasViewState, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
-import { webGraphFromAtlas, webLayout, type WebGraph, type WebPoint } from '@/components/skills/webGeometry'
+import { webGraphFromAtlas, webLayout, type WebGraph, type WebPoint } from '@/utils/webGeometry'
 import { errorMessage } from '@/utils/errorMessage'
 
 export type AtlasSurface = 'page' | 'modal'

@@ -6,7 +6,7 @@ import en from '@/locales/en'
 import { buildSkillAtlas } from '@/utils/skillAtlas'
 import type { AtlasCamera } from '@/utils/skillAtlasView'
 import type { SkillInfo, VerifiableCredential } from '@/types'
-import type { WebPoint } from './webGeometry'
+import type { WebPoint } from '@/utils/webGeometry'
 import WebGraph from './WebGraph.vue'
 import { motionDuration } from '@/composables/useMotion'
 

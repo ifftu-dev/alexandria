@@ -7,7 +7,7 @@ import {
   WEB_MIN_DISTANCE, WEB_SIDEBAR_NODE_LIMIT, continueWebLayout, webDotRadius, webLayout, webNearestInDirection, webNearestTo, webSidebarSubset,
   webGraphFromAtlas, webNamePlaces, webNarrowedIds,
   type WebGraph,
-} from './webGeometry'
+} from '../webGeometry'
 
 type Point = { x: number; y: number }
 

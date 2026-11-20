@@ -3,7 +3,7 @@ import { motionDuration, useMotion } from '@/composables/useMotion'
 import type { AtlasModel, AtlasNode } from '@/utils/skillAtlas'
 import type { AtlasCamera } from '@/utils/skillAtlasView'
 import { atlasFieldColor } from './atlasPresentation'
-import { continueWebLayout, webDotRadius, webGraphFromAtlas, webNamePlaces, webNearestInDirection, webNearestTo, type WebDirection, type WebNamePlace, type WebPoint } from './webGeometry'
+import { continueWebLayout, webDotRadius, webGraphFromAtlas, webNamePlaces, webNearestInDirection, webNearestTo, type WebDirection, type WebNamePlace, type WebPoint } from '@/utils/webGeometry'
 
 // Camera and drawing constants. Positions and dot radii are layout units; the
 // camera's zoom is screen pixels per layout unit. Lines, arrowheads and names

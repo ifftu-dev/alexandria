@@ -8,7 +8,7 @@
  * accessible name, so the skin is hidden from assistive technology.
  */
 import type { WebDotState } from './useWebGraph'
-import type { WebNamePlace } from './webGeometry'
+import type { WebNamePlace } from '@/utils/webGeometry'
 
 withDefaults(defineProps<{ state: WebDotState; size: number; name: string; labelled: boolean; selected: boolean; faded: boolean; compact?: boolean; place?: WebNamePlace }>(), { place: 'below' })
 </script>
