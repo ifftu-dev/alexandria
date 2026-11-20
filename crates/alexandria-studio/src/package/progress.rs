@@ -6,12 +6,12 @@
 //! Pure: no storage and no clock. The app stores attempts and activity state
 //! and calls these functions on them.
 //!
-//! Only SCORM 1.2 is read so far. The SCORM 2004 run-time and the cmi5 launch
-//! plug in at [`read_report`], [`initial_runtime`] and [`rollup`], one match
-//! arm each.
+//! SCORM 1.2 and SCORM 2004 are read. The cmi5 launch plugs in at
+//! [`read_report`], [`initial_runtime`] and [`rollup`], one match arm each.
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::{Launch, LaunchKind, PackageDescription, Standard};
@@ -55,8 +55,9 @@ pub struct ActivityReport {
 pub fn read_report(standard: Standard, runtime: &Value) -> ActivityReport {
     match standard {
         Standard::Scorm12 => scorm12::report(&runtime["cmi"]),
-        // Ticket 10 (SCORM 2004 run-time) and ticket 25 (cmi5 launch).
-        Standard::Scorm2004 | Standard::Cmi5 => ActivityReport::default(),
+        Standard::Scorm2004 => scorm2004::report(&runtime["cmi"]),
+        // Ticket 25 (cmi5 launch).
+        Standard::Cmi5 => ActivityReport::default(),
     }
 }
 
@@ -93,9 +94,24 @@ pub fn entry(standard: Standard, stored: Option<&Value>) -> Entry {
     };
     if exit.as_str() == Some("suspend") {
         Entry::Resume
+    } else if standard == Standard::Scorm2004 {
+        // The lesson's attempt ended; the next launch is a new one.
+        Entry::AbInitio
     } else {
         Entry::Other
     }
+}
+
+/// How an activity the SCORM 2004 sequencing engine delivered is entered.
+/// `resumed` is the engine's word that the delivery resumes a suspended
+/// activity (resume all after a suspend all), which keeps the lesson's data
+/// even when the lesson itself did not exit with `suspend`. Other standards
+/// have no engine and follow [`entry`].
+pub fn delivery_entry(standard: Standard, stored: Option<&Value>, resumed: bool) -> Entry {
+    if resumed && standard == Standard::Scorm2004 && stored.is_some() {
+        return Entry::Resume;
+    }
+    entry(standard, stored)
 }
 
 /// The values only the host knows, for [`initial_runtime`].
@@ -122,8 +138,9 @@ pub fn initial_runtime(standard: Standard, stored: Option<&Value>, host: HostVal
         .unwrap_or_default();
     let cmi = match standard {
         Standard::Scorm12 => scorm12::initial(cmi, host),
-        // Ticket 10 (SCORM 2004 run-time) and ticket 25 (cmi5 launch).
-        Standard::Scorm2004 | Standard::Cmi5 => cmi,
+        Standard::Scorm2004 => scorm2004::initial(cmi, host),
+        // Ticket 25 (cmi5 launch).
+        Standard::Cmi5 => cmi,
     };
     let mut runtime = Map::new();
     runtime.insert("cmi".into(), Value::Object(cmi));
@@ -146,6 +163,14 @@ pub struct Rollup {
     pub score: Option<f64>,
 }
 
+/// What the SCORM 2004 sequencing engine reports for a package's root
+/// activity, the course as a whole, after its own rollup.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RootStatus {
+    /// `completed`, `incomplete`, `not attempted` or `unknown`.
+    pub completion_status: String,
+}
+
 /// Rolls an attempt's activity outcomes, keyed by activity identifier, up to
 /// the package.
 ///
@@ -155,12 +180,15 @@ pub struct Rollup {
 /// (`completed` or `passed`) and a shown-only asset by being launched. The
 /// score is the mean of the scores the lessons reported.
 ///
-/// SCORM 2004 completes on the root activity's completion status from the
-/// sequencing engine (ticket 10) and cmi5 on the course's completion criteria
-/// (ticket 25); until those land, neither completes.
+/// SCORM 2004 completes when the sequencing engine reports the root
+/// activity's completion status as `completed` (`root`, absent until the
+/// engine has reported); its score is worked out as for SCORM 1.2. cmi5
+/// completes on the course's completion criteria (ticket 25); until that
+/// lands, it does not complete.
 pub fn rollup(
     description: &PackageDescription,
     outcomes: &BTreeMap<String, ActivityOutcome>,
+    root: Option<&RootStatus>,
 ) -> Rollup {
     let scores: Vec<f64> = outcomes.values().filter_map(|o| o.score).collect();
     let score = (!scores.is_empty()).then(|| scores.iter().sum::<f64>() / scores.len() as f64);
@@ -172,7 +200,8 @@ pub fn rollup(
                     .iter()
                     .all(|activity| outcomes.get(&activity.id).is_some_and(|o| o.complete))
         }
-        Standard::Scorm2004 | Standard::Cmi5 => false,
+        Standard::Scorm2004 => root.is_some_and(|root| root.completion_status == "completed"),
+        Standard::Cmi5 => false,
     };
     Rollup { complete, score }
 }
@@ -183,13 +212,32 @@ pub fn completes_on_launch(launch: &Launch) -> bool {
     launch.kind == LaunchKind::Asset
 }
 
+/// A number the content wrote as a JSON number or as text.
+fn number(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(number) => number.as_f64(),
+        Value::String(text) => text.trim().parse().ok(),
+        _ => None,
+    }
+    .filter(|n: &f64| n.is_finite())
+}
+
+/// A decimal as the data models spell it: no trailing `.0`.
+fn decimal(value: f64) -> String {
+    if value.fract() == 0.0 {
+        format!("{value:.0}")
+    } else {
+        value.to_string()
+    }
+}
+
 mod scorm12 {
     //! SCORM 1.2: `cmi.core.*` names, `CMITimespan` times, scores on the
     //! lesson's own `min`..`max` scale (0 to 100 when unset).
 
     use serde_json::{Map, Value};
 
-    use super::{ActivityReport, HostValues};
+    use super::{decimal, number, ActivityReport, HostValues};
 
     pub(super) fn report(cmi: &Value) -> ActivityReport {
         let core = &cmi["core"];
@@ -202,15 +250,6 @@ mod scorm12 {
                 .and_then(parse_timespan)
                 .unwrap_or(0.0),
         }
-    }
-
-    fn number(value: &Value) -> Option<f64> {
-        match value {
-            Value::Number(number) => number.as_f64(),
-            Value::String(text) => text.trim().parse().ok(),
-            _ => None,
-        }
-        .filter(|n: &f64| n.is_finite())
     }
 
     fn score(score: &Value) -> Option<f64> {
@@ -256,14 +295,6 @@ mod scorm12 {
         }
     }
 
-    fn decimal(value: f64) -> String {
-        if value.fract() == 0.0 {
-            format!("{value:.0}")
-        } else {
-            value.to_string()
-        }
-    }
-
     /// Takes the named member out as an object, or an empty one when it is
     /// missing or not an object.
     fn take_object(map: &mut Map<String, Value>, key: &str) -> Map<String, Value> {
@@ -306,6 +337,136 @@ mod scorm12 {
             };
         }
         cmi.insert("student_data".into(), Value::Object(student_data));
+        cmi
+    }
+}
+
+mod scorm2004 {
+    //! SCORM 2004: `cmi.*` names, ISO 8601 durations, scaled scores from -1
+    //! to 1. One behaviour serves the 2nd, 3rd and 4th Editions.
+    //!
+    //! A learner attempt on a lesson ends unless it is suspended, and the
+    //! next launch is then a new attempt with new run-time data. Only a
+    //! resumed lesson is handed its stored data again.
+
+    use serde_json::{Map, Value};
+
+    use super::{decimal, number, ActivityReport, Entry, HostValues};
+
+    pub(super) fn report(cmi: &Value) -> ActivityReport {
+        ActivityReport {
+            complete: cmi["completion_status"].as_str() == Some("completed"),
+            score: score(&cmi["score"]),
+            session_seconds: cmi["session_time"]
+                .as_str()
+                .and_then(parse_duration)
+                .unwrap_or(0.0),
+        }
+    }
+
+    /// The scaled score, a negative one counted as zero; else the raw score
+    /// against the lesson's own range when it states one.
+    fn score(score: &Value) -> Option<f64> {
+        if let Some(scaled) = number(&score["scaled"]) {
+            return Some(scaled.clamp(0.0, 1.0));
+        }
+        let raw = number(&score["raw"])?;
+        let (min, max) = (number(&score["min"])?, number(&score["max"])?);
+        (max > min).then(|| ((raw - min) / (max - min)).clamp(0.0, 1.0))
+    }
+
+    /// Seconds in one designator's unit. Years and months have no fixed
+    /// length; they count as 365 and 30 days.
+    const DATE_UNITS: [(char, f64); 3] = [
+        ('Y', 365.0 * 86400.0),
+        ('M', 30.0 * 86400.0),
+        ('D', 86400.0),
+    ];
+    const TIME_UNITS: [(char, f64); 3] = [('H', 3600.0), ('M', 60.0), ('S', 1.0)];
+
+    /// Adds one part of a duration (`1Y2M3D` or `4H5M6.7S`) to `seconds`.
+    /// Designators come in order, each at most once; only seconds may have a
+    /// fraction.
+    fn add_part(part: &str, units: &[(char, f64)], seconds: &mut f64) -> Option<usize> {
+        let mut digits = String::new();
+        let mut remaining = units.iter();
+        let mut found = 0;
+        for c in part.chars() {
+            if c.is_ascii_digit() || c == '.' {
+                digits.push(c);
+                continue;
+            }
+            let (unit, scale) = remaining.find(|(unit, _)| *unit == c)?;
+            if digits.is_empty() || (digits.contains('.') && *unit != 'S') {
+                return None;
+            }
+            *seconds += digits.parse::<f64>().ok()? * scale;
+            digits.clear();
+            found += 1;
+        }
+        digits.is_empty().then_some(found)
+    }
+
+    /// An XML Schema duration, `P[nY][nM][nD][T[nH][nM][n[.n]S]]`.
+    pub(super) fn parse_duration(text: &str) -> Option<f64> {
+        let rest = text.trim().strip_prefix('P')?;
+        let (date, time) = match rest.split_once('T') {
+            Some((_, "")) => return None,
+            Some((date, time)) => (date, time),
+            None => (rest, ""),
+        };
+        let mut seconds = 0.0;
+        let found =
+            add_part(date, &DATE_UNITS, &mut seconds)? + add_part(time, &TIME_UNITS, &mut seconds)?;
+        (found > 0).then_some(seconds)
+    }
+
+    /// `PT#H#M#S`, to the hundredth of a second.
+    pub(super) fn format_duration(seconds: f64) -> String {
+        let centis = (seconds.max(0.0) * 100.0).round() as u64;
+        let (whole, fraction) = (centis / 100, centis % 100);
+        let (hours, minutes, secs) = (whole / 3600, whole / 60 % 60, whole % 60);
+        let mut out = String::from("PT");
+        if hours > 0 {
+            out.push_str(&format!("{hours}H"));
+        }
+        if minutes > 0 {
+            out.push_str(&format!("{minutes}M"));
+        }
+        if fraction > 0 {
+            out.push_str(&format!("{secs}.{fraction:02}S"));
+        } else if secs > 0 || (hours == 0 && minutes == 0) {
+            out.push_str(&format!("{secs}S"));
+        }
+        out
+    }
+
+    pub(super) fn initial(cmi: Map<String, Value>, host: HostValues<'_>) -> Map<String, Value> {
+        let resumed = host.entry == Entry::Resume;
+        let mut cmi = if resumed { cmi } else { Map::new() };
+        cmi.remove("session_time");
+        cmi.remove("exit");
+        cmi.insert("learner_id".into(), host.learner_id.into());
+        cmi.insert("learner_name".into(), host.learner_name.into());
+        cmi.insert("entry".into(), host.entry.as_str().into());
+        cmi.insert("credit".into(), "credit".into());
+        cmi.insert("mode".into(), "normal".into());
+        let total = if resumed { host.total_seconds } else { 0.0 };
+        cmi.insert("total_time".into(), format_duration(total).into());
+
+        let launch = host.launch;
+        let manifest_values = [
+            ("launch_data", launch.launch_data.clone()),
+            ("scaled_passing_score", launch.mastery_score.map(decimal)),
+            ("max_time_allowed", launch.max_time_allowed.clone()),
+            ("time_limit_action", launch.time_limit_action.clone()),
+        ];
+        for (name, value) in manifest_values {
+            match value {
+                Some(value) => cmi.insert(name.into(), value.into()),
+                None => cmi.remove(name),
+            };
+        }
         cmi
     }
 }

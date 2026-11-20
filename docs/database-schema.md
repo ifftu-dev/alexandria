@@ -9,8 +9,8 @@ Status: live
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 46 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 145 tables, 134 indexes, 1 view, 10 triggers.
+**Schema**: 47 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 149 tables, 135 indexes, 1 view, 10 triggers.
 
 ---
 
@@ -69,6 +69,7 @@ and requires a database's history to be an exact prefix of this list:
 44. `packages`
 45. `package_attempts`
 46. `learning_records`
+47. `record_sending`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -1850,6 +1851,50 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `bytes` INTEGER NOT NULL — size counted against the log's limit
 - `recorded_at` TEXT NOT NULL — when the event happened, RFC 3339 UTC
 
+### Record sending (4)
+
+#### `record_access_log`
+
+- `seq` INTEGER PK — write order
+- `at` TEXT NOT NULL — when, RFC 3339 UTC
+- `recipient_id` TEXT NOT NULL
+- `recipient_kind` TEXT NOT NULL
+- `recipient_name` TEXT NOT NULL — what the learner knows the recipient as (a store's address, an organisation)
+- `action` TEXT NOT NULL — void: statements withdrawing records already sent, on removal
+- `course_ids` TEXT NOT NULL — the scope in force
+- `include_interactions` INTEGER NOT NULL
+- `record_count` INTEGER NOT NULL
+- `record_ids` TEXT NOT NULL — local ids of the records sent or voided; voiding on removal reads them
+- `identifier` TEXT NOT NULL — the account name the records carried
+- `outcome` TEXT NOT NULL
+- `detail` TEXT — why it failed
+
+#### `record_destination_secrets`
+
+- `recipient_id` TEXT PK → `record_destinations.recipient_id`
+- `secret` TEXT NOT NULL
+
+#### `record_destinations`
+
+- `recipient_id` TEXT PK → `record_recipients.id`
+- `endpoint` TEXT NOT NULL — the store's xAPI base address, normalised to end in a slash
+- `location` TEXT NOT NULL — where the address resolved when the learner approved it; sending stops if it resolves elsewhere
+- `username` TEXT NOT NULL — the key the store issued to this learner
+- `xapi_version` TEXT NOT NULL — the version negotiated with the store (2.0.0 or 1.0.3)
+
+#### `record_recipients`
+
+- `id` TEXT PK — the recipient id in learning_record_outbox
+- `kind` TEXT NOT NULL — destination: a store the learner named; share: a record share through the hosted service
+- `label` TEXT NOT NULL — every identifier the recipient sees is derived from this label; never changes
+- `identifier` TEXT NOT NULL — the actor the recipient sees: one made for it, the learner's DID, or an account it proposed
+- `proposed_home_page` TEXT — the proposed account, when identifier = proposed
+- `proposed_name` TEXT
+- `actor_name` TEXT NOT NULL — the account name records carry at this recipient, as the learner saw it before approving
+- `course_ids` TEXT NOT NULL — scope: JSON array of the course ids whose records the recipient receives
+- `include_interactions` INTEGER NOT NULL default `0` — scope: 1 also sends interaction-level records (individual responses)
+- `created_at` TEXT NOT NULL — when the learner approved it
+
 ---
 
 ## View and triggers
@@ -1964,6 +2009,8 @@ erDiagram
     plugin_installed ||--o{ plugin_dependencies : plugin_cid
     plugin_installed ||--o{ plugin_irl_submissions : plugin_cid
     plugin_installed ||--o{ plugin_permissions : plugin_cid
+    record_destinations ||--o{ record_destination_secrets : recipient_id
+    record_recipients ||--o{ record_destinations : recipient_id
     skills ||--o{ reputation_assertions : skill_id
     reputation_snapshots ||--o{ reputation_snapshot_inputs : snapshot_id
     credentials ||--o{ reputation_snapshots : credential_id

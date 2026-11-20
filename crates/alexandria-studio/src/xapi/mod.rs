@@ -22,6 +22,7 @@
 
 mod build;
 mod identifiers;
+pub mod lrs;
 pub mod scorm;
 mod statement;
 

@@ -4,7 +4,7 @@ import { i18n, setActiveLocale } from '@/i18n'
 import { loadLocaleMessages } from '@/i18n/loadLocale'
 import { directionOf, isAppLocale } from '@/locales/meta'
 import '@/assets/css/main.css'
-import type { AppNotification, GoalTemplate, P2PStatus, PersonhoodLabStatus } from '@/types'
+import type { AppNotification, GoalTemplate, P2PStatus, PackageDescription, PersonhoodLabStatus } from '@/types'
 
 const templates: GoalTemplate[] = [{
   id: 'audit-software-engineer',
@@ -182,6 +182,20 @@ if (screen === 'motion') {
     notify: (kind: AppNotification['kind']) => emit('notifications:new', { session, row: backend.notify(kind) }),
     removeNotification: (kind: AppNotification['kind']) => emit('notifications:changed', { session, unread: backend.removeNotification(kind) }),
   } })
+} else if (screen === 'activity-log') {
+  // The real activity log page over an in-memory log. `?records=<n>` seeds n
+  // launches instead of the four mixed records. Calls are recorded.
+  const { activityLogBackend } = await import('./activityLogBackend')
+  const count = params.get('records')
+  const backend = activityLogBackend(count === null ? null : Number(count))
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
+    invoke: backend.invoke, transformCallback: () => 1, unregisterCallback: () => {},
+  } })
+  const { default: ActivityLog } = await import('@/pages/dashboard/ActivityLog.vue')
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: ActivityLog }] })
+  await router.push('/activity-log')
+  createApp({ render: () => h('div', { class: 'p-6' }, [h(RouterView)]) }).use(i18n).use(router).mount('#app')
+  Object.assign(window, { activityLogFixture: { calls: backend.calls } })
 } else if (screen === 'package-player') {
   // The real course player over a course whose only element is the SCORM 1.2
   // fixture package, with a fake host bridge. The spec serves the package
@@ -189,7 +203,7 @@ if (screen === 'motion') {
   // `?package=` picks another fixture package (see `packageBackend.ts`).
   const { packageBackend, isPackageFixtureName } = await import('./packageBackend')
   const requested = params.get('package')
-  const backend = packageBackend(isPackageFixtureName(requested) ? requested : 'package-player')
+  const backend = packageBackend({ fixture: isPackageFixtureName(requested) ? requested : 'package-player' })
   Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
   Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
     invoke: (command: string, args?: Record<string, unknown>) => backend.invoke(command, args),
@@ -210,6 +224,59 @@ if (screen === 'motion') {
     control: backend.control,
     called: (command: string) => backend.called(command).length,
     navigate: (path: string) => router.push(path),
+  } })
+} else if (screen === 'package-player-2004') {
+  // The same player over the SCORM 2004 fixture package. `flow=off` turns the
+  // organization's flow control off, so starting delivers nothing and the
+  // learner chooses a lesson.
+  const { packageBackend } = await import('./packageBackend')
+  const { default: description } = await import('./package-player-2004/description.json')
+  const packageDescription = structuredClone(description) as unknown as PackageDescription
+  const controlMode = packageDescription.tree.sequencing?.control_mode
+  if (params.get('flow') === 'off' && controlMode) controlMode.flow = false
+  const backend = packageBackend({ description: packageDescription })
+  Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
+    invoke: (command: string, args?: Record<string, unknown>) => backend.invoke(command, args),
+    transformCallback: () => 1, unregisterCallback: () => {},
+  } })
+  const { useProfiles } = await import('@/composables/useProfiles')
+  await useProfiles().initialize()
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/learn/:id', component: (await import('@/pages/learn/Player.vue')).default },
+    { path: '/:pathMatch(.*)*', component: { render: () => h('p', 'Elsewhere') } },
+  ] })
+  await router.push('/learn/course-safety')
+  createApp({ render: () => h('div', { class: 'flex h-dvh flex-col' }, [h(RouterView)]) }).use(i18n).use(router).mount('#app')
+  Object.assign(window, { packageFixture: {
+    commits: backend.commits,
+    sequencing: backend.sequencing,
+    control: backend.control,
+    called: (command: string) => backend.called(command).length,
+    navigate: (path: string) => router.push(path),
+  } })
+} else if (screen === 'course-editor') {
+  // The real course editor over an instructor's draft holding a package
+  // element, with a fake host. The spec serves the package origin for the
+  // preview and reads what the host received from `courseEditorFixture`.
+  const { courseEditorBackend } = await import('./courseEditorBackend')
+  const backend = courseEditorBackend()
+  Object.defineProperty(window, '__TAURI_EVENT_PLUGIN_INTERNALS__', { value: { unregisterListener: () => {} } })
+  Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: {
+    invoke: (command: string, args?: Record<string, unknown>) => backend.invoke(command, args),
+    transformCallback: () => 1, unregisterCallback: () => {},
+  } })
+  const { useProfiles } = await import('@/composables/useProfiles')
+  await useProfiles().initialize()
+  const router = createRouter({ history: createMemoryHistory(), routes: [
+    { path: '/instructor/composer/:id', component: (await import('@/pages/instructor/Composer.vue')).default },
+    { path: '/:pathMatch(.*)*', component: { render: () => h('p', 'Elsewhere') } },
+  ] })
+  await router.push('/instructor/composer/course-induction')
+  createApp({ render: () => h('div', { class: 'p-6' }, [h(RouterView)]) }).use(i18n).use(router).mount('#app')
+  Object.assign(window, { courseEditorFixture: {
+    control: backend.control,
+    called: (command: string) => backend.called(command),
   } })
 } else if (screen === 'skill-atlas') {
   // Keep the props-only fixture free of unrelated page lifecycle and global CSS.

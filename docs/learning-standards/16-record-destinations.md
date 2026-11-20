@@ -1,6 +1,6 @@
 # Sending records directly to a store the learner names
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: docs/learning-standards-spec.md
 Blocked by: docs/learning-standards/14-learning-records.md
@@ -22,3 +22,28 @@ Done when: host-seam tests against a small in-process xAPI stub show nothing is 
 - There is no access log on the device today; the only one is fetched from the hosted service. This ticket creates the local one: a per-profile table with one row per send (time, recipient, scope, record count, identifier used, outcome), shown beside the hosted entries in the existing access log screen. Reads by a recipient are known only to the hosted service and keep coming from there.
 - Record destinations must work with the organisations feature switched off; do not route them through the code that returns nothing when that switch is off.
 - The sending mechanics live outside the commands layer so ticket 17 can use them; commands stay thin.
+
+2026-11-20: done. Decisions and deviations.
+
+- Layout: `src-tauri/src/record_sending/` (recipients, scope, outbox, access log, sending, record destinations); the xAPI client (address rules, version negotiation, posting) is `alexandria_studio::xapi::lrs`. Commands in `commands/record_destinations.rs` only fetch the learner's key and hand over. Database work goes through a small `RecordDb` trait so the background sender, the commands and the tests run the same code without holding the database across a request.
+- Migration 47 adds four tables: `record_recipients` (any approved recipient: kind `destination` or `share`, label, identifier choice, account name shown at consent, scope), `record_destinations`, `record_destination_secrets` and `record_access_log`. The schema doc is regenerated.
+- Recipient label for a destination: `destination|<normalised xAPI base address>|<store-issued key>`. The same store and key cannot be added twice.
+- Credentials: the secret is a row in the profile's encrypted database, apart from the destination, like model API keys; nothing returned to the interface carries it. Only HTTP Basic credentials are supported, which is what stores issue.
+- Addresses use the model connections' rules: a public store must use https; an address on this device or a private network needs an explicit confirmation on the consent screen; names are resolved and pinned, redirects not followed. The address is resolved again before each pass, and sending stops with a visible failure if it now leads to a different kind of network.
+- Version: negotiated from the store's `about` resource at approval (2.0.0 preferred, else 1.0.3), stored, and sent as the version header.
+- Nothing is sent before approval: the preview only resolves the address and derives identifiers. Approval queues every record already in scope, so past records are sent too.
+- Outbox: each pass queues what is newly in scope (the record writers are untouched), then sends due records oldest first in batches of 50. A store that cannot be reached keeps records queued; any other error marks them failed. Both retry after 30 s, doubling to a 6 h cap. A batch refused with 400 is retried one statement at a time. A background profile job runs a pass at least every minute, when a retry falls due, and when a destination is added or the learner asks.
+- Access log: one row per delivery that reached the recipient (accepted or refused) and per voiding batch, with time, recipient, scope, record count, record ids, identifier and outcome. A try that reached nobody is not logged; it shows as waiting. The log is listed beside the hosted views in the organisations access panel, and by the destinations panel when that panel is not on screen (organisations switched off or no Cloud).
+- Removal deletes the destination, its secret and its outbox rows in one transaction before anything else, then asks the store once to void every record it accepted. The ids come from the access log, so a record the learner later deleted locally is still voided. The outcome is shown and logged.
+- Records from private courses: no course is private yet, so names are always disclosed. `send.rs` has the single place to choose `Names::Omit` once the course access spec adds the switch; the consent screen has no private-course notice yet.
+- Story 42 (supervised profiles) is not in this ticket's list; no guardian rule was added.
+- Send failures in the activity log: ticket 15 owns that screen. The hook is `record_sending::outbox::failures(conn)` (record id, recipient, attempts, last error, next try); no command was added for it. Until it is wired, failures show on each destination in the destinations panel.
+- Placement: the destinations panel lives in Settings → Organisations, outside the switch, as the only existing screen with an access log. Moving it beside the activity log once ticket 15 lands may read better.
+- Strings are English-only under `organisations.records.*`, listed as pending translation; the consent copy should be prioritised.
+- Not run: the desktop interface harness. No harness screen mounts the new panels; the notification-links screen answers unknown commands with null, which the panels tolerate.
+
+Proposed doc edits (not made):
+
+- `GLOSSARY.md`: "record destination", "recipient label" and "access log (local)".
+- `src-tauri/src/AGENTS.md`: sending code lives in `record_sending/`; reuse `send_due` with a `Transport` rather than writing a second outbox driver.
+- The spec's Enterprise boundary rows are unchanged by this ticket.

@@ -1,0 +1,144 @@
+{
+  "standard": "scorm2004",
+  "edition": "4th",
+  "identifier": "com.example.fire-safety",
+  "title": "Fire safety",
+  "tree": {
+    "id": "fire-safety",
+    "title": "Fire safety",
+    "visible": true,
+    "sequencing": {
+      "control_mode": {
+        "choice": true,
+        "choice_exit": true,
+        "flow": true,
+        "forward_only": false,
+        "use_current_attempt_objective_info": true,
+        "use_current_attempt_progress_info": true
+      }
+    },
+    "children": [
+      {
+        "id": "intro",
+        "title": "Introduction",
+        "visible": true,
+        "launch": {
+          "path": "intro/index.html",
+          "kind": "sco",
+          "launch_data": "route=b"
+        },
+        "sequencing": {
+          "objectives": {
+            "primary": {
+              "id": "intro-done",
+              "satisfied_by_measure": false,
+              "min_normalized_measure": 1.0,
+              "map_info": [
+                {
+                  "target_objective_id": "g-intro",
+                  "read_satisfied_status": false,
+                  "read_normalized_measure": false,
+                  "write_satisfied_status": true,
+                  "write_normalized_measure": false
+                }
+              ]
+            }
+          },
+          "delivery_controls": {
+            "tracked": true,
+            "completion_set_by_content": true,
+            "objective_set_by_content": true
+          }
+        }
+      },
+      {
+        "id": "drill",
+        "title": "Evacuation drill",
+        "visible": true,
+        "launch": {
+          "path": "drill/index.html",
+          "kind": "sco"
+        },
+        "sequencing": {
+          "sequencing_rules": {
+            "pre_condition_rules": [
+              {
+                "condition_combination": "any",
+                "conditions": [
+                  {
+                    "condition": "satisfied",
+                    "operator": "not",
+                    "referenced_objective": "gate"
+                  },
+                  {
+                    "condition": "objectiveStatusKnown",
+                    "operator": "not",
+                    "referenced_objective": "gate"
+                  }
+                ],
+                "action": "disabled"
+              }
+            ]
+          },
+          "objectives": {
+            "primary": {
+              "id": "drill-done",
+              "satisfied_by_measure": false,
+              "min_normalized_measure": 1.0
+            },
+            "others": [
+              {
+                "id": "gate",
+                "satisfied_by_measure": false,
+                "min_normalized_measure": 1.0,
+                "map_info": [
+                  {
+                    "target_objective_id": "g-intro",
+                    "read_satisfied_status": true,
+                    "read_normalized_measure": true,
+                    "write_satisfied_status": false,
+                    "write_normalized_measure": false
+                  }
+                ]
+              }
+            ]
+          },
+          "delivery_controls": {
+            "tracked": true,
+            "completion_set_by_content": true,
+            "objective_set_by_content": true
+          }
+        },
+        "hide_lms_ui": [
+          "previous"
+        ]
+      },
+      {
+        "id": "quiz",
+        "title": "Check",
+        "visible": true,
+        "launch": {
+          "path": "quiz/index.html",
+          "kind": "sco",
+          "mastery_score": 0.8
+        },
+        "sequencing": {
+          "objectives": {
+            "primary": {
+              "id": "quiz-pass",
+              "satisfied_by_measure": true,
+              "min_normalized_measure": 0.8
+            }
+          },
+          "delivery_controls": {
+            "tracked": true,
+            "completion_set_by_content": true,
+            "objective_set_by_content": true
+          }
+        }
+      }
+    ]
+  },
+  "files": 5,
+  "uncompressed_bytes": 8662
+}

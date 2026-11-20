@@ -1,9 +1,11 @@
-//! The `package_attempts` and `package_activity_state` tables.
+//! The `package_attempts`, `package_activity_state` and
+//! `package_sequencing_state` tables.
 
 use std::collections::BTreeMap;
 
-use alexandria_studio::package::progress::ActivityOutcome;
+use alexandria_studio::package::progress::{ActivityOutcome, RootStatus};
 use rusqlite::{params, Connection, OptionalExtension, Row};
+use serde::{Deserialize, Serialize};
 
 use super::AttemptError;
 use crate::crypto::hash::entity_id;
@@ -283,6 +285,53 @@ pub(super) fn finish_open_sessions(
          SET total_seconds = total_seconds + session_seconds, session_seconds = 0 \
          WHERE attempt_id = ?1 AND session_seconds > 0",
         params![attempt_id],
+    )?;
+    Ok(())
+}
+
+/// One attempt's `package_sequencing_state` row: the SCORM 2004 engine's
+/// snapshot and its rollup of the root, as `state_json`.
+#[derive(Debug, Serialize, Deserialize)]
+pub(super) struct StoredSequencing {
+    pub(super) snapshot: String,
+    pub(super) root: RootStatus,
+}
+
+pub(super) fn sequencing(
+    conn: &Connection,
+    attempt_id: &str,
+) -> Result<Option<StoredSequencing>, AttemptError> {
+    let json: Option<String> = conn
+        .query_row(
+            "SELECT state_json FROM package_sequencing_state WHERE attempt_id = ?1",
+            params![attempt_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    json.map(|json| {
+        serde_json::from_str(&json).map_err(|e| {
+            AttemptError::Database(format!("attempt {attempt_id}: sequencing state: {e}"))
+        })
+    })
+    .transpose()
+}
+
+pub(super) fn put_sequencing(
+    conn: &Connection,
+    attempt_id: &str,
+    state: &StoredSequencing,
+) -> Result<(), AttemptError> {
+    let json = serde_json::to_string(state).map_err(|e| AttemptError::Database(e.to_string()))?;
+    let now = crate::clock::now_rfc3339();
+    conn.execute(
+        "INSERT INTO package_sequencing_state (attempt_id, state_json, updated_at) \
+         VALUES (?1, ?2, ?3) \
+         ON CONFLICT(attempt_id) DO UPDATE SET state_json = ?2, updated_at = ?3",
+        params![attempt_id, json, now],
+    )?;
+    conn.execute(
+        "UPDATE package_attempts SET updated_at = ?2 WHERE id = ?1",
+        params![attempt_id, now],
     )?;
     Ok(())
 }

@@ -122,10 +122,28 @@ const PENDING_TRANSLATION = [
   // worth prioritising there.
   'learn.package.',
   'learn.player.elementType.package',
+  // Adding a standards package in the course editor and opening a package
+  // file (learning standards ticket 07): summary, refusal reasons,
+  // redistribution confirmation, preview. English-only until the next
+  // instructor translation pass; the redistribution confirmation is a
+  // licensing statement and worth prioritising there.
+  'instructor.package.',
+  'instructor.elementTypes.package',
+  'instructor.compose.blockerUnattachedPackages',
+  'learn.packageFile.',
   // Not-found page for stale deep links, added when retired route redirects
   // were deleted. English-only pending a translate pass; renders in English
   // via the i18n fallback.
   'common.notFound.',
+  // Record destinations and their consent screen (learning standards ticket
+  // 16). English-only pending a translate pass; consent copy should be
+  // prioritised in that pass.
+  'organisations.records.',
+  // Activity log view, signed export and deletion (learning standards ticket
+  // 15). English-only pending the next learner translation pass; the delete
+  // confirmation says what happens to unsent records, so prioritise it.
+  'dashboard.activityLog.',
+  'nav.userMenu.activityLog',
 ]
 
 const isPending = (key) => PENDING_TRANSLATION.some((p) => key.startsWith(p))

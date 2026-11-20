@@ -23,6 +23,7 @@ pub mod package_attempt;
 pub mod package_launch;
 pub mod plugin;
 pub mod profile;
+pub mod record_sending;
 pub mod reputation;
 pub mod sync;
 pub mod talent_index;
