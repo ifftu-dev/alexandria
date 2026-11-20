@@ -1,0 +1,267 @@
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
+import { useMotion } from '@/composables/useMotion'
+import type { AtlasModel, AtlasNode } from '@/utils/skillAtlas'
+import type { AtlasCamera } from '@/utils/skillAtlasView'
+import { atlasFieldColor } from './atlasPresentation'
+import { webDotRadius, webGraphFromAtlas, webNearestInDirection, webNearestTo, type WebDirection, type WebPoint } from './webGeometry'
+
+// Camera and drawing constants. Positions and dot radii are layout units; the
+// camera's zoom is screen pixels per layout unit. Lines, arrowheads and names
+// are drawn in screen pixels, so they keep their size at any zoom.
+/** The camera's zoom range. */
+export const WEB_MIN_ZOOM = 0.2
+export const WEB_MAX_ZOOM = 6
+/** Past this zoom every shown dot carries its name. */
+export const WEB_NAMES_ZOOM = 2
+/** Room left around what a fitted camera shows, in pixels, in the full and the compact graph. */
+export const WEB_FIT_PADDING = 36
+export const WEB_COMPACT_FIT_PADDING = 14
+/** A fitted camera never frames less than this many layout units, so one dot is not blown up. */
+export const WEB_MIN_FIT_EXTENT = 160
+/** Size of the graph before it is measured (and in tests), in pixels. */
+export const WEB_DEFAULT_SIZE = { width: 800, height: 520 }
+export const WEB_COMPACT_DEFAULT_SIZE = { width: 260, height: 200 }
+/** Smallest dot drawn, and smallest pointer target around a dot, in pixels. */
+export const WEB_DOT_MIN_PIXELS = 4
+export const WEB_HIT_PIXELS = 14
+
+export type WebDotState = 'earned' | 'ready-next' | 'ready'
+
+/** One dot as drawn: screen position and size in pixels, and how it reads now. */
+export interface WebDot {
+  node: AtlasNode
+  id: string
+  x: number
+  y: number
+  /** Diameter of the dot, and of the pointer target around it. */
+  size: number
+  hit: number
+  color: string
+  state: WebDotState
+  selected: boolean
+  /** The one dot in the Tab order. */
+  roving: boolean
+  /** Outside the lit neighbourhood, or not matching the search or field focus. */
+  faded: boolean
+}
+
+/** What a Web graph draws and how; the component's props, read through a getter so the composable sees changes. */
+export interface WebGraphInput {
+  model: AtlasModel
+  positions: ReadonlyMap<string, WebPoint>
+  selectedId: string | null
+  /** An explicit neighbourhood (the inspector's prerequisite or dependent focus) lit in place of the selection's. */
+  focusIds: ReadonlySet<string> | null
+  /** When set, dots outside it fade (search, field focus). */
+  matchIds: ReadonlySet<string> | null
+  /** When set, only these dots are drawn (narrowing, the sidebar subset). */
+  shownIds: ReadonlySet<string> | null
+  /** When set, a fitted camera frames these dots (field focus) rather than every shown one. */
+  fitIds: ReadonlySet<string> | null
+  narrowed: boolean
+  names: boolean
+  arrows: boolean
+  related: boolean
+  camera: AtlasCamera | null
+  compact: boolean
+  reducedMotion: boolean
+}
+
+export interface WebGraphEvents {
+  select: (id: string | null) => void
+  active: (id: string | null) => void
+  camera: (camera: AtlasCamera) => void
+  drag: (positions: ReadonlyMap<string, WebPoint>) => void
+}
+
+export function clampZoom(zoom: number): number {
+  return Math.min(WEB_MAX_ZOOM, Math.max(WEB_MIN_ZOOM, zoom))
+}
+
+/** The camera that frames these points in a box of this many pixels. */
+export function webFitCamera(points: Iterable<WebPoint>, width: number, height: number, padding: number): AtlasCamera {
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity
+  for (const point of points) {
+    minX = Math.min(minX, point.x); maxX = Math.max(maxX, point.x)
+    minY = Math.min(minY, point.y); maxY = Math.max(maxY, point.y)
+  }
+  if (minX > maxX) return { x: 0, y: 0, zoom: 1 }
+  const spanX = Math.max(maxX - minX, WEB_MIN_FIT_EXTENT), spanY = Math.max(maxY - minY, WEB_MIN_FIT_EXTENT)
+  const zoom = clampZoom(Math.min(Math.max(1, width - 2 * padding) / spanX, Math.max(1, height - 2 * padding) / spanY))
+  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2, zoom }
+}
+
+/**
+ * The Web graph's geometry, emphasis and interaction, shared by the Web graph
+ * component and by the explorer's own node layer, so the two cannot drift
+ * apart. `root` is the element that holds the dots (each carries
+ * `data-skill`) and takes the pointer, wheel, key and focus handlers.
+ */
+export function useWebGraph(input: () => WebGraphInput, events: WebGraphEvents, root: Ref<HTMLElement | undefined>) {
+  const { reduced: systemReduced } = useMotion()
+  const motionReduced = computed(() => input().reducedMotion || systemReduced.value)
+  const model = computed(() => input().model)
+  const graph = computed(() => webGraphFromAtlas(model.value))
+
+  // Size: measured from the root, with a default until then.
+  const measured = ref<{ width: number; height: number } | null>(null)
+  const size = computed(() => measured.value ?? (input().compact ? WEB_COMPACT_DEFAULT_SIZE : WEB_DEFAULT_SIZE))
+  let observer: ResizeObserver | undefined
+  onMounted(() => {
+    if (!root.value || typeof ResizeObserver === 'undefined') return
+    observer = new ResizeObserver(entries => {
+      const box = entries[0]?.contentRect
+      if (box && box.width > 0 && box.height > 0) measured.value = { width: box.width, height: box.height }
+    })
+    observer.observe(root.value)
+  })
+  onBeforeUnmount(() => observer?.disconnect())
+
+  const positions = computed(() => input().positions)
+  /** Every dot drawn, in model order. */
+  const shownNodes = computed(() => {
+    const shown = input().shownIds
+    return model.value.nodes.filter(node => positions.value.has(node.skill.id) && (!shown || shown.has(node.skill.id)))
+  })
+  const shownSet = computed(() => new Set(shownNodes.value.map(node => node.skill.id)))
+
+  // Camera: the owner's, or the camera that fits what is shown.
+  const fitCamera = computed(() => {
+    const fit = input().fitIds
+    const ids = fit && [...fit].some(id => shownSet.value.has(id)) ? [...fit].filter(id => shownSet.value.has(id)) : [...shownSet.value]
+    const points = ids.flatMap(id => { const point = positions.value.get(id); return point ? [point] : [] })
+    return webFitCamera(points, size.value.width, size.value.height, input().compact ? WEB_COMPACT_FIT_PADDING : WEB_FIT_PADDING)
+  })
+  const camera = computed<AtlasCamera>(() => input().camera ?? fitCamera.value)
+  function toScreen(point: WebPoint): WebPoint {
+    const at = camera.value
+    return { x: (point.x - at.x) * at.zoom + size.value.width / 2, y: (point.y - at.y) * at.zoom + size.value.height / 2 }
+  }
+
+  // Keyboard roving: one dot is in the Tab order.
+  const activeId = ref<string | null>(null)
+  const rovingId = computed(() => {
+    const selected = input().selectedId
+    if (activeId.value && shownSet.value.has(activeId.value)) return activeId.value
+    if (selected && shownSet.value.has(selected)) return selected
+    return webNearestTo({ x: camera.value.x, y: camera.value.y }, positions.value, shownSet.value)
+  })
+  watch(() => input().selectedId, () => { activeId.value = null })
+
+  // Emphasis. Hover, and focus that arrived by keyboard, light a dot's
+  // one-step neighbourhood while they last; selection keeps it.
+  const hoverId = ref<string | null>(null)
+  const focusedId = ref<string | null>(null)
+  /** Focus counts only when it came from the keyboard: a click focuses its dot, and selection already lights it. */
+  const keyboardFocus = ref(false)
+  let pressing = false
+  const transientId = computed(() => hoverId.value ?? (keyboardFocus.value ? focusedId.value : null))
+  watch(transientId, id => events.active(id))
+  /** A shown skill and the shown skills one step away: prerequisites, dependents and, with Related on, relations. */
+  function neighbourhood(id: string): Set<string> {
+    const ids = new Set<string>()
+    const node = model.value.nodeById.get(id)
+    if (!node || !shownSet.value.has(id)) return ids
+    ids.add(id)
+    const steps = [...node.prerequisites, ...node.dependents, ...(input().related ? node.relations : [])]
+    for (const step of steps) if (shownSet.value.has(step.skillId)) ids.add(step.skillId)
+    return ids
+  }
+  /** Dots whose names show at any zoom: the selected and the hovered or focused dot, and their neighbours. */
+  const namedIds = computed(() => {
+    const selected = input().selectedId
+    return new Set([...(selected ? neighbourhood(selected) : []), ...(transientId.value ? neighbourhood(transientId.value) : [])])
+  })
+  /** The lit set; empty when nothing is lit, so nothing fades. */
+  const litIds = computed(() => {
+    const focus = input().focusIds, selected = input().selectedId
+    const kept = focus && focus.size > 0 ? [...focus].filter(id => shownSet.value.has(id)) : selected ? [...neighbourhood(selected)] : []
+    return new Set([...kept, ...(transientId.value ? neighbourhood(transientId.value) : [])])
+  })
+  function fadedByMatch(id: string): boolean {
+    const matches = input().matchIds
+    return matches !== null && !matches.has(id) && id !== input().selectedId
+  }
+  function faded(id: string): boolean {
+    return (litIds.value.size > 0 && !litIds.value.has(id)) || fadedByMatch(id)
+  }
+
+  function radiusOf(node: AtlasNode): number {
+    // An earned skill whose level is unavailable takes the base size, filled.
+    return webDotRadius(node.status === 'earned' ? node.earnedBloom?.rank : null)
+  }
+  const dots = computed<WebDot[]>(() => {
+    const at = camera.value, selected = input().selectedId
+    return shownNodes.value.map(node => {
+      const id = node.skill.id
+      const screen = toScreen(positions.value.get(id)!)
+      const dotSize = Math.max(WEB_DOT_MIN_PIXELS, radiusOf(node) * 2 * at.zoom)
+      return {
+        node, id, x: screen.x, y: screen.y, size: dotSize, hit: Math.max(WEB_HIT_PIXELS, dotSize),
+        color: atlasFieldColor(model.value.fieldById.get(node.fieldId) ?? { id: node.fieldId, slot: null }),
+        state: node.status === 'earned' ? 'earned' : node.readyNext ? 'ready-next' : 'ready',
+        selected: id === selected, roving: id === rovingId.value, faded: faded(id),
+      }
+    })
+  })
+
+  function dotClick(id: string): void { events.select(id) }
+
+  function skillOf(target: EventTarget | null): string | null {
+    const element = target instanceof Element ? target.closest<HTMLElement>('[data-skill]') : null
+    return element && root.value?.contains(element) ? element.dataset.skill ?? null : null
+  }
+  function dotElement(id: string): HTMLElement | undefined {
+    return [...root.value?.querySelectorAll<HTMLElement>('[data-skill]') ?? []].find(element => element.dataset.skill === id)
+  }
+  /** Puts focus on the roving dot, such as when an owner moves focus into the graph. */
+  function focus(): void {
+    if (rovingId.value) dotElement(rovingId.value)?.focus()
+  }
+  function focusIn(event: FocusEvent): void {
+    const id = skillOf(event.target)
+    if (!id) return
+    focusedId.value = id
+    activeId.value = id
+    keyboardFocus.value = !pressing
+  }
+  function focusOut(event: FocusEvent): void {
+    if (event.relatedTarget instanceof Node && root.value?.contains(event.relatedTarget)) return
+    focusedId.value = null
+    keyboardFocus.value = false
+  }
+  const ARROWS: Record<string, WebDirection> = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' }
+  function keyDown(event: KeyboardEvent): void {
+    const direction = ARROWS[event.key]
+    if (direction) {
+      // The arrow keys rove; they never scroll the page or pan the graph.
+      event.preventDefault()
+      keyboardFocus.value = true
+      const from = rovingId.value
+      const next = from ? webNearestInDirection(from, direction, positions.value, shownSet.value) : null
+      if (next) { activeId.value = next; dotElement(next)?.focus() }
+      return
+    }
+    const id = skillOf(event.target)
+    if ((event.key === 'Enter' || event.key === ' ') && id) {
+      // Handled here, so the button's own activation does not select twice.
+      event.preventDefault()
+      keyboardFocus.value = true
+      events.select(id)
+    } else if (event.key === 'Escape' && input().selectedId !== null) {
+      event.stopPropagation()
+      events.select(null)
+    }
+  }
+  function keyUp(event: KeyboardEvent): void {
+    if (event.key === ' ' && skillOf(event.target)) event.preventDefault()
+  }
+  function pressStart(): void { pressing = true }
+  function pressEnd(): void { pressing = false }
+  function hover(id: string | null): void { hoverId.value = id }
+
+  return {
+    size, camera, dots, graph, motionReduced, rovingId, namedIds, litIds,
+    dotClick, focus, focusIn, focusOut, keyDown, keyUp, hover, pressStart, pressEnd,
+  }
+}
