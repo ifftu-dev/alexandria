@@ -1672,6 +1672,7 @@ pub fn run() {
             commands::package_attempts::package_attempt_initialise,
             commands::package_attempts::package_attempt_commit,
             commands::package_attempts::package_attempt_terminate,
+            commands::package_attempts::package_attempt_activities,
             // Content (iroh blob store)
             commands::content::content_add,
             commands::content::content_get_text,

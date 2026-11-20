@@ -377,6 +377,16 @@ export interface PackageCommit {
   runtime: { cmi: Record<string, unknown> }
 }
 
+/** What one lesson of an attempt has reported: a table-of-contents row. */
+export interface PackageActivityResult {
+  activity_id: string
+  /** Launched in this attempt. */
+  started: boolean
+  complete: boolean
+  /** 0..1, self-reported by the content. */
+  score: number | null
+}
+
 export interface PackageAttemptProgress {
   attempt: PackageAttempt
   element_progress: ElementProgress

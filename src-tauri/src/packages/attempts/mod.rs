@@ -28,7 +28,8 @@ use crate::db::Database;
 use crate::domain::enrollment::{ElementProgress, UpdateProgressRequest};
 use crate::domain::package::Package;
 use crate::domain::package_attempt::{
-    PackageAttempt, PackageAttemptProgress, PackageAttemptStatus, PackageCommit, PackageLaunchInit,
+    PackageActivityResult, PackageAttempt, PackageAttemptProgress, PackageAttemptStatus,
+    PackageCommit, PackageLaunchInit,
 };
 use crate::package_serving::{drop_unless_open, Launches};
 use crate::packages::{PackageDb, PackageDirs};
@@ -313,6 +314,36 @@ pub async fn terminate(
         ended.cache_dropped = drop_unless_open(launches, dirs, &ended.attempt.package_hash).await?;
     }
     Ok(ended)
+}
+
+/// What every lesson of an attempt has reported, in the order a learner
+/// meets the lessons: the player's table of contents. Reads only.
+pub async fn activities(
+    db: &impl PackageDb,
+    attempt_id: &str,
+) -> Result<Vec<PackageActivityResult>, AttemptError> {
+    let attempt_id = attempt_id.to_string();
+    in_transaction(db, "packages.attempt-activities", move |db| {
+        let conn = db.conn();
+        let attempt = rows::get(conn, &attempt_id)?;
+        let package = stored_package(conn, &attempt.package_hash)?;
+        let outcomes = rows::outcomes(conn, &attempt.id)?;
+        Ok(package
+            .description
+            .launchable_activities()
+            .into_iter()
+            .map(|activity| {
+                let outcome = outcomes.get(&activity.id);
+                PackageActivityResult {
+                    activity_id: activity.id.clone(),
+                    started: outcome.is_some(),
+                    complete: outcome.is_some_and(|outcome| outcome.complete),
+                    score: outcome.and_then(|outcome| outcome.score),
+                }
+            })
+            .collect())
+    })
+    .await
 }
 
 /// The attempt, refused when a fresh attempt has closed it.

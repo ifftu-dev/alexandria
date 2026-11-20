@@ -92,6 +92,20 @@ pub struct PackageCommit {
     pub runtime: serde_json::Value,
 }
 
+/// What one lesson of an attempt has reported so far, for the player's table
+/// of contents. Self-reported by the content, like every package result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PackageActivityResult {
+    pub activity_id: String,
+    /// The lesson has stored state in this attempt (it was launched).
+    pub started: bool,
+    /// The lesson reports completion (SCORM 1.2: completed or passed; an
+    /// asset: launched).
+    pub complete: bool,
+    /// The lesson's reported score, normalised to 0..1.
+    pub score: Option<f64>,
+}
+
 /// The attempt and the element progress after a commit or a termination.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackageAttemptProgress {
