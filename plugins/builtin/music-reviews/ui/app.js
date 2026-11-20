@@ -60,6 +60,10 @@ import { detectPitch, noteToMidi, freqToMidiFloat, midiToName } from './pitch.js
     detectedPitch: null,
     lastSeenPitch: null,
     lastFrameSec: 0,
+    // Beats the learner has dragged the timeline ahead (positive) or back
+    // (negative) to look at notes off the stage. Display only: evaluation
+    // always uses the real play head, so peeking is locked while playing.
+    peekBeats: 0,
   };
 
   // ============================ DOM ==================================
@@ -104,6 +108,9 @@ import { detectPitch, noteToMidi, freqToMidiFloat, midiToName } from './pitch.js
     restartBtn.disabled = phase === 'idle' || phase === 'countin';
     finishBtn.disabled = phase === 'idle' || phase === 'countin';
     pauseBtn.textContent = phase === 'paused' ? 'Resume' : 'Pause';
+    const running = phase === 'playing' || phase === 'countin';
+    if (running) state.peekBeats = 0;
+    stage.classList.toggle('locked', running);
   }
 
   function updateStats() {
@@ -199,7 +206,7 @@ import { detectPitch, noteToMidi, freqToMidiFloat, midiToName } from './pitch.js
   function noteXAt(beatOffset) {
     // Returns the CSS-pixel x position of a note whose beat number is
     // `noteBeat`, given that `elapsedBeats` beats have passed.
-    return hitXPx() + beatOffset * state.pxPerBeat;
+    return hitXPx() + (beatOffset - state.peekBeats) * state.pxPerBeat;
   }
 
   function elapsedSec() {
@@ -662,6 +669,50 @@ import { detectPitch, noteToMidi, freqToMidiFloat, midiToName } from './pitch.js
     state.bpm = Math.max(40, Math.min(180, v));
     bpmValue.textContent = String(state.bpm);
   }
+
+  // ============================ PEEKING ===============================
+  // Drag the stage sideways (or scroll horizontally) to look along the
+  // timeline while not playing. Only horizontal movement is used; the page
+  // itself never scrolls.
+  function canPeek() {
+    return state.phase !== 'playing' && state.phase !== 'countin';
+  }
+
+  function setPeek(beats) {
+    const eBeats = elapsedBeats();
+    const last = state.notes[state.notes.length - 1];
+    const max = last ? Math.max(0, last.endBeat - eBeats) : 0;
+    state.peekBeats = Math.max(-eBeats, Math.min(max, beats));
+  }
+
+  let drag = null;
+  stage.addEventListener('pointerdown', (e) => {
+    if (!canPeek() || e.button !== 0) return;
+    if (e.target.closest('button, .results, .countin')) return;
+    drag = { id: e.pointerId, x: e.clientX, peek: state.peekBeats };
+    stage.setPointerCapture(e.pointerId);
+    stage.classList.add('dragging');
+  });
+  stage.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    if (!canPeek()) { endDrag(e); return; }
+    setPeek(drag.peek - (e.clientX - drag.x) / state.pxPerBeat);
+  });
+  function endDrag(e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    drag = null;
+    stage.classList.remove('dragging');
+    if (stage.hasPointerCapture(e.pointerId)) stage.releasePointerCapture(e.pointerId);
+  }
+  stage.addEventListener('pointerup', endDrag);
+  stage.addEventListener('pointercancel', endDrag);
+  stage.addEventListener('wheel', (e) => {
+    if (!canPeek()) return;
+    const dx = e.deltaX !== 0 ? e.deltaX : (e.shiftKey ? e.deltaY : 0);
+    if (dx === 0) return;
+    e.preventDefault();
+    setPeek(state.peekBeats + dx / state.pxPerBeat);
+  }, { passive: false });
 
   // ============================ HOST WIRING ===========================
   alex.onHost((msg) => {

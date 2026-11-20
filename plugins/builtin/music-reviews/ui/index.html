@@ -51,10 +51,15 @@
       /* HTML `hidden` must beat the explicit `display: grid` on overlays. */
       [hidden] { display: none !important; }
 
+      /* The page itself never scrolls: on touch screens a scrollable page
+         lets the whole plugin be dragged around. The stage handles
+         horizontal drags itself to peek along the timeline. */
       html, body {
         margin: 0;
         padding: 0;
         height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
       }
       body {
         background:
@@ -120,8 +125,10 @@
       .stage {
         position: relative;
         flex: 1;
-        min-height: 360px;
+        min-height: 160px;
         overflow: hidden;
+        touch-action: none;
+        cursor: grab;
         background:
           linear-gradient(180deg, rgba(255,255,255,0.02) 0%, transparent 8%, transparent 92%, rgba(255,255,255,0.02) 100%),
           repeating-linear-gradient(0deg, transparent 0, transparent 39px, rgba(255,255,255,0.04) 39px, rgba(255,255,255,0.04) 40px);
@@ -577,6 +584,47 @@
         pointer-events: none;
       }
       .toast.show { opacity: 1; }
+      .stage.dragging { cursor: grabbing; }
+      .stage.locked { cursor: default; }
+      .stage.dragging .note { transition: none; }
+
+      /* ===================== PHONES / NARROW FRAMES ===================== */
+      /* The three-column top bar needs ~900px; stack it below that. */
+      @media (max-width: 760px) {
+        .topbar {
+          grid-template-columns: 1fr auto;
+          grid-template-areas: "title title" "left right";
+          gap: 8px 12px;
+          padding: 10px 12px;
+        }
+        .topbar .left { grid-area: left; gap: 14px; }
+        .topbar .right { grid-area: right; }
+        .title-stack { grid-area: title; }
+        .title-stack .h { font-size: 10px; }
+        .title-stack .t { font-size: 15px; }
+        .stat .num { font-size: 18px; }
+        .stat .label { font-size: 9px; }
+        .tempo { padding: 2px 4px 2px 10px; gap: 4px; }
+        .footer {
+          grid-template-columns: 1fr auto;
+          grid-template-areas: "pitch pitch" "controls finish";
+          gap: 10px;
+          padding: 10px 12px 12px;
+        }
+        .footer .left { grid-area: pitch; }
+        .footer .controls { grid-area: controls; gap: 6px !important; }
+        .footer button { padding: 8px 12px; font-size: 14px; white-space: nowrap; }
+        .footer .right { grid-area: finish; }
+        .pitch-display { min-width: 0; flex: 1; padding: 6px 10px; }
+      }
+      @media (max-width: 380px) {
+        .topbar .left { gap: 10px; }
+        .stat .num { font-size: 15px; }
+      }
+      @media (max-height: 520px) {
+        .topbar { padding-block: 6px; }
+        .footer { padding-block: 8px; }
+      }
     </style>
   </head>
   <body>
@@ -628,7 +676,7 @@
           </div>
         </div>
       </div>
-      <div style="display:flex; gap:10px;">
+      <div class="controls" style="display:flex; gap:10px;">
         <button class="primary" id="start-btn" type="button">▶ Start</button>
         <button id="pause-btn" type="button" disabled>Pause</button>
         <button id="restart-btn" type="button" disabled>Restart</button>

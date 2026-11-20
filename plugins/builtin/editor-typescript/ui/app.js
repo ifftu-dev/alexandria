@@ -56,6 +56,30 @@
   };
 
   var view = null;
+  // Follows the host's light/dark theme; standalone preview stays dark.
+  var themeSlot = new CM.Compartment();
+  // Any CSS colour syntax (hex, rgb, color(), oklch) — let a canvas resolve it.
+  var probe = document.createElement('canvas').getContext('2d');
+  function isDarkTheme() {
+    var bg = getComputedStyle(document.documentElement).getPropertyValue('--theme-background').trim();
+    if (!bg || !probe) return true;
+    probe.clearRect(0, 0, 1, 1);
+    probe.fillStyle = '#000';
+    probe.fillStyle = bg;
+    probe.fillRect(0, 0, 1, 1);
+    var px = probe.getImageData(0, 0, 1, 1).data;
+    return (0.2126 * px[0] + 0.7152 * px[1] + 0.0722 * px[2]) < 128;
+  }
+  function editorTheme() { return isDarkTheme() ? CM.oneDark : []; }
+  function refreshTheme() {
+    if (view) view.dispatch({ effects: themeSlot.reconfigure(editorTheme()) });
+  }
+  // The bootstrap writes the host's tokens onto <html style> (on init and on
+  // theme changes), possibly after the editor is built: follow those writes.
+  new MutationObserver(refreshTheme).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['style'],
+  });
   var content = { tests: [] };
   var hasHost = typeof self.alex !== 'undefined';
   var started = false;
@@ -155,7 +179,7 @@
       CM.highlightSelectionMatches(),
       CM.syntaxHighlighting(CM.defaultHighlightStyle, { fallback: true }),
       langExtension(),
-      CM.oneDark,
+      themeSlot.of(editorTheme()),
       CM.keymap.of(
         [].concat(
           CM.closeBracketsKeymap,

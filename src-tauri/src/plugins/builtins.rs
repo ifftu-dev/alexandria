@@ -414,10 +414,23 @@ pub fn install_all(db: &Database, plugins_dir: &Path) -> InstallStats {
             .map(|m| m.scope)
             .unwrap_or(PluginScope::Global);
         if scope == PluginScope::Course {
-            log::debug!(
-                "builtin plugin '{}' is course-scoped — deferred to enrollment",
-                bundle.slug
-            );
+            // Not installed until a course needs it — but once installed, its
+            // files must follow app updates like any other builtin. The CID is
+            // the manifest hash, so a UI-only change keeps the same CID and
+            // nothing else would rewrite the stale files on disk.
+            let cid = verifier::compute_plugin_cid(bundle.manifest_json);
+            match registry::get_installed(db, &cid) {
+                Ok(Some(_)) => {
+                    if let Err(e) = registry::install_builtin(db, plugins_dir, bundle) {
+                        log::warn!("builtin plugin '{}' failed to refresh: {e}", bundle.slug);
+                    }
+                }
+                Ok(None) => log::debug!(
+                    "builtin plugin '{}' is course-scoped — deferred to enrollment",
+                    bundle.slug
+                ),
+                Err(e) => log::warn!("builtin plugin '{}' lookup failed: {e}", bundle.slug),
+            }
             continue;
         }
 
@@ -498,6 +511,35 @@ mod tests {
             })
             .count();
         assert_eq!(stats.installed, global_count);
+    }
+
+    #[test]
+    fn install_all_refreshes_installed_course_builtins_but_installs_none() {
+        let db = test_db();
+        let dir = TempDir::new().unwrap();
+        registry::install_builtin(&db, dir.path(), &EDITOR_JS_BUNDLE).expect("install js editor");
+        let js_cid = verifier::compute_plugin_cid(EDITOR_JS_BUNDLE.manifest_json);
+        let ts_cid = verifier::compute_plugin_cid(EDITOR_TS_BUNDLE.manifest_json);
+
+        // An app update ships new UI bytes under the same manifest (same CID):
+        // simulate the stale on-disk copy from the previous version.
+        let style = dir.path().join(&js_cid).join("ui/style.css");
+        std::fs::write(&style, "/* stale */").unwrap();
+
+        let stats = install_all(&db, dir.path());
+        assert_eq!(stats.failed, 0);
+        let (_, shipped) = EDITOR_JS_BUNDLE
+            .ui_files
+            .iter()
+            .find(|(path, _)| *path == "ui/style.css")
+            .expect("bundle ships style.css");
+        assert_eq!(
+            std::fs::read(&style).unwrap(),
+            *shipped,
+            "stale UI file refreshed"
+        );
+        // A course-scoped builtin that was never installed stays uninstalled.
+        assert!(registry::get_installed(&db, &ts_cid).unwrap().is_none());
     }
 
     #[test]
