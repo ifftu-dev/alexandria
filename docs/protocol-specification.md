@@ -1,7 +1,7 @@
 # Alexandria Protocol Specification
 
 Status: live
-Updated: 2026-11-17
+Updated: 2026-11-21
 Category: Standards Track
 
 ---
@@ -900,7 +900,9 @@ Status only moves up. Flag severity is authoritative on the issuing device, and 
 
 At session start the issuing device locks the session to one trust profile: `core`, `attested` (core + device attestation), `camera` (core + camera) or `full` (core + both), the highest the device's attestation, capabilities, a camera benchmark, per-capability consent and the sponsor's policy floor permit. The selection is the first link of the session's commitment chain. A signal lost afterwards is recorded as degraded, never renegotiated, and a signal the profile does not include is recorded as not run.
 
-The verification rung records positive evidence independent of the device, as a strict ladder: `none` → `process` (response-process signals observed over every served item, from the backend's draw) → `probed` (every follow-up probe on the learner's own answers satisfied) → `consistent` (the outcome agrees with the learner's own history on the skill) → `live` (a live segment in an interview held in Alexandria). Missing or skipped evidence leaves a session a rung lower and never counts against the learner; a failed probe flags the session.
+The verification rung records positive evidence independent of the device, as a strict ladder: `none` → `process` (response-process signals observed over every served item, from the backend's draw) → `probed` (every follow-up probe on the learner's own answers satisfied, at least one of them asking a question the learner had not already answered) → `consistent` (the outcome agrees with the learner's own history on the skill) → `live` (a live segment in an interview held in Alexandria). Missing or skipped evidence leaves a session a rung lower and never counts against the learner; a failed probe flags the session.
+
+Probe rules. A same-item probe (`reseed`: the item again with a new seed) still runs, and a failed one still flags the session, but it never earns `probed`: only an authored follow-up or variant, a plugin's own probe or a generated probe does. A probe's time limit is fixed by the item, never by the attempt's pace: the limit its author set, or else the response-process reading floor over its prompt and option text at its difficulty, times 4, plus 20 seconds, clamped to 15 seconds–5 minutes. Plugin probes keep the grader's time box and generated probes 60 seconds. In a hosted attempt (§14.9.7) a probe is another item on the same skill the candidate was never sent, drawn, timed and graded by the issuer; one answered after its limit fails.
 
 A session reaches the credential through the `integrity` attestation block (§14.9.5), with the terminal status, the composite score, the profile, the rung and the coverage statement digest. Coverage statements and the measurement behind certified rates are specified in [`docs/sentinel.md`](sentinel.md) (Trust profiles, Verification rungs, Integrity Assurance).
 
@@ -1185,6 +1187,7 @@ Each credential MUST conform to the following logical structure.
     "criticalCount": 0,
     "warningCount": 1,
     "assuranceLevel": "local",
+    "answerCustody": "device",
     "generatedAt": "2026-04-13T00:00:00Z",
     "trustProfile": "camera",
     "verificationRung": "probed",
@@ -1193,7 +1196,7 @@ Each credential MUST conform to the following logical structure.
     "signalsDegraded": ["camera"],
     "signalsNotRun": ["device_attestation"],
     "cameraCoverage": 0.95,
-    "probe": { "outcome": "satisfied", "policies": ["reseed"], "satisfied": 2, "failed": 0, "skipped": 0 }
+    "probe": { "outcome": "satisfied", "policies": ["authored"], "satisfied": 2, "failed": 0, "skipped": 0 }
   },
   "relatedResource": [
     {
@@ -1232,10 +1235,12 @@ whose `relatedResource` names a statement other than the assertion's
 ever published stays resolvable offline from the verifier library's registry.
 
 `evidence` (VC Data Model 2.0) carries at most one `DeviceAttestationEvidence`
-entry when the session ran on an attested device (§14.9.5), and a role
-credential carries an `AssessedCredentialEvidence` entry naming the credential
-it was issued on (§14.9.6). The example above, from a desktop without a
-companion phone, carries neither.
+entry when the session ran on an attested device or was backed by a companion
+phone (§14.9.5). A role credential carries an `AssessedCredentialEvidence`
+entry naming the credential it was issued on (§14.9.6), or, when it was issued
+from a hosted attempt, a `HostedAttemptEvidence` entry naming the attempt
+(§14.9.7). The example above, from a desktop without a companion phone,
+carries none.
 
 The optional `integrity` block is the **Sentinel integrity attestation** (§14.9.5). When present it is part of the signed envelope — the proof covers it, so the issuer attests to the figures and a verifier reads how the credential was earned, not merely that it was issued. Absent on credentials not backed by a monitored assessment session.
 
@@ -1302,6 +1307,7 @@ When a session is bound, the issuer summarises its terminal state into the `inte
 | `integrityScore` | Descriptive composite score in `[0,1]`, when the session recorded one |
 | `criticalCount`, `warningCount` | Flag counts by severity |
 | `assuranceLevel` | The device axis, below |
+| `answerCustody` | Who held the answers during the attempt: `device` (the candidate's device) or `issuer` (the answers never left the issuer). The device always writes `device`; only an issuer writes `issuer`, for a hosted attempt (§14.9.7). Absent reads as `device` |
 | `commitmentRoot` | Terminal root of the session's commitment chain |
 | `generatedAt` | Issuance time |
 | `trustProfile` | The profile the session was locked to: `core`, `attested`, `camera` or `full`. Absent when the session never selected one |
@@ -1313,31 +1319,35 @@ When a session is bound, the issuer summarises its terminal state into the `inte
 | `cameraCoverage` | Fraction of committed windows that carried camera checks, in `[0,1]`; `0` with no windows. Present only when the profile includes the camera, and absent from assertions issued before the field existed |
 | `probe` | When a probe step ran: `outcome` (`failed` if any failed, else `satisfied` if any, else `skipped`), the `policies` used, and `satisfied` / `failed` / `skipped` counts |
 
-The profile, rung, digest, signal lists, camera coverage and probe summary are optional and omitted when empty. A verifier that re-serialises the typed credential to check its proof must know these fields, or it drops them and the proof fails (see the trust-profiles spec Notes on the `alexandria-verify` release).
+The profile, rung, digest, signal lists, camera coverage, probe summary and answer custody are optional and omitted when empty. A verifier that re-serialises the typed credential to check its proof must know these fields, or it drops them and the proof fails (see the trust-profiles spec Notes on the `alexandria-verify` release).
 
 `assuranceLevel` is one of:
 
 - `"local"` — privacy-first default. Figures are device-reported; under this level a determined attacker could suppress flags, so verifiers SHOULD weight `local` attestations accordingly.
-- `"device_attested"` — the issuing device's statement that it re-verified, at issuance, a platform attestation bound to the session: Apple App Attest (an attestation object chaining to Apple's App Attestation Root CA over the session nonce, plus an assertion by the attested key over the terminal `commitmentRoot`) or Google Play Integrity (a classic token for the session nonce, decrypted and verified with the developer's response keys, `PLAY_RECOGNIZED` and `MEETS_DEVICE_INTEGRITY`). The platform vouches that an unmodified build of the app on a genuine device produced the session; it does not vouch for the person. A desktop cannot attest itself (App Attest reports unsupported on every Mac); it reaches this level only when the learner's own attested phone joined the session as a companion, which proves that a genuine app on the learner's phone joined, not that it watched.
+Levels form a ladder, `local` < `companion_attested` < `device_attested`:
+
+- `"companion_attested"` — a desktop session backed by the learner's own attested phone, joined as a companion. A genuine app on the learner's phone was present and attested during the session; nothing is claimed about the desktop or what it showed.
+- `"device_attested"` — the attempt ran in the attested app on the attested device: the issuing device's statement that it re-verified, at issuance, a platform attestation bound to the session: Apple App Attest (an attestation object chaining to Apple's App Attestation Root CA over the session nonce, plus an assertion by the attested key over the terminal `commitmentRoot`) or Google Play Integrity (a classic token for the session nonce, decrypted and verified with the developer's response keys, `PLAY_RECOGNIZED` and `MEETS_DEVICE_INTEGRITY`). The platform vouches that an unmodified build of the app on a genuine device produced the session; it does not vouch for the person. A desktop cannot attest itself (App Attest reports unsupported on every Mac) and never reaches this level. When Android attestation is enabled, this level requires the strong (hardware-backed) integrity verdict; the basic device verdict alone yields `local`.
 - `"anchored"` and `"high_assurance"` — reserved for a snapshot-commitment root anchored with a timestamp and immutability proof, and for an independently witnessed session. The implementation has no verified path to either, and a policy requiring a reserved level refuses issuance.
 
-The session nonce is `SHA-256("alexandria-device-attest-v1" ‖ 0x00 ‖ session_id ‖ 0x00 ‖ started_at)`. A stored level is never copied into a credential: the issuer recomputes the nonce and re-verifies the stored attestation, and embeds `"local"` when it does not verify. A companion phone's attestation is credited only when its binding names the issuing profile's own learner DID.
+The session nonce is `SHA-256("alexandria-device-attest-v1" ‖ 0x00 ‖ session_id ‖ 0x00 ‖ started_at)`. A stored level is never copied into a credential: the issuer recomputes the nonce and re-verifies the stored attestation, and embeds `"local"` when it does not verify. A companion phone's attestation is credited, as `companion_attested`, only when its binding names the issuing profile's own learner DID.
 
-`assuranceLevel` is the issuing device's word. What a verifier relies on is the **verified assurance level** it establishes from the credential's `DeviceAttestationEvidence` entry, with trust inputs it supplies (Apple root, app identifiers, Play Integrity response keys). The entry is *credential-bound* when the platform signed the credential's binding digest, `SHA-256(JCS({tag: "alexandria-attestation-binding-v1", commitmentRoot, subject, claim, integrity}))` (an App Attest assertion by the session's key, or a Play Integrity token with the digest as nonce), and *session-bound* when it carries only the session's own attestation. The issuer obtains credential-bound evidence at issuance, asking a companion phone over the link when one backs the session, and falls back to session-bound when it cannot. The verifier reports `attestation` as `not_supplied`, `verified_credential_bound`, `verified_session_bound`, `unverifiable` (no trust inputs for that platform) or `invalid` with a reason code; invalid evidence rejects the credential. `verifiedAssuranceLevel` is `device_attested` only for verified credential-bound evidence, and `local` otherwise. See [ADR 0006](./adr/0006-checkable-integrity-evidence.md).
+`assuranceLevel` is the issuing device's word. What a verifier relies on is the **verified assurance level** it establishes from the credential's `DeviceAttestationEvidence` entry, with trust inputs it supplies (Apple root, app identifiers, Play Integrity response keys). The entry is *credential-bound* when the platform signed the credential's binding digest, `SHA-256(JCS({tag: "alexandria-attestation-binding-v1", commitmentRoot, subject, claim, integrity}))` (an App Attest assertion by the session's key, or a Play Integrity token with the digest as nonce), and *session-bound* when it carries only the session's own attestation. The issuer obtains credential-bound evidence at issuance, asking a companion phone over the link when one backs the session, and falls back to session-bound when it cannot. The verifier reports `attestation` as `not_supplied`, `verified_credential_bound`, `verified_session_bound`, `unverifiable` (no trust inputs for that platform) or `invalid` with a reason code; invalid evidence rejects the credential. A verified outcome carries `companion: true` (omitted while false) when the entry has a companion binding. `verifiedAssuranceLevel` is `companion_attested` for verified credential-bound evidence with a companion binding, `device_attested` for verified credential-bound evidence without one, and `local` otherwise. See [ADR 0006](./adr/0006-checkable-integrity-evidence.md).
 
 The `integrityPolicy` (`IssuancePolicy`, snake_case fields) bounds are each optional:
 
 | Bound | Refuses issuance when | Code |
 |---|---|---|
+| `required_answer_custody` | The assertion's answer custody is below it (`device` < `issuer`) | `custody_below_required` |
 | `require_clean` | The status is not `completed` | `not_clean` |
 | `min_integrity` | The composite score is below it, or absent | `integrity_below_minimum`, `no_integrity_score` |
 | `max_critical`, `max_warning` | A flag count exceeds it | `too_many_critical`, `too_many_warnings` |
-| `required_assurance_level` | The verified assurance level is below it. A minimum: `local` is met by every credential, `device_attested` only by verified credential-bound evidence, reserved levels never | `assurance_below_required` |
-| `min_trust_profile` | The session's profile does not include every signal set the floor names (`camera` does not meet an `attested` floor). A signal counts when it is in `signalsRun` and not in `signalsNotRun` or `signalsDegraded`, with two refinements: a degraded camera still counts when `cameraCoverage` is from 0.9 to 1, and device attestation also needs evidence that verifies, credential- or session-bound | `trust_profile_below_floor` |
-| `min_verification_rung` | The session's rung is below it | `rung_below_minimum` |
+| `required_assurance_level` | The verified assurance level is below it on the ladder. A minimum: `local` is met by every credential, `companion_attested` by verified credential-bound evidence with or without a companion binding, `device_attested` only by verified credential-bound evidence without one, reserved levels never | `assurance_below_required` |
+| `min_trust_profile` | The session's profile does not include every signal set the floor names (`camera` does not meet an `attested` floor). A signal counts when it is in `signalsRun` and not in `signalsNotRun` or `signalsDegraded`, with two refinements: a degraded camera still counts when `cameraCoverage` is from 0.9 to 1, and device attestation also needs evidence that verifies, credential- or session-bound, from the device the attempt ran on (companion evidence never credits it) | `trust_profile_below_floor` |
+| `min_verification_rung` (the required rung) | The credited rung is below it. A stated `probed`, `consistent` or `live` is credited only beside a probe step whose outcome is `satisfied` with `satisfied > 0`, `failed = 0` and `skipped = 0`; otherwise the rule credits `process`, and the refusal names the credited rung | `rung_below_minimum` |
 | `probe_policy` | A policy other than `none` did not run, or a probe failed. A skipped probe is accepted; require a satisfied one with `min_verification_rung: probed` | `probe_policy_not_run`, `probe_failed` |
 
-The rule is judged over verifier-visible facts only (the policy, the integrity assertion and the attestation outcome) by one function, `alexandria_verify::policy::evaluate`, in the table's order, so an issuing device, a hosted service and a candidate's picker reach the same answer. The issuing device additionally judges the floor when the attempt starts and refuses unless the two judgements agree. `probe_connection_id` names the model connection that writes generated probes under the `llm` policy; it is not judged at issuance. The camera coverage bound of earlier revisions (`minCameraCoverage`) is removed: coverage is now a property of the `camera` and `full` profiles. If **any** set bound is violated, issuance MUST be refused (no credential is minted); the issuer returns the first violated bound. A policy without a bound session is a request error. A bound session without a policy embeds the attestation but gates on nothing.
+The rule is judged over verifier-visible facts only (the policy, the integrity assertion and the attestation outcome) by one function, `alexandria_verify::policy::evaluate`, in the table's order (custody, status, score, flags, assurance, floor, rung, probes; custody first, since no retake of the same kind of attempt can meet it), so an issuing device, a hosted service and a candidate's picker reach the same answer. The issuing device additionally judges the floor when the attempt starts and refuses unless the two judgements agree. `probe_connection_id` names the model connection that writes generated probes under the `llm` policy; it is not judged at issuance. The camera coverage bound of earlier revisions (`minCameraCoverage`) is removed: coverage is now a property of the `camera` and `full` profiles. If **any** set bound is violated, issuance MUST be refused (no credential is minted); the issuer returns the first violated bound. A policy without a bound session is a request error. A bound session without a policy embeds the attestation but gates on nothing.
 
 This makes a "trusted" credential one that was only minted when the assessment behind it satisfied the sponsor's integrity rules, with the evidence travelling inside the signed credential for any verifier to check.
 
@@ -1349,11 +1359,34 @@ An **organization** (sponsor) defines **role assessments** that map a job descri
 - `RoleAssessment` — `{ org_id, role_title, job_description, course_id?, skill_ids[], issuance_policy, required_assurance_level }`. The `issuance_policy` is the §14.9.5 `IssuancePolicy`; `required_assurance_level` is folded into it at issuance.
 - `AssessmentAttempt.role_assessment_id?` — the published role a learner chose to assess for, fixed at the first start and reported back on resume. Learners list candidate roles with `assessment_open_roles(skill_id)`; sponsors list a role's attempts with `list_role_attempts(role_assessment_id)` and issue from one.
 
-`issue_role_credential(role_assessment_id, subject, integrity_session_id)` is the keystone: it loads the role's policy, folds in the required assurance level, and issues a `RoleCredential` (claim `{ role: role_title, scope: org_name }`) through the §14.9.5 gated pipeline — so the role credential is refused unless the bound integrity session satisfies the sponsor's rules, and carries the integrity attestation for verifiers. Issuance first requires that the session belongs to a graded, passed attempt for that role made by the named subject. When that attempt has its own `AssessmentCredential`, the role credential carries an `AssessedCredentialEvidence` entry naming it by id and integrity hash, with the attestation outcome and verified assurance level found for it, and the policy is judged from that entry (`policy::evaluate_assessed`).
+`issue_role_credential(role_assessment_id, subject, integrity_session_id)` is the keystone: it loads the role's policy, folds in the required assurance level, and issues a `RoleCredential` (claim `{ role: role_title, scope: org_name }`) through the §14.9.5 gated pipeline — so the role credential is refused unless the bound integrity session satisfies the sponsor's rules, and carries the integrity attestation for verifiers. Issuance first requires that the session belongs to a graded, passed attempt for that role made by the named subject. When that attempt has its own `AssessmentCredential`, the role credential carries an `AssessedCredentialEvidence` entry naming it by id and integrity hash, with the attestation outcome and verified assurance level found for it, and the policy is judged from that entry (`policy::evaluate_assessed`). Candidates' devices hold the answers on this path, so every role made on a sponsor's device stores `required_answer_custody: device` and refuses `issuer`. A role requiring the `live` rung cannot yet issue here from a real interview: the candidate's live segment is recorded only in the interview's own check, never in the role attempt's session.
 
-**Organisation-issued credentials from the hosted service.** A remote candidate answers an organisation's credential request (§14.18.4) from their own device. The hosted service verifies the share, including its attestation evidence, judges the role's policy with the same rule, and issues a `RoleCredential` signed with the organisation's hosted key under its domain-listed `did:key`, with an issuer object naming the organisation, the candidate's integrity assertion unchanged and an `AssessedCredentialEvidence` entry. It carries revocation and suspension entries in lists the service hosts for that key. The candidate's app collects it with the signed `GET /api/credentials/for/{did}`, verifies it and stores it like any received credential. See [ADR 0008](./adr/0008-hosted-organisation-issued-credentials.md).
+**Organisation-issued credentials from the hosted service.** A remote candidate answers an organisation's credential request (§14.18.4) from their own device. The hosted service verifies the share, including its attestation evidence, judges the role's policy with the same rule, and issues a `RoleCredential` signed with the organisation's hosted key under its domain-listed `did:key`, with an issuer object naming the organisation, the candidate's integrity assertion unchanged and an `AssessedCredentialEvidence` entry. It carries revocation and suspension entries in lists the service hosts for that key. This share path stays for roles that accept `device` custody; a role requiring `issuer` custody (the hosted service's default for a new role, with the `probed` rung) refuses it with `custody_below_required` and is taken as a hosted attempt (§14.9.7). The candidate's app collects it with the signed `GET /api/credentials/for/{did}`, verifies it and stores it like any received credential. See [ADR 0008](./adr/0008-hosted-organisation-issued-credentials.md).
 
 **The policy in the request.** A credential request MAY carry the organisation's `issuance_policy` (§14.18.4). Before an attempt answering it starts, `exchange_prepare_assessment` fetches the request, checks the organisation's proof, and stores the request as verified; `exchange_start_assessment` does so again, judges the request's floor before any item, and stores the policy on the attempt. Trust profile selection takes the floor from the stored request named by `ProfileRequest.exchange_request_id` (never together with a role). `integrity_device_support` reports whether this device can attest a session or pair a phone, so the request view can say up front when a floor is out of reach. `exchange_credentials` marks each shareable credential with `meets_policy`, `refusal_code` and `refusal`, judged by the shared rule; a refused credential stays shareable, but the organisation will not issue its own credential for it. Backing IPCs: `create_organization`, `list_organizations`, `create_role_assessment`, `list_role_assessments`, `get_role_assessment`, `set_role_assessment_status`, `issue_role_credential`, `assessment_open_roles`, `list_role_attempts`.
+
+#### 14.9.7 Hosted attempts (issuer-held answers)
+
+An organisation MAY hold a role's items and answers in its hosted service (a hosted item bank) and run the attempt itself. The service draws the items, sends one at a time, stamps its own clock on send and receipt, grades and probes; the candidate's device shows the items and contributes integrity evidence only. A score or timing the device reports decides nothing. See [ADR 0009](./adr/0009-hosted-attempts-issuer-holds-answers.md); the candidate API is specified in the Cloud repository's hosted attempts document.
+
+- **Items on the wire.** A choice item carries `kind: "choice"`, the question, the options in this attempt's shuffled order and `select` (`one` or `many`). A plugin item carries `kind: "plugin"`, `plugin: {cid, starter}` naming a plugin the app bundles by its manifest's BLAKE3, the prompt as `question`, no options and `select: "submission"`; the device answers with `submission`, and the issuer grades it with the exact bundled grader over hidden test cases the device never receives, full marks counting as correct. A device MUST refuse an item naming a plugin it does not bundle. Item text MUST stay in memory and out of storage and logs on the device.
+- **Close.** The device sends its integrity assertion and, on an attested phone, a credential-bound `DeviceAttestationEvidence` whose binding proof covers the close digest `SHA-256("alexandria-hosted-attempt-close-v1" ‖ 0x00 ‖ commitmentRoot ‖ 0x00 ‖ did ‖ 0x00 ‖ attempt id)` (attempt id lowercase hyphenated) instead of a credential's binding digest: an App Attest assertion over it, or a Play Integrity token with it as nonce. Evidence from a companion phone verifies as `companion_attested`.
+- **Attested requests.** When the role requires `device_attested`, the open request registers an App Attest key (challenge `SHA-256("alexandria-hosted-attempt-key-v1" ‖ 0x00 ‖ did ‖ 0x00 ‖ invite id ‖ 0x00 ‖ nonce)`), and every answer and the close carry an assertion from it over the request's signed challenge, a newline and the hex SHA-256 of the body, with the counter advancing. A request without a valid assertion is refused.
+- **Credential.** When the policy is met (judged by `alexandria_verify::policy::evaluate_hosted`), the issuer signs a `RoleCredential` whose assertion it writes: the device's session facts with `answerCustody: "issuer"`, the issuer's rung, probe step and verified level, and the coverage statement for that profile and rung. Its one evidence entry is a `HostedAttemptEvidence`:
+
+```json
+{
+  "type": "HostedAttemptEvidence",
+  "attemptId": "…",
+  "answerCustody": "issuer",
+  "gradedBy": "issuer",
+  "probe": { "outcome": "satisfied", "policies": ["authored"], "satisfied": 1, "failed": 0, "skipped": 0 },
+  "attestation": { "outcome": "verified_credential_bound", "platform": "ios" },
+  "verifiedAssuranceLevel": "device_attested"
+}
+```
+
+`probe` is omitted when no probe step ran. The policy rule takes the verified level, the floor's device attestation and the probe step (for the probe policy and the rung) from this entry, and custody, status, score, flags, profile and rung from the assertion. The entry's level counts only as far as its own `attestation` verifies it. The entry is valid only on an issuer-signed credential whose assertion states `issuer` custody (§14.13.1). When the policy is not met the issuer records the first unmet requirement and issues nothing; a role requiring `live` is held until an interview for the candidate and role holds a `live` result.
 
 ### 14.10 Non-Transferability Semantics
 
@@ -1570,7 +1603,16 @@ The verifier MUST output a structured result:
 `suspension_list_unavailable`, `supersession_state_unavailable`, and
 `integrity_anchor_unavailable`. `attestation` and `verifiedAssuranceLevel` are
 described in §14.9.5; `coverageStatementMismatch` (§14.7) appears only when
-true. `statusValid` is false when a present status
+true. `custodyDefects` (omitted while empty) lists what is wrong with the
+credential's answer custody, read from its own content; any one rejects:
+`issuer_custody_self_issued` (a self-issued credential, issuer DID equal to
+subject DID, states `issuer`), `hosted_attempt_self_issued` (a self-issued
+credential carries `HostedAttemptEvidence`), `hosted_attempt_invalid` (a
+duplicate or unparsable entry, or one not stating `issuer` custody and grader)
+and `hosted_attempt_custody_mismatch` (the entry beside an assertion not
+stating `issuer`). Trust classification (`alexandria_verify::trust`,
+calculation version 5) recomputes them and calls a result that disagrees
+inconsistent. `statusValid` is false when a present status
 reference is malformed or its bit index lies outside the supplied list.
 `integrity_anchor_unavailable` is reported only when the policy requires an
 integrity anchor and the anchor lookup failed.
@@ -1724,10 +1766,11 @@ Credential class default weights SHOULD follow:
 Weight follows verified provenance, not the declared type. A self-issued
 credential (issuer = subject) takes the `SelfAssertion` weight whatever type
 it declares, or an attested weight (0.30 in the reference implementation) when
-its attestation evidence verified credential-bound; only an issuer-signed
+its attestation evidence verified `device_attested` (a `companion_attested`
+credential takes the `SelfAssertion` weight); only an issuer-signed
 credential takes its declared type's weight. A `suspended` or `flagged`
 session status removes a credential from aggregation only where the status is
-reliable (issuer-signed, or credential-bound evidence); elsewhere it is
+reliable (issuer-signed, or `device_attested` evidence); elsewhere it is
 ignored.
 
 Implementations MAY tune these but MUST expose the chosen values.

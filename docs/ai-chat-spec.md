@@ -1,7 +1,7 @@
 # Alexandria AI Chat and Tutoring — Feature Architecture
 
 Status: active
-Updated: 2026-11-12
+Updated: 2026-11-21
 
 Phases 1 and 2 are implemented; section 26 records where the implementation differs from earlier revisions. Phase 3 items remain proposals.
 
@@ -508,7 +508,7 @@ Raise `ai_assistant_running` from Info to Warning for high-stakes roles on deskt
 
 - The shared lesson rules (`alexandria_studio::learning`) expose only published course elements, never `assessment_items`, banks, answer keys, attempt rows, or interview content. Assessments, interactive elements, plugins, and every quiz type (quizzes are monitored like assessments in the player) are withheld from every AI surface; chat attaches text lessons only. The deny list is test-enforced in the same style as the existing privacy invariants.
 - Practice never draws from a ratified bank (section 13).
-- Keep a local MinHash/shingle index over ratified bank items on the device. Check chat composer input, memory proposals, artifact text, and practice-generated questions against it. A match is refused and flagged `item_text_in_chat`. This also catches items photographed, transcribed elsewhere, and pasted back.
+- Keep a local MinHash/shingle index over ratified bank items on the device. Check chat composer input, memory proposals, artifact text, and practice-generated questions against it. A match is refused and flagged `item_text_in_chat`. This also catches items photographed, transcribed elsewhere, and pasted back. Items of a hosted attempt, which the device never stores, are added to the index as they arrive (hashes only) and kept for the rest of the run, a plugin item's prompt and starter included.
 - Post-attempt review shows skill-level feedback, not item text, unless the bank policy explicitly allows item disclosure.
 - Numeric and structured items become parameterized: seeded variables produce a fresh variant per draw, and the grader plugin receives the seed. This removes the value of memorized answers and leaked keys.
 - The randomized draw excludes question IDs previously served to the profile; a pass requires at least some items never seen before by that learner. `drawn.question_ids` is already stored per attempt, so this is a filter, not a schema change.

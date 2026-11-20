@@ -1,7 +1,7 @@
 # Project Structure
 
 Status: live
-Updated: 2026-11-17
+Updated: 2026-11-21
 
 > Alexandria — Tauri v2 desktop and mobile application (macOS, iOS, Android)
 
@@ -106,6 +106,7 @@ src-tauri/
     │   ├── items.rs        # Unified assessment items
     │   ├── probes.rs       # Follow-up probes after submission (reseed/authored/plugin/llm)
     │   ├── llm_probe.rs    # One-shot generated probe run type (not chat)
+    │   ├── hosted/         # Hosted attempts: the candidate API client, wire structs, refusal reasons
     │   ├── policy.rs       # Attempt limits + cooldowns
     │   ├── mcq.rs          # MCQ item handling
     │   ├── goal_plan.rs    # Goal → prerequisite path planning
@@ -313,7 +314,8 @@ src/
 │   │   └── Review.vue      # Transcript, coverage, summary, conclusion, export
 │   ├── learn/
 │   │   ├── Player.vue
-│   │   └── AssessmentRunner.vue # Sentinel-gated dynamic assessment (/assessment/:skillId)
+│   │   ├── AssessmentRunner.vue # Sentinel-gated dynamic assessment (/assessment/:skillId)
+│   │   └── HostedAttempt.vue # An organisation's hosted attempt: consent, one item at a time, result
 │   ├── opinions/
 │   │   ├── Detail.vue
 │   │   ├── Index.vue

@@ -1,7 +1,7 @@
 # Skills & Reputation
 
 Status: live
-Updated: 2026-11-17
+Updated: 2026-11-21
 
 > Open skill graph, evidence-based credentials, and reputation system.
 
@@ -103,7 +103,7 @@ A `SkillClaim` may carry an optional `ProvenanceTier` that grades how the eviden
 | `accredited_document` | Backed by an accredited institution's document | a university transcript |
 | `issuer_signed` | Issued by a third party (issuer ≠ subject) | a formal credential |
 
-Higher tiers carry more aggregation confidence. A claim with no provenance uses the full quality triple `(1,1,1)` (calculation version `1.4`). These weights apply only to verified scoring inputs and never change a credential's signed payload.
+Higher tiers carry more aggregation confidence. A claim with no provenance uses the full quality triple `(1,1,1)` (calculation version `1.5`). These weights apply only to verified scoring inputs and never change a credential's signed payload.
 
 #### Authenticity, trust, and privilege
 
@@ -125,16 +125,17 @@ posted in, and inbound opinions for it are rejected rather than queued. The
 preprod network profile pins no policies yet, so posting is refused with an
 explanation until reviewed demo policies are pinned.
 
-Derived skill states (calculation version `1.4`) score only credentials that
+Derived skill states (calculation version `1.5`) score only credentials that
 verify at computation time, whose signed subject, skill and identifier match
 their stored row, and whose verification is not pending (`db::scoring_inputs`).
 Weight follows verified provenance, not the declared type
 (`aggregation::weights::provenance_weight`): a self-issued credential takes the
 `SelfAssertion` weight (0.25) whatever type it declares, or the attested weight
-(0.30) when its attestation evidence verified credential-bound; only an
+(0.30) when its attestation evidence verified `device_attested` (a paired
+phone's `companion_attested` takes the plain self-claim weight); only an
 issuer-signed credential takes its declared type's weight. A session status of
 `suspended` or `flagged` removes a credential from scoring only where a reader
-can rely on it, for issuer-signed or credential-bound attested credentials
+can rely on it, for issuer-signed or `device_attested` credentials
 (`session_status_counts`); for any other credential the status is the holder's
 word and is ignored. A subject's own claims add no independent issuer cluster,
 so self-issued claims cannot raise confidence through apparent diversity. Each cached state records a fingerprint of the local credential,
@@ -201,7 +202,7 @@ a login, or a local row never makes a policy applicable.
 | Talent-index claims | `talent_index` | verified credentials only; no privilege is granted | none | claims show provenance, not approval |
 | Governance eligibility | none; there is no local proficiency gate | qualification policy bound to the pinned genesis/opening, evaluated at certified submission | committee genesis, not the network profile | not active |
 | Role evidence | cloud role specification and organisation-issued role credentials | signed organisation specification plus learner-signed result; the hosted service issues a role credential under the organisation's domain-listed key when the role's issuance policy is met | organisation signature | not governed by a qualification policy |
-| Derived skill states | `commands/aggregation.rs`, `db/scoring_inputs.rs` | re-verified proofs; self-issued claims gain no independence weight; fingerprinted cache invalidation | calculation version `1.4` | implemented; no privilege is granted |
+| Derived skill states | `commands/aggregation.rs`, `db/scoring_inputs.rs` | re-verified proofs; self-issued claims gain no independence weight; fingerprinted cache invalidation | calculation version `1.5` | implemented; no privilege is granted |
 | Reputation rows and snapshots | `evidence/reputation.rs`, `commands/snapshot.rs` | re-verified proofs; instructor credit only from verified issuer-signed credentials; empty samples excluded; snapshots cite the same verified set | computation spec `v5-session-status` | implemented; no privilege is granted |
 
 A policy lists accepted `did:key` issuers, permitted routes
@@ -551,7 +552,7 @@ Spec section numbers below refer to that document.
 | Dynamic Sentinel-gated assessments (randomized draw, host-side grade) | `assessment::*`, `commands::assessment`, `commands::adaptive` |
 | W3C Verifiable Credentials | `domain::vc` (re-exports `alexandria-verify`), `commands::credentials` |
 | Deterministic aggregation engine (Q, M, U, C, T, L) | `aggregation::aggregate_skill_state` |
-| Type weights by verified provenance, session-status rule, freshness, provenance-weighted quality, independence (§14.14) | `aggregation::weights`, `aggregation::config` (`quality_triple`, `attested_weight`, calc version 1.4) |
+| Type weights by verified provenance, session-status rule, freshness, provenance-weighted quality, independence (§14.14) | `aggregation::weights`, `aggregation::config` (`quality_triple`, `attested_weight`, calc version 1.5) |
 | Anti-gaming (cluster cap, inflation z-score, §14.15) | `aggregation::antigaming` |
 | Issuer clustering / pairwise dependence (one cluster per DID) | `aggregation::independence` |
 | Persisted derived-state cache (§14.16) | `commands::aggregation` (`derived_skill_states` table) |
