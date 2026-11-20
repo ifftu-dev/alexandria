@@ -20,6 +20,7 @@
 
 mod archive;
 mod cmi5;
+pub mod progress;
 mod scorm;
 mod scorm12;
 mod scorm2004;

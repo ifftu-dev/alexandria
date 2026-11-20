@@ -24,6 +24,7 @@
 //! the database across an await.
 
 mod archive;
+pub mod attempts;
 mod cache;
 mod draft;
 mod rows;
