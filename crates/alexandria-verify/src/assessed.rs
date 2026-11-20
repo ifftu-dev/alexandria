@@ -77,8 +77,9 @@ impl AssessedCredentialEvidence {
 
     /// The level a policy judges: the entry's stated level when its own
     /// outcome verifies it, else `local`. An entry stating `device_attested`
-    /// beside an outcome that is not credential-bound states more than its
-    /// own outcome shows.
+    /// beside an outcome that is not credential-bound, or beside a
+    /// companion's credential-bound outcome, states more than its own outcome
+    /// shows.
     pub fn assurance_level(&self) -> VerifiedAssuranceLevel {
         if self.verified_assurance_level == self.attestation.verified_assurance_level() {
             self.verified_assurance_level
@@ -155,6 +156,7 @@ mod tests {
             &credential,
             AttestationOutcome::VerifiedCredentialBound {
                 platform: Platform::Ios,
+                companion: false,
             },
         )
         .unwrap()
@@ -212,6 +214,30 @@ mod tests {
         )
         .unwrap();
         assert_eq!(entry.assurance_level(), VerifiedAssuranceLevel::Local);
+        entry.verified_assurance_level = VerifiedAssuranceLevel::DeviceAttested;
+        assert_eq!(entry.assurance_level(), VerifiedAssuranceLevel::Local);
+    }
+
+    /// A companion's credential-bound outcome verifies `companion_attested`
+    /// and nothing higher.
+    #[test]
+    fn a_companion_outcome_verifies_companion_attested_only() {
+        let mut entry = AssessedCredentialEvidence::new(
+            &assessed(),
+            AttestationOutcome::VerifiedCredentialBound {
+                platform: Platform::Ios,
+                companion: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            entry.verified_assurance_level,
+            VerifiedAssuranceLevel::CompanionAttested
+        );
+        assert_eq!(
+            entry.assurance_level(),
+            VerifiedAssuranceLevel::CompanionAttested
+        );
         entry.verified_assurance_level = VerifiedAssuranceLevel::DeviceAttested;
         assert_eq!(entry.assurance_level(), VerifiedAssuranceLevel::Local);
     }

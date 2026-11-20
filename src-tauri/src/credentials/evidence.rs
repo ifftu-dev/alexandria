@@ -328,7 +328,8 @@ mod tests {
         assert_eq!(
             verify_evidence(&issued.credential, &trust(&w).inputs()),
             AttestationOutcome::VerifiedCredentialBound {
-                platform: Platform::Ios
+                platform: Platform::Ios,
+                companion: false,
             }
         );
     }
@@ -492,7 +493,8 @@ mod tests {
         assert_eq!(
             verify_evidence(&bundled, &trust(&w).inputs()),
             AttestationOutcome::VerifiedCredentialBound {
-                platform: Platform::Ios
+                platform: Platform::Ios,
+                companion: false,
             }
         );
     }

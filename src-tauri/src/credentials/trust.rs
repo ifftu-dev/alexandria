@@ -101,7 +101,7 @@ fn provenance(trust: &CredentialTrust) -> Option<Provenance> {
             name: name.clone(),
             domain: domain.clone(),
         },
-        (_, AttestationOutcome::VerifiedCredentialBound { platform }) => {
+        (_, AttestationOutcome::VerifiedCredentialBound { platform, .. }) => {
             Provenance::DeviceAttested { platform }
         }
         (_, attestation) => Provenance::SelfReported { attestation },

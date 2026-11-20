@@ -12,7 +12,10 @@
 //! The rule trusts only what it can check. The required assurance level is
 //! judged against the verified level ([`AttestationOutcome::
 //! verified_assurance_level`]), never the level the assertion states, so
-//! `device_attested` is met only by credential-bound evidence that verifies.
+//! `device_attested` is met only by credential-bound evidence from the
+//! attempt's own device that verifies. A paired phone's credential-bound
+//! evidence verifies as `companion_attested`, which meets a required
+//! `companion_attested` and never a required `device_attested`.
 //! A floor's device attestation signal counts only when the evidence verifies
 //! (credential- or session-bound: either proves the session was attested).
 //! The camera counts towards a floor when the assertion states its coverage
@@ -94,10 +97,12 @@ pub struct IssuancePolicy {
     /// `flagged`, `suspended` and any other value are refused.
     #[serde(default)]
     pub require_clean: bool,
-    /// Minimum verified assurance level: `local` (met by any credential) or
-    /// `device_attested` (met only by verified credential-bound evidence).
-    /// The reserved levels `anchored` and `high_assurance` have no verified
-    /// path and are never met.
+    /// Minimum verified assurance level: `local` (met by any credential),
+    /// `companion_attested` (met by verified credential-bound evidence from
+    /// a paired phone or from the attempt's own device) or `device_attested`
+    /// (met only by verified credential-bound evidence from the attempt's own
+    /// device). The reserved levels `anchored` and `high_assurance` have no
+    /// verified path and are never met.
     #[serde(default)]
     pub required_assurance_level: Option<String>,
     /// Probe policy for attempts made for this role. Overrides the
@@ -310,13 +315,10 @@ fn judge(
 }
 
 /// Whether the verified `level` is at least `required` on the assurance
-/// ladder. Levels beyond `device_attested`, and unknown ones, are never met.
+/// ladder `local` < `companion_attested` < `device_attested`. Levels beyond
+/// `device_attested`, and unknown ones, are never met.
 fn meets_assurance(level: VerifiedAssuranceLevel, required: &str) -> bool {
-    match required {
-        "local" => true,
-        "device_attested" => level == VerifiedAssuranceLevel::DeviceAttested,
-        _ => false,
-    }
+    VerifiedAssuranceLevel::parse(required).is_some_and(|required| level >= required)
 }
 
 /// Whether `signal` counts towards a floor: the assertion says the profile

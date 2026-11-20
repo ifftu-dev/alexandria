@@ -1,0 +1,52 @@
+{
+  "description": "device_attested is required. A desktop session backed by a paired phone: the phone's evidence verifies credential-bound, but it vouches for the phone, not the device the attempt ran on, so the verified level is companion_attested.",
+  "policy": {
+    "min_integrity": null,
+    "max_critical": null,
+    "max_warning": null,
+    "require_clean": false,
+    "required_assurance_level": "device_attested",
+    "probe_policy": null,
+    "min_trust_profile": null,
+    "min_verification_rung": null
+  },
+  "integrity": {
+    "sessionId": "isess_policy_vector",
+    "status": "completed",
+    "integrityScore": 0.91,
+    "criticalCount": 0,
+    "warningCount": 1,
+    "assuranceLevel": "companion_attested",
+    "generatedAt": "2026-06-01T00:00:00Z",
+    "trustProfile": "attested",
+    "verificationRung": "probed",
+    "signalsRun": [
+      "core",
+      "device_attestation"
+    ],
+    "signalsNotRun": [
+      "camera"
+    ],
+    "probe": {
+      "outcome": "satisfied",
+      "policies": [
+        "reseed"
+      ],
+      "satisfied": 2,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "attestation": {
+    "outcome": "verified_credential_bound",
+    "platform": "ios",
+    "companion": true
+  },
+  "expect": {
+    "refusal": {
+      "code": "assurance_below_required",
+      "level": "companion_attested",
+      "required": "device_attested"
+    }
+  }
+}

@@ -2183,7 +2183,10 @@ export interface VerificationResult {
   pendingReasons: VerificationPendingReason[]
   /** What the credential's device attestation evidence proved. */
   attestation: AttestationOutcome
-  /** `device_attested` only for verified credential-bound evidence. */
+  /**
+   * `device_attested` only for verified credential-bound evidence from the
+   * attempt's own device; `companion_attested` when a paired phone produced it.
+   */
   verifiedAssuranceLevel: VerifiedAssuranceLevel
   acceptanceDecision: AcceptanceDecision
 }
@@ -2210,13 +2213,18 @@ export type AttestationInvalidReason =
 /** Mirrors `alexandria_verify::attestation::AttestationOutcome`. */
 export type AttestationOutcome =
   | { outcome: 'not_supplied' }
-  | { outcome: 'verified_credential_bound'; platform: AttestationPlatform }
+  | {
+      outcome: 'verified_credential_bound'
+      platform: AttestationPlatform
+      /** A paired phone produced the evidence for a desktop session; omitted while false. */
+      companion?: boolean
+    }
   | { outcome: 'verified_session_bound'; platform: AttestationPlatform }
   | { outcome: 'unverifiable'; platform: AttestationPlatform }
   | { outcome: 'invalid'; reason: AttestationInvalidReason }
 
 /** Mirrors `alexandria_verify::attestation::VerifiedAssuranceLevel`. */
-export type VerifiedAssuranceLevel = 'local' | 'device_attested'
+export type VerifiedAssuranceLevel = 'local' | 'companion_attested' | 'device_attested'
 
 /** Mirrors `alexandria_verify::trust::TrustInvalidReason`. */
 export type TrustInvalidReason =
