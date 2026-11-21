@@ -126,6 +126,25 @@ describe('buildSkillAtlas', () => {
     expect(atlas.fieldById.get(null)).toMatchObject({ id: null, nodeIds: ['c'] })
     expect([...atlas.nodeById.keys()]).toEqual(['a', 'b', 'c'])
   })
+  it('gives both skills of an undirected relation the other, sorted by ID, with its type and whether it is loaded', () => {
+    const relation = (skillId: string, relatedSkillId: string, relationType: string) =>
+      ({ skill_id: skillId, related_skill_id: relatedSkillId, relation_type: relationType })
+    const atlas = buildSkillAtlas({ skills: [skill('a', { name: 'Alpha' }), skill('b', { name: 'Beta' }), skill('c', { name: 'Gamma' })],
+      edges: [], subjectDid: 'did:me', activeCredentials: [],
+      relations: [relation('c', 'a', 'alternative'), relation('a', 'b', 'complementary'), relation('b', 'gone', 'related')] })
+    const byId = Object.fromEntries(atlas.nodes.map(n => [n.skill.id, n.relations]))
+    expect(byId).toEqual({
+      a: [{ skillId: 'b', name: 'Beta', type: 'complementary', loaded: true }, { skillId: 'c', name: 'Gamma', type: 'alternative', loaded: true }],
+      b: [{ skillId: 'a', name: 'Alpha', type: 'complementary', loaded: true }, { skillId: 'gone', name: 'gone', type: 'related', loaded: false }],
+      c: [{ skillId: 'a', name: 'Alpha', type: 'alternative', loaded: true }],
+    })
+  })
+
+  it('gives every skill no relations when none were loaded', () => {
+    const atlas = buildSkillAtlas({ skills: [skill('a'), skill('b')], edges: [], subjectDid: 'did:me', activeCredentials: [] })
+    expect(atlas.nodes.map(n => n.relations)).toEqual([[], []])
+  })
+
   it('accepts only the six Bloom ranks from outside values', () => {
     expect([0, 1, 2, 3, 4, 5].every(isBloomRank)).toBe(true)
     expect([-1, 6, 1.5, NaN, '3', null, undefined].some(isBloomRank)).toBe(false)
