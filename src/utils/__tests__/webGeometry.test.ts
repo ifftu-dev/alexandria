@@ -91,13 +91,15 @@ describe('Web layout', () => {
   })
 
   it('lays the 1,500-skill scale taxonomy out inside the time budget', () => {
-    // The atlas budget is no main-thread task over 50 ms; this runs near 40 ms
-    // on a laptop, and the bound allows twice that for shared CI runners. A
-    // layout that lost its grid and went quadratic takes seconds on every run.
+    // A guard against the layout losing its grid and going quadratic, which
+    // takes seconds on every run. It runs near 40 ms on a laptop; shared CI
+    // runners have measured up to about 115 ms even in CPU time (their cores
+    // are shared), so the bound sits well above that and far below seconds.
+    // The main-thread budget itself is held by the desktop-ui trace checks.
     // Other test files share the machine, so the run is timed in this
     // process's CPU time, which waiting for a core does not add to, and the
     // best of up to ten runs must meet the bound.
-    const BUDGET_MS = 100
+    const BUDGET_MS = 200
     const cpuMs = () => { const { user, system } = process.cpuUsage(); return (user + system) / 1000 }
     webLayout(SCALE)
     let best = Infinity
