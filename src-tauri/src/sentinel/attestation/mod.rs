@@ -4,8 +4,9 @@
 //! on a genuine device produced a given nonce. Bound to the integrity
 //! session, that turns "the client says so" into "the platform says this
 //! client was ours". Desktop has no equivalent of its own (on macOS App
-//! Attest reports unsupported) and stays `local` unless the learner pairs an
-//! attested phone (`sentinel::companion`).
+//! Attest reports unsupported) and stays `local`; a paired attested phone
+//! (`sentinel::companion`) makes it `companion_attested`, which says a
+//! genuine phone was present and nothing about the desktop.
 //!
 //! The verification itself (App Attest chains and assertions, Play Integrity
 //! tokens, companion bindings, credential evidence) lives in
@@ -22,6 +23,7 @@
 
 pub mod native;
 
+pub use alexandria_verify::attestation::VerifiedAssuranceLevel;
 pub use alexandria_verify::attestation::{
     app_attest, play_integrity, session_nonce, AttestationPayload, AttestationTrust,
     DeviceAttestation, Platform, PlayIntegrityKeys, Unverified, Verified,
@@ -31,6 +33,10 @@ use alexandria_verify::attestation::{AppleTrust, PlayIntegrityTrust};
 
 /// Assurance a session reaches when its device attestation verifies.
 pub const ASSURANCE_DEVICE_ATTESTED: &str = "device_attested";
+/// Assurance a desktop session reaches when a paired phone's attestation
+/// verifies: a genuine phone was present and attested. Nothing is claimed
+/// about the desktop or the software it ran.
+pub const ASSURANCE_COMPANION_ATTESTED: &str = "companion_attested";
 /// Assurance every session has without attestation.
 pub const ASSURANCE_LOCAL: &str = "local";
 
@@ -100,6 +106,101 @@ impl TrustConfig {
     }
 }
 
+/// The stable error code an attempt start returns when the policy requires
+/// `device_attested` and this device cannot reach it. The full error is
+/// `verified_device_required:<phones>: <message>`, where `<phones>` is
+/// `iphone` until Android attestation is enabled and `phone` after; the UI
+/// turns it into "take this on your phone".
+pub const VERIFIED_DEVICE_REQUIRED: &str = "verified_device_required";
+
+/// The kind of device an attempt runs on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceKind {
+    Desktop,
+    Iphone,
+    Android,
+}
+
+/// What an attempt start knows about the device for a policy that requires
+/// `device_attested`: its kind, and whether Android attestation is enabled
+/// on this build (the network profile carries Play Integrity response keys).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AttemptDevice {
+    pub kind: DeviceKind,
+    pub android_attestation: bool,
+}
+
+impl AttemptDevice {
+    /// A desktop on a build without Android attestation.
+    pub const DESKTOP: Self = Self {
+        kind: DeviceKind::Desktop,
+        android_attestation: false,
+    };
+
+    /// This device, with this build's trust inputs.
+    pub fn current() -> Self {
+        let kind = if cfg!(target_os = "ios") {
+            DeviceKind::Iphone
+        } else if cfg!(target_os = "android") {
+            DeviceKind::Android
+        } else {
+            DeviceKind::Desktop
+        };
+        Self {
+            kind,
+            android_attestation: profile_trust_inputs().play_integrity.is_some(),
+        }
+    }
+
+    /// Whether an attempt here can reach `device_attested`: an iPhone, or an
+    /// Android phone once Android attestation is enabled. A desktop never
+    /// can; a paired phone makes it `companion_attested` at most.
+    pub fn can_reach_device_attested(&self) -> bool {
+        match self.kind {
+            DeviceKind::Desktop => false,
+            DeviceKind::Iphone => true,
+            DeviceKind::Android => self.android_attestation,
+        }
+    }
+}
+
+/// Whether a required assurance level must be met on the attempt's own
+/// attested device: only `device_attested`. `local` and
+/// `companion_attested` can be met from a desktop.
+pub fn requires_device_attested(required: Option<VerifiedAssuranceLevel>) -> bool {
+    required == Some(VerifiedAssuranceLevel::DeviceAttested)
+}
+
+/// Refuse to start an attempt whose policy requires `required` when this
+/// device cannot reach it, before any item is shown
+/// ([`requires_device_attested`]).
+pub fn require_verified_device(
+    required: Option<VerifiedAssuranceLevel>,
+    device: AttemptDevice,
+) -> Result<(), String> {
+    if !requires_device_attested(required) {
+        return Ok(());
+    }
+    require_device_attested(device)
+}
+
+/// Refuse to start an attempt that requires `device_attested` on a device
+/// that cannot reach it, naming the phones that can.
+pub fn require_device_attested(device: AttemptDevice) -> Result<(), String> {
+    if device.can_reach_device_attested() {
+        return Ok(());
+    }
+    let (phones, take_it_on) = if device.android_attestation {
+        ("phone", "an iPhone or Android phone")
+    } else {
+        ("iphone", "an iPhone")
+    };
+    Err(format!(
+        "{VERIFIED_DEVICE_REQUIRED}:{phones}: this requires a verified device; \
+         take the attempt in Alexandria on {take_it_on}"
+    ))
+}
+
 /// This build's trust inputs from the embedded network profile, read once.
 /// What the app verifies received credentials' attestation evidence against.
 pub fn profile_trust_inputs() -> &'static AttestationTrust {
@@ -162,8 +263,9 @@ pub struct SessionAttestationFacts {
 }
 
 /// Decide what a credential may claim for this session. The stored level
-/// is a hint, never evidence: `device_attested` is asserted only when the
-/// stored attestation re-verifies right now against the trust material.
+/// is a hint, never evidence: `device_attested` (or `companion_attested`
+/// for a paired phone's record) is asserted only when the stored
+/// attestation re-verifies right now against the trust material.
 /// Returns the level and, when it stayed `local` despite an attestation,
 /// why.
 pub fn effective_assurance(
@@ -198,9 +300,27 @@ pub fn effective_assurance(
         cfg,
         now_unix,
     ) {
+        Ok(_) if att.companion.is_some() => (ASSURANCE_COMPANION_ATTESTED.to_string(), None),
         Ok(_) => (ASSURANCE_DEVICE_ATTESTED.to_string(), None),
         Err(why) => (ASSURANCE_LOCAL.to_string(), Some(why)),
     }
+}
+
+/// Whether a session at `level` credits the device attestation signal of
+/// its trust profile: only the device's own verified attestation. A paired
+/// phone's (`companion_attested`) says nothing about the device the attempt
+/// ran on, so it does not, as the verifier library's floor rule reads it.
+/// Profile selection, floors and the assertion's degraded signals read it;
+/// the assurance a credential claims is the level itself.
+pub fn credits_attestation_signal(level: &str) -> bool {
+    level == ASSURANCE_DEVICE_ATTESTED
+}
+
+/// Whether a session at `level` had an attested phone present: the device's
+/// own verified attestation or a paired phone's. An interview held outside
+/// Alexandria accepts a check only with one.
+pub fn attested_phone_present(level: &str) -> bool {
+    level == ASSURANCE_DEVICE_ATTESTED || level == ASSURANCE_COMPANION_ATTESTED
 }
 
 /// The nonce a stored record must attest: the session nonce for the

@@ -226,8 +226,10 @@ export interface SentinelStartOptions {
   microphone?: boolean
   /**
    * Desktop only: pair the learner's attested phone before the trust
-   * profile is chosen, so the session can be `device_attested`. Pairing is
-   * the learner's consent; a skipped or failed pairing continues without.
+   * profile is chosen. The session becomes `companion_attested` (a genuine
+   * phone was present; nothing is claimed about this computer), which credits
+   * the profile's device attestation signal. Pairing is the learner's
+   * consent; a skipped or failed pairing continues without.
    */
   companionPhone?: boolean
 }

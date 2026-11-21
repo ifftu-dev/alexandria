@@ -29,6 +29,12 @@
 // floor, and its probe policy runs after submission. A floor that needs the
 // camera or device attestation stops at a short gate first, so the camera
 // can be turned on or a phone paired before monitoring starts.
+//
+// A role or request whose policy requires `device_attested` is taken on a
+// phone that attests itself: a computer reaches `companion_attested` at most,
+// paired phone or not. The chooser says so before anything starts and keeps
+// the start blocked where this device cannot reach it; the backend's
+// `verified_device_required` refusal is shown the same way.
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSentinel } from '@/composables/useSentinel'
@@ -43,6 +49,8 @@ import AssessmentProbes from './AssessmentProbes.vue'
 import CompanionPhoneOffer from '@/components/integrity/CompanionPhoneOffer.vue'
 import TrustProfileNotice from '@/components/integrity/TrustProfileNotice.vue'
 import { isMobilePlatform } from '@/composables/usePlatform'
+import { needsVerifiedDevice } from '@/utils/verifiedDevice'
+import { useVerifiedDevice } from '@/composables/useVerifiedDevice'
 import type { AttemptRoleTarget, StartedAttempt, GradeResult, RequestAttemptTarget, SelectedProfile, SkillDetail } from '@/types'
 import type { DeepReadonly } from 'vue'
 
@@ -112,7 +120,21 @@ const cameraRequired = computed(() => {
   if (requestTarget.value) return requestTarget.value.camera_required
   return attempt.value ? !!attempt.value.role?.camera_required : !!selectedRole.value?.camera_required
 })
-const startBlocked = computed(() => loading.value || (cameraRequired.value && !cameraStream.value))
+const verifiedDeviceRequired = computed(() => {
+  if (requestTarget.value) return needsVerifiedDevice(requestTarget.value.issuance_policy?.required_assurance_level)
+  return !!(attempt.value?.role ?? selectedRole.value)?.verified_device_required
+})
+/** What this device can reach, asked only when a role or request requires a verified device. */
+const {
+  phones,
+  blocked: verifiedDeviceBlocked,
+  detect: detectDeviceSupport,
+  refuse: refuseOnDevice,
+} = useVerifiedDevice(verifiedDeviceRequired)
+const startBlocked = computed(() =>
+  loading.value || (cameraRequired.value && !cameraStream.value) || verifiedDeviceBlocked.value,
+)
+
 
 function currentAnswers() {
   if (!attempt.value) return []
@@ -193,7 +215,12 @@ async function begin(roleAssessmentId: string | null) {
     })
   } catch (e) {
     if (!disposed) {
-      error.value = String(e)
+      if (refuseOnDevice(e)) {
+        // Said where the requirement is shown, not as a raw error.
+        choosing.value = true
+      } else {
+        error.value = String(e)
+      }
       await stopMonitoring()
     }
   } finally {
@@ -228,7 +255,11 @@ onMounted(async () => {
     return
   }
   if (disposed) return
-  const requestGate = !!requestTarget.value && (requestTarget.value.camera_required || requestTarget.value.attestation_required)
+  const requestDevice = needsVerifiedDevice(requestTarget.value?.issuance_policy?.required_assurance_level)
+  if (requestDevice || roles.value.some(r => r.verified_device_required)) await detectDeviceSupport()
+  if (disposed) return
+  const requestGate = !!requestTarget.value
+    && (requestTarget.value.camera_required || requestTarget.value.attestation_required || requestDevice)
   if (roles.value.length === 0 && !requestGate) {
     await begin(null)
     return
@@ -365,8 +396,21 @@ async function submit() {
           <span v-if="r.camera_required" class="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] font-medium text-warning">
             {{ $t('learn.assessment.roleCameraRequired') }}
           </span>
+          <span v-if="r.verified_device_required" class="rounded bg-warning/15 px-1.5 py-0.5 text-[11px] font-medium text-warning">
+            {{ $t(`learn.assessment.verifiedDeviceBadge.${phones}`) }}
+          </span>
         </label>
       </fieldset>
+
+      <p
+        v-if="verifiedDeviceRequired"
+        role="status"
+        class="rounded-lg border border-border bg-card p-3 text-sm"
+        :class="verifiedDeviceBlocked ? 'font-medium text-warning' : 'text-muted-foreground'"
+        data-testid="verified-device-gate"
+      >
+        {{ $t(`learn.assessment.verifiedDeviceNote.${phones}`) }}
+      </p>
 
       <div v-if="cameraRequired" class="space-y-2 rounded-lg border border-border bg-card p-3 text-sm" data-testid="camera-gate">
         <p class="text-muted-foreground">{{ requestTarget ? $t('learn.assessment.requestCameraNote') : $t('learn.assessment.roleCameraNote') }}</p>
@@ -389,7 +433,7 @@ async function submit() {
         </span>
       </label>
 
-      <label v-if="!isMobilePlatform" class="flex items-center gap-3 text-sm" data-testid="companion-toggle">
+      <label v-if="!isMobilePlatform && !verifiedDeviceRequired" class="flex items-center gap-3 text-sm" data-testid="companion-toggle">
         <input v-model="pairPhone" type="checkbox" />
         <span class="text-foreground">{{ $t('sentinel.companion.pairToggle') }}</span>
       </label>

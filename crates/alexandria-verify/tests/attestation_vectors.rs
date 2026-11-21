@@ -119,6 +119,15 @@ fn integrity() -> IntegrityAssertion {
         signals_not_run: vec!["camera".into()],
         camera_coverage: None,
         probe: None,
+        answer_custody: None,
+    }
+}
+
+/// What a desktop session backed by a paired phone states.
+fn companion_integrity() -> IntegrityAssertion {
+    IntegrityAssertion {
+        assurance_level: "companion_attested".into(),
+        ..integrity()
     }
 }
 
@@ -166,6 +175,22 @@ fn sign(vc: VerifiableCredential, key: &SigningKey) -> VerifiableCredential {
 
 fn digest(learner: &Did, score: f64) -> [u8; 32] {
     binding_digest_of(&subject(learner, score), &integrity()).expect("digest")
+}
+
+/// [`credential`] stating [`companion_integrity`].
+fn companion_credential(
+    learner: &Did,
+    score: f64,
+    evidence: Vec<AttestationEvidence>,
+) -> VerifiableCredential {
+    VerifiableCredential {
+        integrity: Some(companion_integrity()),
+        ..credential(learner, score, evidence)
+    }
+}
+
+fn companion_digest(learner: &Did, score: f64) -> [u8; 32] {
+    binding_digest_of(&subject(learner, score), &companion_integrity()).expect("digest")
 }
 
 fn ios_world(seed: &str, app_id: &str, attested_nonce: [u8; 32]) -> World {
@@ -231,7 +256,7 @@ fn vectors_dir() -> PathBuf {
 
 fn build_all() -> Vec<(&'static str, Vector)> {
     use AcceptanceDecision::{Accept, Reject};
-    use VerifiedAssuranceLevel::{DeviceAttested, Local};
+    use VerifiedAssuranceLevel::{CompanionAttested, DeviceAttested, Local};
 
     let learner_key = ed_key("attestation-vector-learner");
     let learner = derive_did_key(&learner_key);
@@ -289,6 +314,7 @@ fn build_all() -> Vec<(&'static str, Vector)> {
             expect(
                 AttestationOutcome::VerifiedCredentialBound {
                     platform: Platform::Ios,
+                    companion: false,
                 },
                 DeviceAttested,
                 Accept,
@@ -322,6 +348,7 @@ fn build_all() -> Vec<(&'static str, Vector)> {
             expect(
                 AttestationOutcome::VerifiedCredentialBound {
                     platform: Platform::Android,
+                    companion: false,
                 },
                 DeviceAttested,
                 Accept,
@@ -344,6 +371,7 @@ fn build_all() -> Vec<(&'static str, Vector)> {
             expect(
                 AttestationOutcome::VerifiedSessionBound {
                     platform: Platform::Ios,
+                    companion: false,
                 },
                 Local,
                 Accept,
@@ -488,22 +516,26 @@ fn build_all() -> Vec<(&'static str, Vector)> {
             "A desktop session backed by a paired phone: the phone's App Attest \
              attestation over the companion nonce (session nonce, learner DID, phone \
              endpoint), the learner's signature over the companion statement, and the \
-             phone's assertion over the binding digest. Verified credential-bound.",
+             phone's assertion over the binding digest. The session states \
+             companion_attested. Verified credential-bound through a companion: the phone was present and attested, nothing is \
+             claimed about the desktop, so the verified level is companion_attested, \
+             never device_attested.",
             &phone_trust,
-            credential(
+            companion_credential(
                 &learner,
                 0.9,
                 vec![AttestationEvidence::credential_bound(
                     &companion_record(&learner_key),
                     STARTED,
-                    b64(&build_assertion(&phone, &digest(&learner, 0.9), 1)),
+                    b64(&build_assertion(&phone, &companion_digest(&learner, 0.9), 1)),
                 )],
             ),
             expect(
                 AttestationOutcome::VerifiedCredentialBound {
                     platform: Platform::Ios,
+                    companion: true,
                 },
-                DeviceAttested,
+                CompanionAttested,
                 Accept,
             ),
         ),
@@ -537,6 +569,34 @@ fn build_all() -> Vec<(&'static str, Vector)> {
             &full_trust,
             credential(&learner, 0.9, vec![ios_bound(0.9), ios_bound(0.9)]),
             expect(invalid(InvalidReason::DuplicateEvidence), Local, Reject),
+        ),
+    ));
+
+    out.push((
+        "13-companion-session-bound",
+        vector(
+            "A paired phone's attestation over the companion nonce and the learner's \
+             signature over the companion statement, without an assertion over the \
+             binding digest (the phone link closed before issuance). Verified \
+             session-bound through a companion: local, and the outcome says \
+             companion, so it never carries a floor's device attestation signal.",
+            &phone_trust,
+            companion_credential(
+                &learner,
+                0.9,
+                vec![AttestationEvidence::session_bound(
+                    &companion_record(&learner_key),
+                    STARTED,
+                )],
+            ),
+            expect(
+                AttestationOutcome::VerifiedSessionBound {
+                    platform: Platform::Ios,
+                    companion: true,
+                },
+                Local,
+                Accept,
+            ),
         ),
     ));
 
@@ -661,6 +721,13 @@ fn the_suite_covers_every_outcome() {
     assert!(has(&|o| matches!(o, O::VerifiedCredentialBound { .. })));
     assert!(has(&|o| matches!(o, O::VerifiedSessionBound { .. })));
     assert!(has(&|o| matches!(o, O::Unverifiable { .. })));
+    for level in VerifiedAssuranceLevel::ALL {
+        assert!(
+            all.iter()
+                .any(|(_, v)| v.expect.verified_assurance_level == level),
+            "no vector verifies as {level:?}"
+        );
+    }
     for reason in [
         InvalidReason::UntrustedChain,
         InvalidReason::WrongNonce,

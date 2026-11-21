@@ -56,7 +56,9 @@ fn gate(
 /// The shared rule over a credential's integrity `assertion`: a role
 /// credential issued on an assessed credential is judged by what was
 /// verified about that credential ([`alexandria_verify::policy::
-/// evaluate_assessed`]); any other by its own attestation evidence checked
+/// evaluate_assessed`]); one issued from a hosted attempt by what the issuer
+/// found ([`alexandria_verify::policy::evaluate_hosted`]), as the hosted
+/// service judged it; any other by its own attestation evidence checked
 /// against `trust`. Used at issuance and by the credential exchange's picker.
 pub(crate) fn judge_shared_rule(
     policy: &IssuancePolicy,
@@ -64,16 +66,18 @@ pub(crate) fn judge_shared_rule(
     vc: &VerifiableCredential,
     trust: &alexandria_verify::attestation::AttestationTrust,
 ) -> Result<(), CredentialError> {
-    match alexandria_verify::assessed::AssessedCredentialEvidence::find(vc)
-        .map_err(|e| CredentialError::Envelope(e.to_string()))?
+    let envelope = |e: &dyn std::fmt::Display| CredentialError::Envelope(e.to_string());
+    if let Some(assessed) = alexandria_verify::assessed::AssessedCredentialEvidence::find(vc)
+        .map_err(|e| envelope(&e))?
     {
-        Some(assessed) => {
-            alexandria_verify::policy::evaluate_assessed(policy, assertion, &assessed)?
-        }
-        None => {
-            let attestation = alexandria_verify::attestation::verify_evidence(vc, trust);
-            alexandria_verify::policy::evaluate(policy, assertion, &attestation)?;
-        }
+        alexandria_verify::policy::evaluate_assessed(policy, assertion, &assessed)?;
+    } else if let Some(hosted) =
+        alexandria_verify::custody::HostedAttemptEvidence::find(vc).map_err(|e| envelope(&e))?
+    {
+        alexandria_verify::policy::evaluate_hosted(policy, assertion, &hosted)?;
+    } else {
+        let attestation = alexandria_verify::attestation::verify_evidence(vc, trust);
+        alexandria_verify::policy::evaluate(policy, assertion, &attestation)?;
     }
     Ok(())
 }
@@ -131,8 +135,10 @@ impl SessionFacts {
 /// attestation verifies right now against `trust` (see
 /// `sentinel::attestation::effective_assurance`); the stored level is never
 /// copied. The profile, signals, rung, probe summary and coverage statement
-/// are derived from the session (`sentinel::surface`). No anchor reference
-/// is embedded.
+/// are derived from the session (`sentinel::surface`). Answer custody is
+/// always `device`: the answers were on the device that ran the attempt, and
+/// only an issuer whose answers never left it may state `issuer`. No anchor
+/// reference is embedded.
 pub(crate) fn build_integrity_assertion(
     conn: &Connection,
     session_id: &str,
@@ -140,7 +146,7 @@ pub(crate) fn build_integrity_assertion(
     trust: &crate::sentinel::attestation::TrustConfig,
 ) -> Result<(IntegrityAssertion, SessionFacts), CredentialError> {
     use crate::sentinel::attestation::{
-        effective_assurance, SessionAttestationFacts, ASSURANCE_DEVICE_ATTESTED,
+        credits_attestation_signal, effective_assurance, SessionAttestationFacts,
     };
     use crate::sentinel::scoring::{active_certification, active_manifest};
     let row = conn
@@ -198,7 +204,7 @@ pub(crate) fn build_integrity_assertion(
     let surface = crate::sentinel::surface::session_surface(
         conn,
         session_id,
-        assurance_level == ASSURANCE_DEVICE_ATTESTED,
+        credits_attestation_signal(&assurance_level),
         &active_manifest(),
         certification.as_ref().map(|(c, d)| (c, d.as_str())),
     )
@@ -221,6 +227,7 @@ pub(crate) fn build_integrity_assertion(
         signals_degraded: surface.signals_degraded,
         signals_not_run: surface.signals_not_run,
         camera_coverage: surface.camera_coverage,
+        answer_custody: Some(alexandria_verify::integrity::AnswerCustody::Device),
         probe: surface.probe.map(|p| ProbeSummary {
             outcome: p.outcome.as_str().to_string(),
             policies: p.policies,
@@ -496,7 +503,10 @@ pub fn issue_with_evidence(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::credentials::fixtures::{sample_request, setup, test_key, NOW};
+    use crate::credentials::fixtures::{
+        assessed, sample_request, scored_with_history, session_on_profile, setup, test_key,
+        verified, NOW,
+    };
     use crate::credentials::{CredentialError, PolicyRefusal, SupersessionRequires};
 
     /// Insert a terminal integrity session row for bridge tests.
@@ -536,82 +546,6 @@ mod tests {
         }
     }
 
-    /// A live session that selected `profile` (with the camera benchmark
-    /// passing), then judged `floor` at attempt start and ended clean.
-    fn session_on_profile(
-        conn: &Connection,
-        id: &str,
-        attested: bool,
-        camera: bool,
-        floor: Option<crate::sentinel::scoring::TrustProfile>,
-    ) {
-        use crate::sentinel::trust_profile::{
-            record_policy_floor, select_for_session, BenchmarkResult, Capabilities, ProfileRequest,
-        };
-        conn.execute(
-            "INSERT INTO integrity_sessions (id, status, assurance_level, started_at)
-             VALUES (?1, 'active', ?2, ?3)",
-            params![id, if attested { "device_attested" } else { "local" }, NOW],
-        )
-        .unwrap();
-        let caps = Capabilities {
-            camera,
-            ..Default::default()
-        };
-        let request = ProfileRequest {
-            capabilities: caps,
-            consent: caps,
-            role_assessment_id: None,
-            exchange_request_id: None,
-        };
-        let fast = BenchmarkResult {
-            detect_ms: 9.0,
-            liveness_ms: 7.0,
-            track_ms: 1.0,
-        };
-        select_for_session(conn, id, &request, Some(&fast)).unwrap();
-        record_policy_floor(conn, id, floor).unwrap();
-        conn.execute(
-            "UPDATE integrity_sessions SET status = 'completed', ended_at = ?2 WHERE id = ?1",
-            params![id, NOW],
-        )
-        .unwrap();
-    }
-
-    /// A finished assessment session on a profile chosen from `camera`, whose
-    /// attempt served `served` items, `observed` of which the response
-    /// tracker saw the learner work through.
-    fn assessed(conn: &Connection, id: &str, camera: bool, served: usize, observed: usize) {
-        session_on_profile(conn, id, false, camera, None);
-        conn.execute(
-            "INSERT OR IGNORE INTO question_banks (id, skill_id, label) VALUES ('bank', 'skill_test', 'Test')",
-            [],
-        )
-        .unwrap();
-        let ids: Vec<String> = (0..served).map(|i| format!("q{i}")).collect();
-        conn.execute(
-            "INSERT INTO assessment_attempts
-                 (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders,
-                  integrity_session_id, started_at)
-             VALUES (?1, ?5, 'bank', 'skill_test', 1, ?2, '[]', ?3, ?4)",
-            params![
-                format!("att-{id}"),
-                serde_json::to_string(&ids).unwrap(),
-                id,
-                NOW,
-                format!("did:key:{id}")
-            ],
-        )
-        .unwrap();
-        for item in ids.iter().take(observed) {
-            conn.execute(
-                "INSERT INTO integrity_observed_items (session_id, item_id) VALUES (?1, ?2)",
-                params![id, item],
-            )
-            .unwrap();
-        }
-    }
-
     /// The wire form omits an empty `evidence`, so credentials issued without
     /// attestation evidence keep the shape they had before it existed.
     fn json_has_no_evidence(vc: &VerifiableCredential) -> bool {
@@ -630,6 +564,75 @@ mod tests {
             .unwrap()
             .integrity
             .expect("integrity assertion embedded")
+    }
+
+    /// A role credential from a hosted attempt is judged by what its
+    /// `HostedAttemptEvidence` entry records, the issuer's own findings, as
+    /// the hosted service judged it: not at `local` with the probe summary
+    /// the device reported.
+    #[test]
+    fn a_role_credential_from_a_hosted_attempt_is_judged_from_its_entry() {
+        use alexandria_verify::attestation::{AttestationOutcome, Platform};
+        use alexandria_verify::custody::{AnswerCustody, HostedAttemptEvidence};
+        use alexandria_verify::vc::ProbeSummary;
+        let satisfied = ProbeSummary {
+            outcome: "satisfied".into(),
+            policies: vec!["authored".into()],
+            satisfied: 1,
+            failed: 0,
+            skipped: 0,
+        };
+        let raw: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../crates/alexandria-verify/tests/vectors/01-valid.json"
+        ))
+        .unwrap();
+        let mut vc: VerifiableCredential =
+            serde_json::from_value(raw["credential"].clone()).unwrap();
+        let assertion = IntegrityAssertion {
+            session_id: "isess_hosted".into(),
+            status: "completed".into(),
+            integrity_score: Some(0.9),
+            critical_count: 0,
+            warning_count: 0,
+            assurance_level: "device_attested".into(),
+            commitment_root: None,
+            anchor_ref: None,
+            generated_at: NOW.into(),
+            trust_profile: Some("attested".into()),
+            verification_rung: Some("probed".into()),
+            coverage_statement_digest: None,
+            signals_run: vec!["core".into(), "device_attestation".into()],
+            signals_degraded: vec![],
+            signals_not_run: vec!["camera".into()],
+            camera_coverage: None,
+            // The device reported a failed probe; the issuer's step is the one judged.
+            probe: Some(ProbeSummary {
+                outcome: "failed".into(),
+                failed: 1,
+                satisfied: 0,
+                ..satisfied.clone()
+            }),
+            answer_custody: Some(AnswerCustody::Issuer),
+        };
+        vc.integrity = Some(assertion.clone());
+        vc.evidence = vec![HostedAttemptEvidence::new(
+            "hatt",
+            Some(satisfied),
+            AttestationOutcome::VerifiedCredentialBound {
+                platform: Platform::Ios,
+                companion: false,
+            },
+        )
+        .into_entry()];
+        let policy = IssuancePolicy {
+            required_answer_custody: Some(AnswerCustody::Issuer),
+            required_assurance_level: Some("device_attested".into()),
+            min_verification_rung: Some(alexandria_verify::integrity::VerificationRung::Probed),
+            probe_policy: Some(alexandria_verify::policy::ProbePolicy::Authored),
+            ..Default::default()
+        };
+        let trust = crate::sentinel::attestation::TrustConfig::default().inputs();
+        judge_shared_rule(&policy, &assertion, &vc, &trust).expect("met on the entry");
     }
 
     #[test]
@@ -689,7 +692,7 @@ mod tests {
                 VerificationRung::Process.as_str()
             )
         );
-        assert_eq!(statement.version, "2", "new credentials name version 2");
+        assert_eq!(statement.version, "3", "new credentials name version 3");
         assert!(statement.certification.is_none());
         assert!(statement
             .not_checked
@@ -698,6 +701,31 @@ mod tests {
     }
 
     /// The `relatedResource` entry of `vc`, as a verifier receives it.
+    #[test]
+    fn a_self_issued_credential_states_device_custody_and_the_library_accepts_it() {
+        use crate::domain::vc::{verify_credential_db, VerificationPolicy};
+        let (db, key, issuer, _) = setup();
+        assessed(db.conn(), "mine", false, 2, 2);
+        // Self-issued: the learner signs about themselves.
+        let mut req = sample_request(issuer);
+        req.integrity_session_id = Some("mine".into());
+        let vc = issue(db.conn(), &key, &req, NOW).unwrap();
+        let json = serde_json::to_value(&vc).unwrap();
+        assert_eq!(
+            json.pointer("/integrity/answerCustody"),
+            Some(&"device".into()),
+            "the custody is written, not left to the missing-field default"
+        );
+        let stored: VerifiableCredential = serde_json::from_value(json).unwrap();
+        let verified =
+            verify_credential_db(db.conn(), &stored, NOW, &VerificationPolicy::default());
+        assert!(verified.custody_defects.is_empty());
+        assert_eq!(
+            verified.acceptance_decision,
+            crate::domain::vc::AcceptanceDecision::Accept
+        );
+    }
+
     fn related_resources(vc: &VerifiableCredential) -> Vec<serde_json::Value> {
         serde_json::to_value(vc).unwrap()["relatedResource"]
             .as_array()
@@ -788,86 +816,19 @@ mod tests {
         assert_eq!(a.verification_rung.as_deref(), Some("none"));
     }
 
-    /// Record a verification result in a finished session, as if it had
-    /// been recorded before monitoring ended.
-    fn verified(conn: &Connection, session: &str, step: &str, policy: &str, outcome: &str) {
-        use crate::sentinel::verification::{record_verification, NewVerification};
-        let outcome = match outcome {
-            "satisfied" => crate::sentinel::verification::VerificationOutcome::Satisfied,
-            "failed" => crate::sentinel::verification::VerificationOutcome::Failed,
-            _ => crate::sentinel::verification::VerificationOutcome::Skipped,
-        };
-        conn.execute(
-            "UPDATE integrity_sessions SET ended_at = NULL WHERE id = ?1",
-            [session],
-        )
-        .unwrap();
-        record_verification(
-            conn,
-            &NewVerification {
-                session_id: session,
-                attempt_id: None,
-                step,
-                policy,
-                outcome,
-                reason: None,
-                subject_ref: None,
-                detail: serde_json::json!({}),
-            },
-        )
-        .unwrap();
-        conn.execute(
-            "UPDATE integrity_sessions SET ended_at = ?2 WHERE id = ?1",
-            params![session, NOW],
-        )
-        .unwrap();
-    }
-
-    /// The session's attempt scored `score`, after `prior` graded items on
-    /// the same skill scored `prior_score` a day before it started.
-    fn scored_with_history(
-        conn: &Connection,
-        session: &str,
-        score: f64,
-        prior: usize,
-        prior_score: f64,
-    ) {
-        conn.execute(
-            "UPDATE assessment_attempts SET score = ?2 WHERE integrity_session_id = ?1",
-            params![session, score],
-        )
-        .unwrap();
-        let earlier = format!("prior-{session}");
-        conn.execute(
-            "INSERT INTO assessment_attempts
-                 (id, subject_did, bank_id, skill_id, seed, question_ids, option_orders, started_at)
-             VALUES (?1, ?2, 'bank', 'skill_test', 2, '[]', '[]', '2026-04-11T00:00:00Z')",
-            params![earlier, format!("did:key:{session}")],
-        )
-        .unwrap();
-        for i in 0..prior {
-            conn.execute(
-                "INSERT INTO attempt_items (attempt_id, ordinal, item_id, score, graded_at)
-                 VALUES (?1, ?2, ?3, ?4, '2026-04-12T00:00:00Z')",
-                params![earlier, i as i64, format!("p{i}"), prior_score],
-            )
-            .unwrap();
-        }
-    }
-
     #[test]
     fn satisfied_probes_raise_the_rung_and_skipped_ones_leave_it_at_process() {
         let (db, key, _, subject) = setup();
         assessed(db.conn(), "probed", false, 2, 2);
-        verified(db.conn(), "probed", "probe", "reseed", "satisfied");
-        verified(db.conn(), "probed", "probe", "reseed", "satisfied");
+        verified(db.conn(), "probed", "probe", "authored", "satisfied");
+        verified(db.conn(), "probed", "probe", "authored", "satisfied");
         let a = assertion_for(db.conn(), &key, &subject, "probed");
         assert_eq!(a.verification_rung.as_deref(), Some("probed"));
         assert_eq!(
             a.probe,
             Some(ProbeSummary {
                 outcome: "satisfied".into(),
-                policies: vec!["reseed".into()],
+                policies: vec!["authored".into()],
                 satisfied: 2,
                 failed: 0,
                 skipped: 0,
@@ -877,11 +838,32 @@ mod tests {
         // A probe that timed out never counts against the learner, but the
         // probe policy was not satisfied either.
         assessed(db.conn(), "timeout", false, 2, 2);
-        verified(db.conn(), "timeout", "probe", "reseed", "satisfied");
-        verified(db.conn(), "timeout", "probe", "reseed", "skipped");
+        verified(db.conn(), "timeout", "probe", "authored", "satisfied");
+        verified(db.conn(), "timeout", "probe", "authored", "skipped");
         let a = assertion_for(db.conn(), &key, &subject, "timeout");
         assert_eq!(a.verification_rung.as_deref(), Some("process"));
         assert_eq!(a.probe.as_ref().map(|p| p.skipped), Some(1));
+    }
+
+    #[test]
+    fn a_satisfied_reseed_probe_is_reported_but_leaves_the_rung_at_process() {
+        let (db, key, _, subject) = setup();
+        assessed(db.conn(), "again", false, 2, 2);
+        verified(db.conn(), "again", "probe", "reseed", "satisfied");
+        verified(db.conn(), "again", "probe", "reseed", "satisfied");
+        let a = assertion_for(db.conn(), &key, &subject, "again");
+        assert_eq!(a.verification_rung.as_deref(), Some("process"));
+        assert_eq!(
+            a.probe,
+            Some(ProbeSummary {
+                outcome: "satisfied".into(),
+                policies: vec!["reseed".into()],
+                satisfied: 2,
+                failed: 0,
+                skipped: 0,
+            }),
+            "the probe still ran and is reported as it went"
+        );
     }
 
     #[test]
@@ -939,7 +921,11 @@ mod tests {
             "issuance policy: verification rung 'process' does not meet the 'probed' minimum"
         );
 
+        // The same item asked again does not lift the rung; a new question
+        // does.
         verified(db.conn(), "process", "probe", "reseed", "satisfied");
+        assert!(issue(db.conn(), &key, &req, NOW).is_err());
+        verified(db.conn(), "process", "probe", "authored", "satisfied");
         assert!(issue(db.conn(), &key, &req, NOW).is_ok());
     }
 

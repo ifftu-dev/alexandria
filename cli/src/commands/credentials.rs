@@ -470,7 +470,8 @@ fn run_verify(bundle_path: &Path, at: Option<&str>) -> Result<()> {
 
 /// One credential's provenance and suspension as the bundle view states
 /// them: exactly one of self-reported, device-attested and verified, or
-/// issued by a named organisation, then the suspension state.
+/// issued by a named organisation, then the suspension state, then, below
+/// the `live` rung, that a second device or person was not ruled out.
 pub(crate) fn trust_summary(
     view: &app_lib::domain::credential_trust::CredentialTrustView,
 ) -> String {
@@ -488,8 +489,15 @@ pub(crate) fn trust_summary(
             format!("Device-attested and verified ({})", platform(*p))
         }
         Some(Provenance::SelfReported { attestation }) => match attestation {
-            AttestationOutcome::VerifiedSessionBound { platform: p } => format!(
+            AttestationOutcome::VerifiedSessionBound { platform: p, .. } => format!(
                 "Self-reported ({} attestation covers the session, not this credential)",
+                platform(*p)
+            ),
+            AttestationOutcome::VerifiedCredentialBound {
+                platform: p,
+                companion: true,
+            } => format!(
+                "Self-reported (a paired {} phone was present; nothing is claimed about the desktop)",
                 platform(*p)
             ),
             AttestationOutcome::Unverifiable { platform: p } => format!(
@@ -506,8 +514,22 @@ pub(crate) fn trust_summary(
         SuspensionState::Unknown { .. } => "suspension unknown",
         SuspensionState::NoList => "names no suspension list",
     };
-    format!("{provenance} · {suspension}")
+    // Below `live`, the coverage statement's own line that a second device or
+    // person was not ruled out (version 3 on).
+    let second_device = view.coverage_statement.as_ref().and_then(|s| {
+        s.not_checked
+            .iter()
+            .find(|line| line.starts_with(SECOND_DEVICE_LINE))
+    });
+    match second_device {
+        Some(line) => format!("{provenance} · {suspension} · {line}"),
+        None => format!("{provenance} · {suspension}"),
+    }
 }
+
+/// How a coverage statement's second-device line begins (version 3 on), as
+/// the app's `utils/sentinel/secondDevice.ts` reads it.
+const SECOND_DEVICE_LINE: &str = "Whether a second device or person helped:";
 
 /// Verification failures are a result, not a crash — the command still exits
 /// 0 and reports the counts, so a caller can act on `allAccepted`.
@@ -565,8 +587,61 @@ mod tests {
              names no suspension list"
         );
         assert_eq!(
+            trust_summary(&view(
+                serde_json::json!({
+                    "kind": "self_reported",
+                    "attestation": {
+                        "outcome": "verified_credential_bound",
+                        "platform": "ios",
+                        "companion": true,
+                    },
+                }),
+                "no_list",
+            )),
+            "Self-reported (a paired Apple phone was present; nothing is claimed about the \
+             desktop) · names no suspension list"
+        );
+        assert_eq!(
             trust_summary(&view(serde_json::Value::Null, "not_suspended")),
             "Not verified · not suspended"
+        );
+    }
+
+    /// Below `live` the summary says, in the coverage statement's own words,
+    /// that a second device or person was not ruled out.
+    #[test]
+    fn the_summary_says_below_live_that_a_second_device_was_not_ruled_out() {
+        let line = "Whether a second device or person helped: not ruled out. Only a live \
+                    segment, where a person asks unscripted questions, rules it out.";
+        let with_statement = |rung: &str| {
+            let mut not_checked = vec!["Sound: nothing is recorded or transcribed."];
+            if rung != "live" {
+                not_checked.push(line);
+            }
+            serde_json::from_value::<app_lib::domain::credential_trust::CredentialTrustView>(
+                serde_json::json!({
+                    "trust": { "state": "invalid", "reasons": ["suspended"] },
+                    "provenance": { "kind": "organisation", "name": "Org Ltd", "domain": "org.example" },
+                    "issuer": null,
+                    "organisation": null,
+                    "suspension": { "state": "not_suspended" },
+                    "coverage_statement": {
+                        "format": 1, "version": "3", "profile": "core", "rung": rung,
+                        "checked": [], "not_checked": not_checked, "platform_ceilings": [],
+                        "measurement": "No signal has a certified error rate yet.",
+                        "certification": null, "certified_signals": {},
+                    },
+                }),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            trust_summary(&with_statement("probed")),
+            format!("Issued by Org Ltd (org.example) · not suspended · {line}")
+        );
+        assert_eq!(
+            trust_summary(&with_statement("live")),
+            "Issued by Org Ltd (org.example) · not suspended"
         );
     }
 

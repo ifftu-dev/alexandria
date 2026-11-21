@@ -15,6 +15,13 @@
  * the host calls `plugin_submit_and_grade` to run the grader inside the
  * deterministic Wasmtime sandbox, persists the reproducibility bundle,
  * and emits `scored-complete` with the resulting score.
+ *
+ * Hosted attempts (`hosted`): the item belongs to an organisation's hosted
+ * service, which grades the submission with the same bundled grader over test
+ * cases this device never receives. The host only hands the plugin's
+ * submission to the page (`submission`); it grades nothing, stores no plugin
+ * state for the item and announces no credential. The plugin's submit stays
+ * pending: the page replaces the item once the service has the answer.
  */
 
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
@@ -54,11 +61,15 @@ const props = defineProps<{
   /** In `review` mode, the id of the submission being reviewed. The plugin's
    *  review UI submits its verdict and the host posts it against this row. */
   reviewSubmissionId?: string | null
+  /** A hosted attempt's plugin item: submissions go to the page, nothing is
+   *  graded or stored here. */
+  hosted?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'complete'): void
   (e: 'scored-complete', score: number): void
+  (e: 'submission', submission: unknown): void
 }>()
 
 const { t } = useI18n()
@@ -156,9 +167,11 @@ onMounted(async () => {
       invoke<InstalledPlugin[]>('plugin_list'),
       invoke<PluginManifest>('plugin_get_manifest', { pluginCid: pluginCid.value }),
       invoke<PluginPermissionRecord[]>('plugin_list_permissions', { pluginCid: pluginCid.value }),
-      invoke<string | null>('plugin_load_element_state', { elementId: props.element.id }).catch(
-        () => null,
-      ),
+      props.hosted
+        ? Promise.resolve(null)
+        : invoke<string | null>('plugin_load_element_state', { elementId: props.element.id }).catch(
+          () => null,
+        ),
     ])
     if (savedState) {
       try {
@@ -344,6 +357,8 @@ function onPersistState(blob: unknown) {
   // the app. Best-effort + fire-and-forget: a failed save must not disrupt the
   // plugin. Reloaded into the plugin's `init` payload on next mount.
   elementState.value = blob
+  // A hosted item's work stays in memory: nothing about it is stored here.
+  if (props.hosted) return
   void invoke('plugin_save_element_state', {
     elementId: props.element.id,
     pluginCid: pluginCid.value,
@@ -385,6 +400,13 @@ async function onSubmit(requestId: number, submission: unknown, metadata: unknow
   }
 
   const meta = (metadata as Record<string, unknown> | null) ?? null
+
+  // Hosted attempt — the service grades. Left pending: the page moves on to
+  // the next item once the service has the answer.
+  if (props.hosted) {
+    emit('submission', submission ?? {})
+    return
+  }
 
   // Review mode — the instructor's review UI is posting its verdict for the
   // submission being reviewed. Route to the generalized review-post IPC.

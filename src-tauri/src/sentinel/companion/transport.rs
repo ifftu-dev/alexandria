@@ -683,7 +683,7 @@ async fn read_message<T: DeserializeOwned>(
 mod tests {
     use super::*;
     use crate::sentinel::attestation::app_attest;
-    use crate::sentinel::attestation::{apple_app_id, ASSURANCE_DEVICE_ATTESTED};
+    use crate::sentinel::attestation::{apple_app_id, ASSURANCE_COMPANION_ATTESTED};
     use crate::sentinel::companion::tests::{
         did_of, learner, phone_capture, trust, SESSION, STARTED,
     };
@@ -854,7 +854,7 @@ mod tests {
         };
         assert_eq!(
             p.join(Some(benchmark)).await.unwrap(),
-            ASSURANCE_DEVICE_ATTESTED
+            ASSURANCE_COMPANION_ATTESTED
         );
         let accepted = stored.await.unwrap();
         assert_eq!(
@@ -1027,7 +1027,8 @@ mod tests {
         assert_eq!(
             verify_evidence(&issued.credential, &trust(&p.world).inputs()),
             AttestationOutcome::VerifiedCredentialBound {
-                platform: Platform::Ios
+                platform: Platform::Ios,
+                companion: true,
             }
         );
     }
@@ -1052,7 +1053,8 @@ mod tests {
         assert_eq!(
             verify_evidence(&issued.credential, &trust(&p.world).inputs()),
             AttestationOutcome::VerifiedSessionBound {
-                platform: Platform::Ios
+                platform: Platform::Ios,
+                companion: true,
             }
         );
     }

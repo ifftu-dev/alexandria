@@ -38,8 +38,10 @@ import { useLocalApi } from '@/composables/useLocalApi'
 import { AppButton } from '@/components/ui'
 import OrgBadge from './OrgBadge.vue'
 import RequestPolicy from './RequestPolicy.vue'
+import { isHostedRequest } from '@/utils/hostedAttempt'
 import { bloomName } from '@/utils/bloom'
 import { floorNeedsDevice, type DeviceAbility } from '@/utils/requestPolicy'
+import { needsVerifiedDevice } from '@/utils/verifiedDevice'
 import type {
   AccessRequestItem,
   CloudPull,
@@ -94,7 +96,8 @@ const preview = ref<SignedCredentialShare | null>(null)
 const receipts = ref<Record<string, string>>({})
 const chosenCredential = computed(() => credentials.value.find((c) => c.id === credentialId.value) ?? null)
 
-/** What this device can run of a request's trust profile floor; asked only when a floor needs it. */
+/** What this device can run of a request's trust profile floor, and whether it can reach a
+ *  required `device_attested`; asked only when a policy needs it. */
 const device = ref<DeviceAbility>({ camera: null, support: null })
 let deviceAsked = false
 
@@ -128,6 +131,7 @@ function refusalReason(code: string | null, fallback: string | null): string {
     case 'probe_failed': return t('organisations.requests.assessment.refusal.probe_failed')
     case 'no_integrity_assertion': return t('organisations.requests.assessment.refusal.no_integrity_assertion')
     case 'unreadable_evidence': return t('organisations.requests.assessment.refusal.unreadable_evidence')
+    case 'custody_below_required': return t('organisations.requests.assessment.refusal.custody_below_required')
     default: return fallback ?? code ?? ''
   }
 }
@@ -267,7 +271,9 @@ async function refresh() {
     if (!picked.value[key]) picked.value[key] = item.skills.filter((s) => s.hasEvidence).map((s) => s.skillId)
   }
   void nameSkills()
-  if (assessments.value.some((item) => floorNeedsDevice(item.request.issuance_policy?.min_trust_profile))) {
+  if (assessments.value.some((item) =>
+    floorNeedsDevice(item.request.issuance_policy?.min_trust_profile)
+    || needsVerifiedDevice(item.request.issuance_policy?.required_assurance_level))) {
     void detectDevice()
   }
   loading.value = false
@@ -328,6 +334,14 @@ function hide(entry: Entry) {
 }
 
 function startAssessment(item: OrgCredentialRequest) {
+  if (isHostedRequest(item.request.issuance_policy)) {
+    // The organisation holds the answers: the attempt runs on its service.
+    void router.push({
+      path: `/assessment/hosted/${encodeURIComponent(item.request.id)}`,
+      query: { directory: item.directory_url },
+    })
+    return
+  }
   void router.push({
     path: `/assessment/${encodeURIComponent(item.request.skill_id)}`,
     query: { request: item.request.id, directory: item.directory_url },
@@ -556,12 +570,15 @@ onUnmounted(() => {
         />
         <div class="flex flex-wrap gap-2">
           <AppButton
-            v-if="entry.item.request.require_new_assessment"
+            v-if="entry.item.request.require_new_assessment || isHostedRequest(entry.item.request.issuance_policy)"
             size="sm"
             :disabled="!entry.org.verified || !!busy"
+            :data-testid="isHostedRequest(entry.item.request.issuance_policy) ? 'hosted-assess' : undefined"
             @click="startAssessment(entry.item)"
           >
-            {{ t('organisations.requests.assessment.assess') }}
+            {{ isHostedRequest(entry.item.request.issuance_policy)
+              ? t('organisations.requests.assessment.assessHosted')
+              : t('organisations.requests.assessment.assess') }}
           </AppButton>
           <AppButton size="sm" variant="outline" :disabled="!entry.org.verified || !!busy" @click="chooseCredential(entry)">
             {{ t('organisations.requests.assessment.choose') }}

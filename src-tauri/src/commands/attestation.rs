@@ -710,6 +710,7 @@ mod tests {
                 signals_degraded: vec![],
                 signals_not_run: vec![],
                 camera_coverage: None,
+                answer_custody: None,
                 probe: None,
             }),
             evidence: Vec::new(),
@@ -819,7 +820,8 @@ mod tests {
             view_of(&db, "urn:uuid:session", trust()).provenance,
             Some(Provenance::SelfReported {
                 attestation: AttestationOutcome::VerifiedSessionBound {
-                    platform: Platform::Android
+                    platform: Platform::Android,
+                    companion: false,
                 }
             })
         );
@@ -829,6 +831,43 @@ mod tests {
             Some(Provenance::SelfReported {
                 attestation: AttestationOutcome::Unverifiable {
                     platform: Platform::Android
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn a_paired_phones_evidence_reads_self_reported_not_device_attested() {
+        use crate::db::scoring_inputs::test_support::{
+            store_attested_credential, trust, Evidence, TestCredential,
+        };
+        use alexandria_verify::attestation::Platform;
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        let learner = SigningKey::from_bytes(&[12; 32]);
+        let did = did_from_verifying_key(&learner.verifying_key());
+        store_attested_credential(
+            &db,
+            &TestCredential {
+                id: "urn:uuid:companion",
+                signer: &learner,
+                subject: &did,
+                credential_type: "SelfAssertion",
+                skill_id: "skill",
+                level: 3,
+                score: 0.8,
+                valid_from: "2026-01-01T00:00:00Z",
+                session_status: "completed",
+                evidence: Evidence::CompanionBound,
+            },
+        );
+        // The view can say a phone was present; it does not back the figures.
+        assert_eq!(
+            view_of(&db, "urn:uuid:companion", trust()).provenance,
+            Some(Provenance::SelfReported {
+                attestation: AttestationOutcome::VerifiedCredentialBound {
+                    platform: Platform::Android,
+                    companion: true,
                 }
             })
         );

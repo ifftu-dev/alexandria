@@ -659,8 +659,9 @@ pub struct IntegrityReport {
     pub camera_coverage: u8,
     pub flags: Vec<IntegrityFlag>,
     pub commitment_root: Option<String>,
-    /// `local` or `device_attested`: what the device the check ran on could
-    /// prove about itself.
+    /// `local`, `device_attested` (the device the check ran on proved
+    /// itself) or `companion_attested` (a paired attested phone was present;
+    /// nothing is claimed about the desktop).
     pub assurance_level: String,
     /// `live` when the panel marked a live segment done during the call,
     /// otherwise `none`. An interview check has no other rung.
@@ -685,8 +686,8 @@ pub struct CheckRun {
     pub started_at: String,
     pub ended_at: Option<String>,
     pub commitment_root: Option<String>,
-    /// `local` or `device_attested` (a mobile device's own attestation, or a
-    /// desktop paired with an attested phone).
+    /// `local`, `device_attested` (a mobile device's own attestation) or
+    /// `companion_attested` (a desktop paired with an attested phone).
     pub assurance_level: String,
     /// `live` or `none`, from the session's verification results.
     pub verification_rung: String,
@@ -714,7 +715,9 @@ pub fn build_integrity_report(
     // Sentinel sees only the device it runs on. In a video call, a phone call
     // or a room, that device is not where the interview happens, so the
     // check vouches for nothing unless an attested phone was there.
-    if invite.mode != "alexandria" && run.assurance_level != "device_attested" {
+    if invite.mode != "alexandria"
+        && !crate::sentinel::attestation::attested_phone_present(&run.assurance_level)
+    {
         return Err(
             "an interview held by video call, phone or in person carries no Sentinel \
              assurance unless a paired attested phone was present"
@@ -862,7 +865,7 @@ fn load_check(conn: &rusqlite::Connection, session_id: &str) -> Result<CheckRun,
     run.verification_rung = crate::sentinel::surface::session_surface(
         conn,
         session_id,
-        run.assurance_level == "device_attested",
+        crate::sentinel::attestation::credits_attestation_signal(&run.assurance_level),
         &crate::sentinel::scoring::active_manifest(),
         None,
     )?

@@ -3,12 +3,16 @@
  * The organisation's issuance policy on an assessment request, in plain words,
  * before the candidate starts: what an answer must meet for the organisation
  * to issue its own credential, and whether this device can run the monitoring
- * profile it asks for. The policy comes from the request itself, which the
- * organisation's proof covers.
+ * profile it asks for. A required `device_attested` is taken on a phone that
+ * attests itself; on a device that cannot reach it (a computer, paired phone
+ * or not) the card says where to take it instead. The policy comes from the
+ * request itself, which the organisation's proof covers.
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { floorReach, policyRequirements, type DeviceAbility, type Requirement } from '@/utils/requestPolicy'
+import { needsVerifiedDevice, verifiedPhones } from '@/utils/verifiedDevice'
+import { secondDeviceNote } from '@/utils/sentinel/secondDevice'
 import type { IssuancePolicy, TrustProfile } from '@/types'
 
 const props = defineProps<{ policy: IssuancePolicy; org: string; device: DeviceAbility }>()
@@ -18,9 +22,17 @@ const items = computed(() => policyRequirements(props.policy))
 const floor = computed<TrustProfile | null>(() => props.policy.min_trust_profile ?? null)
 const reach = computed(() => floorReach(floor.value, props.device))
 const profileName = computed(() => (floor.value ? t(`sentinel.trust.profile.${floor.value}`) : ''))
+/** The policy requires a verified device and this one is known not to be. */
+const verifiedDeviceBlocked = computed(
+  () => needsVerifiedDevice(props.policy.required_assurance_level) && props.device.support?.verified_device === false,
+)
+const phones = computed(() => verifiedPhones(props.device.support))
+/** Below a required `live` rung: a second device or person is not ruled out. */
+const secondDevice = computed(() => secondDeviceNote(props.policy.min_verification_rung))
 
 function label(r: Requirement): string {
   switch (r.kind) {
+    case 'custody': return t('organisations.requests.assessment.policy.custodyIssuer')
     case 'clean': return t('organisations.requests.assessment.policy.clean')
     case 'minIntegrity': return t('organisations.requests.assessment.policy.minIntegrity', { percent: r.percent })
     case 'maxCritical':
@@ -34,6 +46,7 @@ function label(r: Requirement): string {
     case 'assurance':
       if (r.level === 'local') return t('organisations.requests.assessment.policy.assuranceLocal')
       if (r.level === 'device_attested') return t('organisations.requests.assessment.policy.assuranceAttested')
+      if (r.level === 'companion_attested') return t('organisations.requests.assessment.policy.assuranceCompanion')
       return t('organisations.requests.assessment.policy.assuranceOther', { level: r.level })
     case 'floor':
       return t('organisations.requests.assessment.policy.floor', { profile: t(`sentinel.trust.profile.${r.profile}`) })
@@ -54,16 +67,15 @@ function label(r: Requirement): string {
         <li v-for="r in items" :key="r.kind" :data-testid="`requirement-${r.kind}`">{{ label(r) }}</li>
       </ul>
     </template>
+    <p v-if="secondDevice" class="text-muted-foreground" data-testid="second-device">{{ secondDevice }}</p>
+    <p v-if="verifiedDeviceBlocked" class="font-medium text-warning" data-testid="verified-device-blocker">
+      {{ t(`organisations.requests.assessment.policy.verifiedDevice.${phones}`) }}
+    </p>
     <p v-if="reach.blockers.includes('no_camera')" class="font-medium text-warning" data-testid="floor-blocker-camera">
       {{ t('organisations.requests.assessment.policy.noCamera', { profile: profileName }) }}
     </p>
-    <p
-      v-if="reach.blockers.includes('no_attestation') || reach.pairPhone"
-      class="font-medium text-warning"
-      data-testid="floor-blocker-attestation"
-    >
+    <p v-if="reach.blockers.includes('no_attestation')" class="font-medium text-warning" data-testid="floor-blocker-attestation">
       {{ t('organisations.requests.assessment.policy.noAttestation', { profile: profileName }) }}
-      <template v-if="reach.pairPhone">{{ t('organisations.requests.assessment.policy.pairPhone') }}</template>
     </p>
   </div>
 </template>
