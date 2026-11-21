@@ -1,7 +1,7 @@
 # Community Plugin System
 
 Status: live
-Updated: 2026-10-27
+Updated: 2026-11-21
 
 Phase 1–2 implemented (iframe-sandboxed interactive plugins,
 WASM graders, capability consent, management UI). Phase-3 P2P catalog
@@ -73,7 +73,7 @@ away automatically when either endpoint is uninstalled.
 | `verifier` | Ed25519 signature verify; compute the BLAKE3 `plugin_cid` |
 | `registry` | On-disk bundle store + SQLite install/list/uninstall, capability grant/revoke, enable/disable, README read, in-bundle asset read |
 | `asset_protocol` | `plugin://<cid>/` URI handler; injects the bootstrap script + per-plugin nonce CSP |
-| `builtins` | First-party bundles embedded via `include_bytes!`, installed (and refreshed) at startup; prunes stale builtin rows when a builtin's manifest/CID changes |
+| `builtins` | First-party bundles embedded via `include_bytes!`. Global ones are installed and refreshed at startup; course-scoped ones (the code editors) install on first enrollment and are refreshed at startup once installed, since a UI-only change keeps the manifest CID. Prunes stale builtin rows when a builtin's manifest/CID changes |
 | `catalog` | Discovery cache for the `/alexandria/plugins/1.0` gossip topic |
 | `wasm_runtime` | Wasmtime grader sandbox (every platform — see the `grader` cfg in `build.rs`) |
 | `irl_review` | Local instructor-review inbox (see below) |
@@ -191,8 +191,12 @@ Declarable in v1: `microphone`, `camera`, `midi`, `fullscreen`,
 At init the host sends a `theme` map of `--app-*` and `--theme-*` CSS
 tokens (background, foreground, border, accent, success, warning, error…);
 `bootstrap.js` applies them to the plugin's `documentElement`. Plugins
-should style with `var(--theme-*)`. A future `theme_changed` message
-hot-swaps tokens for the planned custom-accent picker.
+should style with `var(--theme-*)`. Values can arrive in any CSS colour
+syntax (WKWebView sends hex), so a plugin that inspects a token, for
+example to pick a light or dark editor theme, should resolve it with a
+canvas or a styled element rather than parse `rgb()`. A future
+`theme_changed` message hot-swaps tokens for the planned custom-accent
+picker.
 
 ## Management UI — Settings → Plugins
 

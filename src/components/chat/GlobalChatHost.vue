@@ -117,7 +117,8 @@ function resizeByKey(event: KeyboardEvent) {
     <button
       v-if="!wide && !chat.panelOpen.value"
       type="button"
-      class="fixed bottom-36 end-4 z-40 grid h-12 w-12 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg"
+      class="fixed end-4 z-40 grid h-12 w-12 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg"
+      :class="route.name === 'learn' ? 'chat-fab--player' : 'chat-fab'"
       :aria-label="t('chat.panel.open')"
       @click="chat.setOpen(true)"
     >
@@ -131,3 +132,10 @@ function resizeByKey(event: KeyboardEvent) {
     </div>
   </template>
 </template>
+
+<style scoped>
+/* Just above the mobile tab bar; the course player's prev/next bar sits on
+   top of the tab bar, so there the button clears that bar too. */
+.chat-fab { bottom: calc(4.25rem + var(--sab, env(safe-area-inset-bottom))); }
+.chat-fab--player { bottom: calc(7rem + var(--sab, env(safe-area-inset-bottom))); }
+</style>

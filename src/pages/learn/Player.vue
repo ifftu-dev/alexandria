@@ -940,8 +940,8 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
   <div class="flex-1 min-h-0 flex flex-col">
     <!-- Loading skeleton -->
     <div v-if="loading" class="flex-1 min-h-0 flex gap-0">
-      <!-- Sidebar skeleton — hidden on mobile -->
-      <div class="hidden md:block w-72 shrink-0 border-e border-border p-4 space-y-4">
+      <!-- Sidebar skeleton — hidden below lg (phones and narrow windows) -->
+      <div class="hidden lg:block w-72 shrink-0 border-e border-border p-4 space-y-4">
         <div class="h-4 w-24 animate-pulse rounded bg-muted/40" />
         <div class="space-y-1">
           <div class="h-5 w-48 animate-pulse rounded bg-muted/40" />
@@ -987,11 +987,11 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
     </div>
 
     <!-- Main Player Layout -->
-    <div v-else class="flex flex-col md:flex-row gap-0 flex-1 min-h-0">
+    <div v-else class="flex flex-col lg:flex-row gap-0 flex-1 min-h-0">
       <!-- ======================================= -->
-      <!-- MOBILE: Compact chapter/element header  -->
+      <!-- NARROW: Compact chapter/element header (below lg, so a narrow desktop window does not squeeze the lesson between two sidebars) -->
       <!-- ======================================= -->
-      <div v-if="!isTutorial" class="md:hidden shrink-0 border-b border-border bg-card/70 backdrop-blur">
+      <div v-if="!isTutorial" class="lg:hidden shrink-0 border-b border-border bg-card/70 backdrop-blur">
         <div class="flex items-center gap-2 px-3 py-2">
           <button
             class="p-1 rounded-md text-muted-foreground active:bg-muted"
@@ -1037,7 +1037,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
       <!-- ============================== -->
       <!-- SIDEBAR: Chapter/Element Nav   -->
       <!-- ============================== -->
-      <div v-if="!isTutorial" class="hidden md:block w-80 shrink-0 overflow-y-auto border-e border-border bg-card/30">
+      <div v-if="!isTutorial" class="hidden lg:block w-80 shrink-0 overflow-y-auto border-e border-border bg-card/30">
         <div class="p-4 space-y-4">
           <!-- Back link -->
           <button
@@ -1288,14 +1288,15 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
           <p>{{ monitoringError }}</p>
           <AppButton variant="outline" :loading="monitoringPending" @click="monitoringRetry++">{{ $t('common.actions.retry') }}</AppButton>
         </div>
-        <div v-if="currentElement" :key="currentElement.id" ref="lessonBody" data-lesson-body class="lesson-body flex-1 min-h-0 flex flex-col overflow-hidden bg-gradient-to-b from-muted/20 via-transparent to-transparent">
+        <div v-if="currentElement" :key="currentElement.id" ref="lessonBody" data-lesson-body class="lesson-body flex-1 min-h-0 flex flex-col bg-gradient-to-b from-muted/20 via-transparent to-transparent" :class="isFullBleedElement ? 'overflow-hidden' : 'overflow-y-auto md:overflow-hidden'">
             <!-- Element header. For full-bleed elements (plugins/video) it is
                  hidden on mobile — the compact top header already carries the
                  chapter/element/progress context, so the renderer gets the
-                 whole viewport. -->
+                 whole viewport. For other elements on mobile it scrolls away
+                 with the lesson (the lesson body is the scroller there). -->
             <div
               class="shrink-0 z-10 border-b border-border/70 bg-background/90 px-4 md:px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/70"
-              :class="{ 'hidden md:block': isFullBleedElement }"
+              :class="{ 'hidden lg:block': isFullBleedElement }"
             >
               <!-- Breadcrumb -->
               <div class="flex items-center gap-1.5 text-xs text-muted-foreground mb-3">
@@ -1392,10 +1393,10 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             <!-- Dispatched via elementRegistry. Phase 0 of plugin system. -->
             <!-- ============================== -->
             <div
-              class="lesson-content flex-1 min-h-0 flex overflow-y-auto"
+              class="lesson-content flex"
               :class="isFullBleedElement
-                ? ''
-                : 'px-4 md:px-6 py-4 md:py-6 pb-[calc(1rem+var(--sab,env(safe-area-inset-bottom)))]'"
+                ? 'flex-1 min-h-0 overflow-y-auto'
+                : 'flex-none md:flex-1 md:min-h-0 md:overflow-y-auto px-4 md:px-6 py-4 md:py-6 pb-20 md:pb-6'"
             >
               <component
                 :is="elementBinding!.component"
@@ -1424,21 +1425,24 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
         <!-- ============================== -->
         <!-- NAVIGATION FOOTER              -->
         <!-- ============================== -->
-        <div v-if="currentElement" class="flex-shrink-0 border-t border-border bg-card/60 px-3 pt-2 pb-[calc(0.5rem+3.25rem+env(safe-area-inset-bottom))] md:px-6 md:py-3 md:pb-3">
+        <div v-if="currentElement" class="flex-shrink-0 border-t border-border bg-card/60 px-3 pt-2 pb-[calc(0.5rem+3.25rem+var(--sab,env(safe-area-inset-bottom)))] md:px-6 md:py-3 md:pb-3">
           <p v-if="claimError" class="mx-auto mb-2 max-w-4xl text-xs text-destructive">
             {{ $t('learn.player.finishError', { error: claimError }) }}
           </p>
           <div :class="['mx-auto flex items-center justify-between gap-2', isVideoElement ? 'max-w-7xl' : 'max-w-4xl']">
             <!-- Previous -->
-            <AppButton variant="secondary" size="sm" :disabled="!hasPrevElement" @click="goToPrev">
-              <svg class="me-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <AppButton variant="secondary" size="sm" class="shrink-0" :disabled="!hasPrevElement" :aria-label="$t('learn.player.previous')" @click="goToPrev">
+              <svg class="h-4 w-4 sm:me-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" />
               </svg>
-              {{ $t('learn.player.previous') }}
+              <span class="hidden sm:inline">{{ $t('learn.player.previous') }}</span>
             </AppButton>
 
-            <AppButton v-if="enrollment && !isAssessment" type="button" variant="ghost" size="sm" @click="openFeedback">
-              {{ t('learn.player.feedback') }}
+            <AppButton v-if="enrollment && !isAssessment" type="button" variant="ghost" size="sm" class="shrink-0" :aria-label="t('learn.player.feedback')" @click="openFeedback">
+              <svg class="h-4 w-4 sm:hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 8.25h9m-9 3H12m-9.75 1.51c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 0 1 1.037-.443 48.282 48.282 0 0 0 5.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
+              </svg>
+              <span class="hidden sm:inline">{{ t('learn.player.feedback') }}</span>
             </AppButton>
 
             <!-- Center action -->
@@ -1451,7 +1455,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
             </AppButton>
             <AppButton
               v-else-if="isContentElement && elementStatus(currentElement.id) !== 'completed'"
-              class="bg-success text-success-foreground hover:opacity-90"
+              class="min-w-0 whitespace-nowrap bg-success text-success-foreground hover:opacity-90"
               size="sm"
               @click="markComplete()"
             >
@@ -1478,7 +1482,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
               </svg>
             </AppButton>
-            <AppButton v-else size="sm" :disabled="!hasNextElement" @click="goToNext">
+            <AppButton v-else size="sm" class="shrink-0" :disabled="!hasNextElement" @click="goToNext">
               {{ $t('common.actions.next') }}
               <svg class="ms-1.5 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
@@ -1531,7 +1535,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
     </AppModal>
 
     <!-- ============================== -->
-    <!-- MOBILE: Chapter navigator sheet -->
+    <!-- NARROW: Chapter navigator sheet (below lg) -->
     <!-- ============================== -->
     <Teleport to="body">
       <Transition
@@ -1542,7 +1546,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
       >
         <div
           v-if="mobileNavOpen && !isTutorial"
-          class="fixed inset-0 z-[120] bg-black/50 md:hidden"
+          class="fixed inset-0 z-[120] bg-black/50 lg:hidden"
           @click.self="mobileNavOpen = false"
         >
           <Transition

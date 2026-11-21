@@ -283,7 +283,8 @@ const avatarEmoji = computed(() => {
         <svg class="topbar-search-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
-        <span class="topbar-search-placeholder">{{ $t('nav.topbar.searchPlaceholder') }}</span>
+        <span class="topbar-search-placeholder topbar-search-placeholder--long">{{ $t('nav.topbar.searchPlaceholder') }}</span>
+        <span class="topbar-search-placeholder topbar-search-placeholder--short">{{ $t('common.actions.search') }}</span>
         <kbd class="topbar-search-kbd">{{ shortcuts.search ? formatCombo(shortcuts.search.keys) : '' }}</kbd>
       </button>
     </div>
@@ -420,12 +421,14 @@ const avatarEmoji = computed(() => {
           <div v-if="userMenuOpen" class="absolute end-0 mt-2 w-56 origin-top-right rounded-xl border border-border bg-card shadow-lg z-50">
             <!-- User info header -->
             <div class="border-b border-border px-4 py-3">
-              <div class="flex items-center gap-2">
-                <p class="truncate text-sm font-medium text-foreground">
+              <!-- Wraps the role badge under the name rather than squeezing
+                   both: "Instructor · Learner Mode" left the name as "uipass…". -->
+              <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <p class="min-w-0 max-w-full truncate text-sm font-medium text-foreground">
                   {{ displayName || $t('nav.userMenu.anonymous') }}
                 </p>
-                <span class="inline-block rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium capitalize leading-none text-muted-foreground">
-                  {{ isInstructor ? (isInstructorMode ? $t('nav.userMenu.roleInstructor') : $t('nav.userMenu.roleInstructorLearner')) : isParent ? 'parent' : 'learner' }}
+                <span class="inline-block whitespace-nowrap rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium capitalize leading-none text-muted-foreground">
+                  {{ isInstructor ? (isInstructorMode ? $t('nav.userMenu.roleInstructor') : $t('nav.userMenu.roleInstructorLearner')) : isParent ? $t('onboarding.roles.parentTitle') : $t('nav.mode.learner') }}
                 </span>
               </div>
               <p class="truncate text-xs text-muted-foreground mt-0.5">
@@ -491,7 +494,7 @@ const avatarEmoji = computed(() => {
                   <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-5a4 4 0 11-8 0 4 4 0 018 0zm6 0a4 4 0 11-8 0 4 4 0 018 0z" />
                 </svg>
                 {{ $t('nav.userMenu.switchUser') }}
-                <span class="ms-auto text-xs text-muted-foreground">{{ shortcuts['switch-profile'] ? formatCombo(shortcuts['switch-profile'].keys) : '' }}</span>
+                <span v-if="!isMobilePlatform" class="ms-auto text-xs text-muted-foreground">{{ shortcuts['switch-profile'] ? formatCombo(shortcuts['switch-profile'].keys) : '' }}</span>
               </button>
               <button
                 class="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-error transition-colors hover:bg-error/10"
@@ -773,6 +776,9 @@ const avatarEmoji = computed(() => {
   .topbar-search-placeholder {
     font-size: 0.8125rem;
   }
+  .topbar-search-placeholder--short {
+    display: none;
+  }
 }
 
 /* On a phone there is no keyboard to press, and the hint takes the room the
@@ -784,6 +790,12 @@ const avatarEmoji = computed(() => {
 
   .topbar-search-placeholder {
     padding-inline-end: 0.75rem;
+  }
+
+  /* The long placeholder still truncated to "Sear…" beside the phone's
+     navigation buttons; a single word fits. */
+  .topbar-search-placeholder--long {
+    display: none;
   }
 }
 

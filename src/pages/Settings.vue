@@ -422,7 +422,7 @@ async function lockWallet() {
   locking.value = true
   try {
     await authLock()
-    router.replace('/unlock')
+    router.replace('/profiles')
   } catch (e) {
     console.error('Failed to lock:', e)
   } finally {
@@ -1074,6 +1074,7 @@ function onSectionClick(id: SettingsSectionId) {
 .settings-sidebar h2:focus, .settings-section-header h3:focus { box-shadow: none; }
 .settings-body { overscroll-behavior: contain; overflow-wrap: anywhere; }
 .settings-body--developer { display: flex; flex-direction: column; overflow: hidden; padding-block: 0; }
+@media (max-width: 767px) { .settings-body--developer { display: block; overflow-y: auto; } }
 .settings-nav-item:focus-visible { outline: 2px solid var(--app-primary); outline-offset: -2px; }
 
 

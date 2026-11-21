@@ -297,9 +297,10 @@ pre,
     padding-right: var(--sar, env(safe-area-inset-right));
   }
 
-  /* Main content area needs bottom padding for tab bar */
+  /* Main content area needs bottom padding for the tab bar and the chat
+     button floating above it, so the last controls scroll clear of both. */
   .mobile-content-padding {
-    padding-bottom: calc(5rem + var(--sab, env(safe-area-inset-bottom)));
+    padding-bottom: calc(8.5rem + var(--sab, env(safe-area-inset-bottom)));
   }
 }
 

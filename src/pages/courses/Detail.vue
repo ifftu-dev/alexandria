@@ -185,6 +185,7 @@ function elementTypeLabel(elementType: string): string {
     case 'subjective_mcq': return t('courses.detail.elementTypes.subjective')
     case 'essay': return t('courses.detail.elementTypes.essay')
     case 'interactive': return t('courses.detail.elementTypes.interactive')
+    case 'plugin': return t('instructor.elementTypes.plugin')
     default: return elementType
   }
 }
@@ -316,7 +317,8 @@ function elementTypeLabel(elementType: string): string {
           <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" :d="elementTypeIcon(type as string)" />
           </svg>
-          {{ count }} {{ elementTypeLabel(type as string) }}
+          {{ elementTypeLabel(type as string) }}
+          <span class="font-medium tabular-nums text-foreground">{{ count }}</span>
         </span>
       </div>
 
