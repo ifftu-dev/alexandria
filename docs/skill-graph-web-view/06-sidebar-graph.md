@@ -1,6 +1,6 @@
 # Sidebar: fully working Web graph
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: ../skill-graph-web-view-spec.md
 Blocked by: 04-web-graph-component.md
@@ -20,3 +20,7 @@ Replace the sidebar widget's per-field earned skill rows with ticket 04's compon
 ## Tests
 
 Sidebar tests per seam 5 of the spec's Testing Decisions.
+
+## Notes
+
+- 2026-11-21: Done. Merged into the integration branch in 4bb23de9, then adjusted in the review-fix round (6dcc53e3). The review round strengthened the sidebar graph's lines, tints and dots in both themes.

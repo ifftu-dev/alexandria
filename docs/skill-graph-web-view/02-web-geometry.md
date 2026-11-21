@@ -1,6 +1,6 @@
 # Web geometry: layout, sizes, keyboard and sidebar subset
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: ../skill-graph-web-view-spec.md
 
@@ -16,3 +16,7 @@ Pure, DOM-free functions for the Web view, beside the existing Simple layout mod
 ## Tests
 
 New unit test file in the style of the Simple layout test, covering everything listed under seam 2 of the spec's Testing Decisions, including a time budget on a taxonomy of the scale fixture's size.
+
+## Notes
+
+- 2026-11-21: Done. Merged into the integration branch in 670f9135, then adjusted in the review-fix round (6dcc53e3). The review round made name placement one shared function for every Web surface and timed the layout budget in process CPU time.

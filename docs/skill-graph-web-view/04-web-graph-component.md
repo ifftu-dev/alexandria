@@ -1,6 +1,6 @@
 # Web graph component and shared Web state
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: ../skill-graph-web-view-spec.md
 Blocked by: 01-relations.md, 02-web-geometry.md
@@ -17,3 +17,7 @@ The one Web drawing and interaction component used later by the explorer (ticket
 ## Tests
 
 New mount test for the component covering seam 3 of the spec's Testing Decisions; unit tests for the shared state (drag positions shared across surfaces and cleared on lock).
+
+## Notes
+
+- 2026-11-21: Done. Merged into the integration branch in d2fb4d91, then adjusted in the review-fix round (6dcc53e3). The review round memoised one Web graph and layout per model and passed it to every Web surface.

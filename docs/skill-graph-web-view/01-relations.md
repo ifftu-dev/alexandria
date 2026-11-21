@@ -1,6 +1,6 @@
 # Relations: command, model and inspector
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: ../skill-graph-web-view-spec.md
 
@@ -20,3 +20,7 @@ Bring the taxonomy's non-prerequisite relations (related, complementary, alterna
 - Rust: in-memory database with migrations and bundled data; every bundled relation returned once with a known type.
 - Atlas model unit tests: relations on both skills, sorted, loaded flags; missing load yields none.
 - Explorer mount tests: the inspector lists relations and choosing one selects the skill.
+
+## Notes
+
+- 2026-11-21: Done. Merged into the integration branch in 78ed1dbc, then adjusted in the review-fix round (6dcc53e3). The relation type became a lowercase serde enum; an unknown type reads as related.

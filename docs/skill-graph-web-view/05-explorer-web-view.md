@@ -1,6 +1,6 @@
 # Explorer: Web view, three-way switch and surface bindings
 
-Triage: ready-for-agent
+Triage: done
 Repos: alexandria
 Part of: ../skill-graph-web-view-spec.md
 Blocked by: 03-view-settings.md, 04-web-graph-component.md
@@ -18,3 +18,7 @@ Add Web to the atlas explorer and bind the two surfaces to their own settings, f
 ## Tests
 
 Explorer mount tests per seam 1, personal-surface tests per seam 4, browser checks per seam 9 of the spec's Testing Decisions.
+
+## Notes
+
+- 2026-11-21: Done. Merged into the integration branch in f6f1e0cd, then adjusted in the review-fix round (6dcc53e3). The review round moved the explorer's Web-only code into its own adapter and made the tools compact; see the parent spec's Tools in Web decision.
