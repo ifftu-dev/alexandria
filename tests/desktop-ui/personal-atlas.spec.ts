@@ -269,7 +269,8 @@ for (const theme of ['light', 'dark']) {
     await sidebar.screenshot({ animations: 'disabled', path: testInfo.outputPath(`sidebar-web-${theme}.png`) })
     const bigO = web.getByRole('button', { name: 'Big-O Analysis, earned, Bloom level 2 Understand', exact: true })
     await bigO.hover()
-    await expect(bigO).toContainText('Big-O Analysis')
+    // Names are drawn in their own layer above the dots.
+    await expect(web.locator('.web-name', { hasText: 'Big-O Analysis' })).toBeVisible()
     await bigO.click()
     await expect(bigO).toHaveAttribute('aria-pressed', 'true')
     await expect(sidebar.locator('.sidebar-caption')).toContainText('Earned · 2 Understand')

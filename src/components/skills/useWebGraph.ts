@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch, type ComputedRef, type Ref } from 'vue'
 import { motionDuration, useMotion } from '@/composables/useMotion'
 import { compareIds, type AtlasModel, type AtlasNode } from '@/utils/skillAtlas'
 import type { AtlasCamera } from '@/utils/skillAtlasView'
@@ -7,7 +7,15 @@ import { continueWebLayout, webDotRadius, webNamePlaces, webNearestInDirection, 
 
 // Camera and drawing constants. Positions and dot radii are layout units; the
 // camera's zoom is screen pixels per layout unit. Lines, arrowheads and names
-// are drawn in screen pixels, so they keep their size at any zoom.
+// keep their size on screen at any zoom.
+//
+// The camera never re-renders the dots. The pan is one transform on the
+// graph's layers. The zoom is written straight onto each dot's element (its
+// box and its skin's diameter), so a zoom costs one pass over the dots and no
+// render; a CSS variable on a shared ancestor would restyle every element
+// under it, which is several times slower on a large graph. Only the names,
+// which are few and placed in screen pixels, and the arrowheads follow the
+// camera through a render.
 /** The camera's zoom range. */
 export const WEB_MIN_ZOOM = 0.2
 export const WEB_MAX_ZOOM = 6
@@ -59,15 +67,13 @@ export interface WebLinePaths { plain: string; lit: string; faded: string }
 /** Prerequisite lines, dotted relation lines and the arrowheads at the dependent end of prerequisite lines. */
 export interface WebLines { prerequisites: WebLinePaths; relations: WebLinePaths; heads: WebLinePaths }
 
-/** One dot as drawn: screen position and size in pixels, and how it reads now. */
+/** One dot: layout position and radius (layout units; `placeDots` places and sizes its element for the zoom), and how it reads now. */
 export interface WebDot {
   node: AtlasNode
   id: string
   x: number
   y: number
-  /** Diameter of the dot, and of the pointer target around it. */
-  size: number
-  hit: number
+  radius: number
   color: string
   state: WebDotState
   selected: boolean
@@ -75,12 +81,23 @@ export interface WebDot {
   roving: boolean
   /** Outside the lit neighbourhood, or not matching the search or field focus. */
   faded: boolean
-  /** Its name shows beside the dot, */
+  /** Its name may show (see `WebName` for the names drawn). */
   labelled: boolean
-  /** on this side, chosen so no two names overlap, */
-  namePlace: WebNamePlace
-  /** this many pixels further out than the usual gap. */
-  nameOffset: number
+}
+
+/** One name as drawn, in layer pixels (the layers move with the pan): its dot's centre and diameter, and where the name sits. */
+export interface WebName {
+  id: string
+  name: string
+  left: number
+  top: number
+  dot: number
+  /** The side of its dot, chosen so no two names overlap, */
+  place: WebNamePlace
+  /** and how many pixels further out than the usual gap. */
+  offset: number
+  selected: boolean
+  faded: boolean
 }
 
 /** What a Web graph draws and how; the component's props, read through a getter so the composable sees changes. */
@@ -138,22 +155,33 @@ export function webFitCamera(points: Iterable<WebPoint>, width: number, height: 
  * component and by the explorer's own node layer, so the two cannot drift
  * apart. `root` is the element that holds the dots (each carries
  * `data-skill`) and takes the pointer, wheel, key and focus handlers.
+ * `layers` are the elements the pan moves; the dots, lines and names inside
+ * them sit at their layout position times the zoom.
  */
-export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents, root: Readonly<Ref<HTMLElement | undefined>>) {
+export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents, root: Readonly<Ref<HTMLElement | undefined>>,
+  layers: () => readonly (Element | null | undefined)[]) {
   // The owner's getter builds a new object on every call, so it is read once
   // per change of the owner's state, never once per dot or per frame.
   const current = computed(source)
-  const input = (): WebGraphInput => current.value
+  // Each input is read through a computed of its own, so a change to one (the
+  // camera, above all) re-runs only what reads that one: a published pan or
+  // zoom must not recompute the dots.
+  const fields: { [K in keyof WebGraphInput]?: ComputedRef<WebGraphInput[K]> } = {}
+  function field<K extends keyof WebGraphInput>(key: K): WebGraphInput[K] {
+    let ref = fields[key] as ComputedRef<WebGraphInput[K]> | undefined
+    if (!ref) { ref = computed(() => current.value[key]); (fields as Record<K, ComputedRef<WebGraphInput[K]>>)[key] = ref }
+    return ref.value
+  }
   const { reduced: systemReduced } = useMotion()
-  const motionReduced = computed(() => input().reducedMotion || systemReduced.value)
-  const model = computed(() => input().model)
-  const graph = computed(() => input().graph)
+  const motionReduced = computed(() => field('reducedMotion') || systemReduced.value)
+  const model = computed(() => field('model'))
+  const graph = computed(() => field('graph'))
 
   // Size: measured from the root, with a default until then. The root may
   // come and go (the explorer draws its map only in some views), so it is
   // watched rather than read once at mount.
   const measured = ref<{ width: number; height: number } | null>(null)
-  const size = computed(() => measured.value ?? (input().compact ? WEB_COMPACT_DEFAULT_SIZE : WEB_DEFAULT_SIZE))
+  const size = computed(() => measured.value ?? (field('compact') ? WEB_COMPACT_DEFAULT_SIZE : WEB_DEFAULT_SIZE))
   let observer: ResizeObserver | undefined
   onMounted(() => {
     watch(root, element => {
@@ -171,44 +199,57 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
 
   /** Positions during a live drag, until the owner's catch up through the drag event and the run stops. */
   const working = shallowRef<ReadonlyMap<string, WebPoint> | null>(null)
-  const positions = computed(() => working.value ?? input().positions)
+  const positions = computed(() => working.value ?? field('positions'))
   /** Every dot drawn, in model order. */
   const shownNodes = computed(() => {
-    const shown = input().shownIds
+    const shown = field('shownIds')
     return model.value.nodes.filter(node => positions.value.has(node.skill.id) && (!shown || shown.has(node.skill.id)))
   })
   const shownSet = computed(() => new Set(shownNodes.value.map(node => node.skill.id)))
 
   // Camera: the owner's, or the camera that fits what is shown.
   const fitCamera = computed(() => {
-    const fit = input().fitIds
+    const fit = field('fitIds')
     const ids = fit && [...fit].some(id => shownSet.value.has(id)) ? [...fit].filter(id => shownSet.value.has(id)) : [...shownSet.value]
     const points = ids.flatMap(id => { const point = positions.value.get(id); return point ? [point] : [] })
-    const { compact, names, narrowed } = input()
+    const compact = field('compact'), names = field('names'), narrowed = field('narrowed')
     return webFitCamera(points, size.value.width, size.value.height, compact ? WEB_COMPACT_FIT_PADDING : names || narrowed ? WEB_NAMED_FIT_PADDING : WEB_FIT_PADDING)
   })
   /** A camera this graph moved to and has emitted, until the owner's camera changes. */
   const localCamera = shallowRef<AtlasCamera | null>(null)
-  watch(() => input().camera, () => { localCamera.value = null })
-  const camera = computed<AtlasCamera>(() => localCamera.value ?? input().camera ?? fitCamera.value)
+  watch(() => field('camera'), () => { localCamera.value = null })
+  const camera = computed<AtlasCamera>(() => localCamera.value ?? field('camera') ?? fitCamera.value)
   function setCamera(next: AtlasCamera): void {
     localCamera.value = next
     events.camera(next)
   }
-  function toScreen(point: WebPoint): WebPoint {
+  /** Where layout point 0, 0 sits on screen: the pan the layers are moved by. */
+  const pan = computed(() => {
     const at = camera.value
-    return { x: (point.x - at.x) * at.zoom + size.value.width / 2, y: (point.y - at.y) * at.zoom + size.value.height / 2 }
+    return { x: size.value.width / 2 - at.x * at.zoom, y: size.value.height / 2 - at.y * at.zoom }
+  })
+  /** The layers, as one value that changes only when one of them does. */
+  const layerList = computed(() => layers())
+  /** The pan on each layer, set directly, so a pan renders nothing. */
+  watch([layerList, pan], () => {
+    const { x, y } = pan.value
+    for (const layer of layerList.value) if (layer instanceof HTMLElement || layer instanceof SVGElement) layer.style.transform = `translate(${x}px, ${y}px)`
+  }, { flush: 'sync', immediate: true })
+  /** A dot's diameter on screen, in pixels: the size its styles give it. */
+  function dotPixels(radius: number): number {
+    return Math.max(field('compact') ? WEB_COMPACT_DOT_MIN_PIXELS : WEB_DOT_MIN_PIXELS, radius * 2 * camera.value.zoom)
   }
 
   // Keyboard roving: one dot is in the Tab order.
   const activeId = ref<string | null>(null)
   const rovingId = computed(() => {
-    const selected = input().selectedId
+    const selected = field('selectedId')
     if (activeId.value && shownSet.value.has(activeId.value)) return activeId.value
     if (selected && shownSet.value.has(selected)) return selected
-    return webNearestTo({ x: camera.value.x, y: camera.value.y }, positions.value, shownSet.value)
+    // The middle of what a fitted camera shows, so a pan or zoom never moves the Tab stop.
+    return webNearestTo({ x: fitCamera.value.x, y: fitCamera.value.y }, positions.value, shownSet.value)
   })
-  watch(() => input().selectedId, () => { activeId.value = null })
+  watch(() => field('selectedId'), () => { activeId.value = null })
 
   // Emphasis. Hover, and focus that arrived by keyboard, light a dot's
   // one-step neighbourhood while they last; selection keeps it.
@@ -225,13 +266,13 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
     const node = model.value.nodeById.get(id)
     if (!node || !shownSet.value.has(id)) return ids
     ids.add(id)
-    const steps = [...node.prerequisites, ...node.dependents, ...(input().related ? node.relations : [])]
+    const steps = [...node.prerequisites, ...node.dependents, ...(field('related') ? node.relations : [])]
     for (const step of steps) if (shownSet.value.has(step.skillId)) ids.add(step.skillId)
     return ids
   }
   /** Dots whose names show at any zoom: the selected and the hovered or focused dot, and their neighbours. */
   const namedIds = computed(() => {
-    const selected = input().selectedId
+    const selected = field('selectedId')
     return new Set([...(selected ? neighbourhood(selected) : []), ...(transientId.value ? neighbourhood(transientId.value) : [])])
   })
   /**
@@ -241,13 +282,13 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
    * light a part of it.
    */
   const litIds = computed(() => {
-    const { focusIds: focus, selectedId: selected, narrowed } = input()
+    const focus = field('focusIds'), selected = field('selectedId'), narrowed = field('narrowed')
     const kept = focus && focus.size > 0 ? [...focus].filter(id => shownSet.value.has(id)) : selected && !narrowed ? [...neighbourhood(selected)] : []
     return new Set([...kept, ...(transientId.value ? neighbourhood(transientId.value) : [])])
   })
   function fadedByMatch(id: string): boolean {
-    const matches = input().matchIds
-    return matches !== null && !matches.has(id) && id !== input().selectedId
+    const matches = field('matchIds')
+    return matches !== null && !matches.has(id) && id !== field('selectedId')
   }
   function faded(id: string): boolean {
     return (litIds.value.size > 0 && !litIds.value.has(id)) || fadedByMatch(id)
@@ -258,23 +299,19 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
     return webDotRadius(node.status === 'earned' ? node.earnedBloom?.rank : null)
   }
   /** Every shown dot is named: with the Names toggle, narrowed, or zoomed in past the threshold. */
-  const everyName = computed(() => input().names || input().narrowed || camera.value.zoom >= WEB_NAMES_ZOOM)
+  const everyName = computed(() => field('names') || field('narrowed') || camera.value.zoom >= WEB_NAMES_ZOOM)
   const dots = computed<WebDot[]>(() => {
-    const at = camera.value, { selectedId: selected } = input()
-    const drawn = shownNodes.value.map((node): WebDot => {
-      const id = node.skill.id
-      const screen = toScreen(positions.value.get(id)!)
-      const dotSize = Math.max(input().compact ? WEB_COMPACT_DOT_MIN_PIXELS : WEB_DOT_MIN_PIXELS, radiusOf(node) * 2 * at.zoom)
+    const selected = field('selectedId')
+    return shownNodes.value.map((node): WebDot => {
+      const id = node.skill.id, point = positions.value.get(id)!
       return {
-        node, id, x: screen.x, y: screen.y, size: dotSize, hit: Math.max(WEB_HIT_PIXELS, dotSize),
+        node, id, x: point.x, y: point.y, radius: radiusOf(node),
         color: atlasFieldColor(model.value.fieldById.get(node.fieldId) ?? { id: node.fieldId, slot: null }),
         state: node.status === 'earned' ? 'earned' : node.readyNext ? 'ready-next' : 'ready',
         selected: id === selected, roving: id === rovingId.value, faded: faded(id),
-        labelled: everyName.value || namedIds.value.has(id), namePlace: 'below', nameOffset: 0,
+        labelled: everyName.value || namedIds.value.has(id),
       }
     })
-    placeNames(drawn)
-    return drawn
   })
 
   // Name sizes. Names are measured in the page's font where the browser can
@@ -282,7 +319,7 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
   let measureContext: OffscreenCanvasRenderingContext2D | null | undefined
   const nameWidths = new Map<string, number>()
   function nameWidth(name: string, selected: boolean): number {
-    const { compact } = input(), style = compact ? WEB_COMPACT_NAME : WEB_NAME
+    const compact = field('compact'), style = compact ? WEB_COMPACT_NAME : WEB_NAME
     if (measureContext === undefined) measureContext = typeof OffscreenCanvas === 'function' ? new OffscreenCanvas(1, 1).getContext('2d') : null
     const family = measureContext && root.value ? getComputedStyle(root.value).fontFamily : ''
     const font = `${selected ? WEB_SELECTED_NAME_WEIGHT : WEB_NAME_WEIGHT} ${style.fontPixels}px ${family || 'sans-serif'}`
@@ -296,73 +333,136 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
     return Math.min(style.maxPixels, width)
   }
   /**
-   * Chooses where each shown name on screen sits so that no two overlap: the
-   * selected and the hovered or focused dot first, then their neighbours,
-   * then larger dots. A name with no free side moves further out from its
-   * dot; in the compact graph a neighbour's name is left out instead, while
-   * the hovered and selected names always show.
+   * Places and sizes every dot's element for the zoom, in layer pixels: the
+   * pointer target's box (an SVG `foreignObject`'s geometry attributes, or an
+   * HTML element's transform and size), the skin's diameter, and the lines
+   * group's scale. Run after each render and on every zoom, never
+   * through one, so a zoom renders no dot. The owner's templates bind none of
+   * these.
    */
-  function placeNames(drawn: WebDot[]): void {
-    const { compact } = input(), transient = transientId.value, { width, height } = size.value
-    const style = compact ? WEB_COMPACT_NAME : WEB_NAME
-    const rank = (dot: WebDot) => dot.selected ? 0 : dot.id === transient ? 1 : namedIds.value.has(dot.id) ? 2 : 3
-    const near = (dot: WebDot) => dot.x > -style.maxPixels && dot.x < width + style.maxPixels && dot.y > -style.linePixels * 2 && dot.y < height + style.linePixels * 2
-    // The selection ring reaches past the selected dot; names keep clear of it.
-    const radius = (dot: WebDot) => dot.size / 2 + (dot.selected ? WEB_SELECTION_RING_PIXELS : 0)
-    const named = drawn.filter(dot => dot.labelled && near(dot))
-    if (!named.length) return
-    named.sort((a, b) => rank(a) - rank(b) || b.size - a.size || compareIds(a.id, b.id))
-    const places = webNamePlaces(named.map(dot => ({ id: dot.id, x: dot.x, y: dot.y, radius: radius(dot), height: style.linePixels,
-      width: nameWidth(dot.node.skill.name, dot.selected), optional: !everyName.value && !dot.selected && dot.id !== transient })),
-    { obstacles: drawn.filter(near).map(dot => ({ x: dot.x, y: dot.y, radius: radius(dot), firm: dot.selected })), compact })
-    for (const dot of named) {
-      const placement = places.get(dot.id)
-      if (!placement) { dot.labelled = false; continue }
-      dot.namePlace = placement.place
-      dot.nameOffset = placement.offset + (dot.selected ? WEB_SELECTION_RING_PIXELS : 0)
+  /** What was last written to each element, so a write that changes nothing (most dots sit at the smallest size when zoomed out) is skipped. */
+  let placed = new WeakMap<Element, { x: string; y: string; hit: string; size: string }>()
+  let placedIn: HTMLElement | undefined
+  function placeDots(): void {
+    const element = root.value
+    // A root that went and came back (the explorer leaving Web and returning)
+    // had its nodes' attributes reset by the other views: write them all again.
+    if (element !== placedIn) { placed = new WeakMap(); placedIn = element }
+    if (!element) return
+    const { zoom } = camera.value
+    const nodes = new Map<string, Element>()
+    for (const node of element.querySelectorAll('[data-skill]')) if (node instanceof HTMLElement || node instanceof SVGElement) nodes.set(node.dataset.skill ?? '', node)
+    for (const dot of dots.value) {
+      const node = nodes.get(dot.id)
+      if (!node) continue
+      const size = dotPixels(dot.radius), hitPixels = Math.max(WEB_HIT_PIXELS, size)
+      const next = { x: (dot.x * zoom - hitPixels / 2).toFixed(1), y: (dot.y * zoom - hitPixels / 2).toFixed(1), hit: hitPixels.toFixed(1), size: size.toFixed(1) }
+      const last = placed.get(node)
+      if (node instanceof SVGElement) {
+        if (last?.x !== next.x) node.setAttribute('x', next.x)
+        if (last?.y !== next.y) node.setAttribute('y', next.y)
+        if (last?.hit !== next.hit) { node.setAttribute('width', next.hit); node.setAttribute('height', next.hit) }
+      } else if (node instanceof HTMLElement) {
+        if (last?.x !== next.x || last.y !== next.y) node.style.transform = `translate(${next.x}px, ${next.y}px)`
+        if (last?.hit !== next.hit) node.style.width = node.style.height = `${next.hit}px`
+      }
+      if (last?.size !== next.size) {
+        // Width and height rather than an inherited variable, so the skin's own children need no restyle.
+        const skin = node.querySelector<HTMLElement>('.web-skin')
+        if (skin) skin.style.width = skin.style.height = `${next.size}px`
+      }
+      placed.set(node, next)
+    }
+    for (const layer of layerList.value) {
+      const lines = layer?.querySelector<SVGGElement>('.web-lines')
+      if (lines) lines.style.transform = `scale(${zoom})`
     }
   }
+  const zoom = computed(() => camera.value.zoom)
+  const compactFlag = computed(() => field('compact'))
+  watch([root, layerList, dots, zoom, compactFlag], placeDots, { flush: 'post' })
 
-  // Lines run from dot edge to dot edge in screen pixels, so their width and
-  // arrowheads stay the same at any zoom.
-  const lines = computed<WebLines>(() => {
+  const NO_NAMES: readonly WebName[] = Object.freeze([])
+  /**
+   * The names drawn, placed on screen so that no two overlap: the selected
+   * and the hovered or focused dot first, then their neighbours, then larger
+   * dots. A name with no free side moves further out from its dot; in the
+   * compact graph a neighbour's name is left out instead, while the hovered
+   * and selected names always show. Names of dots off screen are not drawn.
+   */
+  const names = computed<readonly WebName[]>(() => {
+    const labelled = dots.value.filter(dot => dot.labelled)
+    if (!labelled.length) return NO_NAMES
+    const compact = field('compact'), transient = transientId.value, { width, height } = size.value, { zoom } = camera.value, at = pan.value
+    const style = compact ? WEB_COMPACT_NAME : WEB_NAME
+    const screen = (dot: WebDot) => ({ x: dot.x * zoom + at.x, y: dot.y * zoom + at.y })
+    const near = (point: WebPoint) => point.x > -style.maxPixels && point.x < width + style.maxPixels && point.y > -style.linePixels * 2 && point.y < height + style.linePixels * 2
+    // The selection ring reaches past the selected dot; names keep clear of it.
+    const radius = (dot: WebDot) => dotPixels(dot.radius) / 2 + (dot.selected ? WEB_SELECTION_RING_PIXELS : 0)
+    const rank = (dot: WebDot) => dot.selected ? 0 : dot.id === transient ? 1 : namedIds.value.has(dot.id) ? 2 : 3
+    const named = labelled.filter(dot => near(screen(dot)))
+    if (!named.length) return NO_NAMES
+    named.sort((a, b) => rank(a) - rank(b) || b.radius - a.radius || compareIds(a.id, b.id))
+    const places = webNamePlaces(named.map(dot => ({ ...screen(dot), id: dot.id, radius: radius(dot), height: style.linePixels,
+      width: nameWidth(dot.node.skill.name, dot.selected), optional: !everyName.value && !dot.selected && dot.id !== transient })),
+    { obstacles: dots.value.flatMap(dot => { const point = screen(dot); return near(point) ? [{ ...point, radius: radius(dot), firm: dot.selected }] : [] }), compact })
+    return named.flatMap((dot): WebName[] => {
+      const placement = places.get(dot.id)
+      if (!placement) return []
+      return [{ id: dot.id, name: dot.node.skill.name, left: dot.x * zoom, top: dot.y * zoom, dot: dotPixels(dot.radius), place: placement.place,
+        offset: placement.offset + (dot.selected ? WEB_SELECTION_RING_PIXELS : 0), selected: dot.selected, faded: dot.faded }]
+    })
+  })
+
+  // Lines run between dot centres in layout units, under the dots, inside a
+  // group the owner scales by the zoom with non-scaling strokes, so they keep
+  // their width on screen and a pan or zoom never rebuilds them. Arrowheads
+  // sit at the dependent dot's edge and keep their size on screen, so they
+  // follow the zoom; only lit ones are drawn unless Arrows is on.
+  const linePaths = computed(() => {
     const byId = new Map(dots.value.map(dot => [dot.id, dot]))
-    const lit = litIds.value, arrows = input().arrows
+    const lit = litIds.value
     const out = { prerequisites: { plain: [] as string[], lit: [] as string[], faded: [] as string[] },
-      relations: { plain: [] as string[], lit: [] as string[], faded: [] as string[] },
-      heads: { plain: [] as string[], lit: [] as string[], faded: [] as string[] } }
+      relations: { plain: [] as string[], lit: [] as string[], faded: [] as string[] } }
     const n = (value: number) => value.toFixed(1)
     const emphasis = (a: string, b: string): keyof WebLinePaths =>
       lit.size > 0 && lit.has(a) && lit.has(b) ? 'lit' : lit.size > 0 || fadedByMatch(a) || fadedByMatch(b) ? 'faded' : 'plain'
-    const segment = (fromId: string, toId: string) => {
-      const from = byId.get(fromId), to = byId.get(toId)
-      if (!from || !to) return null
-      const dx = to.x - from.x, dy = to.y - from.y, length = Math.hypot(dx, dy)
-      if (length <= from.size / 2 + to.size / 2) return null
-      const ux = dx / length, uy = dy / length
-      return { x1: from.x + ux * from.size / 2, y1: from.y + uy * from.size / 2, x2: to.x - ux * to.size / 2, y2: to.y - uy * to.size / 2, ux, uy }
-    }
+    const heads: { from: WebDot; to: WebDot; kind: keyof WebLinePaths }[] = []
     for (const link of graph.value.prerequisites) {
       // Drawn from the prerequisite to the skill that builds on it.
-      const line = segment(link.prerequisite, link.skill)
-      if (!line) continue
+      const from = byId.get(link.prerequisite), to = byId.get(link.skill)
+      if (!from || !to || (from.x === to.x && from.y === to.y)) continue
       const kind = emphasis(link.prerequisite, link.skill)
-      out.prerequisites[kind].push(`M ${n(line.x1)} ${n(line.y1)} L ${n(line.x2)} ${n(line.y2)}`)
-      if (kind !== 'lit' && !arrows) continue
-      const back = WEB_ARROW_PIXELS, wing = WEB_ARROW_PIXELS / 2
-      const bx = line.x2 - line.ux * back, by = line.y2 - line.uy * back
-      out.heads[kind].push(`M ${n(line.x2)} ${n(line.y2)} L ${n(bx - line.uy * wing)} ${n(by + line.ux * wing)} L ${n(bx + line.uy * wing)} ${n(by - line.ux * wing)} Z`)
+      out.prerequisites[kind].push(`M ${n(from.x)} ${n(from.y)} L ${n(to.x)} ${n(to.y)}`)
+      heads.push({ from, to, kind })
     }
-    if (input().related) {
+    if (field('related')) {
       for (const [a, b] of graph.value.relations) {
-        const line = segment(a, b)
-        if (line) out.relations[emphasis(a, b)].push(`M ${n(line.x1)} ${n(line.y1)} L ${n(line.x2)} ${n(line.y2)}`)
+        const from = byId.get(a), to = byId.get(b)
+        if (from && to) out.relations[emphasis(a, b)].push(`M ${n(from.x)} ${n(from.y)} L ${n(to.x)} ${n(to.y)}`)
       }
     }
     const join = (paths: { plain: string[]; lit: string[]; faded: string[] }): WebLinePaths =>
       ({ plain: paths.plain.join(' '), lit: paths.lit.join(' '), faded: paths.faded.join(' ') })
-    return { prerequisites: join(out.prerequisites), relations: join(out.relations), heads: join(out.heads) }
+    return { prerequisites: join(out.prerequisites), relations: join(out.relations), heads }
   })
+  const headPaths = computed<WebLinePaths>(() => {
+    const { zoom } = camera.value, arrows = field('arrows')
+    const out = { plain: [] as string[], lit: [] as string[], faded: [] as string[] }
+    const n = (value: number) => value.toFixed(2)
+    const back = WEB_ARROW_PIXELS / zoom, wing = WEB_ARROW_PIXELS / 2 / zoom
+    for (const { from, to, kind } of linePaths.value.heads) {
+      if (kind !== 'lit' && !arrows) continue
+      const dx = to.x - from.x, dy = to.y - from.y, length = Math.hypot(dx, dy)
+      const edge = dotPixels(to.radius) / 2 / zoom
+      if (length <= edge + dotPixels(from.radius) / 2 / zoom) continue
+      const ux = dx / length, uy = dy / length, tipX = to.x - ux * edge, tipY = to.y - uy * edge
+      const bx = tipX - ux * back, by = tipY - uy * back
+      out[kind].push(`M ${n(tipX)} ${n(tipY)} L ${n(bx - uy * wing)} ${n(by + ux * wing)} L ${n(bx + uy * wing)} ${n(by - ux * wing)} Z`)
+    }
+    return { plain: out.plain.join(' '), lit: out.lit.join(' '), faded: out.faded.join(' ') }
+  })
+  const lines = computed<WebLines>(() => ({ prerequisites: linePaths.value.prerequisites, relations: linePaths.value.relations, heads: headPaths.value }))
 
   // Dragging. With full motion a live run of the layout's forces lets the
   // neighbours follow and stops within the emphasis duration of release;
@@ -440,7 +540,7 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
   }
   /** The compact graph zooms with any wheel; the full graph, like the Detailed map, leaves a plain wheel to the page and zooms on a pinch (ctrl or meta + wheel). */
   function wheel(event: WheelEvent): void {
-    if (!input().compact && !event.ctrlKey && !event.metaKey) return
+    if (!field('compact') && !event.ctrlKey && !event.metaKey) return
     event.preventDefault()
     const pixels = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? size.value.height : 1)
     zoomBy(Math.exp(-pixels * WEB_WHEEL_RATE), local(event))
@@ -484,7 +584,7 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
       suppressClick = true
       root.value?.setPointerCapture?.(event.pointerId)
       // Whatever the camera shows when a gesture starts, it holds still while dots move.
-      if (!localCamera.value && !input().camera) setCamera(camera.value)
+      if (!localCamera.value && !field('camera')) setCamera(camera.value)
       const point = gesture.id ? positions.value.get(gesture.id) : undefined
       if (gesture.id && point) {
         const grabbed = toWorld(gesture.start)
@@ -561,7 +661,7 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
       event.preventDefault()
       keyboardFocus.value = true
       events.select(id)
-    } else if (event.key === 'Escape' && input().selectedId !== null) {
+    } else if (event.key === 'Escape' && field('selectedId') !== null) {
       event.stopPropagation()
       events.select(null)
     }
@@ -574,7 +674,7 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
   function hover(id: string | null): void { hoverId.value = id }
 
   return {
-    size, camera, dots, lines, graph, motionReduced, rovingId, namedIds, litIds,
+    size, camera, pan, dots, names, lines, graph, motionReduced, rovingId, namedIds, litIds, dotPixels,
     zoomBy, panBy, wheel, dotClick, pointerDown, pointerMove, pointerUp, clickCapture, focus, focusIn, focusOut, keyDown, keyUp, hover,
   }
 }

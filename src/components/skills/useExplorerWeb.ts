@@ -30,6 +30,8 @@ export interface ExplorerWebOptions {
   /** Runs a task when the main thread is idle; the explorer cancels what is left when it goes. */
   whenIdle: (run: () => void) => void
   map: Readonly<Ref<HTMLElement | undefined>>
+  /** The layers the pan moves: the explorer's canvas and its names layer. */
+  layers: () => readonly (Element | null | undefined)[]
 }
 
 /**
@@ -40,7 +42,7 @@ export interface ExplorerWebOptions {
  * event, so the explorer delegates to it once per handler. Everything the Web
  * graph reads is empty outside Web, so the other views never pay for it.
  */
-export function useExplorerWeb({ input: source, update, dragged, reset: resetOwner, whenIdle, map }: ExplorerWebOptions) {
+export function useExplorerWeb({ input: source, update, dragged, reset: resetOwner, whenIdle, map, layers }: ExplorerWebOptions) {
   // Read once per change of the explorer's state, never once per dot or per frame.
   const current = computed(source)
   const input = (): ExplorerWebInput => current.value
@@ -88,28 +90,29 @@ export function useExplorerWeb({ input: source, update, dragged, reset: resetOwn
       if (!input().webPositions) ownDragged.value = { model: input().model, positions: next }
       dragged(next)
     },
-  }, computed(() => active.value ? map.value : undefined))
+  }, computed(() => active.value ? map.value : undefined), () => active.value ? layers() : [])
 
   const dotById = computed(() => new Map(graph.dots.value.map(dot => [dot.id, dot])))
   function dot(node: AtlasNode): WebDot | undefined { return active.value ? dotById.value.get(node.skill.id) : undefined }
   /** The nodes drawn in Web, in model order; null outside Web. */
   const nodes = computed(() => active.value ? graph.dots.value.map(dot => dot.node) : null)
-  /** Where each node's element sits on the canvas, in screen pixels; null outside Web. */
-  const nodeBoxes = computed(() => {
-    if (!active.value) return null
-    const boxes = new Map<string, NodeBox>()
-    for (const dot of graph.dots.value) boxes.set(dot.id, { x: dot.x - dot.hit / 2, y: dot.y - dot.hit / 2, width: dot.hit, height: dot.hit })
-    return boxes
-  })
+  /**
+   * Node boxes for the canvas attributes; empty in Web, where `useWebGraph`
+   * writes each node's box itself, so a pan or zoom renders no node. Null
+   * outside Web.
+   */
+  const NO_BOXES: ReadonlyMap<string, NodeBox> = new Map()
+  const nodeBoxes = computed(() => active.value ? NO_BOXES : null)
   /** Web draws in screen pixels: one canvas unit per pixel of the map. Null outside Web. */
   const canvasBox = computed(() => {
     if (!active.value) return null
     const { width, height } = graph.size.value
     return { viewBox: `0 0 ${width} ${height}`, width, height }
   })
-  // The lines and zoom tools follow every pan and zoom. Read through getters
+  // The lines, names and zoom tools follow the camera. Read through getters
   // by layers of their own, so a camera move re-renders them, not the explorer.
   const lineLayer = { get items() { return active.value ? [graph.lines.value] : [] } }
+  const nameLayer = { get items() { return active.value ? [graph.names.value] : [] } }
   const zoomLayer = { get items() {
     if (!active.value) return []
     const zoom = graph.camera.value.zoom
@@ -218,7 +221,7 @@ export function useExplorerWeb({ input: source, update, dragged, reset: resetOwn
   function pan(dx: number, dy: number): void { graph.panBy(dx, dy) }
 
   return {
-    active, narrowed, nodes, nodeBoxes, canvasBox, dot, lineLayer, zoomLayer, withPendingCamera,
+    active, narrowed, nodes, nodeBoxes, canvasBox, dot, lineLayer, nameLayer, zoomLayer, withPendingCamera,
     select, focusField, allFields, narrow, depthPatch, fit, reset, zoom, pan,
     pointerDown, pointerMove, pointerEnd, click, keyDown, keyUp, focusIn, focusOut, wheel, hover,
   }

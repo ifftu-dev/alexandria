@@ -1,9 +1,12 @@
 <script setup lang="ts">
 /**
- * The Web graph's lines as an SVG group, in screen pixels: thin neutral
- * prerequisite lines with arrowheads at the dependent, and dotted relation
- * lines. A group, so it sits in the Web graph's own SVG or in the explorer's
- * canvas alike. Empty paths are not drawn.
+ * The Web graph's lines as an SVG group: thin neutral prerequisite lines
+ * with arrowheads at the dependent, and dotted relation lines. Paths are in
+ * layout units; `useWebGraph` scales the group by the zoom and the strokes
+ * do not scale, so lines keep their width on screen and a zoom rebuilds no
+ * path.
+ * A group, so it sits in the Web graph's own SVG or in the explorer's canvas
+ * alike, at layer point 0, 0. Empty paths are not drawn.
  */
 import type { WebLines } from './useWebGraph'
 
@@ -22,8 +25,8 @@ const EMPHASES = ['faded', 'plain', 'lit'] as const
 </template>
 
 <style scoped>
-.web-lines { pointer-events: none; }
-.web-line, .web-relation { fill: none; stroke: var(--app-muted-foreground); stroke-width: 1; opacity: .45; transition: opacity var(--transition-base); }
+.web-lines { pointer-events: none; transform-box: view-box; transform-origin: 0 0; }
+.web-line, .web-relation { vector-effect: non-scaling-stroke; fill: none; stroke: var(--app-muted-foreground); stroke-width: 1; opacity: .45; transition: opacity var(--transition-base); }
 .web-relation { stroke-dasharray: 2 3; stroke-linecap: round; }
 .web-head { fill: var(--app-muted-foreground); opacity: .45; transition: opacity var(--transition-base); }
 .web-line.is-lit, .web-relation.is-lit { stroke: var(--app-foreground); stroke-width: 1.5; opacity: .8; }

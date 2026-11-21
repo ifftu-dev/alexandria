@@ -40,7 +40,7 @@ function dot(view: VueWrapper, name: string) {
 }
 const shown = (view: VueWrapper) => new Set(dots(view).map(item => item.attributes('data-skill')!))
 /** Dots whose name shows under them. */
-const named = (view: VueWrapper) => dots(view).filter(item => item.text() !== '').length
+const named = (view: VueWrapper) => view.findAll('.web-name').length
 const places = (view: VueWrapper) => dots(view).map(item => `${item.attributes('data-skill')} ${item.attributes('style')}`)
 const faded = (view: VueWrapper) => dots(view).filter(item => item.find('.is-faded').exists()).map(item => item.attributes('data-skill'))
 /** Line segments drawn by the paths matching a selector: each starts with a move. */

@@ -786,7 +786,7 @@ describe('Web view', () => {
   }
   const skillOf = (item: { element: Element }) => item.element.closest('[data-skill]')?.getAttribute('data-skill')
   const fadedSkills = (wrapper: VueWrapper) => wrapper.findAll('.map-node').filter(item => item.find('.web-skin.is-faded').exists()).map(skillOf).sort()
-  const namedSkills = (wrapper: VueWrapper) => wrapper.findAll('.map-node').filter(item => item.find('.web-name').exists()).map(skillOf).sort()
+  const namedSkills = (wrapper: VueWrapper) => wrapper.findAll('.web-name-box').map(item => item.attributes('data-name-for')).sort()
   const shownSkills = (wrapper: VueWrapper) => wrapper.findAll('.map-node').map(skillOf).sort()
 
   it('draws every skill as a dot on the same node elements, named as in the other views, behind one Tab stop, and keeps the selection across every switch', async () => {
@@ -1028,7 +1028,8 @@ describe('Web view', () => {
     const map = wrapper.get('.atlas-map').element
     const cameras = () => (wrapper.emitted('update:view') ?? []).map(([next]) => (next as AtlasViewState).webCamera)
     const before = cameras().length
-    const place = () => wrapper.get('[data-skill="a"]').attributes('x')
+    // The pan moves the canvas, not the nodes: its transform carries the camera.
+    const place = () => wrapper.get('.atlas-canvas').attributes('style')?.match(/translate\(([-\d.]+)px/)?.[1]
     const start = place()
     for (const [name, x] of [['pointerdown', 400], ['pointermove', 420], ['pointermove', 460]] as const) {
       const event = new MouseEvent(name, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: 5 })

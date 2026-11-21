@@ -10,6 +10,7 @@ import AtlasMapTools from './AtlasMapTools.vue'
 import { useExplorerWeb } from './useExplorerWeb'
 import WebGraphDot from './WebGraphDot.vue'
 import WebGraphLines from './WebGraphLines.vue'
+import WebGraphNames from './WebGraphNames.vue'
 import type { WebPoint } from '@/utils/webGeometry'
 import { animateMotion, motionDuration, useMotion } from '@/composables/useMotion'
 import type { SkillGraphView } from '@/composables/useSkillGraphView'
@@ -251,6 +252,8 @@ const canvasBox = computed(() => {
 const canvas = ref<SVGSVGElement>()
 /** Moves the canvas so the camera's view fills the screen. Set directly, so no render is involved. */
 function placeCanvas(at: AtlasCamera): void {
+  // The Web view moves the canvas itself (useWebGraph).
+  if (webMode.value) return
   if (!detailedMode.value) { if (canvas.value) canvas.value.style.transform = ''; return }
   const screen = rectAround(at, width.value, height), pad = canvasPad.value
   if (canvas.value) canvas.value.style.transform = `translate3d(${-(screen.left + pad.x) * at.zoom}px, ${-(screen.top + pad.y) * at.zoom}px, 0)`
@@ -318,6 +321,8 @@ const bloomMatches = computed(() => matches.value.filter(bloomMatch))
 function bloomMatch(node: AtlasNode): boolean { return detailedMode.value && bloomEmphasis.value !== null && node.earnedBloom?.rank === bloomEmphasis.value }
 const matchIds = computed(() => new Set(matches.value.map(node => node.skill.id)))
 const mapElement = ref<HTMLElement>()
+/** The Web view's names, above the canvas; the pan moves it with the canvas. */
+const webNames = ref<HTMLElement>()
 // Web: the same node elements placed by the Web graph's geometry and wearing
 // its dot skin. The adapter holds every Web-only branch and the camera a
 // gesture moves; each handler below delegates to it once.
@@ -325,6 +330,7 @@ const web = useExplorerWeb({
   input: () => ({ model: props.model, view: props.view, viewMode: props.viewMode, reducedMotion: props.reducedMotion === true,
     webPositions: props.webPositions, neighborhoodIds: neighborhoodIds.value, matchIds: matchIds.value, searching: query.value !== '' }),
   update, dragged: positions => emit('web-drag', positions), reset: () => emit('web-reset'), whenIdle, map: mapElement,
+  layers: () => [canvas.value, webNames.value],
 })
 function setDepth(event: Event): void {
   const value = event.target instanceof HTMLSelectElement ? Number(event.target.value) : null
@@ -733,7 +739,7 @@ function setBloom(event: Event): void {
                       <template v-if="simple">
                         <span class="node-disc" aria-hidden="true">{{ node.status === 'earned' && node.earnedBloom ? node.earnedBloom.rank + 1 : '' }}</span><span class="node-label" :class="{ 'is-label-quiet': labelQuiet(node) }" dir="auto">{{ node.skill.name }}</span>
                       </template>
-                      <WebGraphDot v-else-if="webMode && web.dot(node)" :state="web.dot(node)!.state" :size="web.dot(node)!.size" :name="node.skill.name" :labelled="web.dot(node)!.labelled" :selected="web.dot(node)!.selected" :faded="web.dot(node)!.faded" :place="web.dot(node)!.namePlace" :offset="web.dot(node)!.nameOffset" />
+                      <WebGraphDot v-else-if="webMode && web.dot(node)" :state="web.dot(node)!.state" :selected="web.dot(node)!.selected" :faded="web.dot(node)!.faded" />
                       <template v-else>
                         <span class="skill-name" dir="auto">{{ node.skill.name }}</span><span class="node-evidence"><span v-if="node.status === 'earned'" aria-hidden="true">✓</span><span v-else-if="node.readyNext" aria-hidden="true">◎</span><span v-else aria-hidden="true">○</span><span>{{ nodeText(node).evidence }}</span></span>
                       </template>
@@ -741,6 +747,7 @@ function setBloom(event: Event): void {
                   </foreignObject>
                 </AtlasNodeLayer>
               </svg>
+              <div v-if="webMode" ref="webNames" class="atlas-web-names"><AtlasNodeLayer v-slot="{ items }" :source="web.nameLayer"><WebGraphNames v-for="names in items" :key="0" :names="names" /></AtlasNodeLayer></div>
               <div ref="grabCover" class="atlas-grab-cover" hidden />
             </div>
             <!-- Web zoom follows every gesture, so its tools are a layer of their own, over the canvas corner. -->
@@ -909,7 +916,10 @@ function setBloom(event: Event): void {
 .map-node:hover .node-label, .map-node:focus-visible .node-label { opacity: 1; }
 /* Web: the same node elements wear a dot skin, placed in screen pixels on a still canvas; the Web graph takes every gesture. */
 .atlas-map.is-web { height: min(560px, 64vh); touch-action: none; background-image: none; }
-.atlas-map.is-web .map-node-box { overflow: visible; }
+/* A Web node's box is placed and sized by useWebGraph; it lets the pointer through around the dot's button. */
+.atlas-map.is-web .map-node-box { overflow: visible; pointer-events: none; }
+.atlas-map.is-web .map-node { pointer-events: auto; }
+.atlas-web-names { position: absolute; top: 0; left: 0; width: 0; height: 0; pointer-events: none; }
 .atlas .atlas-map.is-web .map-node { display: grid; place-items: center; box-sizing: border-box; width: 100%; height: 100%; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; box-shadow: none; overflow: visible; }
 .atlas .atlas-map.is-web .map-node:focus-visible { outline: 3px solid var(--app-ring); outline-offset: 2px; }
 /* Web chrome: compact rows, so the graph starts high on the screen. */

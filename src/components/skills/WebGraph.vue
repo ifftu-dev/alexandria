@@ -9,25 +9,27 @@
  *
  * How the work is split, so the sidebar and the explorer cannot drift apart:
  * - `useWebGraph` (beside this file) holds all geometry, emphasis and
- *   interaction: screen positions and dot sizes, the lit and named sets,
- *   line paths, the camera and fit, roving focus, drag with its live run,
- *   pan, wheel and pinch. It takes the same inputs as this component's props
- *   and a root element whose descendants carry `data-skill`.
- * - `WebGraphDot` is the Web skin of one skill (dot and name); `WebGraphLines`
- *   is the lines as an SVG group. Neither is a control.
- * - This component assembles them for the sidebar: an SVG of lines under one
- *   button per dot.
+ *   interaction: layout positions and radii, the lit and named sets, line
+ *   paths, name places, the camera and fit, roving focus, drag with its live
+ *   run, pan, wheel and pinch. It takes the same inputs as this component's
+ *   props, a root element whose descendants carry `data-skill`, and the
+ *   layers it moves with the pan; it places and sizes the dots for the zoom.
+ * - `WebGraphDot` is the Web skin of one skill; `WebGraphLines` is the lines
+ *   as an SVG group; `WebGraphNames` is the names. None is a control.
+ * - This component assembles them for the sidebar: one layer holding an SVG
+ *   of lines, one button per dot (placed and sized by `useWebGraph`) and
+ *   the names.
  * - The explorer (ticket 05) does not mount this component, because its node
  *   elements must stay the same DOM nodes across Web, Simple and Detailed so
  *   they can travel and keep focus. In Web its adapter (`useExplorerWeb`)
- *   calls `useWebGraph` with the explorer's map element as root; the
- *   explorer places its existing node elements at each dot's `x`, `y` and
- *   `hit` (screen pixels), renders `WebGraphDot` inside them in
- *   place of the Simple or Detailed skin, binds the same attributes and
+ *   calls `useWebGraph` with the explorer's map element as root and its
+ *   canvas and names layer as layers; `useWebGraph` places and sizes the
+ *   explorer's existing node elements, which render `WebGraphDot` in place
+ *   of the Simple or Detailed skin and bind the same attributes and
  *   handlers as the template below (`data-skill`, `tabindex` from `roving`,
  *   `aria-pressed`, click, pointerenter and pointerleave on the node; key,
- *   focus, pointer, click-capture and wheel handlers on the root), and draws
- *   `WebGraphLines` in its canvas. `zoomBy` and `panBy` serve its zoom and pan
+ *   focus, pointer, click-capture and wheel handlers on the root), draws
+ *   `WebGraphLines` in its canvas and `WebGraphNames` in its names layer. `zoomBy` and `panBy` serve its zoom and pan
  *   buttons (`AtlasMapTools`); a null camera fits what is shown.
  * - The memoised Web graph and layout of a model come from `webLayoutEntry`
  *   (`@/utils/webGeometry`), computed once per model for every surface.
@@ -47,6 +49,7 @@ import { webLayoutEntry, type WebPoint } from '@/utils/webGeometry'
 import { useWebGraph } from './useWebGraph'
 import WebGraphDot from './WebGraphDot.vue'
 import WebGraphLines from './WebGraphLines.vue'
+import WebGraphNames from './WebGraphNames.vue'
 
 const props = withDefaults(defineProps<{
   model: AtlasModel
@@ -75,6 +78,7 @@ const emit = defineEmits<{
 const { t, locale } = useI18n()
 const present = createAtlasPresenter(t)
 const root = ref<HTMLElement>()
+const layer = ref<HTMLElement>()
 const web = useWebGraph(() => ({
   model: props.model, graph: webLayoutEntry(props.model).graph, positions: props.positions, selectedId: props.selectedId, focusIds: props.focusIds, matchIds: props.matchIds,
   shownIds: props.shownIds, fitIds: props.fitIds, narrowed: props.narrowed, names: props.names, arrows: props.arrows, related: props.related,
@@ -82,8 +86,8 @@ const web = useWebGraph(() => ({
 }), {
   select: id => emit('select', id), active: id => emit('active', id),
   camera: camera => emit('update:camera', camera), drag: positions => emit('drag', positions),
-}, root)
-const { dots, lines, size } = web
+}, root, () => [layer.value])
+const { dots, names, lines } = web
 /** Accessible names, once per model and language: a pan or zoom only looks them up. */
 const accessibleNames = computed(() => {
   void locale.value
@@ -93,17 +97,23 @@ const accessibleNames = computed(() => {
 
 <template>
   <div ref="root" class="web-graph" :class="{ 'is-compact': compact }" role="group" :aria-label="label" :aria-describedby="describedBy" @keydown="web.keyDown" @keyup="web.keyUp" @focusin="web.focusIn" @focusout="web.focusOut" @pointerdown="web.pointerDown" @pointermove="web.pointerMove" @pointerup="web.pointerUp" @pointercancel="web.pointerUp" @lostpointercapture="web.pointerUp" @click.capture="web.clickCapture" @wheel="web.wheel">
-    <svg class="web-canvas" :width="size.width" :height="size.height" :viewBox="`0 0 ${size.width} ${size.height}`" aria-hidden="true"><WebGraphLines :lines="lines" :compact="compact" /></svg>
-    <button v-for="dot in dots" :key="dot.id" class="web-node" type="button" :data-skill="dot.id" :tabindex="dot.roving ? 0 : -1" :aria-label="accessibleNames.get(dot.id)" :aria-pressed="dot.selected" :style="{ '--field': dot.color, '--hit': `${dot.hit}px`, transform: `translate(${dot.x - dot.hit / 2}px, ${dot.y - dot.hit / 2}px)` }" @click="web.dotClick(dot.id)" @pointerenter="web.hover(dot.id)" @pointerleave="web.hover(null)">
-      <WebGraphDot :state="dot.state" :size="dot.size" :name="dot.node.skill.name" :labelled="dot.labelled" :selected="dot.selected" :faded="dot.faded" :compact="compact" :place="dot.namePlace" :offset="dot.nameOffset" />
-    </button>
+    <div ref="layer" class="web-layer">
+      <svg class="web-canvas" width="1" height="1" aria-hidden="true"><WebGraphLines :lines="lines" :compact="compact" /></svg>
+      <button v-for="dot in dots" :key="dot.id" class="web-node" type="button" :data-skill="dot.id" :tabindex="dot.roving ? 0 : -1" :aria-label="accessibleNames.get(dot.id)" :aria-pressed="dot.selected" :style="{ '--field': dot.color }" @click="web.dotClick(dot.id)" @pointerenter="web.hover(dot.id)" @pointerleave="web.hover(null)">
+        <WebGraphDot :state="dot.state" :selected="dot.selected" :faded="dot.faded" :compact="compact" />
+      </button>
+      <WebGraphNames :names="names" :compact="compact" />
+    </div>
   </div>
 </template>
 
 <style scoped>
 .web-graph { position: relative; width: 100%; height: var(--web-graph-height, 520px); overflow: hidden; touch-action: none; user-select: none; cursor: grab; background: var(--app-background); }
 .web-graph.is-compact { height: var(--web-graph-height, 200px); }
+/* Moved by the pan (useWebGraph sets its transform); point 0, 0 of the layout sits at its origin. */
+.web-layer { position: absolute; top: 0; left: 0; width: 0; height: 0; }
 .web-canvas { position: absolute; top: 0; left: 0; display: block; overflow: visible; }
-.web-node { position: absolute; top: 0; left: 0; display: grid; place-items: center; width: var(--hit); height: var(--hit); padding: 0; margin: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+/* Placed and sized by useWebGraph (transform, width and height). */
+.web-node { position: absolute; top: 0; left: 0; display: grid; place-items: center; padding: 0; margin: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
 .web-node:focus-visible { outline: 3px solid var(--app-ring); outline-offset: 2px; }
 </style>

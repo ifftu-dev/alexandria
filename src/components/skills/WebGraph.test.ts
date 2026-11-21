@@ -192,13 +192,16 @@ describe('Web graph', () => {
     expect(segments(wrapper, '.web-line')).toBe(2)
     expect(segments(wrapper, '.web-relation')).toBe(1)
     expect(segments(wrapper, '.web-head')).toBe(0)
-    // Edge to edge: the Algebra–Bridges line leaves Algebra's dot, not its centre (400 - 50, 260 - 50 on screen).
-    const first = wrapper.get('.web-line').attributes('d')!.match(/M ([\d.]+) ([\d.]+)/)!
-    expect(Number(first[1])).toBeGreaterThan(352)
-    expect(Number(first[2])).toBe(210)
+    // Lines run between dot centres in layout units, under the dots: the Algebra–Bridges line starts at Algebra (0, 0).
+    const first = wrapper.get('.web-line').attributes('d')!.match(/M ([-\d.]+) ([-\d.]+)/)!
+    expect([Number(first[1]), Number(first[2])]).toEqual([0, 0])
     await wrapper.setProps({ selectedId: 'b' })
     expect(segments(wrapper, '.web-line.is-lit')).toBe(2)
     expect(segments(wrapper, '.web-head.is-lit')).toBe(2)
+    // An arrowhead's tip sits at the dependent dot's edge: Bridges (100, 0) builds on Algebra, so its tip lies short of 100.
+    const tip = wrapper.get('.web-head.is-lit').attributes('d')!.match(/M ([-\d.]+) ([-\d.]+)/)!
+    expect(Number(tip[1])).toBeLessThan(100)
+    expect(Number(tip[1])).toBeGreaterThan(90)
     expect(segments(wrapper, '.web-head:not(.is-lit)')).toBe(0)
     await wrapper.setProps({ selectedId: null, arrows: true })
     expect(segments(wrapper, '.web-head')).toBe(2)
@@ -289,14 +292,17 @@ describe('Web graph', () => {
 
   it('in compact form zooms with a plain wheel, and with no camera fits what is shown', async () => {
     const wrapper = setup({ compact: true, camera: null })
+    await nextTick()
     const canvas = wrapper.get('[role="group"]').element
-    // Fitted: every dot inside the compact box.
+    // Fitted: every dot's centre inside the compact box, its place in the layer plus the layer's pan.
+    const translate = (style: string | undefined) => (style?.match(/translate\(([-\d.]+)px, ([-\d.]+)px\)/) ?? []).slice(1).map(Number)
+    const [panX, panY] = translate(wrapper.get('.web-layer').attributes('style'))
     for (const item of dots(wrapper)) {
-      const [x, y] = (item.attributes('style')!.match(/translate\(([-\d.]+)px, ([-\d.]+)px\)/) ?? []).slice(1).map(Number)
-      expect(x).toBeGreaterThanOrEqual(0)
-      expect(y).toBeGreaterThanOrEqual(0)
-      expect(x).toBeLessThanOrEqual(260)
-      expect(y).toBeLessThanOrEqual(200)
+      const [x, y] = translate(item.attributes('style')), half = Number.parseFloat((item.element as HTMLElement).style.width) / 2
+      expect(panX! + x! + half).toBeGreaterThanOrEqual(0)
+      expect(panY! + y! + half).toBeGreaterThanOrEqual(0)
+      expect(panX! + x! + half).toBeLessThanOrEqual(260)
+      expect(panY! + y! + half).toBeLessThanOrEqual(200)
     }
     const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 100, clientX: 130, clientY: 100 })
     canvas.dispatchEvent(event)
