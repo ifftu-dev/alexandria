@@ -50,6 +50,12 @@ describe('RoleIntegrityPolicy', () => {
     expect(wrapper.text()).toContain('sentinel.trust.rungHint.probed')
   })
 
+  it('states that candidates\' devices hold the answers', async () => {
+    const wrapper = render(empty)
+    await flushPromises()
+    expect(wrapper.get('[data-testid="policy-custody"]').text()).toContain('dashboard.sponsor.roleModal.custodyDevice')
+  })
+
   it('emits each choice as it changes', async () => {
     const wrapper = render(empty)
     await flushPromises()

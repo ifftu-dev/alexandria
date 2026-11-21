@@ -1,8 +1,9 @@
 <script setup lang="ts">
 // Follow-up probes after an attempt is submitted, while monitoring is still
-// on. The backend picks the probes and grades them; this shows each one,
-// starts its time box by rendering it, and sends the served positions the
-// learner chose plus the time to their first input. Skipping or running out
+// on. The backend picks the probes and grades them; this states each one's
+// time limit, starts its time box by rendering it once the learner presses
+// Start, and sends the served positions the learner chose plus the time to
+// their first input. Skipping or running out
 // of time never counts against the learner, and a probe step that fails is
 // never allowed to block grading: the component always emits `done`.
 import { computed, onMounted, onUnmounted, ref } from 'vue'
@@ -19,6 +20,8 @@ const probes = ref<ServedProbe[]>([])
 const index = ref(0)
 const selected = ref<Set<number>>(new Set())
 const remainingMs = ref<number | null>(null)
+/** The current probe's time limit is stated and its clock not started. */
+const ready = ref(false)
 const busy = ref(false)
 /** Probes are being prepared; a generated one waits on a model. */
 const starting = ref(true)
@@ -38,6 +41,7 @@ const prompt = computed(() => String(current.value?.content.prompt ?? ''))
 const multiple = computed(() => current.value?.content.kind !== 'single')
 const complement = computed(() => current.value?.content.probe === 'complement')
 const secondsLeft = computed(() => Math.ceil((remainingMs.value ?? 0) / 1000))
+const limitSeconds = computed(() => Math.ceil((current.value?.time_box_ms ?? 0) / 1000))
 
 function stopTimer() {
   if (timer !== null) clearInterval(timer)
@@ -63,11 +67,25 @@ async function show() {
   selected.value = new Set()
   firstInputMs = null
   remainingMs.value = null
+  ready.value = false
   // This runner renders choice items only; a probe it cannot show is left
   // for the backend to record as not shown.
   while (current.value && current.value.item_kind !== 'mcq') index.value++
   const probe = current.value
   if (!probe || disposed) return finish()
+  // A probe whose clock already runs (a reload) resumes at once; otherwise
+  // its time limit is stated first and the clock waits for Start.
+  if (probe.remaining_ms === null) {
+    ready.value = true
+    return
+  }
+  await begin()
+}
+
+async function begin() {
+  const probe = current.value
+  if (!probe || disposed) return
+  ready.value = false
   try {
     const rendered = await renderProbe(probe.id)
     if (disposed) return
@@ -151,26 +169,31 @@ onUnmounted(() => {
     </div>
     <p class="text-sm text-muted-foreground">{{ $t('learn.assessment.probeIntro') }}</p>
     <div class="rounded-xl border border-border p-4">
-      <p class="font-medium text-foreground">{{ prompt }}</p>
-      <p class="mb-3 mt-1 text-xs text-muted-foreground">
-        {{ complement
-          ? $t('learn.assessment.probeComplement')
-          : multiple ? $t('learn.assessment.chooseAll') : $t('learn.assessment.chooseOne') }}
+      <p v-if="ready" class="text-sm text-foreground" data-testid="probe-time-limit">
+        {{ $t('learn.assessment.probeTimeLimit', { seconds: limitSeconds }) }}
       </p>
-      <label
-        v-for="(opt, pi) in options"
-        :key="pi"
-        class="mb-1.5 flex items-center gap-3 rounded-lg border border-border p-2.5 text-sm"
-      >
-        <input
-          :type="multiple ? 'checkbox' : 'radio'"
-          :name="multiple ? undefined : `probe-${current.id}`"
-          :disabled="busy"
-          :checked="selected.has(pi)"
-          @change="toggle(pi)"
-        />
-        <span class="text-foreground">{{ opt }}</span>
-      </label>
+      <template v-else>
+        <p class="font-medium text-foreground">{{ prompt }}</p>
+        <p class="mb-3 mt-1 text-xs text-muted-foreground">
+          {{ complement
+            ? $t('learn.assessment.probeComplement')
+            : multiple ? $t('learn.assessment.chooseAll') : $t('learn.assessment.chooseOne') }}
+        </p>
+        <label
+          v-for="(opt, pi) in options"
+          :key="pi"
+          class="mb-1.5 flex items-center gap-3 rounded-lg border border-border p-2.5 text-sm"
+        >
+          <input
+            :type="multiple ? 'checkbox' : 'radio'"
+            :name="multiple ? undefined : `probe-${current.id}`"
+            :disabled="busy"
+            :checked="selected.has(pi)"
+            @change="toggle(pi)"
+          />
+          <span class="text-foreground">{{ opt }}</span>
+        </label>
+      </template>
     </div>
     <div class="flex items-center justify-between gap-3">
       <span v-if="remainingMs !== null" class="font-mono text-xs text-muted-foreground" role="timer">
@@ -178,7 +201,8 @@ onUnmounted(() => {
       </span>
       <div class="ms-auto flex gap-2">
         <AppButton variant="outline" :disabled="busy" @click="submitCurrent(false)">{{ $t('learn.assessment.probeSkip') }}</AppButton>
-        <AppButton :loading="busy" @click="submitCurrent(true)">{{ $t('learn.assessment.probeAnswer') }}</AppButton>
+        <AppButton v-if="ready" @click="begin()">{{ $t('learn.assessment.probeStart') }}</AppButton>
+        <AppButton v-else :loading="busy" @click="submitCurrent(true)">{{ $t('learn.assessment.probeAnswer') }}</AppButton>
       </div>
     </div>
   </div>

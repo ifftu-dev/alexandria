@@ -19,6 +19,10 @@
 //! The verification rungs form a ladder, `none` → `process` → `probed` →
 //! `consistent` → `live`: a session stands on the highest rung whose evidence
 //! holds along with that of every rung below it.
+//!
+//! Answer custody says who held an assessment's answers during the attempt:
+//! the candidate's `device`, or the `issuer` when the answers never left it
+//! (a hosted attempt). An assertion that states none reads as `device`.
 
 use serde::{Deserialize, Serialize};
 
@@ -213,5 +217,40 @@ impl VerificationRung {
 
     pub fn parse(rung: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|r| r.as_str() == rung)
+    }
+}
+
+/// Who held an assessment's answers during the attempt. Ordered
+/// `device` < `issuer`: a policy that accepts `device` custody is met by
+/// either, one that requires `issuer` only by `issuer`.
+#[derive(
+    Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum AnswerCustody {
+    /// The candidate's device held the items and their answers: a bundled
+    /// bank, a bank in a profile, a private course or a sponsor's own
+    /// device. Whatever the device reports is its own word.
+    #[default]
+    Device,
+    /// The answers never left the issuer: it delivered one item at a time,
+    /// graded and timed the attempt itself. Only an issuer other than the
+    /// candidate can state it.
+    Issuer,
+}
+
+impl AnswerCustody {
+    /// `device` first.
+    pub const ALL: [AnswerCustody; 2] = [AnswerCustody::Device, AnswerCustody::Issuer];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AnswerCustody::Device => "device",
+            AnswerCustody::Issuer => "issuer",
+        }
+    }
+
+    pub fn parse(custody: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|c| c.as_str() == custody)
     }
 }

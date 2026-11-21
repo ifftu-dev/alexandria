@@ -1259,7 +1259,11 @@ export interface IntegritySession {
   warning_count: number
   started_at: string
   ended_at: string | null
-  /** `local`, or `device_attested` once a platform attestation verified. */
+  /**
+   * `local`; `device_attested` once this device's platform attestation
+   * verified; `companion_attested` once a paired phone's did (a genuine phone
+   * was present, nothing is claimed about this computer).
+   */
   assurance_level: string
   /** Items whose first visit arrived with response-process timing. */
   response_items: number
@@ -2476,7 +2480,24 @@ export interface IntegrityAssertion {
   cameraCoverage?: number | null
   /** Outcome of the follow-up probes, when any probe step ran. */
   probe?: IntegrityProbeSummary | null
+  /**
+   * Who held the answers. Absent from credentials issued before the field
+   * existed, which read as 'device'. 'issuer' on a self-issued credential is
+   * invalid.
+   */
+  answerCustody?: AnswerCustody | null
 }
+
+/** Mirrors `alexandria_verify::integrity::AnswerCustody`. */
+export type AnswerCustody = 'device' | 'issuer'
+
+/** Mirrors `alexandria_verify::custody::CustodyDefect`. */
+export type CustodyDefect =
+  | 'issuer_custody_self_issued'
+  | 'issuer_custody_unproven'
+  | 'hosted_attempt_self_issued'
+  | 'hosted_attempt_invalid'
+  | 'hosted_attempt_custody_mismatch'
 
 /** The probe step of an integrity session, as a credential states it. */
 export interface IntegrityProbeSummary {
@@ -2504,6 +2525,9 @@ export interface VerifiableCredential {
   integrity?: IntegrityAssertion | null
   /** VC 2.0 `relatedResource`; names the coverage statement when `integrity` does. */
   relatedResource?: RelatedResource[]
+  /** VC 2.0 `evidence`: attestation, assessed-credential or hosted-attempt
+   *  entries, read with guards (`utils/hostedEvidence`). */
+  evidence?: unknown[]
   proof: Proof
 }
 
@@ -2536,7 +2560,7 @@ export interface IssuancePolicy {
   max_critical?: number | null
   max_warning?: number | null
   require_clean?: boolean
-  required_assurance_level?: string | null
+  required_assurance_level?: VerifiedAssuranceLevel | null
   /**
    * Probe policy for attempts made for this role; overrides the assessment's
    * unless 'none'. At issuance anything but 'none' requires the probe step to
@@ -2555,6 +2579,8 @@ export interface IssuancePolicy {
   min_trust_profile?: TrustProfile | null
   /** Minimum verification rung, judged at issuance. */
   min_verification_rung?: VerificationRung | null
+  /** Required answer custody: 'issuer' is met only by 'issuer'; 'device' accepts either. */
+  required_answer_custody?: AnswerCustody | null
 }
 
 export interface IssueCredentialRequest {
@@ -2589,7 +2615,7 @@ export interface RoleAssessment {
   course_id?: string | null
   skill_ids: string[]
   issuance_policy?: IssuancePolicy | null
-  required_assurance_level?: string | null
+  required_assurance_level?: VerifiedAssuranceLevel | null
   status: string
   created_at: string
   updated_at: string
@@ -2652,7 +2678,7 @@ export interface CreateRoleAssessmentRequest {
   course_id?: string | null
   skill_ids?: string[]
   issuance_policy?: IssuancePolicy | null
-  required_assurance_level?: string | null
+  required_assurance_level?: VerifiedAssuranceLevel | null
 }
 
 export interface VerificationResult {
@@ -2670,11 +2696,16 @@ export interface VerificationResult {
   superseded: boolean
   /** A `relatedResource` names a coverage statement other than the assertion's; omitted while false. */
   coverageStatementMismatch?: boolean
+  /** What is wrong with the credential's answer custody; any one rejects. Omitted while empty. */
+  custodyDefects?: CustodyDefect[]
   verificationTime: string
   pendingReasons: VerificationPendingReason[]
   /** What the credential's device attestation evidence proved. */
   attestation: AttestationOutcome
-  /** `device_attested` only for verified credential-bound evidence. */
+  /**
+   * `device_attested` only for verified credential-bound evidence from the
+   * attempt's own device; `companion_attested` when a paired phone produced it.
+   */
   verifiedAssuranceLevel: VerifiedAssuranceLevel
   acceptanceDecision: AcceptanceDecision
 }
@@ -2701,13 +2732,23 @@ export type AttestationInvalidReason =
 /** Mirrors `alexandria_verify::attestation::AttestationOutcome`. */
 export type AttestationOutcome =
   | { outcome: 'not_supplied' }
-  | { outcome: 'verified_credential_bound'; platform: AttestationPlatform }
-  | { outcome: 'verified_session_bound'; platform: AttestationPlatform }
+  | {
+      outcome: 'verified_credential_bound'
+      platform: AttestationPlatform
+      /** A paired phone produced the evidence for a desktop session; omitted while false. */
+      companion?: boolean
+    }
+  | {
+      outcome: 'verified_session_bound'
+      platform: AttestationPlatform
+      /** A paired phone produced the evidence for a desktop session; omitted while false. */
+      companion?: boolean
+    }
   | { outcome: 'unverifiable'; platform: AttestationPlatform }
   | { outcome: 'invalid'; reason: AttestationInvalidReason }
 
 /** Mirrors `alexandria_verify::attestation::VerifiedAssuranceLevel`. */
-export type VerifiedAssuranceLevel = 'local' | 'device_attested'
+export type VerifiedAssuranceLevel = 'local' | 'companion_attested' | 'device_attested'
 
 /** Mirrors `alexandria_verify::trust::TrustInvalidReason`. */
 export type TrustInvalidReason =
@@ -2723,6 +2764,11 @@ export type TrustInvalidReason =
   | 'integrity_anchor_missing'
   | 'type_not_allowed'
   | 'invalid_attestation'
+  | 'issuer_custody_self_issued'
+  | 'issuer_custody_unproven'
+  | 'hosted_attempt_self_issued'
+  | 'hosted_attempt_invalid'
+  | 'hosted_attempt_custody_mismatch'
 
 /** Mirrors `alexandria_verify::trust::EndorsementMismatch`. */
 export type EndorsementMismatch =
@@ -2786,7 +2832,10 @@ export type CredentialTrust =
 export type Provenance =
   | { kind: 'organisation'; name: string; domain: string }
   | { kind: 'device_attested'; platform: AttestationPlatform }
-  /** `attestation` says what the credential's evidence, if any, did prove. */
+  /**
+   * `attestation` says what the credential's evidence, if any, did prove; a
+   * paired phone's evidence verifies credential-bound with `companion` set.
+   */
   | { kind: 'self_reported'; attestation: AttestationOutcome }
 
 /** Mirrors `domain::credential_trust::SuspensionState`, read from the suspension list. */
@@ -3232,6 +3281,9 @@ export interface AttemptRoleTarget {
    *  learner is asked before the attempt whether their answers may leave the
    *  device for that. */
   generated_probes: boolean
+  /** The role requires `device_attested`: it is taken on a phone that attests
+   *  itself, and a desktop refuses to start it (`verified_device_required`). */
+  verified_device_required: boolean
 }
 
 /** One submitted answer: the served option positions the learner selected. */
@@ -3565,10 +3617,118 @@ export interface RequestAttemptTarget {
   attestation_required: boolean
 }
 
+// ── Hosted attempts (`hosted_attempt_*`) ──────────────────────────
+// An assessment request whose organisation holds the answers runs on its
+// hosted service. Mirrors `assessment::hosted::wire` and
+// `commands::hosted_attempt`.
+
+/** What the candidate sees and accepts before the first item. */
+export interface HostedTerms {
+  format: string
+  organisation: string
+  role: string
+  items: number
+  max_probes: number
+  /** `any` or `device_attested`. */
+  device_requirement: string
+  retakes: { limit: number; wait_days: number; abandoned_counts: boolean }
+  disconnect_grace_secs: number
+  retention_days: number
+  /** The consent text, in order. */
+  statements: string[]
+}
+
+export interface HostedTermsReply {
+  terms: HostedTerms
+  terms_digest: string
+  /** An attempt to resume. */
+  open_attempt: string | null
+  attempts_used: number
+  attempts_allowed: number
+  /** Set while a retake wait runs. */
+  next_attempt_at: string | null
+  can_open: boolean
+}
+
+/** One item, held in memory while shown and never stored. */
+/** The bundled plugin a hosted plugin item is shown in (`wire::PluginRef`). */
+export interface HostedPluginRef {
+  /** The plugin's `plugin_cid`. */
+  cid: string
+  /** The code the editor opens with. */
+  starter: string
+}
+
+export interface HostedItem {
+  seq: number
+  probe: boolean
+  /** `plugin`: shown in the bundled plugin `plugin` names, answered with its submission. */
+  kind: 'choice' | 'plugin'
+  /** A plugin item's prompt. */
+  question: string
+  /** Empty for a plugin item. */
+  options: string[]
+  select: 'one' | 'many' | 'submission'
+  time_limit_ms: number
+  sent_at: string
+  /** On the service's clock, which keeps running while disconnected. */
+  remaining_ms: number
+  plugin?: HostedPluginRef | null
+}
+
+export interface HostedAttemptState {
+  attempt: {
+    id: string
+    status: string
+    opened_at: string
+    items: number
+    answered: number
+    max_probes: number
+    requires_attested: boolean
+    ready_to_close: boolean
+  }
+  /** Null once every item is answered, and while a probe waits for Start. */
+  item: HostedItem | null
+  /** A probe is next: its limit, shown before Start; its text and clock
+   *  arrive with `hosted_attempt_start_probe`. */
+  pending_probe?: { time_limit_ms: number } | null
+}
+
+/** A refusal code in plain words (`assessment::hosted::refusal`). */
+export interface HostedRefusal {
+  code: string
+  message: string
+  retake_may_help: boolean
+}
+
+export type HostedIssuance =
+  | { state: 'issued'; credential_id: string; collected: string | null }
+  | { state: 'refused'; refusal: HostedRefusal }
+  | { state: 'held'; waiting_for: string }
+  | { state: 'none' }
+
+export interface HostedOutcome {
+  attempt_id: string
+  result: {
+    score: { correct: number; total: number; fraction: number }
+    probes: { max: number; asked: number; passed: number; failed: number; late: number; unavailable: number; probed: boolean }
+    flagged: boolean
+  }
+  issuance: HostedIssuance
+}
+
 /** What this device can contribute to a trust profile floor (`integrity_device_support`). */
 export interface DeviceSupport {
   platform_attestation: boolean
+  /** A phone can be paired (desktop builds). It is present and attested
+   *  during the session; it does not verify this computer. */
   companion_phone: boolean
+  /** Android phones can reach `device_attested` on this build; until then
+   *  only an iPhone can. */
+  android_attestation: boolean
+  /** This device can reach `device_attested`, so it can start an attempt
+   *  whose policy requires a verified device. */
+  verified_device: boolean
 }
 
 export interface InterviewInvite {

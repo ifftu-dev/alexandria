@@ -164,12 +164,27 @@ pub fn create_role_assessment_impl(
             _ => return Err(format!("invalid required_assurance_level: {level}")),
         }
     }
+    // Candidates take a role made here on their own devices, so their
+    // devices hold the answers: `device` custody is the only kind a role on
+    // this device can have, and it is stated in the policy rather than left
+    // to the missing-field default.
+    let mut policy = req.issuance_policy.clone().unwrap_or_default();
+    match policy.required_answer_custody {
+        Some(alexandria_verify::integrity::AnswerCustody::Issuer) => {
+            return Err(
+                "a role on this device cannot require issuer answer custody: candidates' \
+                 devices hold the answers here"
+                    .into(),
+            )
+        }
+        Some(alexandria_verify::integrity::AnswerCustody::Device) | None => {
+            policy.required_answer_custody =
+                Some(alexandria_verify::integrity::AnswerCustody::Device)
+        }
+    }
     let id = entity_id(&[&req.org_id, &req.role_title, now]);
     let skill_ids_json = serde_json::to_string(&req.skill_ids).map_err(|e| e.to_string())?;
-    let policy_json = match &req.issuance_policy {
-        Some(p) => Some(serde_json::to_string(p).map_err(|e| e.to_string())?),
-        None => None,
-    };
+    let policy_json = Some(serde_json::to_string(&policy).map_err(|e| e.to_string())?);
     conn.execute(
         "INSERT INTO role_assessments
             (id, org_id, role_title, job_description, course_id, skill_ids,
@@ -1191,6 +1206,126 @@ mod tests {
         assert!(create_role_assessment_impl(conn, &req, NOW).is_err());
     }
 
+    fn role_with_policy(
+        conn: &Connection,
+        title: &str,
+        policy: Option<IssuancePolicy>,
+    ) -> Result<RoleAssessment, String> {
+        let org = create_organization_impl(conn, "Acme", "stake_owner", None, NOW).unwrap();
+        create_role_assessment_impl(
+            conn,
+            &CreateRoleAssessmentRequest {
+                org_id: org.id,
+                role_title: title.into(),
+                job_description: None,
+                course_id: None,
+                skill_ids: vec![],
+                issuance_policy: policy,
+                required_assurance_level: None,
+            },
+            NOW,
+        )
+    }
+
+    #[test]
+    fn a_role_on_a_sponsors_device_requires_device_custody() {
+        use alexandria_verify::integrity::AnswerCustody;
+        let (db, ..) = setup();
+        let conn = db.conn();
+        // Candidates' devices hold the answers here, so that is the default.
+        let role = role_with_policy(conn, "Default", None).unwrap();
+        assert_eq!(
+            role.issuance_policy.and_then(|p| p.required_answer_custody),
+            Some(AnswerCustody::Device)
+        );
+        let role = role_with_policy(
+            conn,
+            "Bounded",
+            Some(IssuancePolicy {
+                min_integrity: Some(0.7),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        let policy = role.issuance_policy.unwrap();
+        assert_eq!(policy.required_answer_custody, Some(AnswerCustody::Device));
+        assert_eq!(policy.min_integrity, Some(0.7));
+
+        // Issuer custody needs answers that never left the issuer, which no
+        // role on this device can have.
+        let error = role_with_policy(
+            conn,
+            "Hosted",
+            Some(IssuancePolicy {
+                required_answer_custody: Some(AnswerCustody::Issuer),
+                ..Default::default()
+            }),
+        )
+        .unwrap_err();
+        assert!(error.contains("issuer"), "{error}");
+    }
+
+    #[test]
+    fn a_role_that_requires_live_issues_only_once_the_panel_marked_a_live_segment() {
+        use crate::credentials::fixtures::{assessed, scored_with_history, verified};
+        use crate::sentinel::scoring::VerificationRung;
+        let (db, key, owner, subject) = setup();
+        let conn = db.conn();
+        let role = role_with_policy(
+            conn,
+            "Live",
+            Some(IssuancePolicy {
+                min_verification_rung: Some(VerificationRung::Live),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE organizations SET did = ?1 WHERE id = ?2",
+            params![owner.0, role.org_id],
+        )
+        .unwrap();
+        // The subject's passed attempt for the role, whose response process
+        // was observed in full.
+        assessed(conn, "climb", false, 2, 2);
+        conn.execute(
+            "UPDATE assessment_attempts
+                SET subject_did = ?2, role_assessment_id = ?3, passed = 1, graded_at = ?4
+              WHERE integrity_session_id = ?1",
+            params!["climb", subject.0, role.id, NOW],
+        )
+        .unwrap();
+        let refused_at = |rung: &str| {
+            format!("issuance policy: verification rung '{rung}' does not meet the 'live' minimum")
+        };
+
+        let err = issue_on(conn, &key, &role.id, &subject, "climb").unwrap_err();
+        assert_eq!(err, refused_at("process"));
+        verified(conn, "climb", "probe", "authored", "satisfied");
+        let err = issue_on(conn, &key, &role.id, &subject, "climb").unwrap_err();
+        assert_eq!(err, refused_at("probed"));
+        scored_with_history(conn, "climb", 0.9, 6, 1.0);
+        let err = issue_on(conn, &key, &role.id, &subject, "climb").unwrap_err();
+        assert_eq!(err, refused_at("consistent"));
+
+        // The panel marks a live segment done: the recorded verification the
+        // interview flow writes (step `interview`, policy `panel`).
+        verified(
+            conn,
+            "climb",
+            crate::sentinel::verification::STEP_INTERVIEW,
+            crate::commands::hiring::LIVE_SEGMENT_POLICY,
+            "satisfied",
+        );
+        let vc = issue_on(conn, &key, &role.id, &subject, "climb").unwrap();
+        let integrity = vc.integrity.expect("integrity embedded");
+        assert_eq!(integrity.verification_rung.as_deref(), Some("live"));
+        assert_eq!(
+            integrity.answer_custody,
+            Some(alexandria_verify::integrity::AnswerCustody::Device)
+        );
+    }
+
     #[test]
     fn issue_role_credential_passes_gate_and_embeds_role() {
         let (db, key, _, subject) = setup();
@@ -1760,7 +1895,8 @@ mod tests {
         assert_eq!(
             entry.attestation,
             AttestationOutcome::VerifiedCredentialBound {
-                platform: Platform::Ios
+                platform: Platform::Ios,
+                companion: false,
             }
         );
         assert_eq!(

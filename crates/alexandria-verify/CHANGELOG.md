@@ -1,13 +1,35 @@
 # Changelog
 
-## 0.8.0 (unreleased)
+## 0.9.0 (unreleased)
 
-Learning records: a learner can share their learning records with an
-organisation under an access grant, and can export their activity log with a
-signature anyone can check.
+Review fixes to the unreleased 0.8.0 (never published; read its notes below
+as part of this release): `issuer` answer custody is no longer taken on the
+assertion's word.
+
+It also carries learning records: a learner can share their learning
+records with an organisation under an access grant, and can export their
+activity log with a signature anyone can check.
 
 ### Breaking changes
 
+- **`issuer` custody counts only on a credential from a hosted attempt.**
+  `policy::evaluate` and `policy::evaluate_assessed` credit `device` custody
+  whatever the assertion states; `policy::evaluate_hosted` credits the
+  assertion's custody only beside a `HostedAttemptEvidence` entry that says
+  the issuer held the answers and graded. Before, a candidate signing about
+  themselves with a second key could state `issuer` and meet a policy that
+  required it. Issuance policy vector 34 now expects
+  `custody_below_required`.
+- **New custody defect.** `CustodyDefect::IssuerCustodyUnproven`
+  (`issuer_custody_unproven`): a credential that is not self-issued states
+  `issuer` custody with no `HostedAttemptEvidence` entry. Reported after
+  `issuer_custody_self_issued`. `TrustInvalidReason` gains
+  `IssuerCustodyUnproven`. `TRUST_CALCULATION_VERSION` is 6.
+- **The hosted attempt entry states the issuer's score.**
+  `HostedAttemptEvidence::score: Option<f64>` (`score`, omitted while unset;
+  set with `with_score`): the fraction of drawn items the issuer graded
+  correct. A score outside [0,1] makes the entry `hosted_attempt_invalid`.
+  `HostedAttemptEvidence` no longer derives `Eq`.
 - **Access requests and grants may carry a record scope.**
   `AccessRequest::records` and `GrantStatement::records` are
   `Option<access::RecordScope>` (`course_ids`, `kinds` of `completion` and
@@ -22,6 +44,11 @@ signature anyone can check.
 
 ### Added
 
+- **Vectors**: credential vectors 30 (`issuer_custody_unproven`) and 31 (a
+  hosted score out of range); issuance policy vectors 52 (`issuer` stated on
+  an assessed credential) and 53 (a hosted entry that does not say what a
+  hosted attempt is). The independent JavaScript verifier checks both new
+  rules.
 - `access::RecordScope`, `RecordKind`, `RecordAccount`, `validate_request`
   and the limits `MAX_COURSES`, `MAX_ACCOUNT_NAME_LEN` and
   `MAX_ACCOUNT_HOME_PAGE_LEN`. A grant's scope must be within the request's
@@ -35,7 +62,82 @@ signature anyone can check.
   (`alexandria-record-export/1`), with vectors under
   `tests/vectors/record-export/`.
 
-## 0.7.0 (unreleased)
+## 0.8.0 (unreleased, superseded by 0.9.0)
+
+Assessment hardening: a credential says who held the answers, a desktop
+session backed by a paired phone gets its own level, and an organisation's
+policy can require issuer-held answers and a rung that its evidence shows.
+
+### Breaking changes
+
+- **The integrity assertion states answer custody.**
+  `IntegrityAssertion::answer_custody: Option<AnswerCustody>`
+  (`answerCustody`: `device` or `issuer`, omitted from JSON when absent). An
+  assertion without it reads as `device` (`IntegrityAssertion::answer_custody()`).
+  A struct literal of `IntegrityAssertion` must set it; assertions without it
+  serialize and hash as before. This is the assertion format change; the
+  assertion carries no format version field of its own, so this crate's
+  version is it.
+- **`companion_attested`.** `VerifiedAssuranceLevel` gains
+  `CompanionAttested`, ordered `local` < `companion_attested` <
+  `device_attested`, with `ALL` and `parse`.
+  `AttestationOutcome::VerifiedCredentialBound` and `VerifiedSessionBound`
+  gain `companion: bool` (omitted from JSON while false), set when a paired
+  phone produced the evidence. Companion credential-bound evidence verifies
+  as `companion_attested`, never `device_attested`. Patterns naming the
+  fields need `companion` or `..`.
+- **Companion evidence no longer carries a policy floor.** A floor's device
+  attestation signal counts only for verified evidence from the attempt's own
+  device; a paired phone's evidence, either binding, says nothing about the
+  desktop.
+- **New issuance policy requirement.** `IssuancePolicy::required_answer_custody:
+  Option<AnswerCustody>` (omitted from the stored shape while unset):
+  `issuer` is met only by `issuer`, `device` by either. A struct literal must
+  set it. `PolicyRefusal::CustodyBelowRequired` (`custody_below_required`) is
+  judged first: the order is custody, status, score, flags, assurance, floor,
+  rung, probes. A required `device_attested` is not met by
+  `companion_attested`; a required `companion_attested` is met by either.
+- **The required rung is judged on the strict ladder.** A stated rung of
+  `probed` or above counts only beside a probe step with outcome `satisfied`,
+  at least one satisfied probe and none failed or skipped (its policies are
+  not judged, so a `reseed` policy still counts); otherwise the rule credits
+  `process`. `RungBelowMinimum::rung` names the credited rung.
+- **New result field.** `VerificationResult::custody_defects:
+  Vec<CustodyDefect>` (omitted from JSON while empty); any defect rejects.
+- **Trust classification.** `TrustInvalidReason` gains
+  `IssuerCustodySelfIssued`, `HostedAttemptSelfIssued`, `HostedAttemptInvalid`
+  and `HostedAttemptCustodyMismatch`; a result whose `custody_defects` differ
+  from the credential's is `InconsistentVerificationResult`.
+  `TRUST_CALCULATION_VERSION` is 5.
+- **Coverage statements.** `CURRENT_VERSION` is `"3"` and `VERSIONS` gains
+  it. Every published version-1 and version-2 digest still resolves.
+
+### Added
+
+- **Answer custody** (`custody`, `integrity::AnswerCustody`): `custody_defects`
+  reports, in order, `issuer_custody_self_issued`, `hosted_attempt_self_issued`,
+  `hosted_attempt_invalid` and `hosted_attempt_custody_mismatch`, judged on
+  the credential alone (self-issued: the issuer DID is the subject's).
+- **Hosted attempt evidence** (`custody::HostedAttemptEvidence`,
+  `HOSTED_ATTEMPT_EVIDENCE_TYPE`): the `evidence` entry an organisation's role
+  credential from a hosted attempt carries, with `attemptId`, `answerCustody`
+  and `gradedBy` (`issuer`), the issuer's `probe` summary, and the
+  `attestation` outcome and `verifiedAssuranceLevel` it found (`new`, `find`,
+  `into_entry`, `assurance_level`, `states_a_hosted_attempt`). Valid only on
+  an issuer-signed credential stating `issuer` custody.
+  `policy::evaluate_hosted` judges a role's policy from it: its level, its
+  outcome for a floor, and its probe step for the probe policy and the rung.
+- **Coverage statement version 3**: below `live`, a line says a second device
+  or person was not ruled out; the probe lines say the follow-up questions
+  were ones the learner had not already answered, with a time limit fixed by
+  the item.
+- **Vectors**: credential vectors 24–29 (answer custody, hosted attempts, a
+  version-3 statement), attestation vector 13 (companion session-bound),
+  issuance policy vectors 27–51 (companion level, custody, the rung at every
+  step and its probe evidence, companion floors, hosted attempts). The
+  independent JavaScript verifier checks custody.
+
+## 0.7.0
 
 Credential trust: what a credential says about how it was earned becomes
 checkable where the platform allows it, organisations can put their own

@@ -215,11 +215,116 @@ const VERSION_2: [(&str, &str, &str); 20] = [
     ),
 ];
 
+/// Every version-3 statement, pinned when version 3 was published.
+const VERSION_3: [(&str, &str, &str); 20] = [
+    (
+        "core",
+        "none",
+        "blake3:d61f0af610ccb1d6db46d29e1fd12b5cc325008f6f3d3dc7c96e2f95bfedeb09",
+    ),
+    (
+        "core",
+        "process",
+        "blake3:1fe5fce8c6ea7d96b31078d298cc703200282e143ac64a58917321acbcca1bdb",
+    ),
+    (
+        "core",
+        "probed",
+        "blake3:9524dd9bc1753dff56e82ba7dddf08189f4221d0ffdd5697df1bb7caed706b1f",
+    ),
+    (
+        "core",
+        "consistent",
+        "blake3:1b65415d3bf273a5167997897d48f5d0f47e7453b8f0c1c76a5b2fdc4e1b0292",
+    ),
+    (
+        "core",
+        "live",
+        "blake3:c87267f048b402c51643890c9b37ddefa85cf7c44c8ad520f59f83435d2d938f",
+    ),
+    (
+        "attested",
+        "none",
+        "blake3:17c7e0626872cf03771e4e8d9fc495729e2fad29954a0ead97a5c17dbe35b850",
+    ),
+    (
+        "attested",
+        "process",
+        "blake3:94368ae1a4f80ed88e2933993e7e9595dc2daa6fcf1d12a4f0c88dfdc81650e8",
+    ),
+    (
+        "attested",
+        "probed",
+        "blake3:01c3d28b127f6cda7974f147d474f252b2e6ff0516b2c95119ea55622c17c45f",
+    ),
+    (
+        "attested",
+        "consistent",
+        "blake3:c7c426e8db9344a188a740feb71a6d255d4155a1690988ca7754b1b808b75a10",
+    ),
+    (
+        "attested",
+        "live",
+        "blake3:3b41d32cc250d61b808629f7fd74cd3257cf058e47fbe8a6b9df5285f9245fd3",
+    ),
+    (
+        "camera",
+        "none",
+        "blake3:83e7c082aaa4c0d707c4ef06e0841f3f7da39b59f8e20d0ab6439459b7b841aa",
+    ),
+    (
+        "camera",
+        "process",
+        "blake3:221c078394fae0280aec1529ff2529f9f581616b23187a4f490ce993e803c02a",
+    ),
+    (
+        "camera",
+        "probed",
+        "blake3:39f4ba070d3ab4021a92c6c49bb1b17a9b90c98cb703bce9121bc6340bb1a229",
+    ),
+    (
+        "camera",
+        "consistent",
+        "blake3:0e2f14cb88d52209a702fe19dfdec2086c63f482fafc72e345a1c2216e39a39e",
+    ),
+    (
+        "camera",
+        "live",
+        "blake3:1bbca5f574c03e8e35791c3c6f325683ff34c2a7168bb458948329c4903669a1",
+    ),
+    (
+        "full",
+        "none",
+        "blake3:b2ebc4be449c75a0605b438d75bc17c9effed51b08009deec4525ab246598ce1",
+    ),
+    (
+        "full",
+        "process",
+        "blake3:9266b0a7d9f6c35be6809f2025a90f3e04d9136a9bafa27813c77806ba6d232e",
+    ),
+    (
+        "full",
+        "probed",
+        "blake3:5c48a5834a0a7b6d725737a936c61efa0b2fee3743517c94a851ff99ccb17f70",
+    ),
+    (
+        "full",
+        "consistent",
+        "blake3:62128aa771014ca369b040166970623b14b780ab15af422bda2dec4a6990bf11",
+    ),
+    (
+        "full",
+        "live",
+        "blake3:c1add9f20ee153248b9ae0d4958e6c52dc417b962ef8bb8c104f55229c490d51",
+    ),
+];
+
 /// A version's pinned table. A new version adds an arm and a table here.
 fn pinned(version: &str) -> &'static [(&'static str, &'static str, &'static str); 20] {
     match version {
         "1" => &VERSION_1,
         "2" => &VERSION_2,
+        "3" => &VERSION_3,
         other => panic!("version {other} is published but its digests are not pinned here"),
     }
 }
@@ -256,8 +361,7 @@ fn every_version_1_digest_resolves_to_its_profile_and_rung() {
 }
 
 #[test]
-fn new_sessions_use_version_2_whose_attestation_line_says_who_verified() {
-    assert_eq!(coverage::CURRENT_VERSION, "2");
+fn version_2_attestation_line_says_who_verified() {
     let full = coverage::statement("2", "full", "live", None).expect("v2 full/live");
     let line = full
         .checked
@@ -274,6 +378,38 @@ fn new_sessions_use_version_2_whose_attestation_line_says_who_verified() {
 
     let resolved = coverage::resolve(&full.digest(), None).expect("v2 resolves");
     assert_eq!(resolved, full);
+}
+
+/// Version 3: below `live`, every statement says a second device or person
+/// was not ruled out, since only a person asking unscripted questions rules
+/// it out; and the probe line says the follow-up questions were ones the
+/// learner had not already answered.
+#[test]
+fn new_sessions_use_version_3_which_says_below_live_a_second_device_was_not_ruled_out() {
+    assert_eq!(coverage::CURRENT_VERSION, "3");
+    let not_ruled_out = |s: &coverage::CoverageStatement| {
+        s.not_checked
+            .iter()
+            .any(|l| l.contains("not ruled out") && l.contains("second device or person"))
+    };
+    for profile in coverage::PROFILES {
+        for rung in coverage::RUNGS {
+            let v3 = coverage::statement("3", profile, rung, None).expect("v3 statement");
+            assert_eq!(not_ruled_out(&v3), rung != "live", "{profile}/{rung}");
+            let v2 = coverage::statement("2", profile, rung, None).expect("v2 statement");
+            assert!(!not_ruled_out(&v2), "v2 {profile}/{rung} is unchanged");
+        }
+    }
+    let probed = coverage::statement("3", "core", "probed", None).expect("v3 core/probed");
+    assert!(probed
+        .checked
+        .iter()
+        .any(|l| l.contains("had not already answered")));
+    let process = coverage::statement("3", "core", "process", None).expect("v3 core/process");
+    assert!(process
+        .not_checked
+        .iter()
+        .any(|l| l.contains("had not already answered")));
 }
 
 #[test]
@@ -305,4 +441,5 @@ fn unknown_versions_profiles_and_rungs_have_no_statement() {
     assert_eq!(coverage::statement("0", "core", "none", None), None);
     assert_eq!(coverage::statement("2", "remote", "none", None), None);
     assert_eq!(coverage::statement("2", "core", "proctored", None), None);
+    assert_eq!(coverage::statement("4", "core", "none", None), None);
 }

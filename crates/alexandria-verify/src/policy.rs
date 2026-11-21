@@ -12,9 +12,15 @@
 //! The rule trusts only what it can check. The required assurance level is
 //! judged against the verified level ([`AttestationOutcome::
 //! verified_assurance_level`]), never the level the assertion states, so
-//! `device_attested` is met only by credential-bound evidence that verifies.
+//! `device_attested` is met only by credential-bound evidence from the
+//! attempt's own device that verifies. A paired phone's credential-bound
+//! evidence verifies as `companion_attested`, which meets a required
+//! `companion_attested` and never a required `device_attested`.
 //! A floor's device attestation signal counts only when the evidence verifies
-//! (credential- or session-bound: either proves the session was attested).
+//! (credential- or session-bound: either proves the session was attested)
+//! and comes from the device the attempt ran on. A paired phone's evidence,
+//! either binding, says a genuine phone was present and nothing about the
+//! desktop, so it never carries the signal.
 //! The camera counts towards a floor when the assertion states its coverage
 //! (`cameraCoverage`) at or above
 //! [`MIN_CAMERA_COVERAGE`](crate::integrity::MIN_CAMERA_COVERAGE), even while
@@ -23,9 +29,26 @@
 //! field (issued before it existed) gets the strict reading: a degraded
 //! camera never carries a floor. Any other degraded signal never does.
 //!
+//! The required answer custody is judged against the custody the rule can
+//! prove, not the one the assertion states: `issuer` is met only by an
+//! assertion stating `issuer` beside a [`HostedAttemptEvidence`] entry that
+//! says the issuer held the answers and graded ([`evaluate_hosted`]). Anyone
+//! can sign an assertion stating `issuer`, a candidate with a second key
+//! among them, so [`evaluate`] and [`evaluate_assessed`] credit `device`
+//! whatever the assertion states. The entry is the issuer's word: a verifier
+//! relies on it as far as it relies on the issuer, which for an
+//! organisation's credential means its organisation backing
+//! ([`crate::org::organisation_backing`]).
+//! The required rung (`min_verification_rung`) is judged on the strict
+//! ladder: the stated rung counts as far as the assertion shows its
+//! evidence, so `probed` and every rung above it need a probe step whose
+//! every probe was satisfied, and without one the rule credits `process`.
+//!
 //! A role credential issued on an assessed credential is judged by
 //! [`evaluate_assessed`]: its assurance comes from the
-//! [`AssessedCredentialEvidence`] entry naming that credential.
+//! [`AssessedCredentialEvidence`] entry naming that credential. One issued
+//! from a hosted attempt is judged by [`evaluate_hosted`]: its assurance and
+//! probe outcome come from the [`HostedAttemptEvidence`] entry.
 //!
 //! What needs the session itself stays with the issuing app: that the floor
 //! judged at attempt start agrees with the one judged at issuance, and that
@@ -35,8 +58,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::assessed::AssessedCredentialEvidence;
 use crate::attestation::{AttestationOutcome, VerifiedAssuranceLevel};
-use crate::integrity::{camera_coverage_counts, ProfileSignal, TrustProfile, VerificationRung};
-use crate::vc::IntegrityAssertion;
+use crate::custody::HostedAttemptEvidence;
+use crate::integrity::{
+    camera_coverage_counts, AnswerCustody, ProfileSignal, TrustProfile, VerificationRung,
+};
+use crate::vc::{IntegrityAssertion, ProbeSummary};
 
 /// Where an attempt's probes come from. Set per assessment and per role (the
 /// role's issuance policy); a role's policy other than `none` wins.
@@ -94,10 +120,12 @@ pub struct IssuancePolicy {
     /// `flagged`, `suspended` and any other value are refused.
     #[serde(default)]
     pub require_clean: bool,
-    /// Minimum verified assurance level: `local` (met by any credential) or
-    /// `device_attested` (met only by verified credential-bound evidence).
-    /// The reserved levels `anchored` and `high_assurance` have no verified
-    /// path and are never met.
+    /// Minimum verified assurance level: `local` (met by any credential),
+    /// `companion_attested` (met by verified credential-bound evidence from
+    /// a paired phone or from the attempt's own device) or `device_attested`
+    /// (met only by verified credential-bound evidence from the attempt's own
+    /// device). The reserved levels `anchored` and `high_assurance` have no
+    /// verified path and are never met.
     #[serde(default)]
     pub required_assurance_level: Option<String>,
     /// Probe policy for attempts made for this role. Overrides the
@@ -120,6 +148,13 @@ pub struct IssuancePolicy {
     /// Minimum verification rung.
     #[serde(default)]
     pub min_verification_rung: Option<VerificationRung>,
+    /// Required answer custody: `issuer` is met only by a credential from a
+    /// hosted attempt ([`evaluate_hosted`]) whose assertion states `issuer`;
+    /// `device` accepts either. [`evaluate`] and [`evaluate_assessed`] credit
+    /// `device` whatever the assertion states. Omitted from the stored shape
+    /// while unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_answer_custody: Option<AnswerCustody>,
 }
 
 impl IssuancePolicy {
@@ -156,13 +191,19 @@ pub enum PolicyRefusal {
     /// `profile` is the assertion's trust profile, or `none`.
     #[error("issuance policy: trust profile '{profile}' does not meet the '{required}' floor")]
     TrustProfileBelowFloor { profile: String, required: String },
-    /// `rung` is the assertion's verification rung, or `none`.
+    /// `rung` is the rung the rule credits: the assertion's, at most
+    /// `process` when its probe step does not show every probe satisfied,
+    /// `none` when it states none, or an unknown rung as stated.
     #[error("issuance policy: verification rung '{rung}' does not meet the '{required}' minimum")]
     RungBelowMinimum { rung: String, required: String },
     #[error("issuance policy: the '{policy}' probe step did not run in the session")]
     ProbePolicyNotRun { policy: String },
     #[error("issuance policy: a '{policy}' probe failed")]
     ProbeFailed { policy: String },
+    /// `custody` is the answer custody the rule credits: the assertion's
+    /// only on a credential from a hosted attempt, else `device`.
+    #[error("issuance policy: answer custody '{custody}' does not meet required '{required}'")]
+    CustodyBelowRequired { custody: String, required: String },
 }
 
 impl PolicyRefusal {
@@ -179,14 +220,18 @@ impl PolicyRefusal {
             Self::RungBelowMinimum { .. } => "rung_below_minimum",
             Self::ProbePolicyNotRun { .. } => "probe_policy_not_run",
             Self::ProbeFailed { .. } => "probe_failed",
+            Self::CustodyBelowRequired { .. } => "custody_below_required",
         }
     }
 }
 
 /// Judge `policy` against a credential's `integrity` assertion and the
 /// `attestation` outcome a verifier established for the same credential.
-/// Requirements are judged in a fixed order (status, score, flags,
-/// assurance, floor, rung, probes); the first unmet one is returned.
+/// Requirements are judged in a fixed order (custody, status, score, flags,
+/// assurance, floor, rung, probes); the first unmet one is returned. Custody
+/// comes first because no retake of the same kind of attempt can meet it.
+/// Answer custody is credited as `device` whatever the assertion states:
+/// only a hosted attempt entry proves `issuer` ([`evaluate_hosted`]).
 pub fn evaluate(
     policy: &IssuancePolicy,
     integrity: &IntegrityAssertion,
@@ -197,6 +242,8 @@ pub fn evaluate(
         integrity,
         attestation,
         attestation.verified_assurance_level(),
+        integrity.probe.as_ref(),
+        AnswerCustody::Device,
     )
 }
 
@@ -207,7 +254,8 @@ pub fn evaluate(
 /// role credential's own attestation evidence (none, or session-bound: the
 /// issuer's device cannot bind the candidate's session) is not judged.
 /// The entry's level counts only as far as its own outcome verifies it
-/// ([`AssessedCredentialEvidence::assurance_level`]).
+/// ([`AssessedCredentialEvidence::assurance_level`]). Answer custody is
+/// credited as `device`: an assessed credential is the candidate's own.
 pub fn evaluate_assessed(
     policy: &IssuancePolicy,
     integrity: &IntegrityAssertion,
@@ -218,7 +266,46 @@ pub fn evaluate_assessed(
         integrity,
         &assessed.attestation,
         assessed.assurance_level(),
+        integrity.probe.as_ref(),
+        AnswerCustody::Device,
     )
+}
+
+/// [`evaluate`] for a role credential issued from a hosted attempt: the
+/// verified assurance level, the device attestation a floor credits and the
+/// probe outcome are the ones its [`HostedAttemptEvidence`] entry records,
+/// the issuer's signed statement of what it found. The issuer graded,
+/// timed and probed the attempt itself, so the probe step judged (for the
+/// probe policy and for the rung's evidence) is the entry's, never the probe
+/// summary the device reported in the assertion. Status, score, flags,
+/// trust profile and rung are read from the assertion, which the issuer
+/// writes; its answer custody counts only when the entry says what a hosted
+/// attempt is (the issuer held the answers and graded), else `device`. The entry's level counts only as far as its own outcome
+/// verifies it ([`HostedAttemptEvidence::assurance_level`]).
+pub fn evaluate_hosted(
+    policy: &IssuancePolicy,
+    integrity: &IntegrityAssertion,
+    hosted: &HostedAttemptEvidence,
+) -> Result<(), PolicyRefusal> {
+    judge(
+        policy,
+        integrity,
+        &hosted.attestation,
+        hosted.assurance_level(),
+        hosted.probe.as_ref(),
+        hosted_custody(integrity, hosted),
+    )
+}
+
+/// The custody [`evaluate_hosted`] credits: the assertion's, when the entry
+/// says what a hosted attempt is (the issuer held the answers and graded);
+/// otherwise `device`.
+fn hosted_custody(integrity: &IntegrityAssertion, hosted: &HostedAttemptEvidence) -> AnswerCustody {
+    if hosted.states_a_hosted_attempt() {
+        integrity.answer_custody()
+    } else {
+        AnswerCustody::Device
+    }
 }
 
 fn judge(
@@ -226,8 +313,18 @@ fn judge(
     integrity: &IntegrityAssertion,
     attestation: &AttestationOutcome,
     level: VerifiedAssuranceLevel,
+    probe: Option<&ProbeSummary>,
+    custody: AnswerCustody,
 ) -> Result<(), PolicyRefusal> {
     let a = integrity;
+    if let Some(required) = policy.required_answer_custody {
+        if custody < required {
+            return Err(PolicyRefusal::CustodyBelowRequired {
+                custody: custody.as_str().to_string(),
+                required: required.as_str().to_string(),
+            });
+        }
+    }
     if policy.require_clean && a.status != "completed" {
         return Err(PolicyRefusal::NotClean {
             status: a.status.clone(),
@@ -280,24 +377,17 @@ fn judge(
         }
     }
     if let Some(required) = policy.min_verification_rung {
-        let rung = a
-            .verification_rung
-            .as_deref()
-            .and_then(VerificationRung::parse)
-            .unwrap_or_default();
+        let (rung, named) = credited_rung(a, probe);
         if rung < required {
             return Err(PolicyRefusal::RungBelowMinimum {
-                rung: a
-                    .verification_rung
-                    .clone()
-                    .unwrap_or_else(|| VerificationRung::None.as_str().into()),
+                rung: named,
                 required: required.as_str().to_string(),
             });
         }
     }
     if let Some(probe_policy) = policy.probe_policy.filter(|p| *p != ProbePolicy::None) {
         let name = probe_policy.as_str().to_string();
-        match &a.probe {
+        match probe {
             Some(p) if p.policies.contains(&name) => {
                 if p.failed > 0 {
                     return Err(PolicyRefusal::ProbeFailed { policy: name });
@@ -309,19 +399,51 @@ fn judge(
     Ok(())
 }
 
+/// The rung the rule credits, and its name for a refusal. The stated rung
+/// counts as far as the assertion shows its evidence: `probed` and every rung
+/// above it stand on a probe step whose every probe was satisfied
+/// ([`probe_evidence_holds`]); without one the rule credits `process`, the
+/// highest rung below `probed`, whose evidence a verifier cannot see. An
+/// unknown stated rung counts as `none` and is named as stated.
+fn credited_rung(
+    a: &IntegrityAssertion,
+    probe: Option<&ProbeSummary>,
+) -> (VerificationRung, String) {
+    let stated = a.verification_rung.as_deref();
+    let Some(rung) = stated.and_then(VerificationRung::parse) else {
+        let named = stated.unwrap_or(VerificationRung::None.as_str());
+        return (VerificationRung::None, named.to_string());
+    };
+    let rung = if rung >= VerificationRung::Probed && !probe_evidence_holds(probe) {
+        VerificationRung::Process
+    } else {
+        rung
+    };
+    (rung, rung.as_str().to_string())
+}
+
+/// Whether a probe step shows the `probed` rung's evidence: it ran, at least
+/// one probe was satisfied, and none failed or was skipped. Its policies are
+/// not judged: an authored variant served under `reseed` asks a question the
+/// candidate had not answered and earns the rung, and the summary does not
+/// say which kind of probe ran.
+fn probe_evidence_holds(probe: Option<&ProbeSummary>) -> bool {
+    probe.is_some_and(|p| {
+        p.outcome == "satisfied" && p.satisfied > 0 && p.failed == 0 && p.skipped == 0
+    })
+}
+
 /// Whether the verified `level` is at least `required` on the assurance
-/// ladder. Levels beyond `device_attested`, and unknown ones, are never met.
+/// ladder `local` < `companion_attested` < `device_attested`. Levels beyond
+/// `device_attested`, and unknown ones, are never met.
 fn meets_assurance(level: VerifiedAssuranceLevel, required: &str) -> bool {
-    match required {
-        "local" => true,
-        "device_attested" => level == VerifiedAssuranceLevel::DeviceAttested,
-        _ => false,
-    }
+    VerifiedAssuranceLevel::parse(required).is_some_and(|required| level >= required)
 }
 
 /// Whether `signal` counts towards a floor: the assertion says the profile
-/// ran it; a device attestation's evidence verifies and the attestation was
-/// not degraded; the camera's stated coverage meets the minimum or, with no
+/// ran it; a device attestation's evidence verifies, comes from the device
+/// the attempt ran on (a paired phone's evidence says nothing about the
+/// desktop) and the attestation was not degraded; the camera's stated coverage meets the minimum or, with no
 /// coverage stated, the camera was not degraded.
 fn credited(
     a: &IntegrityAssertion,
@@ -336,8 +458,13 @@ fn credited(
             !listed(&a.signals_degraded)
                 && matches!(
                     attestation,
-                    AttestationOutcome::VerifiedCredentialBound { .. }
-                        | AttestationOutcome::VerifiedSessionBound { .. }
+                    AttestationOutcome::VerifiedCredentialBound {
+                        companion: false,
+                        ..
+                    } | AttestationOutcome::VerifiedSessionBound {
+                        companion: false,
+                        ..
+                    }
                 )
         }
         ProfileSignal::Camera => match a.camera_coverage {

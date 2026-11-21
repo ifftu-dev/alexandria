@@ -413,10 +413,12 @@ pub struct Witness {
 /// flags, so downstream verifiers should weight them accordingly. An issuer
 /// states `"device_attested"` when the session's platform attestation (Apple
 /// App Attest or Google Play Integrity) verified on the issuing device, and
-/// carries that attestation in the credential's `evidence`. A verifier never
-/// takes the stated level on trust: it reports
+/// carries that attestation in the credential's `evidence`; it states
+/// `"companion_attested"` when a paired phone's attestation backed a desktop
+/// session. A verifier never takes the stated level on trust: it reports
 /// `device_attested` as the result's `verifiedAssuranceLevel` only when that
-/// evidence verifies and is bound to this credential (see
+/// evidence verifies, is bound to this credential and carries no companion
+/// binding, `companion_attested` when such evidence carries one (see
 /// [`crate::attestation`]), and `local` otherwise, whatever this field says.
 /// `"anchored"` and `"high_assurance"` are reserved ladder values with no
 /// verified production path; the value alone is not evidence of either.
@@ -436,7 +438,8 @@ pub struct IntegrityAssertion {
     pub integrity_score: Option<f64>,
     pub critical_count: i64,
     pub warning_count: i64,
-    /// Stated assurance: `"local"` or `"device_attested"`. `"anchored"` and
+    /// Stated assurance: `"local"`, `"companion_attested"` or
+    /// `"device_attested"`. `"anchored"` and
     /// `"high_assurance"` are reserved ladder values. Only the verifier's
     /// `verifiedAssuranceLevel`, established from `evidence`, is checked.
     pub assurance_level: String,
@@ -484,6 +487,21 @@ pub struct IntegrityAssertion {
     /// Outcome of the follow-up probes, when any probe step ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub probe: Option<ProbeSummary>,
+    /// Who held the answers: `device` or `issuer`. Absent from assertions
+    /// issued before the field existed, which read as `device`
+    /// ([`Self::answer_custody`]). A self-issued credential stating `issuer`
+    /// is invalid: nobody holds answers away from themselves
+    /// ([`crate::custody`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer_custody: Option<crate::integrity::AnswerCustody>,
+}
+
+impl IntegrityAssertion {
+    /// The answer custody the assertion states, `device` when it states
+    /// none.
+    pub fn answer_custody(&self) -> crate::integrity::AnswerCustody {
+        self.answer_custody.unwrap_or_default()
+    }
 }
 
 /// What the probe step of an integrity session concluded.
@@ -797,6 +815,13 @@ pub struct VerificationResult {
     /// Omitted while false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub coverage_statement_mismatch: bool,
+    /// What is wrong with what the credential says about who held the
+    /// answers ([`crate::custody::custody_defects`]): `issuer` custody on a
+    /// self-issued credential, or a hosted attempt entry that is self-issued,
+    /// malformed or beside another custody. Any one rejects. Omitted while
+    /// empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custody_defects: Vec<crate::custody::CustodyDefect>,
     pub verification_time: String,
     #[serde(default)]
     pub pending_reasons: Vec<VerificationPendingReason>,
@@ -805,8 +830,10 @@ pub struct VerificationResult {
     /// left to the other checks.
     #[serde(default)]
     pub attestation: crate::attestation::AttestationOutcome,
-    /// `device_attested` only for verified credential-bound evidence, else
-    /// `local`, whatever level the integrity assertion states.
+    /// `device_attested` only for verified credential-bound evidence from the
+    /// attempt's own device, `companion_attested` for verified
+    /// credential-bound evidence from a paired phone, else `local`, whatever
+    /// level the integrity assertion states.
     #[serde(default)]
     pub verified_assurance_level: crate::attestation::VerifiedAssuranceLevel,
     pub acceptance_decision: AcceptanceDecision,

@@ -46,6 +46,10 @@ function catalog(loc) {
 // Key prefixes shipped English-only for now. Each needs a reason and an owner
 // in the comment, so "temporary" stays visible.
 const PENDING_TRANSLATION = [
+  // Hosted attempts (assessment hardening ticket 10): English-only until the
+  // next learner translation pass; renders via the i18n fallback.
+  'learn.hosted',
+  'organisations.requests.assessment.assessHosted',
   // Sentinel probes after an attempt (trust profiles ticket 07): English-only
   // until the next learner translation pass; renders via the i18n fallback.
   'learn.assessment.probe',
@@ -131,6 +135,29 @@ const PENDING_TRANSLATION = [
   'instructor.elementTypes.package',
   'instructor.compose.blockerUnattachedPackages',
   'learn.packageFile.',
+  // Companion-attested wording (assessment hardening ticket 03): pairing no
+  // longer claims to make an attempt device-attested, and a role or request
+  // that requires a verified device says to take it on a phone. English-only
+  // pending the next learner translation pass; the stale translations of the
+  // reworded pairing strings were removed so they cannot keep the old claim.
+  'sentinel.companion.pairToggle',
+  'sentinel.companion.cardDescription',
+  'sentinel.companion.offerNote',
+  'sentinel.companion.paired',
+  'credentials.detail.integrityCompanionAttested',
+  'learn.assessment.verifiedDevice',
+  // Answer custody (assessment hardening ticket 05): where a credential's
+  // answers were held, the role form's custody line and a request that needs
+  // issuer custody. English-only pending the next translation pass.
+  'credentials.detail.custody',
+  // Who computed the score and the level the issuer verified (assessment
+  // hardening review fixes, story 2). English-only pending the next
+  // translation pass.
+  'credentials.detail.gradedBy',
+  'credentials.detail.issuerLevelLabel',
+  'credentials.detail.assuranceLevel.',
+  'dashboard.sponsor.roleModal.custodyDevice',
+  'organisations.requests.assessment.policy.custodyIssuer',
   // Not-found page for stale deep links, added when retired route redirects
   // were deleted. English-only pending a translate pass; renders in English
   // via the i18n fallback.

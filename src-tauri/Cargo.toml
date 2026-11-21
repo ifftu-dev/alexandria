@@ -249,6 +249,8 @@ windows = { version = "0.58", features = [
     "Win32_System_Diagnostics_ToolHelp",
     # Sentinel global-hotkey monitor: GetAsyncKeyState + VK_* constants.
     "Win32_UI_Input_KeyboardAndMouse",
+    # Sentinel process watchlist: Authenticode publisher of an executable.
+    "Win32_Security_Cryptography",
 ] }
 
 # Linux (X11): _NET_ACTIVE_WINDOW → WM_CLASS. Wayland returns None.

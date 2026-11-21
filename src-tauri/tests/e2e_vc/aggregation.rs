@@ -104,7 +104,7 @@ async fn worked_example_26_yields_level_5() {
     // unaffected: its evidence carries no provenance, no self-issued claims
     // and no session status, so quality resolves to (1,1,1) and the derived
     // level holds.
-    assert_eq!(state.calculation_version, "1.4");
+    assert_eq!(state.calculation_version, "1.5");
 }
 
 #[tokio::test]

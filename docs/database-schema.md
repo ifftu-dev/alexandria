@@ -1084,7 +1084,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `ended_at` TEXT
 - `critical_count` INTEGER NOT NULL default `0`
 - `warning_count` INTEGER NOT NULL default `0`
-- `assurance_level` TEXT NOT NULL default `'local'` — local|device_attested (verified again at issuance)
+- `assurance_level` TEXT NOT NULL default `'local'` — local|companion_attested|device_attested (verified again at issuance)
 - `commitment_root` TEXT
 - `anchor_ref` TEXT
 - `purpose` TEXT NOT NULL default `'assessment'`

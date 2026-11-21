@@ -1,9 +1,12 @@
-//! Paired attested phone: a desktop session borrows a phone's platform
-//! attestation.
+//! Paired attested phone: a genuine phone is present and attested during a
+//! desktop session.
 //!
 //! Desktops have no hardware attestation Alexandria can use (on macOS,
 //! `DCAppAttestService.isSupported` is false), so a desktop session stays
-//! `local` on its own. The learner can pair their phone for one session:
+//! `local` on its own. The learner can pair their phone for one session,
+//! which makes the session `companion_attested`, never `device_attested`:
+//! the phone attests whatever digest the desktop hands it, so it says
+//! nothing about the desktop or the software it ran.
 //!
 //! 1. The desktop shows a one-time **offer** (a code): the session id and
 //!    start instant, the learner's DID, the desktop's iroh address and a
@@ -31,7 +34,7 @@
 //!    only per-window camera scores, never frames.
 //!
 //! Ceiling: the phone proves "a genuine build on a genuine phone, signed in
-//! as this learner, joined this session". It does not prove the phone
+//! as this learner, joined this session", not that the desktop is genuine. It does not prove the phone
 //! stayed in the room or watched the learner. The camera scores it sends are
 //! not signed one by one, and the end assertion signs the root the desktop
 //! presents without the phone recomputing it, so it says "this phone was
@@ -215,9 +218,10 @@ pub fn bound_nonce(
 pub struct Accepted {
     /// Store on `integrity_sessions.attestation_json`.
     pub record: DeviceAttestation,
-    /// `device_attested` when the platform attestation verified now,
-    /// `local` when there is no trust material for it (Android without
-    /// response keys).
+    /// `companion_attested` when the phone's platform attestation verified
+    /// now, `local` when there is no trust material for it (Android without
+    /// response keys). Never `device_attested`: the phone vouches for
+    /// itself, not for the desktop.
     pub assurance_level: String,
     pub unverified: Option<Unverified>,
     pub camera_benchmark: Option<crate::sentinel::camera_budget::BenchmarkResult>,
@@ -263,7 +267,7 @@ pub fn accept_hello(
     }
     let nonce = bound_nonce(record, binding, &offer.session_nonce()).map_err(reason)?;
     let (assurance_level, unverified) = match att::verify(record, &nonce, None, cfg, now_unix) {
-        Ok(_) => (att::ASSURANCE_DEVICE_ATTESTED.to_string(), None),
+        Ok(_) => (att::ASSURANCE_COMPANION_ATTESTED.to_string(), None),
         Err(Unverified::NoTrustMaterial) => (
             att::ASSURANCE_LOCAL.to_string(),
             Some(Unverified::NoTrustMaterial),
@@ -364,7 +368,7 @@ pub(crate) mod tests {
         SessionAttestationFacts {
             session_id: SESSION.into(),
             started_at: STARTED.into(),
-            stored_assurance_level: att::ASSURANCE_DEVICE_ATTESTED.into(),
+            stored_assurance_level: att::ASSURANCE_COMPANION_ATTESTED.into(),
             attestation_json: Some(serde_json::to_string(record).unwrap()),
             commitment_root: None,
             learner_did: learner,
@@ -372,13 +376,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_paired_phone_attestation_reaches_device_attested_and_re_verifies_at_issuance() {
+    fn a_paired_phone_attestation_reaches_companion_attested_and_re_verifies_at_issuance() {
         let now = build_world(&apple_app_id(), [0; 32], b"appattest\0\0\0\0\0\0\0", 0).now;
         let offer = offer(now);
         let (w, hello) = hello_from(&offer, &learner(), now);
 
         let accepted = accept_hello(&offer, &hello, PHONE, &trust(&w), now).unwrap();
-        assert_eq!(accepted.assurance_level, att::ASSURANCE_DEVICE_ATTESTED);
+        assert_eq!(accepted.assurance_level, att::ASSURANCE_COMPANION_ATTESTED);
 
         // Issuance recomputes everything from the stored record and the
         // profile's learner.
@@ -389,7 +393,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             (level.as_str(), why),
-            (att::ASSURANCE_DEVICE_ATTESTED, None)
+            (att::ASSURANCE_COMPANION_ATTESTED, None)
         );
     }
 
@@ -501,7 +505,7 @@ pub(crate) mod tests {
         f.commitment_root = Some(root.into());
         assert_eq!(
             effective_assurance(&f, &trust(&w), now).0,
-            att::ASSURANCE_DEVICE_ATTESTED
+            att::ASSURANCE_COMPANION_ATTESTED
         );
         f.commitment_root = Some("moved".into());
         assert_eq!(

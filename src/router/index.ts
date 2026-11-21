@@ -277,6 +277,12 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
     {
+      path: '/assessment/hosted/:requestId',
+      name: 'hosted-assessment',
+      component: () => import('@/pages/learn/HostedAttempt.vue'),
+      meta: { layout: 'app' },
+    },
+    {
       path: '/assessment/:skillId',
       name: 'assessment',
       component: () => import('@/pages/learn/AssessmentRunner.vue'),

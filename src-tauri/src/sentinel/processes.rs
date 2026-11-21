@@ -7,9 +7,15 @@
 //! screen-share clients (an off-device watcher), and hypervisor guest
 //! agents (the assessment is running inside a VM).
 //!
-//! This is a fingerprint signal: a renamed binary walks straight past it.
-//! It is cheap, high-precision when it fires, and useless when it misses,
-//! so it is one input among several, never a gate on its own. The
+//! This is a fingerprint signal. On macOS and Windows a rule may name a
+//! signing identity (team identifier, Authenticode publisher), so renaming
+//! a signed tool does not hide it; an unsigned or re-signed binary, and
+//! everything on Linux, is matched by name only. Signatures are read once
+//! per executable path on a background thread and cached, so a scan never
+//! waits on one: a process first seen in this scan matches by name until
+//! its read lands. It is cheap, high-precision when it fires, and useless
+//! when it misses, so it is one input among several, never a gate on its
+//! own. The
 //! watchlist is a `const` so it can later move to the model-update channel
 //! without touching the matcher.
 //!
@@ -41,6 +47,11 @@ pub struct RawProcess {
     /// Bundle id (macOS), full image path (Windows), `cmdline[0]` or
     /// `exe` link target (Linux). May equal `name`.
     pub identifier: String,
+    /// Code-signing identity of the executable: the team identifier on
+    /// macOS, the publisher on Windows. `None` when unsigned, not yet read,
+    /// or on a platform without a reader (Linux, mobile).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signer: Option<String>,
 }
 
 /// Why a process is on the watchlist.
@@ -93,6 +104,9 @@ pub enum MatchKind {
     /// `name` contains the needle. Needles must be ≥ 6 chars (tested) so
     /// this never degenerates into `"obs"` matching `"jobs"`.
     NameContains,
+    /// The process's signing identity equals the needle. Matches whatever
+    /// the file is called, so renaming a signed tool changes nothing.
+    Signer,
 }
 
 /// One watchlist entry.
@@ -111,7 +125,7 @@ const fn rule(category: WatchCategory, needle: &'static str, match_kind: MatchKi
     }
 }
 
-use MatchKind::{ExactName, IdentifierPrefix};
+use MatchKind::{ExactName, IdentifierPrefix, Signer};
 use WatchCategory::*;
 
 // Provenance (2026-10-09). "verified" = read from an installed bundle's
@@ -150,6 +164,21 @@ use WatchCategory::*;
 //   `spice-vdagent`) are the documented service binaries. Hyper-V guest
 //   services run inside `svchost` on Windows and are not matchable by name.
 //
+// Signing identities (2026-11-20). A `Signer` rule sits after its vendor's
+// name and id rules, so an unrenamed tool keeps reporting the same rule.
+// macOS team identifiers are from appcatalog.cloud's per-app code
+// requirements (`certificate leaf[subject.OU]`): TeamViewer H7UGFBUGV6,
+// AnyDesk KHRWM533LU, RustDesk HZF9JMC8YN, Parsec Y9MY52XZDB, OBS
+// 2MMRE5MTB8, ManyCam 72D53DS677, Zoom BJ4HAAB9B3, Discord 53Q6R32WPB,
+// OpenAI (ChatGPT, Codex, Atlas) 2DC432GLL2, Anthropic Q6L2SF6YDW, Ollama
+// 3MU9H2V9Y9. Windows publishers: AnyDesk's own incident FAQ names
+// "AnyDesk Software GmbH" and its predecessor "philandro Software GmbH";
+// "TeamViewer Germany GmbH" is the signer in public sandbox reports of
+// current builds. Only vendors whose identity signs nothing outside the
+// rule's category are listed: Microsoft (Teams, but also Remote Desktop
+// and the OS) and Google (Chrome Remote Desktop, but also Chrome) stay
+// name-only, as do the vendors whose identity could not be confirmed.
+//
 // Deliberately absent: browsers, Slack, Raycast, `mstsc` / Microsoft Remote
 // Desktop (clients, not hosts), Google Meet (browser), Hyper-V, WSL.
 pub const WATCHLIST: &[WatchRule] = &[
@@ -181,16 +210,19 @@ pub const WATCHLIST: &[WatchRule] = &[
     rule(AiAssistant, "chatgpt", ExactName),
     rule(AiAssistant, "com.openai.codex", IdentifierPrefix),
     rule(AiAssistant, "com.openai.atlas", IdentifierPrefix),
+    rule(AiAssistant, "2dc432gll2", Signer),
     rule(
         AiAssistant,
         "com.anthropic.claudefordesktop",
         IdentifierPrefix,
     ),
     rule(AiAssistant, "claude", ExactName),
+    rule(AiAssistant, "q6l2sf6ydw", Signer),
     rule(AiAssistant, "ai.perplexity", IdentifierPrefix),
     rule(AiAssistant, "perplexity", ExactName),
     rule(AiAssistant, "com.electron.ollama", IdentifierPrefix),
     rule(AiAssistant, "ollama", ExactName),
+    rule(AiAssistant, "3mu9h2v9y9", Signer),
     rule(AiAssistant, "lm studio", ExactName),
     rule(AiAssistant, "lm-studio", ExactName),
     rule(AiAssistant, "msty", ExactName),
@@ -199,12 +231,19 @@ pub const WATCHLIST: &[WatchRule] = &[
     rule(RemoteDesktop, "teamviewer", ExactName),
     rule(RemoteDesktop, "teamviewer_service", ExactName),
     rule(RemoteDesktop, "teamviewerd", ExactName),
+    rule(RemoteDesktop, "h7ugfbugv6", Signer),
+    rule(RemoteDesktop, "teamviewer germany gmbh", Signer),
     rule(RemoteDesktop, "com.philandro.anydesk", IdentifierPrefix),
     rule(RemoteDesktop, "anydesk", ExactName),
+    rule(RemoteDesktop, "khrwm533lu", Signer),
+    rule(RemoteDesktop, "anydesk software gmbh", Signer),
+    rule(RemoteDesktop, "philandro software gmbh", Signer),
     rule(RemoteDesktop, "com.carriez.rustdesk", IdentifierPrefix),
     rule(RemoteDesktop, "rustdesk", ExactName),
+    rule(RemoteDesktop, "hzf9jmc8yn", Signer),
     rule(RemoteDesktop, "tv.parsec", IdentifierPrefix),
     rule(RemoteDesktop, "parsec", ExactName),
+    rule(RemoteDesktop, "y9my52xzdb", Signer),
     // Not `parsecd`: on macOS that name belongs to Apple's own
     // CoreParsec.framework daemon (Siri / Spotlight), a guaranteed false
     // positive. Parsec's remote host is caught by the `tv.parsec` bundle id
@@ -234,7 +273,9 @@ pub const WATCHLIST: &[WatchRule] = &[
     rule(VirtualCamera, "obs", ExactName),
     rule(VirtualCamera, "obs64", ExactName),
     rule(VirtualCamera, "obs-studio", ExactName),
+    rule(VirtualCamera, "2mmre5mtb8", Signer),
     rule(VirtualCamera, "manycam", ExactName),
+    rule(VirtualCamera, "72d53ds677", Signer),
     rule(VirtualCamera, "snap camera", ExactName),
     rule(VirtualCamera, "camtwist", ExactName),
     rule(VirtualCamera, "mmhmm", ExactName),
@@ -254,11 +295,13 @@ pub const WATCHLIST: &[WatchRule] = &[
     rule(ScreenShare, "us.zoom", IdentifierPrefix),
     rule(ScreenShare, "zoom", ExactName),
     rule(ScreenShare, "zoom.us", ExactName),
+    rule(ScreenShare, "bj4haab9b3", Signer),
     rule(ScreenShare, "com.microsoft.teams", IdentifierPrefix),
     rule(ScreenShare, "ms-teams", ExactName),
     rule(ScreenShare, "teams", ExactName),
     rule(ScreenShare, "com.hnc.discord", IdentifierPrefix),
     rule(ScreenShare, "discord", ExactName),
+    rule(ScreenShare, "53q6r32wpb", Signer),
     rule(ScreenShare, "cisco webex meetings", ExactName),
     rule(ScreenShare, "webex", ExactName),
     rule(ScreenShare, "com.cisco.webex", IdentifierPrefix),
@@ -291,6 +334,7 @@ fn exact_name_matches(name_lower: &str, needle: &str) -> bool {
 fn match_rule(proc_: &RawProcess) -> Option<&'static WatchRule> {
     let name = proc_.name.to_lowercase();
     let identifier = proc_.identifier.to_lowercase();
+    let signer = proc_.signer.as_deref().map(str::to_lowercase);
     // Linux `comm` is truncated to 15 bytes by the kernel, so a long needle
     // can only match the executable's basename (from the `exe` link or
     // `cmdline[0]`). On the other platforms this is the same string again.
@@ -307,6 +351,7 @@ fn match_rule(proc_: &RawProcess) -> Option<&'static WatchRule> {
             }
             MatchKind::IdentifierPrefix => identifier.starts_with(&needle),
             MatchKind::NameContains => name.contains(&needle),
+            MatchKind::Signer => signer.as_deref() == Some(needle.as_str()),
         }
     })
 }
@@ -316,6 +361,7 @@ fn kind_label(kind: MatchKind) -> &'static str {
         MatchKind::ExactName => "name",
         MatchKind::IdentifierPrefix => "id",
         MatchKind::NameContains => "contains",
+        MatchKind::Signer => "signer",
     }
 }
 
@@ -345,6 +391,79 @@ pub fn classify(raw: &[RawProcess], own_pid: u32, source: &str) -> ProcessScan {
     }
 }
 
+/// Signing identities by executable path. Each path is read once; until
+/// its read lands the process is matched by name only.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[derive(Default)]
+struct SignerCache {
+    known: std::collections::HashMap<String, Option<String>>,
+    queued: HashSet<String>,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+impl SignerCache {
+    /// The identity read for `path` so far, and whether `path` has just
+    /// been queued for its one read.
+    fn lookup(&mut self, path: &str) -> (Option<String>, bool) {
+        if let Some(signer) = self.known.get(path) {
+            return (signer.clone(), false);
+        }
+        (None, self.queued.insert(path.to_owned()))
+    }
+
+    fn record(&mut self, path: String, signer: Option<String>) {
+        self.queued.remove(&path);
+        self.known.insert(path, signer);
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod signers {
+    use std::sync::{mpsc, LazyLock, Mutex, PoisonError};
+
+    use super::SignerCache;
+
+    static CACHE: LazyLock<Mutex<SignerCache>> = LazyLock::new(Default::default);
+
+    /// One background thread reads signatures, so a scan never waits on
+    /// one. `None` if the thread could not be started: name matching only.
+    static READER: LazyLock<Option<mpsc::Sender<String>>> = LazyLock::new(|| {
+        let (tx, rx) = mpsc::channel::<String>();
+        std::thread::Builder::new()
+            .name("sentinel-signer".into())
+            .spawn(move || {
+                for path in rx {
+                    let signer = super::imp::read_signer(&path);
+                    CACHE
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .record(path, signer);
+                }
+            })
+            .ok()?;
+        Some(tx)
+    });
+
+    /// The cached signing identity of the executable at `path`. A path
+    /// seen for the first time is queued for the reader and yields `None`
+    /// on this scan.
+    pub fn cached(path: &str) -> Option<String> {
+        if path.is_empty() {
+            return None;
+        }
+        let (signer, queued) = CACHE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .lookup(path);
+        if queued {
+            if let Some(tx) = READER.as_ref() {
+                let _ = tx.send(path.to_owned());
+            }
+        }
+        signer
+    }
+}
+
 /// Enumerate and classify, or `None` when the platform has no probe or
 /// enumeration failed outright.
 pub fn scan() -> Option<ProcessScan> {
@@ -360,6 +479,8 @@ pub fn raw_processes() -> Option<Vec<RawProcess>> {
 #[cfg(target_os = "macos")]
 mod imp {
     use std::collections::BTreeMap;
+
+    use std::ffi::c_void;
 
     use super::RawProcess;
 
@@ -381,6 +502,105 @@ mod imp {
             buffer: *mut std::ffi::c_void,
             buffersize: u32,
         ) -> std::ffi::c_int;
+    }
+
+    // Security.framework / CoreFoundation, for the code signature's team
+    // identifier. Raw FFI: four calls do not justify another binding crate.
+    #[link(name = "Security", kind = "framework")]
+    unsafe extern "C" {
+        fn SecStaticCodeCreateWithPath(
+            path: *const c_void,
+            flags: u32,
+            static_code: *mut *const c_void,
+        ) -> i32;
+        fn SecCodeCopySigningInformation(
+            code: *const c_void,
+            flags: u32,
+            information: *mut *const c_void,
+        ) -> i32;
+        static kSecCodeInfoTeamIdentifier: *const c_void;
+    }
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    unsafe extern "C" {
+        fn CFURLCreateFromFileSystemRepresentation(
+            allocator: *const c_void,
+            buffer: *const u8,
+            buf_len: isize,
+            is_directory: u8,
+        ) -> *const c_void;
+        fn CFDictionaryGetValue(dict: *const c_void, key: *const c_void) -> *const c_void;
+        fn CFGetTypeID(cf: *const c_void) -> usize;
+        fn CFStringGetTypeID() -> usize;
+        fn CFStringGetCString(
+            string: *const c_void,
+            buffer: *mut std::ffi::c_char,
+            buffer_size: isize,
+            encoding: u32,
+        ) -> u8;
+        fn CFRelease(cf: *const c_void);
+    }
+
+    const K_SEC_CS_DEFAULT_FLAGS: u32 = 0;
+    /// `kSecCSSigningInformation`: read the embedded signature without
+    /// validating it (validation hashes the whole binary).
+    const K_SEC_CS_SIGNING_INFORMATION: u32 = 1 << 1;
+    const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
+
+    /// Team identifier from the code signature of the executable at
+    /// `path`, or `None` when unsigned, ad-hoc signed or unreadable. The
+    /// signature is not validated: this is a fingerprint, and a tool that
+    /// strips or re-signs itself falls back to name matching.
+    pub fn read_signer(path: &str) -> Option<String> {
+        // SAFETY: every CF object created here (`url`, `code`, `info`) is
+        // null-checked and released exactly once. `team` is borrowed from
+        // `info` (Get rule), type-checked as a CFString and read before
+        // `info` is released. `buf` is a fixed stack buffer whose size is
+        // passed to CFStringGetCString, which NUL-terminates on success.
+        unsafe {
+            let url = CFURLCreateFromFileSystemRepresentation(
+                std::ptr::null(),
+                path.as_ptr(),
+                path.len() as isize,
+                0,
+            );
+            if url.is_null() {
+                return None;
+            }
+            let mut code: *const c_void = std::ptr::null();
+            let status = SecStaticCodeCreateWithPath(url, K_SEC_CS_DEFAULT_FLAGS, &mut code);
+            CFRelease(url);
+            if status != 0 || code.is_null() {
+                return None;
+            }
+            let mut info: *const c_void = std::ptr::null();
+            let status =
+                SecCodeCopySigningInformation(code, K_SEC_CS_SIGNING_INFORMATION, &mut info);
+            CFRelease(code);
+            if status != 0 || info.is_null() {
+                return None;
+            }
+            let team = CFDictionaryGetValue(info, kSecCodeInfoTeamIdentifier);
+            let mut out = None;
+            if !team.is_null() && CFGetTypeID(team) == CFStringGetTypeID() {
+                let mut buf = [0 as std::ffi::c_char; 64];
+                if CFStringGetCString(
+                    team,
+                    buf.as_mut_ptr(),
+                    buf.len() as isize,
+                    K_CF_STRING_ENCODING_UTF8,
+                ) != 0
+                {
+                    out = std::ffi::CStr::from_ptr(buf.as_ptr())
+                        .to_str()
+                        .ok()
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_owned);
+                }
+            }
+            CFRelease(info);
+            out
+        }
     }
 
     /// Headless pass: every pid with its short name and executable path.
@@ -430,11 +650,13 @@ mod imp {
                 } else {
                     name
                 };
+                let signer = super::signers::cached(&path);
                 let identifier = if path.is_empty() { name.clone() } else { path };
                 out.push(RawProcess {
                     pid: pid as u32,
                     name,
                     identifier,
+                    signer,
                 });
             }
             out
@@ -478,6 +700,7 @@ mod imp {
                     pid: pid as u32,
                     name,
                     identifier,
+                    signer: None,
                 });
             }
             out
@@ -486,11 +709,15 @@ mod imp {
 
     pub fn enumerate() -> Option<Vec<RawProcess>> {
         // libproc first, then let NSWorkspace's richer info win per pid.
+        // Only libproc knows the executable path, so its signer carries over.
         let mut merged: BTreeMap<u32, RawProcess> = BTreeMap::new();
         for p in libproc_pass() {
             merged.insert(p.pid, p);
         }
-        for p in workspace_pass() {
+        for mut p in workspace_pass() {
+            if let Some(seen) = merged.get_mut(&p.pid) {
+                p.signer = seen.signer.take();
+            }
             merged.insert(p.pid, p);
         }
         if merged.is_empty() {
@@ -531,6 +758,97 @@ mod imp {
         }
     }
 
+    /// Publisher (signer certificate's simple display name) of the
+    /// Authenticode signature embedded in the file at `path`, or `None`
+    /// when unsigned or catalog-signed. The signature is not verified (no
+    /// chain build, no revocation fetch): this is a fingerprint, and a
+    /// tool that strips its signature falls back to name matching.
+    pub fn read_signer(path: &str) -> Option<String> {
+        use std::ffi::c_void;
+        use windows::Win32::Security::Cryptography::{
+            CertCloseStore, CertFindCertificateInStore, CertFreeCertificateContext,
+            CertGetNameStringW, CryptMsgClose, CryptMsgGetParam, CryptQueryObject,
+            CERT_FIND_SUBJECT_CERT, CERT_INFO, CERT_NAME_SIMPLE_DISPLAY_TYPE,
+            CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED_EMBED, CERT_QUERY_FORMAT_FLAG_BINARY,
+            CERT_QUERY_OBJECT_FILE, CMSG_SIGNER_INFO, CMSG_SIGNER_INFO_PARAM, HCERTSTORE,
+            PKCS_7_ASN_ENCODING, X509_ASN_ENCODING,
+        };
+        let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: `wide` is a NUL-terminated UTF-16 path that outlives the
+        // CryptQueryObject call. The store and message it returns are
+        // closed on every path below. The signer info is copied into a
+        // u64-aligned buffer of the size CryptMsgGetParam reported, and
+        // its issuer/serial blobs point into that buffer, which outlives
+        // the CertFindCertificateInStore call. The certificate context is
+        // freed after its name is read into a stack buffer whose length
+        // CertGetNameStringW receives.
+        unsafe {
+            let mut store = HCERTSTORE::default();
+            let mut msg: *mut c_void = std::ptr::null_mut();
+            CryptQueryObject(
+                CERT_QUERY_OBJECT_FILE,
+                wide.as_ptr().cast(),
+                CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED_EMBED,
+                CERT_QUERY_FORMAT_FLAG_BINARY,
+                0,
+                None,
+                None,
+                None,
+                Some(&mut store),
+                Some(&mut msg),
+                None,
+            )
+            .ok()?;
+            let name = (|| {
+                let mut len = 0u32;
+                CryptMsgGetParam(msg, CMSG_SIGNER_INFO_PARAM, 0, None, &mut len).ok()?;
+                if (len as usize) < std::mem::size_of::<CMSG_SIGNER_INFO>() {
+                    return None;
+                }
+                let mut buf = vec![0u64; (len as usize).div_ceil(8)];
+                CryptMsgGetParam(
+                    msg,
+                    CMSG_SIGNER_INFO_PARAM,
+                    0,
+                    Some(buf.as_mut_ptr().cast()),
+                    &mut len,
+                )
+                .ok()?;
+                let signer = &*(buf.as_ptr() as *const CMSG_SIGNER_INFO);
+                let wanted = CERT_INFO {
+                    Issuer: signer.Issuer,
+                    SerialNumber: signer.SerialNumber,
+                    ..Default::default()
+                };
+                let cert = CertFindCertificateInStore(
+                    store,
+                    X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
+                    0,
+                    CERT_FIND_SUBJECT_CERT,
+                    Some((&wanted as *const CERT_INFO).cast()),
+                    None,
+                );
+                if cert.is_null() {
+                    return None;
+                }
+                let mut name = [0u16; 256];
+                let n = CertGetNameStringW(
+                    cert,
+                    CERT_NAME_SIMPLE_DISPLAY_TYPE,
+                    0,
+                    None,
+                    Some(&mut name),
+                );
+                let _ = CertFreeCertificateContext(Some(cert));
+                // `n` counts the trailing NUL; 1 means an empty name.
+                (n > 1).then(|| String::from_utf16_lossy(&name[..n as usize - 1]))
+            })();
+            let _ = CryptMsgClose(Some(msg));
+            let _ = CertCloseStore(store, 0);
+            name
+        }
+    }
+
     pub fn enumerate() -> Option<Vec<RawProcess>> {
         use windows::Win32::Foundation::CloseHandle;
         use windows::Win32::System::Diagnostics::ToolHelp::{
@@ -559,11 +877,14 @@ mod imp {
                     let pid = entry.th32ProcessID;
                     if pid != 0 && !exe.is_empty() {
                         let name = exe.trim_end_matches(".exe").to_owned();
-                        let identifier = image_path(pid).unwrap_or_else(|| exe.clone());
+                        let path = image_path(pid);
+                        let signer = path.as_deref().and_then(super::signers::cached);
+                        let identifier = path.unwrap_or_else(|| exe.clone());
                         out.push(RawProcess {
                             pid,
                             name,
                             identifier,
+                            signer,
                         });
                     }
                     if Process32NextW(snapshot, &mut entry).is_err() {
@@ -624,6 +945,7 @@ mod imp {
                 pid,
                 name,
                 identifier,
+                signer: None,
             });
         }
         if out.is_empty() {
@@ -652,6 +974,7 @@ mod tests {
             pid: 4242,
             name: "chrome-remote-d".into(),
             identifier: "/opt/google/chrome-remote-desktop/chrome-remote-desktop-host".into(),
+            signer: None,
         };
         let scan = super::classify(&[p], 1, "procfs");
         assert_eq!(scan.watched.len(), 1);
@@ -668,7 +991,110 @@ mod tests {
             pid,
             name: name.into(),
             identifier: identifier.into(),
+            signer: None,
         }
+    }
+
+    fn signed(pid: u32, name: &str, identifier: &str, signer: &str) -> RawProcess {
+        RawProcess {
+            signer: Some(signer.into()),
+            ..p(pid, name, identifier)
+        }
+    }
+
+    #[test]
+    fn a_renamed_tool_signed_by_a_watched_identity_still_matches() {
+        // TeamViewer's macOS team identifier, copied and renamed.
+        let raw = [signed(
+            1,
+            "Notes Helper",
+            "/Users/x/Downloads/notes-helper",
+            "H7UGFBUGV6",
+        )];
+        let scan = classify(&raw, 0, "nsworkspace");
+        assert_eq!(scan.watched.len(), 1);
+        assert_eq!(scan.watched[0].category, WatchCategory::RemoteDesktop);
+        assert_eq!(scan.watched[0].rule, "signer:h7ugfbugv6");
+    }
+
+    #[test]
+    fn an_unsigned_process_falls_back_to_its_name() {
+        let raw = [p(
+            1,
+            "AnyDesk",
+            "/Applications/AnyDesk.app/Contents/MacOS/AnyDesk",
+        )];
+        let scan = classify(&raw, 0, "nsworkspace");
+        assert_eq!(scan.watched.len(), 1);
+        assert_eq!(scan.watched[0].category, WatchCategory::RemoteDesktop);
+        assert_eq!(scan.watched[0].rule, "name:anydesk");
+    }
+
+    #[test]
+    fn an_unwatched_identity_does_not_hide_a_watched_name() {
+        let raw = [signed(
+            1,
+            "Cluely",
+            "C:\\Users\\x\\AppData\\Local\\cluely\\Cluely.exe",
+            "Some Unrelated Vendor Ltd",
+        )];
+        let scan = classify(&raw, 0, "toolhelp");
+        assert_eq!(scan.watched.len(), 1);
+        assert_eq!(scan.watched[0].category, WatchCategory::InterviewCheat);
+        assert_eq!(scan.watched[0].rule, "name:cluely");
+    }
+
+    #[test]
+    fn a_windows_publisher_matches_whatever_the_exe_is_called() {
+        let raw = [signed(
+            1,
+            "svc-helper",
+            "C:\\Temp\\svc-helper.exe",
+            "AnyDesk Software GmbH",
+        )];
+        let scan = classify(&raw, 0, "toolhelp");
+        assert_eq!(scan.watched.len(), 1);
+        assert_eq!(scan.watched[0].category, WatchCategory::RemoteDesktop);
+        assert_eq!(scan.watched[0].rule, "signer:anydesk software gmbh");
+    }
+
+    #[test]
+    fn a_signed_tool_keeps_its_name_rule_label() {
+        // Signer rules sit after a vendor's name and id rules, so an
+        // unrenamed tool reports the same rule as before.
+        let raw = [signed(
+            1,
+            "TeamViewer",
+            "com.teamviewer.TeamViewer",
+            "H7UGFBUGV6",
+        )];
+        assert_eq!(
+            classify(&raw, 0, "nsworkspace").watched[0].rule,
+            "id:com.teamviewer"
+        );
+    }
+
+    #[test]
+    fn each_path_is_read_once_and_then_served_from_the_cache() {
+        let mut cache = SignerCache::default();
+        assert_eq!(
+            cache.lookup("/a"),
+            (None, true),
+            "first sight queues a read"
+        );
+        assert_eq!(
+            cache.lookup("/a"),
+            (None, false),
+            "a queued path is not re-queued"
+        );
+        cache.record("/a".into(), Some("TEAMID1234".into()));
+        assert_eq!(cache.lookup("/a"), (Some("TEAMID1234".into()), false));
+        cache.record("/b".into(), None);
+        assert_eq!(
+            cache.lookup("/b"),
+            (None, false),
+            "unsigned is remembered too"
+        );
     }
 
     #[test]

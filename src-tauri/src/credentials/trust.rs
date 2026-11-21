@@ -84,7 +84,10 @@ pub fn trust_view(
     }
 }
 
-/// Organisation first, then credential-bound attestation, else self-reported.
+/// Organisation first, then credential-bound attestation from the device the
+/// attempt ran on, else self-reported. A paired phone's evidence reads
+/// self-reported: its outcome says a phone was present, not that the figures
+/// came from a verified device.
 fn provenance(trust: &CredentialTrust) -> Option<Provenance> {
     let (attestation, organisation) = match trust {
         CredentialTrust::VerifiedSelfClaim { attestation, .. }
@@ -101,9 +104,13 @@ fn provenance(trust: &CredentialTrust) -> Option<Provenance> {
             name: name.clone(),
             domain: domain.clone(),
         },
-        (_, AttestationOutcome::VerifiedCredentialBound { platform }) => {
-            Provenance::DeviceAttested { platform }
-        }
+        (
+            _,
+            AttestationOutcome::VerifiedCredentialBound {
+                platform,
+                companion: false,
+            },
+        ) => Provenance::DeviceAttested { platform },
         (_, attestation) => Provenance::SelfReported { attestation },
     })
 }
