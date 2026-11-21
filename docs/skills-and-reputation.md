@@ -64,7 +64,9 @@ Ordered enumeration based on Bloom's revised taxonomy: `remember`, `understand`,
 
 ## 4. Skill Graph (Normative)
 
-Skills form a directed acyclic graph (DAG) with explicit prerequisite edges stored in `skill_prerequisites` (composite PK: `skill_id`, `prerequisite_id`). Non-prerequisite relationships (e.g., "related to", "builds on") are stored in `skill_relations`.
+Skills form a directed acyclic graph (DAG) with explicit prerequisite edges stored in `skill_prerequisites` (composite PK: `skill_id`, `prerequisite_id`). Non-prerequisite relationships are stored in `skill_relations`, one undirected row per pair with a relation type: `related`, `complementary` ("goes well with") or `alternative` ("an alternative to"). An unknown type reads as `related`.
+
+Prerequisites are guidance, never a gate. On every skill graph surface a skill is earned or ready, and nothing else: "Ready next" is a suggestion computed from prerequisites, it never blocks opening, learning or earning a skill, and no view may draw an unearned skill as locked or unavailable.
 
 Taxonomy updates are committee-gated via the governance system and propagated over the `/alexandria/taxonomy/1.0` GossipSub topic.
 

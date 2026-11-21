@@ -1,7 +1,7 @@
 # App Settings
 
 Status: implemented
-Updated: 2026-11-14
+Updated: 2026-11-21
 
 Every user-controlled preference Alexandria has — theme, sidebar
 collapsed, keyboard shortcuts, sentinel toggles, video defaults,
@@ -107,7 +107,8 @@ These keys back the skill-graph surfaces and the reputation home surface (see
 
 | Key | Scope | Kind | Use |
 |---|---|---|---|
-| `ui.skill_graph_view` | sync | string | `simple` (default) or `detailed`: the remembered skill graph view, shared by every surface that shows the graph. Local writes and inbound sync rows with any other value are refused; the frontend reads it through `useSkillGraphView()`, which treats anything unknown as `simple`. |
+| `ui.skill_graph_view` | sync | string | `web`, `simple` (default) or `detailed`: the remembered skill graph view on the skills page. Local writes and inbound sync rows with any other value are refused; the frontend reads it through `useSkillGraphView('page')`, which treats anything unknown as `simple`. |
+| `ui.skill_graph_expanded_view` | sync | string | `web` (default), `simple` or `detailed`: the remembered view of the graph expanded from the sidebar. Same validation as `ui.skill_graph_view`; read through `useSkillGraphView('modal')`, which treats anything unknown as `web`. |
 | `instructor.graph_prefs` | sync | json | `{ skill_id: { public, teaching } }` — per-skill visibility + teaching highlight. Read by `p2p::graph_fetch` when serving the owner's public graph. |
 | `learner.targets` | sync | json | `Goal[]` the user is working toward. Each goal carries `kind`, optional `source_key` / `source_url`, `resolution_provenance`, and `taxonomy_version` — resolved from the bundled `goal_templates` (exam/curriculum/job-role) or on-device job-description parsing. |
 | `identity.local_did` | device | string | Cached `did:key` of the active profile, written by `get_local_did`. Lets the swarm event loop (no keystore access) answer `graph-fetch` requests for its own owner. Internal — not user-facing. |

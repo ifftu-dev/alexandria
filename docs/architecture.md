@@ -1,7 +1,7 @@
 # Alexandria — Architecture
 
 Status: live
-Updated: 2026-11-17
+Updated: 2026-11-21
 
 > Offline-first, trustless, multi-platform.
 
@@ -727,7 +727,7 @@ list.
 | classroom | 24 | `classroom_create`, `classroom_approve_member`, `classroom_send_message`, `classroom_start_call` |
 | tutoring | 16 | `tutoring_create_room`, `tutoring_join_room`, `tutoring_send_transcript`, `tutoring_toggle_video` |
 | interview | 14 | `interview_create`, `interview_record_consent`, `interview_append_transcript`, `interview_generate_summary`, `interview_purge_expired` |
-| taxonomy | 9 | `list_skills`, `list_subjects`, `list_skill_graph_edges`, `tag_element_skill` |
+| taxonomy | 9 | `list_skills`, `list_subjects`, `list_skill_graph_edges`, `list_skill_graph_relations`, `tag_element_skill` |
 | profile | 9 | `list_profiles`, `get_active_profile_id`, `create_profile`, `restore_profile_with_mnemonic`, `unlock_profile`, `lock_profile`, `rename_profile`, `set_profile_avatar`, `delete_profile` |
 | identity | 8 | `export_mnemonic`, `is_biometric_available`, `get_wallet_info`, `get_local_did`, `get_profile`, `update_profile`, `publish_profile`, `resolve_profile` (lifecycle commands moved to `profile` module) |
 | settings | 3 | `list_settings`, `set_setting`, `reset_setting` — drives the unified per-profile settings store. See [`settings.md`](settings.md). |
