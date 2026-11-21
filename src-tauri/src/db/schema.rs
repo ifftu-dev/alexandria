@@ -890,7 +890,7 @@ CREATE TABLE integrity_sessions (
     ended_at TEXT,
     critical_count INTEGER NOT NULL DEFAULT 0,
     warning_count INTEGER NOT NULL DEFAULT 0,
-    assurance_level TEXT NOT NULL DEFAULT 'local',                                             -- local|device_attested (verified again at issuance)
+    assurance_level TEXT NOT NULL DEFAULT 'local',                                             -- local|companion_attested|device_attested (verified again at issuance)
     commitment_root TEXT,
     anchor_ref TEXT,
     purpose TEXT NOT NULL DEFAULT 'assessment' CHECK (purpose IN ('assessment', 'interview'))

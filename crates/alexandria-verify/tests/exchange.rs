@@ -279,6 +279,7 @@ fn camera_policy() -> IssuancePolicy {
         probe_connection_id: None,
         min_trust_profile: Some(TrustProfile::Camera),
         min_verification_rung: Some(VerificationRung::Process),
+        required_answer_custody: None,
     }
 }
 

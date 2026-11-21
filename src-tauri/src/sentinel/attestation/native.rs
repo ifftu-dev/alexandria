@@ -45,6 +45,14 @@ pub fn assert_commitment(key_id_b64: &str, root: &str) -> Result<Option<String>,
     imp::assert_commitment(key_id_b64, root)
 }
 
+/// iOS only: an assertion from the attested key `key_id_b64` whose client
+/// data is `client_data` (its hash is the assertion's `clientDataHash`), as a
+/// hosted attempt's attested requests carry. `Ok(None)` where assertions do
+/// not exist.
+pub fn assert_bytes(key_id_b64: &str, client_data: &[u8]) -> Result<Option<String>, String> {
+    imp::assert_bytes(key_id_b64, client_data)
+}
+
 /// Platform evidence over a credential's binding digest: on iOS an
 /// assertion from the attested key `key_id_b64` whose client data is the 32
 /// digest bytes; on Android a fresh Play Integrity token with the digest as
@@ -235,6 +243,10 @@ mod imp {
         assert_client_data(key_id_b64, root.as_bytes())
     }
 
+    pub fn assert_bytes(key_id_b64: &str, client_data: &[u8]) -> Result<Option<String>, String> {
+        assert_client_data(key_id_b64, client_data)
+    }
+
     pub fn bind_digest(
         key_id_b64: Option<&str>,
         digest: &[u8; 32],
@@ -297,6 +309,10 @@ mod imp {
         Ok(None)
     }
 
+    pub fn assert_bytes(_key_id_b64: &str, _client_data: &[u8]) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+
     pub fn bind_digest(
         _key_id_b64: Option<&str>,
         digest: &[u8; 32],
@@ -321,6 +337,10 @@ mod imp {
     }
 
     pub fn assert_commitment(_key_id_b64: &str, _root: &str) -> Result<Option<String>, String> {
+        Ok(None)
+    }
+
+    pub fn assert_bytes(_key_id_b64: &str, _client_data: &[u8]) -> Result<Option<String>, String> {
         Ok(None)
     }
 

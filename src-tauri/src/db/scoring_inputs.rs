@@ -376,8 +376,9 @@ pub(crate) mod test_support {
         mint_play_token, p256_key, play_keys_b64, play_verdict,
     };
     use alexandria_verify::attestation::{
-        binding_digest_of, session_nonce, AttestationEvidence, AttestationPayload,
-        AttestationTrust, DeviceAttestation, Platform, PlayIntegrityKeys, PlayIntegrityTrust,
+        binding_digest_of, companion_nonce, companion_statement, session_nonce,
+        AttestationEvidence, AttestationPayload, AttestationTrust, CompanionBinding,
+        DeviceAttestation, Platform, PlayIntegrityKeys, PlayIntegrityTrust,
     };
     use alexandria_verify::did::derive_did_key;
     use alexandria_verify::vc::sign::{sign_credential, UnsignedCredential};
@@ -445,6 +446,9 @@ pub(crate) mod test_support {
         CredentialBound,
         /// The session's Play Integrity evidence only.
         SessionBound,
+        /// Play Integrity evidence over this credential's binding digest from
+        /// a phone the signer paired with a desktop session.
+        CompanionBound,
     }
 
     /// One test credential's content.
@@ -475,6 +479,7 @@ pub(crate) mod test_support {
             warning_count: 0,
             assurance_level: match spec.evidence {
                 Evidence::CredentialBound => "device_attested",
+                Evidence::CompanionBound => "companion_attested",
                 _ => "local",
             }
             .into(),
@@ -488,6 +493,7 @@ pub(crate) mod test_support {
             signals_degraded: vec![],
             signals_not_run: vec![],
             camera_coverage: None,
+            answer_custody: None,
             probe: None,
         };
         let subject = Claim::Skill(SkillClaim {
@@ -501,13 +507,22 @@ pub(crate) mod test_support {
         })
         .into_subject(spec.subject.clone());
         let session = session_nonce(&session_id, SESSION_STARTED);
-        let record = DeviceAttestation {
+        // A paired phone attests the session nonce bound to the learner and
+        // itself, and the learner signs the binding.
+        const PHONE: &str = "scoring-test-phone";
+        let companion = spec.evidence == Evidence::CompanionBound;
+        let attested = if companion {
+            companion_nonce(&session, issuer.as_str(), PHONE)
+        } else {
+            session
+        };
+        let mut record = DeviceAttestation {
             platform: Platform::Android,
-            nonce_hex: hex::encode(session),
+            nonce_hex: hex::encode(attested),
             app_id: PACKAGE.into(),
             payload: AttestationPayload::PlayIntegrity {
                 token: mint_play_token(
-                    &play_verdict(&session, PACKAGE),
+                    &play_verdict(&attested, PACKAGE),
                     &KEK,
                     &play_signer(),
                     [1; 12],
@@ -516,12 +531,25 @@ pub(crate) mod test_support {
             captured_at: SESSION_STARTED.into(),
             companion: None,
         };
+        if companion {
+            use base64::Engine as _;
+            use ed25519_dalek::Signer as _;
+            let signature = spec
+                .signer
+                .sign(&companion_statement(&record, issuer.as_str(), PHONE));
+            record.companion = Some(CompanionBinding {
+                learner_did: issuer.as_str().into(),
+                phone_endpoint: PHONE.into(),
+                did_signature_b64: base64::engine::general_purpose::STANDARD
+                    .encode(signature.to_bytes()),
+            });
+        }
         let evidence = match spec.evidence {
             Evidence::NoAssertion | Evidence::NotSupplied => vec![],
             Evidence::SessionBound => {
                 vec![AttestationEvidence::session_bound(&record, SESSION_STARTED).into_entry()]
             }
-            Evidence::CredentialBound => {
+            Evidence::CredentialBound | Evidence::CompanionBound => {
                 let digest = binding_digest_of(&subject, &integrity).unwrap();
                 let token = mint_play_token(
                     &play_verdict(&digest, PACKAGE),

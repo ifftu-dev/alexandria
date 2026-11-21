@@ -17,3 +17,4 @@ Status values:
 | [0006](0006-checkable-integrity-evidence.md) | Integrity evidence is checkable by the relying party or labelled self-reported | implemented | 2026-11-16 |
 | [0007](0007-did-key-never-rotates.md) | A `did:key` never rotates; organisations rotate through their domain's key list | implemented | 2026-11-16 |
 | [0008](0008-hosted-organisation-issued-credentials.md) | The hosted service issues organisation-signed credentials under the organisation's domain-listed key | implemented | 2026-11-16 |
+| [0009](0009-hosted-attempts-issuer-holds-answers.md) | For a hosted attempt the issuer holds the answers and computes the outcome; the device contributes integrity evidence only | implemented | 2026-11-20 |

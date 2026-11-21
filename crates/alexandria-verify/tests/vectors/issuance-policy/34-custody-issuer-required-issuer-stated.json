@@ -1,0 +1,52 @@
+{
+  "description": "`issuer` answer custody is required and the assertion states it, with no hosted attempt entry to stand on. Anyone can sign an assertion stating `issuer` (a candidate with a second key, say): only a hosted attempt entry proves it, so the rule credits `device`.",
+  "policy": {
+    "min_integrity": null,
+    "max_critical": null,
+    "max_warning": null,
+    "require_clean": false,
+    "required_assurance_level": null,
+    "probe_policy": null,
+    "min_trust_profile": null,
+    "min_verification_rung": null,
+    "required_answer_custody": "issuer"
+  },
+  "integrity": {
+    "sessionId": "isess_policy_vector",
+    "status": "completed",
+    "integrityScore": 0.91,
+    "criticalCount": 0,
+    "warningCount": 1,
+    "assuranceLevel": "local",
+    "generatedAt": "2026-06-01T00:00:00Z",
+    "trustProfile": "camera",
+    "verificationRung": "probed",
+    "signalsRun": [
+      "core",
+      "camera"
+    ],
+    "signalsNotRun": [
+      "device_attestation"
+    ],
+    "probe": {
+      "outcome": "satisfied",
+      "policies": [
+        "reseed"
+      ],
+      "satisfied": 2,
+      "failed": 0,
+      "skipped": 0
+    },
+    "answerCustody": "issuer"
+  },
+  "attestation": {
+    "outcome": "not_supplied"
+  },
+  "expect": {
+    "refusal": {
+      "code": "custody_below_required",
+      "custody": "device",
+      "required": "issuer"
+    }
+  }
+}

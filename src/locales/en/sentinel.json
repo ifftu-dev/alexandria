@@ -599,16 +599,18 @@
     "liveSuspended": "Session suspended"
   },
   "companion": {
-    "pairToggle": "Pair my phone first, so this attempt can be device-attested",
+    "pairToggle": "Pair my phone first. It is present and attested during the attempt; it does not verify this computer.",
     "offerTitle": "Pair your phone",
     "offerBody": "On your phone, open Alexandria signed in as you, go to Sentinel, choose Join from phone and paste this code. It works once and expires in five minutes.",
+    "offerNote": "Your phone is present and attested during this attempt. It does not verify this computer, so the result is not device-attested.",
     "copy": "Copy code",
     "copied": "Copied",
     "waiting": "Waiting for your phone…",
     "skip": "Continue without the phone",
     "failed": "Your phone could not pair: {reason}",
+    "paired": "Phone paired. It is present and attested during this attempt; nothing is claimed about this computer.",
     "joinTitle": "Join from phone",
-    "cardDescription": "Lend this phone's device attestation to an assessment you are taking on your desktop.",
+    "cardDescription": "Pair this phone with an assessment you are taking on your desktop. The phone is present and attested during the session; it does not verify the desktop.",
     "joinBody": "Paste the code your desktop shows. This phone attests that it is a genuine Alexandria app signed in as you; it accepts codes only for your own sessions.",
     "joinPlaceholder": "Companion code",
     "join": "Join",
@@ -656,7 +658,6 @@
       "over_budget": "this device cannot run the camera checks smoothly"
     },
     "raise": {
-      "pair_phone": "Pair your phone before you start.",
       "attested_device": "Use a phone or tablet that passes device attestation.",
       "connect_camera": "Connect a camera.",
       "allow_camera": "Turn on the camera before you start.",

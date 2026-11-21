@@ -1,7 +1,7 @@
 # The enterprise boundary
 
 Status: live
-Updated: 2026-10-12
+Updated: 2026-11-21
 
 Alexandria is AGPL-3.0-or-later in full. The commercial Enterprise Edition is a **shell
 around** this application, in a separate repository, and nothing here references
@@ -76,6 +76,7 @@ If yes, it is core, and it is AGPL. There is no third category.
 | Talent index service and storage | **Enterprise** | Multi-tenant server-side state about other people |
 | Employer search console | **Enterprise** | Scoped to an organisation |
 | Hosted verification API — rate limits, keys, SLA | **Enterprise** | The hosted *operation*; the logic underneath stays core |
+| Hosted item banks and hosted attempts — a role's items and answers held, drawn, timed and graded by the organisation's service | **Enterprise** | A hosted process an organisation runs over many candidates. Checking the resulting credential (answer custody, the hosted attempt entry, the policy rule) stays core, free and offline in `alexandria-verify`, and so does the app's side of taking the attempt |
 | Bulk verification | **Enterprise** | A metered enterprise operation |
 | Human review queue over Sentinel flags | **Enterprise** | An org process with an adjudication workflow — but it may not request evidence, and released evidence is legible to the one reviewer assigned to the case rather than to the organisation; see `sentinel.md` |
 | Cohort analytics, skills intelligence | **Enterprise** | Cross-user server-side aggregation |

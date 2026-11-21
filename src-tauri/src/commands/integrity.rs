@@ -25,8 +25,9 @@ pub struct IntegritySession {
     pub warning_count: i64,
     pub started_at: String,
     pub ended_at: Option<String>,
-    /// `local`, or `device_attested` once the platform attestation stored
-    /// for this session verified. Re-verified at issuance.
+    /// `local`; `device_attested` once this device's platform attestation
+    /// stored for this session verified; `companion_attested` once a paired
+    /// phone's did. Re-verified at issuance.
     pub assurance_level: String,
     /// Items whose first visit arrived with response-process timing.
     pub response_items: i64,
@@ -113,15 +114,28 @@ pub struct AttestSessionResponse {
 pub struct DeviceSupport {
     /// The platform can attest a session here (App Attest, Play Integrity).
     pub platform_attestation: bool,
-    /// A paired phone can lend its attestation (desktop builds).
+    /// A phone can be paired (desktop builds). The session is then
+    /// `companion_attested`: the phone is present and attested; nothing is
+    /// claimed about this computer.
     pub companion_phone: bool,
+    /// Android phones can reach `device_attested` on this build (the network
+    /// profile carries Play Integrity response keys); until then only an
+    /// iPhone can.
+    pub android_attestation: bool,
+    /// This device can reach `device_attested`, so it can start an attempt
+    /// whose policy requires a verified device
+    /// ([`crate::sentinel::attestation::require_verified_device`]).
+    pub verified_device: bool,
 }
 
 #[tauri::command]
 pub async fn integrity_device_support() -> Result<DeviceSupport, String> {
+    let device = crate::sentinel::attestation::AttemptDevice::current();
     Ok(DeviceSupport {
         platform_attestation: crate::sentinel::attestation::native::supported(),
         companion_phone: cfg!(desktop),
+        android_attestation: device.android_attestation,
+        verified_device: device.can_reach_device_attested(),
     })
 }
 

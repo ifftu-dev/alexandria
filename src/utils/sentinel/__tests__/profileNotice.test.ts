@@ -39,25 +39,27 @@ describe('profileNotice', () => {
       { profile: 'attested', reasons: ['not_attested'] },
       { profile: 'camera', reasons: ['camera_not_consented'] },
       { profile: 'full', reasons: ['not_attested', 'camera_not_consented'] },
-    ]), { mobile: false })
+    ]))
     expect(notice.profile).toBe('core')
     expect(notice.notRun).toEqual([
       { signal: 'device_attestation', reasons: ['not_attested'] },
       { signal: 'camera', reasons: ['camera_not_consented'] },
     ])
     expect(notice.floor).toEqual({ required: null, satisfied: true, missing: [] })
-    expect(notice.raise).toEqual(['pair_phone', 'allow_camera'])
+    // Pairing a phone no longer raises a desktop's profile (a companion is
+    // its own level): the step is an attested device.
+    expect(notice.raise).toEqual(['attested_device', 'allow_camera'])
   })
 
   it('names only what the unmet floor is missing', () => {
     const notice = profileNotice(selected('camera', [
       { profile: 'attested', reasons: ['not_attested'] },
       { profile: 'full', reasons: ['not_attested', 'over_budget'] },
-    ], { required: 'attested', satisfied: false, missing: ['device_attestation'] }), { mobile: true })
+    ], { required: 'attested', satisfied: false, missing: ['device_attestation'] }))
     expect(notice.floor).toEqual({ required: 'attested', satisfied: false, missing: ['device_attestation'] })
     expect(notice.notRun).toEqual([{ signal: 'device_attestation', reasons: ['not_attested'] }])
-    // A phone without attestation cannot pair another phone: it needs an
-    // attested device. The camera budget is beside the point here.
+    // Without attestation the step is an attested device. The camera budget
+    // is beside the point here.
     expect(notice.raise).toEqual(['attested_device'])
   })
 
@@ -65,13 +67,13 @@ describe('profileNotice', () => {
     const notice = profileNotice(selected('attested', [
       { profile: 'camera', reasons: ['over_budget'] },
       { profile: 'full', reasons: ['not_benchmarked'] },
-    ]), { mobile: true })
+    ]))
     expect(notice.notRun).toEqual([{ signal: 'camera', reasons: ['over_budget', 'not_benchmarked'] }])
     expect(notice.raise).toEqual(['faster_device'])
   })
 
   it('has nothing to raise on the full profile', () => {
-    const notice = profileNotice(selected('full', []), { mobile: true })
+    const notice = profileNotice(selected('full', []))
     expect(notice.notRun).toEqual([])
     expect(notice.raise).toEqual([])
   })

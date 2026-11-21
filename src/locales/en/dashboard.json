@@ -177,6 +177,7 @@
       "probePolicy": "Follow-up questions",
       "noMinimum": "No minimum",
       "coverageTitle": "What a credential under this policy covers",
+      "custodyDevice": "Candidates' devices hold the answers. A role on this device can only have that answer custody, and its credentials say so.",
       "generatedProbeLabel": "Model connection",
       "generatedProbeOff": "Off",
       "generatedProbeNone": "No model connections are set up on this device.",

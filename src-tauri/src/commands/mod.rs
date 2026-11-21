@@ -93,6 +93,7 @@ pub mod decisions;
 
 pub mod exchange;
 pub mod hiring;
+pub mod hosted_attempt;
 pub mod interview_panel;
 pub mod organisations;
 

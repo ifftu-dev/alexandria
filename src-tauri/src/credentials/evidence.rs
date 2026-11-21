@@ -328,7 +328,8 @@ mod tests {
         assert_eq!(
             verify_evidence(&issued.credential, &trust(&w).inputs()),
             AttestationOutcome::VerifiedCredentialBound {
-                platform: Platform::Ios
+                platform: Platform::Ios,
+                companion: false,
             }
         );
     }
@@ -356,7 +357,8 @@ mod tests {
         assert_eq!(
             verify_evidence(&issued.credential, &trust(&w).inputs()),
             AttestationOutcome::VerifiedSessionBound {
-                platform: Platform::Ios
+                platform: Platform::Ios,
+                companion: false,
             }
         );
         // The signed credential, as stored, still verifies.
@@ -393,7 +395,8 @@ mod tests {
         assert_eq!(
             verify_evidence(&issued.credential, &trust(&w).inputs()),
             AttestationOutcome::VerifiedSessionBound {
-                platform: Platform::Ios
+                platform: Platform::Ios,
+                companion: false,
             }
         );
     }
@@ -492,7 +495,8 @@ mod tests {
         assert_eq!(
             verify_evidence(&bundled, &trust(&w).inputs()),
             AttestationOutcome::VerifiedCredentialBound {
-                platform: Platform::Ios
+                platform: Platform::Ios,
+                companion: false,
             }
         );
     }

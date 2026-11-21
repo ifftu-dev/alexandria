@@ -14,7 +14,6 @@ import type {
 
 /** Something the learner can change to reach a higher profile. */
 export type RaiseStep =
-  | 'pair_phone'
   | 'attested_device'
   | 'connect_camera'
   | 'allow_camera'
@@ -46,11 +45,11 @@ const PROFILE_SIGNALS: Record<TrustProfile, ProfileSignal[]> = {
   full: ['device_attestation', 'camera'],
 }
 
-function step(reason: ProfileExclusionReason, mobile: boolean): RaiseStep {
+function step(reason: ProfileExclusionReason): RaiseStep {
   switch (reason) {
-    // A desktop has no attestation of its own; a paired attested phone
-    // brings one. A phone that did not attest needs an attested device.
-    case 'not_attested': return mobile ? 'attested_device' : 'pair_phone'
+    // Only the attempt's own attested device runs device attestation: a
+    // paired phone is the companion level and raises nothing.
+    case 'not_attested': return 'attested_device'
     case 'no_camera': return 'connect_camera'
     case 'camera_not_consented': return 'allow_camera'
     case 'not_benchmarked':
@@ -58,7 +57,7 @@ function step(reason: ProfileExclusionReason, mobile: boolean): RaiseStep {
   }
 }
 
-export function profileNotice(selected: DeepReadonly<SelectedProfile>, { mobile }: { mobile: boolean }): ProfileNotice {
+export function profileNotice(selected: DeepReadonly<SelectedProfile>): ProfileNotice {
   const notRun = selected.not_run.map((signal): SignalNotice => {
     const reasons: ProfileExclusionReason[] = []
     for (const exclusion of selected.excluded) {
@@ -74,7 +73,7 @@ export function profileNotice(selected: DeepReadonly<SelectedProfile>, { mobile 
   for (const { signal, reasons } of notRun) {
     if (!satisfied && !missing.includes(signal)) continue
     for (const reason of reasons) {
-      const next = step(reason, mobile)
+      const next = step(reason)
       if (!raise.includes(next)) raise.push(next)
     }
   }

@@ -16,7 +16,10 @@
 //!    (`crate::attestation`); invalid evidence rejects.
 //! 9. Check that a coverage statement named by `relatedResource` is the one
 //!    the integrity assertion names by digest.
-//! 10. Emit an accepted, pending, or rejected `VerificationResult`.
+//! 10. Check answer custody (`crate::custody`): a self-issued credential
+//!     cannot state `issuer` custody or carry a hosted attempt entry, and a
+//!     hosted attempt entry must be well formed beside `issuer` custody.
+//! 11. Emit an accepted, pending, or rejected `VerificationResult`.
 //!
 //! Missing or unavailable issuer/status evidence produces a typed pending
 //! result. A malformed reference or a failed cryptographic/policy check is a
@@ -33,7 +36,7 @@ use crate::attestation::{AttestationOutcome, AttestationTrust, VerifiedAssurance
 use crate::did::{parse_did_key, resolve_did_key, Did, DidError};
 use crate::{StoreLookup, VerificationStore};
 
-/// Verification algorithm per spec §13.2, steps 1–10, with no attestation
+/// Verification algorithm per spec §13.2, steps 1–11, with no attestation
 /// trust inputs: attestation evidence the credential carries is reported as
 /// `unverifiable` (or `invalid` when it fails a check that needs no trust
 /// input). Use [`verify_credential_with_attestation`] to check it.
@@ -80,6 +83,7 @@ pub fn verify_credential_with_attestation(
         suspended: false,
         superseded: false,
         coverage_statement_mismatch: false,
+        custody_defects: Vec::new(),
         verification_time: verification_time.to_string(),
         pending_reasons: Vec::new(),
         attestation: AttestationOutcome::NotSupplied,
@@ -174,6 +178,11 @@ pub fn verify_credential_with_attestation(
     // A credential that names its coverage statement twice must name one
     // statement. Comparing digests needs no registry lookup.
     result.coverage_statement_mismatch = crate::coverage::names_mismatched_statement(credential);
+
+    // -- answer custody -----------------------------------------------------
+    // Judged on the credential's own content: who signed it, what its
+    // assertion states and what its hosted attempt entry says.
+    result.custody_defects = crate::custody::custody_defects(credential);
 
     // -- integrity anchor (§11.3.1) ------------------------------------------
     // The store supplies what the caller saw on the ledger; the hash is
@@ -350,7 +359,8 @@ fn finalize(
         && !(policy.reject_expired && result.expired)
         && !(policy.reject_suspended && result.suspended)
         && !(policy.reject_superseded && result.superseded)
-        && !result.coverage_statement_mismatch;
+        && !result.coverage_statement_mismatch
+        && result.custody_defects.is_empty();
     result.acceptance_decision = if !accept {
         AcceptanceDecision::Reject
     } else if result.pending_reasons.is_empty() {

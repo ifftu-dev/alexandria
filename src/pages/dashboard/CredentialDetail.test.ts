@@ -205,6 +205,13 @@ describe('CredentialDetail integrity', () => {
     expect(row.text()).toContain('credentials.detail.cameraCoverage')
     expect(row.find('.text-warning').exists()).toBe(true)
   })
+
+  it('states where the answers were held, reading a credential that does not say as device', async () => {
+    const unstated = (await open({ ...credential, integrity })).get('[data-integrity-section]')
+    expect(unstated.get('[data-answer-custody]').text()).toContain('credentials.detail.custody.device')
+    const issuer = (await open({ ...credential, integrity: { ...integrity, answerCustody: 'issuer' } })).get('[data-integrity-section]')
+    expect(issuer.get('[data-answer-custody]').text()).toContain('credentials.detail.custody.issuer')
+  })
 })
 
 // What the provenance section states comes from the trust command alone: the
@@ -247,6 +254,18 @@ describe('CredentialDetail provenance', () => {
     }))
     expect(section.get('[data-provenance]').text()).toBe('credentials.detail.trustProvenance.selfReported')
     expect(section.text()).toContain('credentials.detail.trustProvenance.sessionBound')
+  })
+
+  it('says a paired phone was present, as a self-reported credential, never device-attested', async () => {
+    const section = await openWithTrust(trustView({
+      provenance: {
+        kind: 'self_reported',
+        attestation: { outcome: 'verified_credential_bound', platform: 'ios', companion: true },
+      },
+    }))
+    expect(section.get('[data-provenance]').text()).toBe('credentials.detail.trustProvenance.selfReported')
+    expect(section.text()).toContain('credentials.detail.trustProvenance.companion')
+    expect(section.text()).not.toContain('credentials.detail.trustProvenance.deviceAttested')
   })
 
   it('says what device attestation proves and what it does not', async () => {
@@ -305,6 +324,39 @@ describe('CredentialDetail provenance', () => {
     const section = await openWithTrust(trustView({ coverage_statement: statement }), { ...credential, integrity })
     expect(mocks.coverageStatement).not.toHaveBeenCalled()
     expect(section.get('[data-testid="coverage-statement"]').text()).toContain('a second device out of view')
+  })
+
+  it('says below the live rung, in the statement\'s own words, that a second device or person was not ruled out', async () => {
+    const line = 'Whether a second device or person helped: not ruled out. Only a live segment, where a person asks unscripted questions, rules it out.'
+    const below = await openWithTrust(
+      trustView({ coverage_statement: { ...statement, version: '3', not_checked: [...statement.not_checked, line] } }),
+      { ...credential, integrity },
+    )
+    expect(below.get('[data-second-device]').text()).toBe(line)
+
+    // A `live` statement has no such line, and neither has an older version.
+    const live = await openWithTrust(
+      trustView({ coverage_statement: { ...statement, version: '3', rung: 'live' } }),
+      { ...credential, integrity: { ...integrity, verificationRung: 'live' } },
+    )
+    expect(live.find('[data-second-device]').exists()).toBe(false)
+  })
+
+  it('states who graded the attempt and the level the issuer verified', async () => {
+    const hosted = {
+      type: 'HostedAttemptEvidence', attemptId: 'hatt', answerCustody: 'issuer', gradedBy: 'issuer',
+      score: 0.75, attestation: { outcome: 'verified_credential_bound', platform: 'ios' },
+      verifiedAssuranceLevel: 'device_attested',
+    }
+    const issuer = (await open({
+      ...credential, integrity: { ...integrity, answerCustody: 'issuer' }, evidence: [hosted],
+    })).get('[data-integrity-section]')
+    expect(issuer.get('[data-graded-by]').text()).toContain('credentials.detail.gradedBy.issuer')
+    expect(issuer.get('[data-issuer-level]').text()).toContain('credentials.detail.assuranceLevel.device_attested')
+
+    const device = (await open({ ...credential, integrity })).get('[data-integrity-section]')
+    expect(device.get('[data-graded-by]').text()).toContain('credentials.detail.gradedBy.device')
+    expect(device.find('[data-issuer-level]').exists()).toBe(false)
   })
 
   it('says when the named coverage statement could not be resolved', async () => {

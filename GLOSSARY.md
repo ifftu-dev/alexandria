@@ -1,7 +1,7 @@
 # Alexandria app
 
 Status: live
-Updated: 2026-11-17
+Updated: 2026-11-21
 
 The desktop and mobile app: learning, assessment, credentials and the integrity checks behind them. This glossary holds the app's domain vocabulary; terms enter it as they are settled.
 
@@ -26,15 +26,19 @@ A signal the locked trust profile includes that was lost or stopped counting dur
 _Avoid_: Downgrade, fallback
 
 **Assurance level**:
-What the issuing device established about the client that produced a session: `local` (self-reported) or `device_attested` (a platform attestation verified at issuance). The device axis of trust, as the credential states it; a reader relies on the verified assurance level instead.
+What the issuing device established about the client that produced a session, on a ladder: `local` (self-reported), `companion_attested` or `device_attested` (the attempt ran in the attested app on the attested device). The device axis of trust, as the credential states it; a reader relies on the verified assurance level instead.
 _Avoid_: Trust level, security level
+
+**Companion-attested**:
+The assurance level of a desktop session backed by a companion phone: a genuine phone was present, and nothing is claimed about the desktop. It never meets a requirement for `device_attested`.
+_Avoid_: Phone-attested, device-attested by pairing
 
 **Camera coverage**:
 The fraction of a camera session's committed windows that carried camera checks, stated in the credential; the camera counts towards a policy floor at 90% or more.
 _Avoid_: Camera uptime, camera score
 
 **Companion phone**:
-The learner's own attested phone joined to a desktop session, which lends the session its platform attestation.
+The learner's own attested phone, present and attested during a desktop session.
 _Avoid_: Paired device, second device
 
 **Verification rung**:
@@ -50,7 +54,7 @@ Agreement between an attempt's outcome and the learner's own recent practice, le
 _Avoid_: Practice divergence, history score
 
 **Probe**:
-A short, time-boxed follow-up question made from the learner's own submission and graded by the same grader as the item.
+A short follow-up question made from the learner's own submission, graded by the same grader as the item, under a time limit the item fixes. Only a probe asking something the learner had not already answered counts towards the `probed` rung.
 _Avoid_: Follow-up item, challenge question
 
 **Probe policy**:
@@ -144,6 +148,22 @@ _Avoid_: Source credential, parent credential
 **Issuance policy**:
 The bounds a role or a credential request sets on an integrity assertion before a credential is issued, judged by one shared rule that returns the first unmet requirement as a stable refusal code.
 _Avoid_: Integrity gate, role rules
+
+**Required rung**:
+The lowest verification rung an issuance policy accepts.
+_Avoid_: Minimum proof, rung floor
+
+**Answer custody**:
+Who held an assessment's answers during the attempt: `issuer`, only when the answers never left the issuer, or `device`. Stated in every integrity assertion; a self-issued credential stating `issuer` is invalid.
+_Avoid_: Item exposure, private or public bank
+
+**Hosted item bank**:
+The items and answers an organisation imports into the hosted service for one role.
+_Avoid_: Cloud bank, private bank
+
+**Hosted attempt**:
+An attempt whose items the hosted service draws, delivers one at a time, times and grades, including code items it grades with a bundled grader over test cases the device never receives. The candidate's device only shows the items and contributes integrity evidence.
+_Avoid_: Online attempt, remote assessment
 
 **Suspension list**:
 The issuer's published status list of suspended credentials, read by every verifier; suspension is reversible, revocation is not.

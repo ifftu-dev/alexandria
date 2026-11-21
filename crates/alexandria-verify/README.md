@@ -6,9 +6,11 @@ Verifiable Credentials Data Model 2.0 secured with Data Integrity proofs
 revocation and suspension, `did:key` resolution, and JCS canonicalization
 (RFC 8785).
 
-New in 0.7.0: suspension lists, device attestation evidence, organisation
-backing, the coverage statement registry and the shared issuance policy. It
-breaks the 0.6 API; see [CHANGELOG.md](CHANGELOG.md).
+New in 0.9.0: answer custody and the hosted attempt evidence entry (with the
+issuer's score), the `companion_attested` level, required custody and the
+strict rung ladder in the issuance policy, and coverage statement version 3.
+`issuer` custody counts only on a credential from a hosted attempt. It breaks
+the 0.7 API; see [CHANGELOG.md](CHANGELOG.md).
 
 `MIT OR Apache-2.0`, while the Alexandria application itself is
 AGPL-3.0-or-later. That split is deliberate. Alexandria promises that checking a
@@ -64,8 +66,10 @@ world is ever added.
   material that is credential-bound (over the credential's binding digest) or
   session-bound. `verify_credential_with_attestation` takes the trust inputs
   and sets `attestation` and `verifiedAssuranceLevel` on the result. Only
-  verified credential-bound evidence reads `device_attested`; the
-  assertion's own `assuranceLevel` is the issuer's word. Invalid evidence
+  verified credential-bound evidence from the attempt's own device reads
+  `device_attested`; a paired phone's reads `companion_attested`, and the
+  outcome says `companion` for either binding. The assertion's own
+  `assuranceLevel` is the issuer's word. Invalid evidence
   rejects. The certificate and token checks are behind the `attestation`
   feature; without it evidence verifies as `unverifiable`. `test-support`
   adds synthetic chains and tokens for tests.
@@ -76,15 +80,26 @@ world is ever added.
   `trust::classify_credential_with_organisation` carries it into the
   classification.
 - **Coverage statements** (`coverage`). Every published statement text, by
-  digest, resolvable offline. A credential that names a statement in
+  digest, resolvable offline. Version 3 says, below `live`, that a second
+  device or person was not ruled out. A credential that names a statement in
   `relatedResource` other than its assertion's `coverageStatementDigest` is
   rejected.
+- **Answer custody** (`custody`). The assertion's `answerCustody` says
+  whether the candidate's `device` or the `issuer` held the answers (absent
+  reads `device`). A role credential from a hosted attempt carries a
+  `HostedAttemptEvidence` entry. Verification rejects `issuer` custody on a
+  self-issued credential and a hosted attempt entry that is self-issued,
+  malformed or beside another custody, reporting `custodyDefects`.
 - **Issuance policy** (`policy`, `integrity`). `policy::evaluate` is the one
   rule an issuing app and a hosted service apply to a credential's integrity
   assertion and attestation outcome, returning the first unmet requirement
   with a stable code. `evaluate_assessed` judges a role credential from its
-  `AssessedCredentialEvidence` entry (`assessed`). A policy floor counts the
-  camera despite degraded windows only when the assertion states
+  `AssessedCredentialEvidence` entry (`assessed`), `evaluate_hosted` from its
+  `HostedAttemptEvidence` entry. A required answer custody is judged first; the
+  required rung on the strict ladder, where `probed` and above need a probe
+  step with every probe satisfied. A floor's device attestation counts only
+  for the attempt's own device, never a paired phone. A policy floor counts
+  the camera despite degraded windows only when the assertion states
   `cameraCoverage` of at least `MIN_CAMERA_COVERAGE` (0.9).
 
 ## Untrusted input
@@ -132,7 +147,7 @@ carry no privilege; policy qualification is a separate decision.
 `tests/vectors/` holds signed credentials with known-good and known-bad
 outcomes, plus `independent-verifier.mjs` — a small Node implementation
 written against the specification rather than against this code. It passes all
-23 credential vectors, the exact-byte limit vectors in
+29 credential vectors, the exact-byte limit vectors in
 `tests/vectors/limits/`, and the course completion endorsement vectors in
 `tests/vectors/endorsements/`. `tests/limit_vectors.rs` and
 `tests/endorsement_vectors.rs` check those against this crate, and the app's

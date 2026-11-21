@@ -8,6 +8,7 @@
 pub mod adaptive;
 pub mod goal_plan;
 pub mod grader;
+pub mod hosted;
 pub mod irt;
 pub mod items;
 pub mod llm_probe;

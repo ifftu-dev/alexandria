@@ -16,7 +16,11 @@
 //!   At least one served item must be observed, the session's
 //!   `response_process` channel must not be over threshold, and the
 //!   attempt's items come from the backend's draw (every attempt's do).
-//! - `probed`: probe results exist and all of them were satisfied.
+//! - `probed`: probe results exist and all of them were satisfied, counting
+//!   only satisfied probes that asked a question the learner had not
+//!   answered ([`crate::assessment::probes::asks_a_new_question`]). A
+//!   satisfied `reseed` probe of the same item is left out, so it neither
+//!   earns nor blocks the rung; a failed or skipped one still counts.
 //! - `consistent`: the attempt's outcome agrees with the learner's history
 //!   ([`crate::sentinel::consistency::for_attempt`]).
 //! - `live`: a satisfied [`STEP_INTERVIEW`] verification in the session. An
@@ -171,10 +175,22 @@ pub(crate) fn session_surface(
     let live = verifications
         .iter()
         .any(|r| r.step == STEP_INTERVIEW && r.outcome == VerificationOutcome::Satisfied);
+    // A satisfied probe that asked an answered question again shows nothing
+    // new: the rung is judged as if it had not run. A failed one still
+    // counts, as does every skip.
+    let rung_probes: Vec<VerificationResult> = verifications
+        .iter()
+        .filter(|r| {
+            r.outcome != VerificationOutcome::Satisfied
+                || crate::assessment::probes::asks_a_new_question(
+                    r.detail.get("source").and_then(|s| s.as_str()),
+                )
+        })
+        .cloned()
+        .collect();
     let evidence = RungEvidence {
         process,
-        probed: probe
-            .as_ref()
+        probed: probe_outcome(&rung_probes)
             .is_some_and(|p| p.outcome == VerificationOutcome::Satisfied && p.skipped == 0),
         consistent,
         live,
@@ -264,7 +280,7 @@ pub(crate) fn session_review(
     let surface = session_surface(
         conn,
         session_id,
-        assurance == "device_attested",
+        crate::sentinel::attestation::credits_attestation_signal(&assurance),
         manifest,
         None,
     )?;
