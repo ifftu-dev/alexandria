@@ -1,7 +1,7 @@
 # Building for iOS and Android
 
 Status: live
-Updated: 2026-10-30
+Updated: 2026-11-21
 
 Device requirements and the shared prerequisites are in
 [building](building.md#system-requirements). For a quicker loop with a device
@@ -122,3 +122,15 @@ rm -rf src-tauri/gen/android/app/build
 Android WebView does not support `env(safe-area-inset-*)`. `MainActivity.kt`
 reads the real `WindowInsets` and injects them as the CSS custom properties
 `--sat`, `--sab`, `--sal` and `--sar`.
+
+### On-screen keyboard (iOS)
+
+WKWebView does not shrink the page when the keyboard opens; it slides the whole
+web view up, pushing the top bar under the notch. `src/utils/keyboardViewport.ts`
+(installed on iOS only) sizes `html`, `body` and `#app` to the visual viewport
+through `--app-height` while the keyboard is open, undoes the slide, and scrolls
+the focused field, or its whole form when it fits, into view. It detects the
+keyboard from `documentElement.clientHeight`, because `window.innerHeight`
+shrinks with the keyboard on iOS. `html.keyboard-open` drops the bottom
+safe-area padding and hides anything marked `.hide-with-keyboard` (the tab bar
+and chat button).

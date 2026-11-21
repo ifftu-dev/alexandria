@@ -7,6 +7,8 @@ import { i18n } from './i18n'
 import { initMotion } from './composables/useMotion'
 import { initLocale } from './composables/useLocale'
 import { showOnFirstPaint } from './composables/launchWindow'
+import { isIOS } from './composables/usePlatform'
+import { installKeyboardViewport } from './utils/keyboardViewport'
 import './assets/fonts.css'
 // Non-Latin script fonts (self-hosted via @fontsource; each @font-face is
 // unicode-range-scoped so Latin users don't download them). Covers the six
@@ -32,6 +34,9 @@ const app = createApp(App)
 app.use(router)
 app.use(i18n)
 app.mount('#app')
+
+// iOS slides the whole web view up for the keyboard; keep the app in place.
+if (isIOS) installKeyboardViewport()
 
 // The window was created hidden; show it with the themed first frame.
 if (isTauri()) showOnFirstPaint(() => { void getCurrentWebviewWindow().show().catch(() => {}) })

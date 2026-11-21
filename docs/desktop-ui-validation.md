@@ -1,7 +1,7 @@
 # Desktop UI validation
 
 Status: live
-Updated: 2026-10-22
+Updated: 2026-11-21
 
 Desktop changes need both automated regressions and a native package check. The
 browser fixture uses production Vue components, onboarding, and theme CSS. It stubs
@@ -38,6 +38,8 @@ screenshots, and traces for 14 days. The suite checks:
   and navigation through the initial steps in a short window.
 - Dashboard hero contrast across its gradient in both themes.
 - Home's Add a goal action opening goal selection, with dismissal returning to Goals.
+- The course player's chapter sheet: full width on a phone, a centred card at the
+  900-pixel minimum Mac window width.
 
 Chromium and Playwright WebKit are regression coverage, not a substitute for the
 installed Windows WebView2 or Linux WebKitGTK package. Native decorations, GPU

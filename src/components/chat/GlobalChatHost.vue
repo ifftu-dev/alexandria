@@ -118,7 +118,7 @@ function resizeByKey(event: KeyboardEvent) {
       v-if="!wide && !chat.panelOpen.value"
       type="button"
       class="fixed end-4 z-40 grid h-12 w-12 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg"
-      :class="route.name === 'learn' ? 'chat-fab--player' : 'chat-fab'"
+      :class="['hide-with-keyboard', route.name === 'learn' ? 'chat-fab--player' : 'chat-fab']"
       :aria-label="t('chat.panel.open')"
       @click="chat.setOpen(true)"
     >
