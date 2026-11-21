@@ -45,6 +45,35 @@ export async function handlerConstant(name: string): Promise<string> {
   return found[1].replace(/\\\n\s*/g, '')
 }
 
+/**
+ * The content policy `content_policy` in handler.rs builds for a response:
+ * `CONTENT_POLICY`'s directives, plus `DOCUMENT_POLICY_EXTRA` for pages, with
+ * a cmi5 session's loopback endpoint added to connect-src when given.
+ */
+export async function handlerPolicy(kind: 'html' | 'other', endpointPort?: string): Promise<string> {
+  const source = await readFile(new URL('handler.rs', serving), 'utf8')
+  const list = /const CONTENT_POLICY: &\[\(&str, &str\)\] = &\[([\s\S]*?)\];/.exec(source)?.[1]
+  if (list === undefined) throw new Error('CONTENT_POLICY not found in handler.rs')
+  const directives: [string, string][] = []
+  for (const [, name, value] of list.matchAll(/\(\s*("[^"]*"|[A-Z_]+)\s*,\s*"([^"]*)"\s*\)/g)) {
+    if (name === undefined || value === undefined) continue
+    directives.push([name.startsWith('"') ? name.slice(1, -1) : await handlerConstant(name), value])
+  }
+  if (kind === 'html') {
+    const extra = /const DOCUMENT_POLICY_EXTRA: \(&str, &str\) = \("([^"]*)", "([^"]*)"\);/.exec(source)
+    if (extra?.[1] === undefined || extra[2] === undefined) throw new Error('DOCUMENT_POLICY_EXTRA not found in handler.rs')
+    directives.push([extra[1], extra[2]])
+  }
+  return directives
+    .map(([name, value]) => {
+      const parts = [name]
+      if (value) parts.push(value)
+      if (name === 'connect-src' && endpointPort !== undefined) parts.push(`http://127.0.0.1:${endpointPort}`)
+      return parts.join(' ')
+    })
+    .join('; ')
+}
+
 /** `ServeLimits::DEFAULT` from the scheme handler, in bytes. */
 export async function handlerLimits(): Promise<{ wholeFile: number, rangeChunk: number }> {
   const source = await readFile(new URL('handler.rs', serving), 'utf8')
@@ -154,8 +183,8 @@ async function wrapperWithInterval(ms: number): Promise<string> {
 
 /** Opens the player on `fixture`, serving the package origin from disk. */
 export async function openPlayer(page: Page, options: OpenOptions): Promise<Served> {
-  const policy = await handlerConstant('CONTENT_POLICY')
-  const documentPolicy = policy + await handlerConstant('DOCUMENT_POLICY_SUFFIX')
+  const policy = await handlerPolicy('other')
+  const documentPolicy = await handlerPolicy('html')
   const permissions = await handlerConstant('PERMISSIONS_POLICY')
   const limits = await handlerLimits()
   const frameSources = await appFrameSources()

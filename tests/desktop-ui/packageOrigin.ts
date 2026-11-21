@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import type { Page } from '@playwright/test'
-import { handlerConstant } from './packageHarness'
+import { handlerConstant, handlerPolicy } from './packageHarness'
 
 // Serves the package origin the fake hosts hand out (`launch-N/` under
 // `http://scorm-package.test`) from a fixture package on disk (the player
@@ -26,7 +26,7 @@ const contentType = (path: string) =>
 
 export async function servePackageOrigin(page: Page, fixture = 'package-player') {
   const packageFiles = new URL(`./${fixture}/package/`, import.meta.url)
-  const policy = await handlerConstant('CONTENT_POLICY')
+  const policy = await handlerPolicy('other')
   const permissions = await handlerConstant('PERMISSIONS_POLICY')
   const refused: string[] = []
   await page.route('**/*', async (route) => {

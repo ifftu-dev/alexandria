@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { expect, test, type FrameLocator, type Page } from '@playwright/test'
-import { handlerConstant } from './packageHarness'
+import { handlerConstant, handlerPolicy } from './packageHarness'
 
 // cmi5 at the player seam: the real course player and wrapper page, the
 // cmi5 fixture package (a block of two units and a unit that asks for its
@@ -46,10 +46,9 @@ const fixture = <T>(page: Page, read: (fixture: Cmi5Fixture) => T) =>
   page.evaluate(`(${read.toString()})(window.cmi5Fixture)`) as Promise<T>
 
 async function open(page: Page) {
-  // Same rule as `admit_endpoint` in handler.rs: the session's loopback
+  // Same rule as `content_policy` in handler.rs: the session's loopback
   // endpoint joins connect-src, nothing else does.
-  const policy = (await handlerConstant('CONTENT_POLICY'))
-    .replace("connect-src 'self';", `connect-src 'self' http://127.0.0.1:${ENDPOINT_PORT};`)
+  const policy = await handlerPolicy('other', ENDPOINT_PORT)
   const permissions = await handlerConstant('PERMISSIONS_POLICY')
   const refused: string[] = []
   await page.route('**/*', async (route) => {
