@@ -1535,7 +1535,8 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
     </AppModal>
 
     <!-- ============================== -->
-    <!-- NARROW: Chapter navigator sheet (below lg) -->
+    <!-- NARROW: Chapter navigator sheet (below lg). Phones get a full-width
+         bottom sheet; wider windows a centred, card-width one. -->
     <!-- ============================== -->
     <Teleport to="body">
       <Transition
@@ -1558,7 +1559,7 @@ const elementHostContext = computed<ElementHostContext | null>(() => {
           >
             <div
               v-if="mobileNavOpen"
-              class="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-card pb-[calc(1rem+var(--sab,env(safe-area-inset-bottom)))]"
+              class="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-card pb-[calc(1rem+var(--sab,env(safe-area-inset-bottom)))] md:inset-x-auto md:bottom-4 md:left-1/2 md:w-[min(28rem,calc(100%-2rem))] md:-translate-x-1/2 md:max-h-[70vh] md:rounded-2xl md:border md:pb-4 md:shadow-xl"
             >
               <!-- Grab handle + header -->
               <div class="sticky top-0 z-10 bg-card px-4 pt-2.5 pb-3">
