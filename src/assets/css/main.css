@@ -223,7 +223,9 @@ html {
 }
 
 html, body, #app {
-  height: 100%;
+  /* --app-height: the space above the iOS keyboard while it is open
+     (utils/keyboardViewport.ts). */
+  height: var(--app-height, 100%);
   margin: 0;
   padding: 0;
   overflow: hidden;
@@ -292,6 +294,16 @@ pre,
     padding-bottom: var(--sab, env(safe-area-inset-bottom));
   }
 
+  /* iOS keyboard open (utils/keyboardViewport.ts): the keyboard covers the
+     home indicator, and bottom chrome would sit on top of the keyboard. */
+  .keyboard-open .safe-area-bottom {
+    padding-bottom: 0;
+  }
+
+  .keyboard-open .hide-with-keyboard {
+    display: none;
+  }
+
   .safe-area-lr {
     padding-left: var(--sal, env(safe-area-inset-left));
     padding-right: var(--sar, env(safe-area-inset-right));
@@ -301,6 +313,10 @@ pre,
      button floating above it, so the last controls scroll clear of both. */
   .mobile-content-padding {
     padding-bottom: calc(8.5rem + var(--sab, env(safe-area-inset-bottom)));
+  }
+
+  .keyboard-open .mobile-content-padding {
+    padding-bottom: 1rem;
   }
 }
 
