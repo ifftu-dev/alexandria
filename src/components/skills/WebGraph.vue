@@ -114,6 +114,6 @@ const accessibleNames = computed(() => {
 .web-layer { position: absolute; top: 0; left: 0; width: 0; height: 0; }
 .web-canvas { position: absolute; top: 0; left: 0; display: block; overflow: visible; }
 /* Placed and sized by useWebGraph (transform, width and height). */
-.web-node { position: absolute; top: 0; left: 0; display: grid; place-items: center; padding: 0; margin: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.web-node { position: absolute; top: 0; left: 0; display: grid; grid-template: 100% / 100%; place-items: center; padding: 0; margin: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
 .web-node:focus-visible { outline: 3px solid var(--app-ring); outline-offset: 2px; }
 </style>

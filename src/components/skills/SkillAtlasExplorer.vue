@@ -920,7 +920,7 @@ function setBloom(event: Event): void {
 .atlas-map.is-web .map-node-box { overflow: visible; pointer-events: none; }
 .atlas-map.is-web .map-node { pointer-events: auto; }
 .atlas-web-names { position: absolute; top: 0; left: 0; width: 0; height: 0; pointer-events: none; }
-.atlas .atlas-map.is-web .map-node { display: grid; place-items: center; box-sizing: border-box; width: 100%; height: 100%; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; box-shadow: none; overflow: visible; }
+.atlas .atlas-map.is-web .map-node { display: grid; grid-template: 100% / 100%; place-items: center; box-sizing: border-box; width: 100%; height: 100%; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; box-shadow: none; overflow: visible; }
 .atlas .atlas-map.is-web .map-node:focus-visible { outline: 3px solid var(--app-ring); outline-offset: 2px; }
 /* Web chrome: compact rows, so the graph starts high on the screen. */
 .atlas.is-web .atlas-heading { margin-block-end: 12px; }

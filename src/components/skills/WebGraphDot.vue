@@ -2,8 +2,8 @@
 /**
  * The Web skin of one skill: a dot in the field colour (`--field` on an
  * ancestor), filled when earned, a ring on the page background when ready
- * next, a pale tint otherwise. `useWebGraph` sets its diameter (width and
- * height) from the dot's radius and the zoom. It draws no control and no
+ * next, a pale tint otherwise. It fills the box `useWebGraph` sizes for the
+ * dot's radius and the zoom, less the pointer padding (WEB_HIT_PADDING). It draws no control and no
  * name: the owner wraps it in the skill's button (the Web graph's own, or the
  * explorer's node element in the Web view), which carries the accessible
  * name, and names are drawn in their own layer (`WebGraphNames`), so the skin
@@ -21,7 +21,7 @@ defineProps<{ state: WebDotState; selected: boolean; faded: boolean; compact?: b
 </template>
 
 <style scoped>
-.web-skin { display: grid; place-items: center; pointer-events: none; transition: opacity var(--transition-base); }
+.web-skin { display: grid; place-items: center; width: calc(100% - 10px); height: calc(100% - 10px); pointer-events: none; transition: opacity var(--transition-base); }
 .web-skin.is-faded { opacity: .16; }
 .web-dot { box-sizing: border-box; width: 100%; height: 100%; border-radius: 50%; background: color-mix(in srgb, var(--field) 30%, var(--app-background)); }
 /* The small graph's pale dots take a stronger tint, so field colour reads at a few pixels. */

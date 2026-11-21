@@ -11,7 +11,7 @@ import { continueWebLayout, webDotRadius, webNamePlaces, webNearestInDirection, 
 //
 // The camera never re-renders the dots. The pan is one transform on the
 // graph's layers. The zoom is written straight onto each dot's element (its
-// box and its skin's diameter), so a zoom costs one pass over the dots and no
+// box, which its skin fills), so a zoom costs one pass over the dots and no
 // render; a CSS variable on a shared ancestor would restyle every element
 // under it, which is several times slower on a large graph. Only the names,
 // which are few and placed in screen pixels, and the arrowheads follow the
@@ -31,10 +31,15 @@ export const WEB_MIN_FIT_EXTENT = 160
 /** Size of the graph before it is measured (and in tests), in pixels. */
 export const WEB_DEFAULT_SIZE = { width: 800, height: 520 }
 export const WEB_COMPACT_DEFAULT_SIZE = { width: 260, height: 200 }
-/** Smallest dot drawn in the full and the compact graph, and smallest pointer target around a dot, in pixels. */
+/** Smallest dot drawn in the full and the compact graph, in pixels. */
 export const WEB_DOT_MIN_PIXELS = 4
 export const WEB_COMPACT_DOT_MIN_PIXELS = 6
-export const WEB_HIT_PIXELS = 14
+/**
+ * Pointer target around a dot, in pixels on each side, so the smallest
+ * target is 14 pixels. The dot's skin fills its box less this on each side
+ * (match WebGraphDot's styles), so a zoom resizes one element per dot.
+ */
+export const WEB_HIT_PADDING = 5
 /** A press that moves this many pixels is a drag, not a click. */
 export const WEB_DRAG_THRESHOLD = 4
 /** Zoom per pixel of wheel travel: one notch (about 100 pixels) zooms by about a fifth. */
@@ -335,13 +340,13 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
   /**
    * Places and sizes every dot's element for the zoom, in layer pixels: the
    * pointer target's box (an SVG `foreignObject`'s geometry attributes, or an
-   * HTML element's transform and size), the skin's diameter, and the lines
-   * group's scale. Run after each render and on every zoom, never
+   * HTML element's transform and size), which the skin fills less the
+   * padding, and the lines group's scale. Run after each render and on every zoom, never
    * through one, so a zoom renders no dot. The owner's templates bind none of
    * these.
    */
   /** What was last written to each element, so a write that changes nothing (most dots sit at the smallest size when zoomed out) is skipped. */
-  let placed = new WeakMap<Element, { x: string; y: string; hit: string; size: string }>()
+  let placed = new WeakMap<Element, { x: string; y: string; hit: string }>()
   let placedIn: HTMLElement | undefined
   function placeDots(): void {
     const element = root.value
@@ -355,8 +360,8 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
     for (const dot of dots.value) {
       const node = nodes.get(dot.id)
       if (!node) continue
-      const size = dotPixels(dot.radius), hitPixels = Math.max(WEB_HIT_PIXELS, size)
-      const next = { x: (dot.x * zoom - hitPixels / 2).toFixed(1), y: (dot.y * zoom - hitPixels / 2).toFixed(1), hit: hitPixels.toFixed(1), size: size.toFixed(1) }
+      const hitPixels = dotPixels(dot.radius) + 2 * WEB_HIT_PADDING
+      const next = { x: (dot.x * zoom - hitPixels / 2).toFixed(1), y: (dot.y * zoom - hitPixels / 2).toFixed(1), hit: hitPixels.toFixed(1) }
       const last = placed.get(node)
       if (node instanceof SVGElement) {
         if (last?.x !== next.x) node.setAttribute('x', next.x)
@@ -365,11 +370,6 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
       } else if (node instanceof HTMLElement) {
         if (last?.x !== next.x || last.y !== next.y) node.style.transform = `translate(${next.x}px, ${next.y}px)`
         if (last?.hit !== next.hit) node.style.width = node.style.height = `${next.hit}px`
-      }
-      if (last?.size !== next.size) {
-        // Width and height rather than an inherited variable, so the skin's own children need no restyle.
-        const skin = node.querySelector<HTMLElement>('.web-skin')
-        if (skin) skin.style.width = skin.style.height = `${next.size}px`
       }
       placed.set(node, next)
     }
