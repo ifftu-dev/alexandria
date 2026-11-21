@@ -250,8 +250,17 @@ export function sameValue(expected: string, returned: string): boolean {
   const b = durationSeconds(returned)
   if (a !== null && b !== null) return Math.abs(a - b) < 0.005
   const instant = /^\d{4}(-\d{2}(-\d{2}(T\d{2}(:\d{2}(:\d{2}(\.\d+)?)?)?)?)?)?(Z|[+-]\d{2}(:\d{2})?)?$/
-  if (instant.test(expected) && instant.test(returned)) return Date.parse(expected) === Date.parse(returned)
+  if (instant.test(expected) && instant.test(returned)) return instantMs(expected) === instantMs(returned)
   return false
+}
+
+/**
+ * An instant in milliseconds, a time with no zone read as UTC so the result
+ * is the same on every machine (Date.parse would read it as local time).
+ */
+function instantMs(text: string): number {
+  const zoneless = text.includes('T') && !/(Z|[+-]\d{2}(:\d{2})?)$/.test(text)
+  return Date.parse(zoneless ? `${text}Z` : text)
 }
 
 /**
