@@ -63,6 +63,10 @@ DOMAINS = [
     ("Instructor studio", r"^(studio_|course_tutor_policies$|course_lesson_feedback$)"),
     ("AI chat", r"^(chat_|learning_memory$|ai_connection_approvals$)"),
     ("Notifications", r"^(notification|push_)"),
+    ("Standards packages", r"^(packages|package_attempts|package_activity_state|package_sequencing_state)$"),
+    ("Learning records", r"^(learning_records|learning_record_outbox)$"),
+    ("Record sending", r"^(record_recipients|record_destinations|record_destination_secrets|record_access_log)$"),
+    ("cmi5 sessions", r"^(cmi5_sessions|cmi5_statements|xapi_documents)$"),
 ]
 
 

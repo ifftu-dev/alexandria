@@ -1,0 +1,167 @@
+import { expect, test, type Frame, type Page } from '@playwright/test'
+import {
+  called, commits, navigate, openLaunches, openPlayer, runningLesson, savedStates, seenIn, wrapperFrame,
+} from './packageHarness'
+
+// The package player with a SCORM 2004 package: the real course player, the
+// real wrapper page, the vendored SCORM 2004 runtime and its sequencing
+// engine, a three-lesson package with a sequencing rule written for these
+// checks, and a fake host bridge. Served by `packageHarness.ts`: the package
+// origin through `page.route`, with the bootstrap linked into every HTML page
+// and the scheme handler's own policy headers. A request to anywhere else
+// fails the test.
+
+const open = (page: Page, query?: string) => openPlayer(page, { fixture: 'package-player-2004', query })
+
+const control = (page: Page, name: string) => page.locator(`[data-package-nav="${name}"]`)
+const toc = (page: Page, id: string) => page.locator(`[data-package-toc] [data-activity="${id}"]`)
+
+/** The lesson the engine delivered, once it is the only one running (under `prefix`, if given). */
+const delivered = (page: Page, lessonId: string, prefix?: string): Promise<Frame> =>
+  runningLesson(page, `${lessonId}/index.html`, prefix)
+
+test('a lesson the package locks cannot be reached until the lesson before it is passed', async ({ page }) => {
+  const { refused } = await open(page)
+
+  const intro = await delivered(page, 'intro')
+  expect(await seenIn(intro)).toMatchObject({
+    'initialised': 'true',
+    'cmi.entry': 'ab-initio',
+    'cmi.learner_id': 'learner-for-this-package',
+    'cmi.learner_name': 'Ada Learner',
+    'cmi.launch_data': 'route=b',
+    'cmi.mode': 'normal',
+  })
+  await expect(page.locator('[data-package-toc] [data-activity]')).toHaveText([/Introduction/, /Evacuation drill/, /Check/])
+  await expect(toc(page, 'intro')).toHaveAttribute('aria-current', 'true')
+
+  // Locked: neither the table of contents nor continue reaches the drill.
+  await expect(toc(page, 'drill')).toBeDisabled()
+  await expect(control(page, 'continue')).toBeDisabled()
+  await expect(control(page, 'previous')).toBeDisabled()
+
+  await intro.locator('#pass').click()
+  await expect(control(page, 'continue')).toBeEnabled()
+
+  await control(page, 'continue').click()
+  expect(await seenIn(await delivered(page, 'drill'))).toMatchObject({ 'cmi.entry': 'ab-initio' })
+  await expect(toc(page, 'drill')).toHaveAttribute('aria-current', 'true')
+  await expect(toc(page, 'intro')).toHaveAttribute('data-complete', 'true')
+  // The drill asks the player not to draw its previous control.
+  await expect(control(page, 'previous')).toHaveCount(0)
+  await expect(control(page, 'continue')).toBeVisible()
+
+  // The introduction's session ended with its own termination and was saved.
+  const introCommits = (await commits(page)).filter(commit => commit.activity_id === 'intro')
+  expect(introCommits.slice(-1)[0]).toMatchObject({ session_ended: true, runtime: { cmi: { success_status: 'passed' } } })
+  expect(refused).toEqual([])
+})
+
+test('suspend and resume restore the sequencing engine and the lesson where it was left', async ({ page }) => {
+  const { refused } = await open(page)
+  const intro = await delivered(page, 'intro')
+  await intro.locator('#pass').click()
+  await intro.locator('#next').click()
+  await (await delivered(page, 'drill')).locator('#bookmark').click()
+
+  await control(page, 'suspend').click()
+  await expect(page.locator('[data-package-sequencing="ended"]')).toBeVisible()
+  await expect.poll(async () => (await savedStates(page)).length).toBeGreaterThan(0)
+
+  // Resume in the same player: the drill comes back as it was.
+  await page.locator('[data-package-resume]').click()
+  expect(await seenIn(await delivered(page, 'drill'))).toMatchObject({
+    'cmi.entry': 'resume',
+    'cmi.location': 'drill-2',
+    'cmi.suspend_data': 'seen=1,2',
+  })
+
+  // Leave the course: the player suspends the package and hands the engine's
+  // state to the host before the attempt is ended.
+  const before = (await savedStates(page)).length
+  const [first] = await openLaunches(page)
+  await navigate(page, '/elsewhere')
+  await expect(page.getByText('Elsewhere')).toBeVisible()
+  await expect.poll(() => called(page, 'package_attempt_terminate')).toBe(1)
+  expect((await savedStates(page)).length).toBeGreaterThan(before)
+
+  // Back again: a new wrapper and a new engine, restored from that state.
+  await navigate(page, '/learn/course-safety')
+  await expect.poll(async () => (await openLaunches(page)).filter(prefix => prefix !== first).length).toBe(1)
+  const [second] = await openLaunches(page)
+  expect(await seenIn(await delivered(page, 'drill', second))).toMatchObject({ 'cmi.entry': 'resume', 'cmi.location': 'drill-2' })
+  await expect(toc(page, 'intro')).toHaveAttribute('data-complete', 'true')
+  // The global objective the introduction wrote still unlocks the drill.
+  await expect(toc(page, 'drill')).toBeEnabled()
+  await expect(control(page, 'previous')).toHaveCount(0)
+  expect(refused).toEqual([])
+})
+
+test('the package completes when the sequencing engine reports the course completed', async ({ page }) => {
+  const { refused } = await open(page)
+  const intro = await delivered(page, 'intro')
+  await intro.locator('#pass').click()
+  await intro.locator('#next').click()
+  const drill = await delivered(page, 'drill')
+  await drill.locator('#complete').click()
+  await drill.locator('#next').click()
+  const quiz = await delivered(page, 'quiz')
+  expect(await seenIn(quiz)).toMatchObject({ 'cmi.scaled_passing_score': '0.8' })
+  await expect(page.locator('[data-package-result]')).not.toContainText('Completed')
+
+  await quiz.locator('#pass').click()
+  await quiz.locator('#next').click()
+
+  await expect(page.locator('[data-package-sequencing="ended"]')).toBeVisible()
+  await expect.poll(async () => (await savedStates(page)).slice(-1)[0]?.root.completion_status).toBe('completed')
+  const result = page.locator('[data-package-result]')
+  await expect(result).toContainText('Completed')
+  await expect(result).toContainText(/self-reported/i)
+  expect(await called(page, 'claim_course_completion')).toBe(0)
+  expect(refused).toEqual([])
+})
+
+test('focus mode keeps the package navigation controls, so a full-screen package can still be left', async ({ page }) => {
+  await open(page)
+  await (await delivered(page, 'intro')).locator('#pass').click()
+  await page.locator('[data-package-label]').getByRole('button').click()
+  await expect(page.locator('[data-package-player]')).toHaveAttribute('data-focus', 'true')
+  // The course's own chrome goes; the package's controls stay.
+  await expect(page.locator('[data-package-toc]')).toBeHidden()
+  await expect(page.locator('[data-package-fresh]')).toBeHidden()
+  for (const name of ['previous', 'continue', 'suspend', 'exit']) await expect(control(page, name)).toBeVisible()
+
+  await control(page, 'continue').click()
+  expect(await seenIn(await delivered(page, 'drill'))).toMatchObject({ 'cmi.entry': 'ab-initio' })
+  await control(page, 'exit').click()
+  await page.locator('[data-package-exit-confirm]').click()
+  await expect(page.locator('[data-package-sequencing="ended"]')).toBeVisible()
+})
+
+test('the sequencing engine state is handed over at once when the app goes to the background', async ({ page }) => {
+  await open(page)
+  await (await delivered(page, 'intro')).locator('#bookmark').click()
+  // The start's own state, and nothing more until a navigation.
+  await expect.poll(async () => (await savedStates(page)).length).toBe(1)
+
+  await wrapperFrame(page).evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  // Well inside the two-second coalescing interval: the lesson's state and the engine's.
+  await expect.poll(async () => (await savedStates(page)).length, { timeout: 1000 }).toBe(2)
+  await expect.poll(async () => (await commits(page)).length, { timeout: 1000 }).toBe(1)
+  expect((await commits(page))[0]).toMatchObject({ activity_id: 'intro', session_ended: false, runtime: { cmi: { location: 'intro-2' } } })
+})
+
+test('when starting delivers nothing the learner chooses a lesson', async ({ page }) => {
+  const { refused } = await open(page, 'flow=off')
+  await expect(page.locator('[data-package-sequencing="choose"]')).toBeVisible()
+  await expect(control(page, 'continue')).toBeDisabled()
+  await expect(toc(page, 'drill')).toBeDisabled()
+
+  await toc(page, 'intro').click()
+  expect(await seenIn(await delivered(page, 'intro'))).toMatchObject({ 'cmi.entry': 'ab-initio' })
+  await expect(page.locator('[data-package-sequencing]')).toHaveCount(0)
+  expect(refused).toEqual([])
+})

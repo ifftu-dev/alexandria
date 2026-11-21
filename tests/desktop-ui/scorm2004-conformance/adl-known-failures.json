@@ -1,0 +1,763 @@
+{
+  "CM-03b": {
+    "row": "nothing",
+    "why": "The sequencing engine delivers nothing where the suite expects an activity.",
+    "failures": [
+      "Act3V2: expected activity 3, the player delivered nothing (choose)"
+    ]
+  },
+  "CM-04b": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act14V1: expected activity 14, the player delivered activity 12"
+    ]
+  },
+  "CM-04c": {
+    "row": "nothing",
+    "why": "The sequencing engine delivers nothing where the suite expects an activity.",
+    "failures": [
+      "Act12V2: expected activity 12, the player delivered nothing (choose)"
+    ]
+  },
+  "CM-06": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act3V1: expected activity 3, the player delivered activity 2"
+    ]
+  },
+  "CM-07a": {
+    "row": "choice",
+    "why": "The choices offered differ from the suite's: the runtime's choice validity (constrainChoice applied to the wrong activity, stopForwardTraversal not stopping a choice, choiceExit and forwardOnly edge cases), and the table of contents has no entry for the root of the activity tree.",
+    "failures": [
+      "Act6V1: toc.enabled: answered Y, expected N",
+      "Act6V1: previous.enabled: answered Y, expected N",
+      "Act10V1: toc.enabled: answered Y, expected N"
+    ]
+  },
+  "CM-07b": {
+    "row": "choice",
+    "why": "The choices offered differ from the suite's: the runtime's choice validity (constrainChoice applied to the wrong activity, stopForwardTraversal not stopping a choice, choiceExit and forwardOnly edge cases), and the table of contents has no entry for the root of the activity tree.",
+    "failures": [
+      "Act11V1: previous.disabled: answered N, expected Y",
+      "Act19V1: previous.enabled: answered Y, expected N",
+      "Act19V1: continue.disabled: answered N, expected Y",
+      "Act21V1: previous.disabled: answered N, expected Y",
+      "Act21V1: continue.enabled: answered Y, expected N"
+    ]
+  },
+  "CM-07c": {
+    "row": "choice",
+    "why": "The choices offered differ from the suite's: the runtime's choice validity (constrainChoice applied to the wrong activity, stopForwardTraversal not stopping a choice, choiceExit and forwardOnly edge cases), and the table of contents has no entry for the root of the activity tree.",
+    "failures": [
+      "Act3V1: previous.disabled: answered N, expected Y",
+      "Act3V1: toc.enabled.selectable@Activity 2: answered Y, expected N",
+      "Act17V1: toc.enabled.selectable@Activity 13: answered Y, expected N",
+      "Act17V1: toc.enabled.selectable@Activity 11: answered Y, expected N",
+      "Act17V1: toc.enabled.selectable@Activity 12: answered Y, expected N"
+    ]
+  },
+  "CM-07d": {
+    "row": "choice",
+    "why": "The choices offered differ from the suite's: the runtime's choice validity (constrainChoice applied to the wrong activity, stopForwardTraversal not stopping a choice, choiceExit and forwardOnly edge cases), and the table of contents has no entry for the root of the activity tree.",
+    "failures": [
+      "Act3V1: toc.enabled.selectable@the activity that corresponds to the root of \"LMS Test Content Package CM-07d\": answered N, expected Y",
+      "Act3V1: toc.enabled.selectable@Activity 13: answered Y, expected N",
+      "Act3V1: toc.enabled.selectable@Activity 18: answered Y, expected N",
+      "Act6V1: toc.enabled.selectable@the activity that corresponds to the root of \"LMS Test Content Package CM-07d\": answered N, expected Y",
+      "Act6V1: toc.enabled.selectable@Activity 13: answered Y, expected N",
+      "Act6V1: toc.enabled.selectable@Activity 18: answered Y, expected N",
+      "Act10V1: toc.enabled.selectable@Activity 2: answered Y, expected N",
+      "Act10V1: toc.enabled.selectable@Activity 18: answered Y, expected N",
+      "Act13V1: toc.enabled.selectable@Activity 3: answered Y, expected N",
+      "Act13V1: toc.enabled.selectable@Activity 7: answered Y, expected N",
+      "Act13V1: toc.enabled.selectable@Activity 13: answered N, expected Y",
+      "Act13V1: toc.enabled.selectable@Activity 10: answered N, expected Y",
+      "Act13V1: toc.enabled.selectable@Activity 14: answered N, expected Y",
+      "Act13V1: toc.enabled.selectable@Activity 18: answered Y, expected N",
+      "Act13V1: Choice~Activity 15: the table of contents entry for Activity 15 is disabled"
+    ]
+  },
+  "CM-07e": {
+    "row": "choice",
+    "why": "The choices offered differ from the suite's: the runtime's choice validity (constrainChoice applied to the wrong activity, stopForwardTraversal not stopping a choice, choiceExit and forwardOnly edge cases), and the table of contents has no entry for the root of the activity tree.",
+    "failures": [
+      "Act1V1: toc.enabled.selectable@Activity 4: answered N, expected Y",
+      "Act5V1: toc.enabled.selectable@Activity 3: answered N, expected Y",
+      "Act5V1: previous.enabled: answered Y, expected N",
+      "Act6V1: toc.enabled.selectable@the activity that corresponds to the root of \"LMS Test Content Package CM-07e\": answered N, expected Y",
+      "Act1V2: toc.enabled.selectable@Activity 4: answered N, expected Y"
+    ]
+  },
+  "CM-07f": {
+    "row": "choice",
+    "why": "The choices offered differ from the suite's: the runtime's choice validity (constrainChoice applied to the wrong activity, stopForwardTraversal not stopping a choice, choiceExit and forwardOnly edge cases), and the table of contents has no entry for the root of the activity tree.",
+    "failures": [
+      "Act1V1: toc.enabled.selectable@Activity 1: answered N, expected Y",
+      "Act1V1: toc.enabled.selectable@Activity 3: answered Y, expected N",
+      "Act1V1: toc.enabled.selectable@Activity 2: answered Y, expected N",
+      "Act2V1: toc.enabled.selectable@Activity 1: answered N, expected Y",
+      "Act4V1: toc.enabled.selectable@Activity 1: answered N, expected Y"
+    ]
+  },
+  "CM-09aa": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act2V1: expected activity 2, the player delivered activity 3"
+    ]
+  },
+  "CM-09ba": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act3V1: expected activity 3, the player delivered activity 1"
+    ]
+  },
+  "CM-09ca": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act4V2: expected activity 4, the player delivered activity 3"
+    ]
+  },
+  "CM-16": {
+    "row": "choice",
+    "why": "The choices offered differ from the suite's: the runtime's choice validity (constrainChoice applied to the wrong activity, stopForwardTraversal not stopping a choice, choiceExit and forwardOnly edge cases), and the table of contents has no entry for the root of the activity tree.",
+    "failures": [
+      "Act2V1: the table of contents entry for Activity 2 is disabled"
+    ]
+  },
+  "CM-17a": {
+    "row": "choice",
+    "why": "The choices offered differ from the suite's: the runtime's choice validity (constrainChoice applied to the wrong activity, stopForwardTraversal not stopping a choice, choiceExit and forwardOnly edge cases), and the table of contents has no entry for the root of the activity tree.",
+    "failures": [
+      "Act8V1: toc.enabled.selectable@Activity 4: answered Y, expected N",
+      "Act8V1: toc.enabled.selectable@Activity 6: answered Y, expected N",
+      "Act3V1: toc.enabled.selectable@Activity 2: answered N, expected Y",
+      "Act3V1: Choice~Activity 4: the table of contents has no entry for Activity 4"
+    ]
+  },
+  "CM-17b": {
+    "row": "choice",
+    "why": "The choices offered differ from the suite's: the runtime's choice validity (constrainChoice applied to the wrong activity, stopForwardTraversal not stopping a choice, choiceExit and forwardOnly edge cases), and the table of contents has no entry for the root of the activity tree.",
+    "failures": [
+      "Act3V1: toc.enabled.selectable@Activity 4: answered N, expected Y",
+      "Act5V1: toc.enabled.selectable@Activity 2: answered N, expected Y",
+      "Act5V1: toc.enabled.selectable@Activity 6: answered N, expected Y",
+      "Act5V1: Choice~Activity 7: the table of contents entry for Activity 7 is disabled"
+    ]
+  },
+  "CO-02a": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act3V1: expected activity 3, the player delivered activity 2"
+    ]
+  },
+  "CO-03": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act7V1: expected activity 7, the player delivered activity 4"
+    ]
+  },
+  "CO-04a": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act4V1: expected activity 4, the player delivered activity 2"
+    ]
+  },
+  "CO-04b": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act4V1: expected activity 4, the player delivered activity 2"
+    ]
+  },
+  "CO-04c": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act3V1: expected activity 3, the player delivered activity 2"
+    ]
+  },
+  "CO-05a": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act3V1: expected activity 3, the player delivered activity 6"
+    ]
+  },
+  "CO-05b": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act3V1: expected activity 3, the player delivered activity 6"
+    ]
+  },
+  "CO-07a": {
+    "row": "end",
+    "why": "An exit rule or exit-parent rule ends the attempt on the root, but the engine does not end the sequencing session; the player offers a choice instead.",
+    "failures": [
+      "after the last activity the player shows choose, not an ended session"
+    ]
+  },
+  "CO-07b": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act3V1: expected activity 3, the player delivered activity 1"
+    ]
+  },
+  "CO-10": {
+    "row": "objectives",
+    "why": "Objective data a lesson should read through global objective maps (completion, progress measure, raw, min and max scores) does not reach cmi.objectives.",
+    "failures": [
+      "Act3V1: GetValue(\"cmi.objectives.&PRIMARYOBJ&.completion_status\"): returned \"incomplete\", expected \"completed\"",
+      "Act2V2: GetValue(\"cmi.objectives.&PRIMARYOBJ&.completion_status\"): returned \"incomplete\", expected \"completed\"",
+      "Act1V2: GetValue(\"cmi.objectives.&PRIMARYOBJ&.progress_measure\"): returned \"0.3\", expected \"0.39\"",
+      "Act1V2: GetValue(\"cmi.objectives.&PRIMARYOBJ&.completion_status\"): returned \"incomplete\", expected \"completed\"",
+      "Act2V3: GetValue(\"cmi.objectives.&PRIMARYOBJ&.completion_status\"): returned \"incomplete\", expected \"completed\""
+    ]
+  },
+  "CO-12d": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act4V1: expected activity 4, the player delivered activity 3"
+    ]
+  },
+  "CO-13a": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act3V1: expected activity 3, the player delivered activity 2"
+    ]
+  },
+  "DDM": {
+    "row": "packages",
+    "why": "The case continues in a second package and expects data shared across packages (adlcp:sharedDataGlobalToSystem); each package keeps its own data by design.",
+    "failures": [
+      "Act2aV1: exitlaunch~DDMb: the case continues in another package, and each package keeps its own data"
+    ]
+  },
+  "DMI": {
+    "row": "validation",
+    "why": "The runtime accepts values the standard refuses (timestamps with a zone after minutes, more than two fraction digits or years past 2038; durations without T; identifiers such as \"urn:\"; unknown language tags; malformed response patterns), answers 403 or 0 instead of 301 for a read past the end of a list, and 408 where the suite expects 351.",
+    "failures": [
+      "Act1V1: GetValue(\"cmi.objectives.0.id\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.0.success_status\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.0.completion_status\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.0.progress_measure\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.0.description\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.0.score.scaled\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.0.score.raw\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.0.score.min\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.0.score.max\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.1.id\"): error 0, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.2.id\"): error 0, expected 301",
+      "Act1V1: SetValue(\"cmi.objectives.2.id!urn:\"): returned \"true\", expected \"false\"",
+      "Act1V1: GetValue(\"cmi.objectives.2.id\"): returned \"urn:\", expected \"\"",
+      "Act1V1: SetValue(\"cmi.objectives.2.id!urn:adl:lms Test/OBJ01\"): error 351, expected 406",
+      "Act1V1: GetValue(\"cmi.objectives.2.id\"): returned \"urn:\", expected \"\"",
+      "Act1V1: SetValue(\"cmi.objectives.2.id!urn:adl:lmsTest/OBJ01\"): returned \"false\", expected \"true\"",
+      "Act1V1: GetValue(\"cmi.objectives.2.id\"): returned \"urn:\", expected \"urn:adl:lmsTest/OBJ01\"",
+      "Act1V1: GetValue(\"cmi.objectives.5.id\"): error 0, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.31.id\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.31.success_status\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.31.completion_status\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.31.progress_measure\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.31.description\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.31.score.scaled\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.31.score.raw\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.31.score.min\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.31.score.max\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.50.id\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.50.success_status\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.50.completion_status\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.50.progress_measure\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.50.description\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.50.score.scaled\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.50.score.raw\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.50.score.min\"): error 403, expected 301",
+      "Act1V1: GetValue(\"cmi.objectives.50.score.max\"): error 403, expected 301",
+      "Act1V1: SetValue(\"cmi.session_time!P1Y6M14D4H15M6.34S\"): returned \"true\", expected \"false\"",
+      "Act1V1: SetValue(\"cmi.session_time!P1Y6M14DT\"): returned \"true\", expected \"false\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45Z\"): returned \"true\", expected \"false\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45+03\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45+03\", expected \"2004-04-01T09:45\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45+03:30\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45+03:30\", expected \"2004-04-01T09:45\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45-03\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45-03\", expected \"2004-04-01T09:45\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45-03:30\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45-03:30\", expected \"2004-04-01T09:45\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45-03:30\", expected \"2004-04-01T09:45\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45:58.025\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45:58.025\", expected \"2004-04-01T09:45:58.55\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45:58Z\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45:58Z\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45:58+02\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45:58+02\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45:58+02:30\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45:58+02:30\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45:58-03\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45:58-03\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45:58-03:00\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45:58-03:00\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45Z\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45Z\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45+02\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45+02\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45+02:30\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45+02:30\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45-03\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45-03\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2004-04-01T09:45-03:00\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45-03:00\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45-03:00\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45-03:00\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45-03:00\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45-03:00\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2004-04-01T09:45-03:00\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!2039\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"2039\", expected \"2038\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.0.timestamp!3239\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.0.timestamp\"): returned \"3239\", expected \"2038\"",
+      "Act2V1: SetValue(\"cmi.comments_from_learner.100.timestamp!2004-04-01T09:45:58+02:30\"): returned \"true\", expected \"false\"",
+      "Act2V1: GetValue(\"cmi.comments_from_learner.100.timestamp\"): returned \"2004-04-01T09:45:58+02:30\", expected \"2004-04-01T15:21:45\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.type\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.0.objectives.0.id!INTOBJ1\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.objectives.0.id\"): returned \"INTOBJ1\", expected \"\"",
+      "Act3V1: SetValue(\"cmi.interactions.01.timestamp!2003-07-25T03:00:00\"): error 408, expected 351",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.0.correct_responses.0.pattern\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.01.weighting!75.5\"): error 408, expected 351",
+      "Act3V1: GetValue(\"cmi.interactions.0.weighting\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.01.learner_response!Dependency on cmi.inter\"... (87 characters)): error 408, expected 351",
+      "Act3V1: GetValue(\"cmi.interactions.0.learner_response\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.01.result!incorrect\"): returned \"true\", expected \"false\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.result!incorrect\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.result\"): returned \"incorrect\", expected \"\"",
+      "Act3V1: SetValue(\"cmi.interactions.01.latency!PT3M\"): error 408, expected 351",
+      "Act3V1: GetValue(\"cmi.interactions.0.latency\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.01.description!Dependency on cmi.interactio\"... (82 characters)): error 408, expected 351",
+      "Act3V1: GetValue(\"cmi.interactions.0.description\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.01.id!INT1\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.objectives.0.id\"): returned \"INTOBJ1\", expected \"\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.correct_responses.0.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.0.result\"): returned \"incorrect\", expected \"\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.objectives.0.id\"): returned \"INTOBJ1\", expected \"\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.objectives.0.id!urn:\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.objectives.0.id\"): returned \"urn:\", expected \"MYID01\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.objectives.0.id!urn:adl:lms Test/OBJ01\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.objectives.0.id\"): returned \"urn:adl:lms Test/OBJ01\", expected \"MYID01\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45Z\"): returned \"true\", expected \"false\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45+03\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45+03\", expected \"2004-04-01T09:45\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45+03:30\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45+03:30\", expected \"2004-04-01T09:45\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45-03\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45-03\", expected \"2004-04-01T09:45\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45-03:30\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45-03:30\", expected \"2004-04-01T09:45\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45-03:30\", expected \"2004-04-01T09:45\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45:58.025\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45:58.025\", expected \"2004-04-01T09:45:58.55\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45:58Z\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45:58Z\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45:58+02\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45:58+02\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45:58+02:30\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45:58+02:30\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45:58-03\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45:58-03\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45:58-03:00\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45:58-03:00\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45Z\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45Z\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45+02\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45+02\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45+02:30\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45+02:30\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45-03\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45-03\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2004-04-01T09:45-03:00\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45-03:00\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45-03:00\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45-03:00\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45-03:00\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45-03:00\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2004-04-01T09:45-03:00\", expected \"2004-04-01T09:45:58.55-03:00\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!2039\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"2039\", expected \"2038\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.timestamp!3239\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.timestamp\"): returned \"3239\", expected \"2038\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.result\"): returned \"incorrect\", expected \"\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.latency!P1Y6M14D4H15M6.34S\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.latency\"): returned \"P1Y6M14D4H15M6.34S\", expected \"P1Y6MT4H15M\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.latency!P1Y6M14DT\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.latency\"): returned \"P1Y6M14DT\", expected \"P1Y6MT6.34S\"",
+      "Act3V1: SetValue(\"cmi.interactions.1.description!欢迎使用  Unicode\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.1.description\"): returned \"欢迎使用  Unicode\", expected \"\"",
+      "Act3V1: SetValue(\"cmi.interactions.2.description!Добро пожаловаТъ в Unicode!\"): error 408, expected 351",
+      "Act3V1: GetValue(\"cmi.interactions.2.description\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.3.description!Bienvenue au Unicode\"): error 408, expected 351",
+      "Act3V1: GetValue(\"cmi.interactions.3.description\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.4.description!Wilkommen zu Unicode\"): error 408, expected 351",
+      "Act3V1: GetValue(\"cmi.interactions.4.description\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.5.description!Unicodeへょぅこそ\"): error 408, expected 351",
+      "Act3V1: GetValue(\"cmi.interactions.5.description\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.6.description!Séja Bemvindo Unicode\"): error 408, expected 351",
+      "Act3V1: GetValue(\"cmi.interactions.6.description\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.7.description!Bienvenida a Unicode\"): error 408, expected 351",
+      "Act3V1: GetValue(\"cmi.interactions.7.description\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.1.id!1\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.1.correct_responses.1.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.1.correct_responses.1.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.1.correct_responses.1.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.1.correct_responses.1.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.1.correct_responses.1.pattern\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.2.learner_response!{}{[]}{}{[]}{}\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.2.learner_response\"): returned \"{}{[]}{}{[]}{}\", expected \"uri.uri.uri.abcd[,]testuri\"",
+      "Act3V1: SetValue(\"cmi.interactions.2.correct_responses.0.pattern!{}{[]}{}{[]}{}\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.2.correct_responses.0.pattern\"): returned \"{}{[]}{}{[]}{}\", expected \"a[,]asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdfty\"... (616 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.2.correct_responses.2.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.2.correct_responses.3.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.2.correct_responses.4.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.2.correct_responses.5.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.2.correct_responses.6.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.2.correct_responses.7.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.2.correct_responses.8.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.2.correct_responses.9.pattern\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!a[,]asdftyuio\"... (1326 characters)): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"a[,]asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdfty\"... (1279 characters), expected \"{lang=en-US}z\"",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{lang=frl}z\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{lang=frl}z\", expected \"{lang=en-US}z\"",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!a[,]asdftyuio\"... (1326 characters)): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"a[,]asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdfty\"... (1279 characters), expected \"{lang=en-US}z\"",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{lang=exg}z\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{lang=exg}z\", expected \"{lang=en-US}z\"",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!a[,]asdftyuio\"... (1321 characters)): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"a[,]asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdfty\"... (1274 characters), expected \"{lang=en-US}z\"",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{lang=sp}z\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{lang=sp}z\", expected \"{lang=en-US}z\"",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!a[,]asdftyuio\"... (1341 characters)): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"a[,]asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdfty\"... (1294 characters), expected \"{lang=en-US}z\"",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{lang=ruq-JM}z\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{lang=ruq-JM}z\", expected \"{lang=en-US}z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{order_matters=true}a[,]asdftyuioplkjhgfdsazxcvbnm0987654321\"... (633 characters), expected \"a[,]asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdfty\"... (613 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{order_matters=true}z\", expected \"z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}a[,]asdftyuioplkjhgfdsazxcvbnm0987654321\"... (633 characters), expected \"a[,]asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdfty\"... (613 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"z\"",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{order_matter\"... (710 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"a[,]asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdfty\"... (643 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{lang=eng}{or\"... (1369 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=eng}{order_matters=true}{case_matters=invalid}a[,]asdf\"... (1322 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{case_matters\"... (97 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{case_matters=true}{lang=eng}{order_matters=true}z\"",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{lang=eng}a[,\"... (711 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=eng}a[,]{lang=eng}asdftyuioplkjhgfdsazxcvbnm0987654321\"... (664 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{lang=eng}{ca\"... (1349 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=eng}{case_matters=invalid}a[,]asdftyuioplkjhgfdsazxcvb\"... (1302 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{lang=eng}{ca\"... (97 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=eng}{case_matters=true}{order_matters=true}z\"",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{order_matter\"... (714 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{order_matters=false}a[,]asdftyuioplkjhgfdsazxcvbnm098765432\"... (667 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{lang=en-US}{\"... (1373 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{order_matters=false}{case_matters=invalid}a[,]a\"... (1326 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{case_matters\"... (101 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{order_matters=false}z\"",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{lang=en-US}a\"... (721 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}a[,]{lang=en-US}asdftyuioplkjhgfdsazxcvbnm098765\"... (674 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{lang=en-US}{\"... (1352 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{case_matters=invalid}a[,]asdftyuioplkjhgfdsazxc\"... (1305 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{lang=en-US}{\"... (101 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{case_matters=false}{order_matters=false}z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{case_matters=false}{order_matters=false}z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{case_matters=false}{order_matters=false}z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{case_matters=false}{order_matters=false}z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{case_matters=false}{order_matters=false}z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{case_matters=false}{order_matters=false}z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{case_matters=false}{order_matters=false}z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{case_matters=false}{order_matters=false}z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{case_matters=false}{order_matters=false}z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{case_matters=false}{order_matters=false}z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{case_matters=false}{order_matters=false}z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{case_matters=false}{order_matters=false}z\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"{lang=en-US}{case_matters=false}{order_matters=false}z\"",
+      "Act3V1: SetValue(\"cmi.interactions.3.correct_responses.0.pattern!{lang=en-US}{\"... (1354 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{}{[]}{}{[]}{}\", expected \"{lang=en-US}{case_matters=invalid}a[,]asdftyuioplkjhgfdsazxc\"... (1307 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.learner_response\"): returned \"{lang=en}\", expected \"\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{lang=en}\", expected \"\"",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=frl}z\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{lang=frl}z\", expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (4012 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=frl}asd\"... (307 characters)): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{lang=frl}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50\"... (260 characters), expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (4012 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=frl}asd\"... (4057 characters)): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{lang=frl}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50\"... (4010 characters), expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (4012 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=exg}z\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{lang=exg}z\", expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (4012 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=exg}asd\"... (307 characters)): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{lang=exg}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50\"... (260 characters), expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (4012 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=exg}asd\"... (4057 characters)): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{lang=exg}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50\"... (4010 characters), expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (4012 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=sp}z\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{lang=sp}z\", expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (4012 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=sp}asdf\"... (306 characters)): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{lang=sp}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50a\"... (259 characters), expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (4012 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=sp}asdf\"... (4056 characters)): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{lang=sp}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50a\"... (4009 characters), expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (4012 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=ruq-JM}z\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{lang=ruq-JM}z\", expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (4012 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=ruq-JM}\"... (310 characters)): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{lang=ruq-JM}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuiopl\"... (263 characters), expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (4012 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=ruq-JM}\"... (4060 characters)): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{lang=ruq-JM}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuiopl\"... (4013 characters), expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (4012 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}z\", expected \"z\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}asdftyuioplkjhgfdsazxcvbnm0987654321qwer\"... (270 characters), expected \"asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdftyuiop\"... (250 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}asdftyuioplkjhgfdsazxcvbnm0987654321qwer\"... (4020 characters), expected \"asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdftyuiop\"... (4000 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}asdftyuioplkjhgfdsazxcvbnm0987654321qwer\"... (4020 characters), expected \"asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdftyuiop\"... (4000 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}asdftyuioplkjhgfdsazxcvbnm0987654321qwer\"... (4020 characters), expected \"asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdftyuiop\"... (4000 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}asdftyuioplkjhgfdsazxcvbnm0987654321qwer\"... (4020 characters), expected \"asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdftyuiop\"... (4000 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}asdftyuioplkjhgfdsazxcvbnm0987654321qwer\"... (4020 characters), expected \"asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdftyuiop\"... (4000 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}asdftyuioplkjhgfdsazxcvbnm0987654321qwer\"... (4020 characters), expected \"asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdftyuiop\"... (4000 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}asdftyuioplkjhgfdsazxcvbnm0987654321qwer\"... (4020 characters), expected \"asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdftyuiop\"... (4000 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=eng}{ca\"... (4076 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=true}{lang=eng}z\", expected \"{case_matters=true}{lang=eng}asdftyuioplkjhgfdsazxcvbnm09876\"... (4029 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=eng}{ca\"... (326 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=true}{lang=eng}z\", expected \"{case_matters=true}{lang=eng}asdftyuioplkjhgfdsazxcvbnm09876\"... (279 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}{lang=en-US}z\", expected \"{lang=en-US}z\"",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=en-US}{\"... (4079 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}{lang=en-US}z\", expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (4012 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.4.correct_responses.0.pattern!{lang=en-US}{\"... (329 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}{lang=en-US}z\", expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (262 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}{lang=en-US}z\", expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (262 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}{lang=en-US}z\", expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (262 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}{lang=en-US}z\", expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (262 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}{lang=en-US}z\", expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (262 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}{lang=en-US}z\", expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (262 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.4.correct_responses.0.pattern\"): returned \"{case_matters=false}{lang=en-US}z\", expected \"{lang=en-US}asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk\"... (262 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.7.correct_responses.0.pattern\"): returned \"{order_matters=true}a[.]asdftyuioplkjhgfdsazxcvbnm0987654321\"... (2581 characters), expected \"a[.]asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50asdfty\"... (2561 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.7.correct_responses.0.pattern\"): returned \"{order_matters=true}asdftyuioplkjhgfdsazxcvbnm0987654321qwer\"... (373 characters), expected \"asdftyuioplkjhgfdsazxcvbnm0987654321qwertyuioplk50pikhtyuiop\"... (353 characters)",
+      "Act3V1: GetValue(\"cmi.interactions.8.correct_responses.0.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.8.correct_responses.1.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.8.correct_responses.2.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.8.correct_responses.3.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.8.correct_responses.4.pattern\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.9.correct_responses.0.pattern!300[:]1.5\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.9.correct_responses.0.pattern\"): returned \"300[:]1.5\", expected \"-0.45678[:]90000\"",
+      "Act3V1: SetValue(\"cmi.interactions.9.correct_responses.0.pattern!30[:]-4500\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.9.correct_responses.0.pattern\"): returned \"30[:]-4500\", expected \"-0.45678[:]90000\"",
+      "Act3V1: GetValue(\"cmi.interactions.9.correct_responses.0.pattern\"): returned \"30[:]-4500\", expected \"-0.45678[:]90000\"",
+      "Act3V1: GetValue(\"cmi.interactions.9.correct_responses.0.pattern\"): returned \"30[:]-4500\", expected \"-0.45678[:]90000\"",
+      "Act3V1: GetValue(\"cmi.interactions.9.correct_responses.1.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.9.correct_responses.1.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.9.correct_responses.1.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.9.correct_responses.1.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.9.correct_responses.1.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.9.correct_responses.1.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.9.correct_responses.1.pattern\"): error 403, expected 301",
+      "Act3V1: GetValue(\"cmi.interactions.9.correct_responses.1.pattern\"): error 403, expected 301",
+      "Act3V1: SetValue(\"cmi.interactions.0.id!MYID01\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.id\"): returned \"INT1\", expected \"MYID01\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.id!MYID01\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.id\"): returned \"INT1\", expected \"MYID01\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.id!urn:\"): error 351, expected 406",
+      "Act3V1: GetValue(\"cmi.interactions.0.id\"): returned \"INT1\", expected \"MYID01\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.id!urn:adl:lms Test/OBJ01\"): error 351, expected 406",
+      "Act3V1: GetValue(\"cmi.interactions.0.id\"): returned \"INT1\", expected \"MYID01\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.id!urn:adl:lmsTest/OBJ01\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.id\"): returned \"INT1\", expected \"urn:adl:lmsTest/OBJ01\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.id!urn:adl:lmsTest/OBJ324/this/is/the/spm\"... (3977 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.id\"): returned \"INT1\", expected \"urn:adl:lmsTest/OBJ324/this/is/the/spm/check/for/the/long/ID\"... (3955 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.0.id!urn:adl:lmsTest/OBJ324/this/is/the/spm\"... (3978 characters)): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.id\"): returned \"INT1\", expected \"urn:adl:lmsTest/OBJ324/this/is/the/spm/check/for/the/long/ID\"... (3956 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.2.id!INTID\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.id\"): returned \"INT1\", expected \"urn:adl:lmsTest/OBJ324/this/is/the/spm/check/for/the/long/ID\"... (3956 characters)",
+      "Act3V1: SetValue(\"cmi.interactions.0.id!INTID0\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.id\"): returned \"INT1\", expected \"INTID0\"",
+      "Act3V1: SetValue(\"cmi.interactions.1.id!INTID1\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.1.id\"): returned \"INT1\", expected \"INTID1\"",
+      "Act3V1: SetValue(\"cmi.interactions.2.id!INTID2\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.2.id\"): returned \"2\", expected \"INTID2\"",
+      "Act3V1: SetValue(\"cmi.interactions.3.id!INTID3\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.3.id\"): returned \"3\", expected \"INTID3\"",
+      "Act3V1: SetValue(\"cmi.interactions.4.id!INTID4\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.4.id\"): returned \"4\", expected \"INTID4\"",
+      "Act3V1: SetValue(\"cmi.interactions.5.id!INTID5\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.5.id\"): returned \"5\", expected \"INTID5\"",
+      "Act3V1: SetValue(\"cmi.interactions.6.id!INTID6\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.6.id\"): returned \"6\", expected \"INTID6\"",
+      "Act3V1: SetValue(\"cmi.interactions.7.id!INTID7\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.7.id\"): returned \"7\", expected \"INTID7\"",
+      "Act3V1: SetValue(\"cmi.interactions.8.id!INTID8\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.8.id\"): returned \"8\", expected \"INTID8\"",
+      "Act3V1: SetValue(\"cmi.interactions.9.id!INTID9\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.9.id\"): returned \"9\", expected \"INTID9\"",
+      "Act3V1: SetValue(\"cmi.interactions.10.id!INTID10\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.10.id\"): returned \"10\", expected \"INTID10\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.id!DUPLICATEID\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.0.id\"): returned \"INT1\", expected \"DUPLICATEID\"",
+      "Act3V1: SetValue(\"cmi.interactions.1.id!DUPLICATEID\"): returned \"false\", expected \"true\"",
+      "Act3V1: GetValue(\"cmi.interactions.1.id\"): returned \"INT1\", expected \"DUPLICATEID\"",
+      "Act3V1: SetValue(\"cmi.interactions.249.timestamp!2004-04-01T09:45:58+02:30\"): returned \"true\", expected \"false\"",
+      "Act3V1: GetValue(\"cmi.interactions.249.timestamp\"): returned \"2004-04-01T09:45:58+02:30\", expected \"\"",
+      "Act3V1: SetValue(\"cmi.interactions.0.id!thisstringislength20qwertyuiop01234567\"... (4022 characters)): returned \"false\", expected \"true\"",
+      "Act4V1: SetValue(\"cmi.learner_preference.delivery_speed!0.0\"): returned \"false\", expected \"true\"",
+      "Act4V1: GetValue(\"cmi.learner_preference.delivery_speed\"): returned \"1\", expected \"0.0\"",
+      "Act4V1: GetValue(\"cmi.learner_preference.delivery_speed\"): returned \"1\", expected \"0.0\"",
+      "Act4V1: GetValue(\"cmi.learner_preference.delivery_speed\"): returned \"1\", expected \"0.0\"",
+      "Act4V1: SetValue(\"cmi.learner_preference.delivery_speed!0.0\"): returned \"false\", expected \"true\"",
+      "Act4V1: GetValue(\"cmi.learner_preference.delivery_speed\"): returned \"99.0\", expected \"0.0\"",
+      "Act4V1: GetValue(\"adl.data.10.id\"): error 403, expected 301",
+      "Act4V1: GetValue(\"adl.data.10.store\"): error 403, expected 301",
+      "Act4V1: SetValue(\"adl.data.8.store!illegal\"): returned \"true\", expected \"false\"",
+      "Act4V1: GetValue(\"adl.data.&tarID8&.store\"): error 0, expected 403",
+      "Act1V2: GetValue(\"cmi.objectives.2.id\"): returned \"urn:\", expected \"urn:adl:lmsTest/OBJ01\"",
+      "Act3V2: GetValue(\"cmi.interactions.0.id\"): returned \"INT1\", expected \"thisstringislength20qwertyuiop0123456789thisstringislength60\"... (4000 characters)",
+      "Act3V2: GetValue(\"cmi.interactions.1.description\"): returned \"欢迎使用  Unicode\", expected \"\"",
+      "Act3V2: GetValue(\"cmi.interactions.3.correct_responses.0.pattern\"): returned \"{}{[]}{}{[]}{}\", expected \"{lang=en-US}{case_matters=invalid}a[,]asdftyuioplkjhgfdsazxc\"... (1307 characters)",
+      "Act3V2: GetValue(\"cmi.interactions.3.correct_responses.1.pattern\"): error 403, expected 0",
+      "Act3V2: GetValue(\"cmi.interactions.3.correct_responses.2.pattern\"): error 403, expected 0",
+      "Act3V2: GetValue(\"cmi.interactions.3.correct_responses.3.pattern\"): error 403, expected 0",
+      "Act3V2: GetValue(\"cmi.interactions.3.correct_responses.4.pattern\"): error 403, expected 0",
+      "Act3V2: GetValue(\"cmi.interactions.4.correct_responses.1.pattern\"): error 403, expected 0",
+      "Act3V2: GetValue(\"cmi.interactions.4.correct_responses.2.pattern\"): error 403, expected 0",
+      "Act3V2: GetValue(\"cmi.interactions.4.correct_responses.3.pattern\"): error 403, expected 0",
+      "Act3V2: GetValue(\"cmi.interactions.4.correct_responses.4.pattern\"): error 403, expected 0",
+      "Act3V2: GetValue(\"cmi.interactions.9.correct_responses.0.pattern\"): returned \"30[:]-4500\", expected \"-0.45678[:]90000\"",
+      "Act3V2: GetValue(\"cmi.interactions.1.id\"): returned \"INT1\", expected \"DUPLICATEID\"",
+      "Act3V2: GetValue(\"cmi.interactions.2.id\"): returned \"2\", expected \"INTID2\""
+    ]
+  },
+  "MS-05a": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act1V2: expected activity 1, the player delivered activity 5"
+    ]
+  },
+  "MS-06": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act6V1: expected activity 6, the player delivered activity 1"
+    ]
+  },
+  "OB-03c": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act9V1: expected activity 9, the player delivered activity 4"
+    ]
+  },
+  "OB-08a": {
+    "row": "end",
+    "why": "An exit rule or exit-parent rule ends the attempt on the root, but the engine does not end the sequencing session; the player offers a choice instead.",
+    "failures": [
+      "after the last activity the player shows choose, not an ended session"
+    ]
+  },
+  "OB-08b": {
+    "row": "end",
+    "why": "An exit rule or exit-parent rule ends the attempt on the root, but the engine does not end the sequencing session; the player offers a choice instead.",
+    "failures": [
+      "after the last activity the player shows choose, not an ended session"
+    ]
+  },
+  "OB-09a": {
+    "row": "end",
+    "why": "An exit rule or exit-parent rule ends the attempt on the root, but the engine does not end the sequencing session; the player offers a choice instead.",
+    "failures": [
+      "after the last activity the player shows choose, not an ended session"
+    ]
+  },
+  "OB-09b": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act3V1: expected activity 3, the player delivered activity 1"
+    ]
+  },
+  "RU-07c": {
+    "row": "nothing",
+    "why": "The sequencing engine delivers nothing where the suite expects an activity.",
+    "failures": [
+      "Act3V2: expected activity 3, the player delivered nothing (choose)"
+    ]
+  },
+  "RU-10": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act6V1: expected activity 6, the player delivered activity 1"
+    ]
+  },
+  "RU-11": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act1V2: expected activity 1, the player delivered activity 4"
+    ]
+  },
+  "RU-13d": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act6V1: expected activity 6, the player delivered activity 2"
+    ]
+  },
+  "RU-15b": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act1V2: expected activity 1, the player delivered activity 6"
+    ]
+  },
+  "RU-19b": {
+    "row": "delivery",
+    "why": "The sequencing engine delivers a different activity from the one the suite's pseudo-code run expects.",
+    "failures": [
+      "Act5V1: expected activity 5, the player delivered activity 2"
+    ]
+  },
+  "SX-04b": {
+    "row": "choice",
+    "why": "The choices offered differ from the suite's: the runtime's choice validity (constrainChoice applied to the wrong activity, stopForwardTraversal not stopping a choice, choiceExit and forwardOnly edge cases), and the table of contents has no entry for the root of the activity tree.",
+    "failures": [
+      "Act1V1: RootSX4b: the table of contents offers no entry for the root of the activity tree"
+    ]
+  },
+  "SX-11c": {
+    "row": "objectives",
+    "why": "Objective data a lesson should read through global objective maps (completion, progress measure, raw, min and max scores) does not reach cmi.objectives.",
+    "failures": [
+      "Act1V1: GetValue(\"cmi.objectives.&obj&.score.raw\"): returned \"\", expected \"7\"",
+      "Act1V1: GetValue(\"cmi.objectives.&obj&.score.min\"): returned \"\", expected \"1\"",
+      "Act1V1: GetValue(\"cmi.objectives.&obj&.score.max\"): returned \"\", expected \"3.3333\"",
+      "Act1V1: GetValue(\"cmi.objectives.&obj&.progress_measure\"): returned \"\", expected \"0.011\""
+    ]
+  },
+  "T-01a": {
+    "row": "nothing",
+    "why": "The sequencing engine delivers nothing where the suite expects an activity.",
+    "failures": [
+      "Act6V1: expected activity 6, the player delivered nothing (choose)"
+    ]
+  },
+  "T-01b": {
+    "row": "nothing",
+    "why": "The sequencing engine delivers nothing where the suite expects an activity.",
+    "failures": [
+      "Act6V1: expected activity 6, the player delivered nothing (choose)"
+    ]
+  }
+}

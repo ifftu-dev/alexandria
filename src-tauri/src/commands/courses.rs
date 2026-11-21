@@ -7,13 +7,19 @@ use crate::domain::course::{Course, CreateCourseRequest, UpdateCourseRequest};
 use crate::AppState;
 
 use crate::content_store::course as content_course;
+use crate::content_store::node::ContentNode;
 use crate::crypto::did::did_from_verifying_key;
 use crate::crypto::wallet;
+use crate::domain::catalog::CatalogAnnouncement;
+use crate::domain::course_document::PACKAGE_ELEMENT_TYPE;
 use crate::domain::course_document::{
     CourseCompletionPolicy, CourseDocumentPayload, DocumentChapter, DocumentElement,
     PublishCourseResult,
 };
 use crate::p2p::catalog;
+use crate::p2p::types::SignedGossipMessage;
+use crate::packages::{self, ExecutorDb, PackageDb, PackageDirs};
+use ed25519_dalek::SigningKey;
 
 /// List all courses in the local database.
 #[tauri::command]
@@ -366,193 +372,277 @@ async fn prepare_course_document(
     let ks = keystore.as_ref().ok_or("vault is locked — unlock first")?;
     let mnemonic = ks.retrieve_mnemonic().map_err(|e| e.to_string())?;
     drop(keystore);
-
     let w = wallet::wallet_from_mnemonic(&mnemonic).map_err(|e| e.to_string())?;
-    let author_did = did_from_verifying_key(&w.signing_key.verifying_key());
-    let signer_address = w.stake_address.clone();
+
+    let dirs = PackageDirs::for_profile(&state.active_paths()?);
+    dirs.ensure().map_err(|e| e.to_string())?;
+    let db = ExecutorDb {
+        executor: &state.db_executor,
+        lease: state.profile_lease(),
+        workload: DatabaseWorkload::Instructor,
+    };
+    let prepared = prepare_course_document_core(
+        &db,
+        &state.content_node,
+        &dirs,
+        CourseSigner {
+            key: &w.signing_key,
+            stake_address: &w.stake_address,
+        },
+        &course_id,
+        publish,
+        &profile_unchanged,
+    )
+    .await?;
+
+    // Local preparation intentionally leaves the draft out of the catalog.
+    if let Some((announcement, signed_ann)) = prepared.announcement {
+        let p2p_node = state.p2p_node.lock().await;
+        if let Some(ref node) = *p2p_node {
+            if let Err(e) = node.publish_signed(&signed_ann).await {
+                log::warn!("Failed to broadcast catalog announcement via P2P: {e}");
+            } else {
+                log::info!(
+                    "Broadcast catalog announcement for '{}' (v{})",
+                    announcement.title,
+                    prepared.version
+                );
+            }
+        }
+    }
+
+    Ok(prepared.result)
+}
+
+/// The author's key and stake address, from the unlocked wallet.
+pub(crate) struct CourseSigner<'a> {
+    pub key: &'a SigningKey,
+    pub stake_address: &'a str,
+}
+
+/// A signed, stored course document, and for a published course the catalog
+/// announcement still to broadcast.
+pub(crate) struct PreparedCourse {
+    pub result: PublishCourseResult,
+    pub announcement: Option<(CatalogAnnouncement, SignedGossipMessage)>,
+    pub version: i64,
+}
+
+/// Reads an owned course, signs its document and stores it in the content
+/// store; when `publish`, also moves every package element's archive into
+/// the served store (pinned, never evicted) and records and signs the
+/// catalog entry. Local preparation (`publish == false`) records only the
+/// document binding a local enrolment needs: no catalog entry, and a
+/// package's archive stays a draft file the node cannot serve.
+///
+/// `profile_unchanged` is checked between phases; publication stops if the
+/// active profile changed while it ran.
+pub(crate) async fn prepare_course_document_core(
+    db: &impl PackageDb,
+    node: &ContentNode,
+    dirs: &PackageDirs,
+    signer: CourseSigner<'_>,
+    course_id: &str,
+    publish: bool,
+    profile_unchanged: &(dyn Fn() -> bool + Sync),
+) -> Result<PreparedCourse, String> {
+    let author_did = did_from_verifying_key(&signer.key.verifying_key());
+    let signer_address = signer.stake_address.to_string();
 
     // Read course data off the async runtime before iroh calls.
-    let read_course_id = course_id.clone();
-    let (mut payload, inline_text) = state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Instructor,
-            state.profile_lease(),
-            "courses.publish.read",
-            move |db| {
-                let course = get_course_by_id(db.conn(), &read_course_id)?;
-                if course.author_address != signer_address {
-                    return Err("course not found or not authored by you".into());
-                }
-                if !publish && course.status != "draft" {
-                    return Err("only an owned draft can be prepared locally".into());
-                }
-                let draft_policy_json: Option<String> = db
-                    .conn()
-                    .query_row(
-                        "SELECT draft_completion_policy_json FROM courses WHERE id = ?1",
-                        params![read_course_id],
-                        |row| row.get(0),
-                    )
-                    .map_err(|error| error.to_string())?;
-                let completion_policy = draft_policy_json
-                    .as_deref()
-                    .map(serde_json::from_str::<CourseCompletionPolicy>)
-                    .transpose()
+    let read_course_id = course_id.to_string();
+    let (mut payload, inline_text) = db
+        .run("courses.publish.read", move |db| {
+            let course = get_course_by_id(db.conn(), &read_course_id)?;
+            if course.author_address != signer_address {
+                return Err("course not found or not authored by you".into());
+            }
+            if !publish && course.status != "draft" {
+                return Err("only an owned draft can be prepared locally".into());
+            }
+            let draft_policy_json: Option<String> = db
+                .conn()
+                .query_row(
+                    "SELECT draft_completion_policy_json FROM courses WHERE id = ?1",
+                    params![read_course_id],
+                    |row| row.get(0),
+                )
+                .map_err(|error| error.to_string())?;
+            let completion_policy = draft_policy_json
+                .as_deref()
+                .map(serde_json::from_str::<CourseCompletionPolicy>)
+                .transpose()
+                .map_err(|error| format!("invalid draft completion policy: {error}"))?;
+            if let Some(policy) = &completion_policy {
+                policy
+                    .validate()
                     .map_err(|error| format!("invalid draft completion policy: {error}"))?;
-                if let Some(policy) = &completion_policy {
-                    policy
-                        .validate()
-                        .map_err(|error| format!("invalid draft completion policy: {error}"))?;
-                }
+            }
 
-                // Read chapters with their elements
-                let chapter_rows: Vec<(String, String, Option<String>, i64)> = {
-                    let mut stmt = db
+            // Read chapters with their elements
+            let chapter_rows: Vec<(String, String, Option<String>, i64)> = {
+                let mut stmt = db
+                    .conn()
+                    .prepare(
+                        "SELECT id, title, description, position \
+                     FROM course_chapters WHERE course_id = ?1 ORDER BY position ASC",
+                    )
+                    .map_err(|e| e.to_string())?;
+
+                let rows = stmt
+                    .query_map(params![read_course_id], |row| {
+                        Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                    })
+                    .map_err(|e| e.to_string())?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| e.to_string())?;
+                rows
+            };
+
+            // Text lessons written in the studio are stored inline and
+            // uploaded as blobs before signing, so the signed document
+            // references content rather than carrying it.
+            let mut inline_text: Vec<(String, String)> = Vec::new();
+            let mut chapters = Vec::new();
+            for (ch_id, ch_title, ch_desc, ch_pos) in &chapter_rows {
+                let elements: Vec<DocumentElement> = {
+                    let mut el_stmt = db
                         .conn()
                         .prepare(
-                            "SELECT id, title, description, position \
-                     FROM course_chapters WHERE course_id = ?1 ORDER BY position ASC",
+                            "SELECT id, title, element_type, content_cid, position, duration_seconds, content_inline \
+                                 FROM course_elements WHERE chapter_id = ?1 ORDER BY position ASC",
                         )
                         .map_err(|e| e.to_string())?;
 
-                    let rows = stmt
-                        .query_map(params![read_course_id], |row| {
-                            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+                    let els = el_stmt
+                        .query_map(params![ch_id], |row| {
+                            let el_id: String = row.get(0)?;
+                            let element_type: String = row.get(2)?;
+                            if element_type == "text" {
+                                if let Some(text) = row.get::<_, Option<String>>(6)? {
+                                    inline_text.push((el_id.clone(), text));
+                                }
+                            }
+                            Ok(DocumentElement {
+                                id: el_id,
+                                title: row.get(1)?,
+                                element_type,
+                                content_hash: row.get(3)?,
+                                position: row.get(4)?,
+                                duration_seconds: row.get(5)?,
+                                // video_chapters are joined in below after the
+                                // element list is materialised, to keep the row
+                                // closure free of outer borrows.
+                                video_chapters: Vec::new(),
+                            })
                         })
                         .map_err(|e| e.to_string())?
                         .collect::<Result<Vec<_>, _>>()
                         .map_err(|e| e.to_string())?;
-                    rows
-                };
 
-                // Text lessons written in the studio are stored inline and
-                // uploaded as blobs before signing, so the signed document
-                // references content rather than carrying it.
-                let mut inline_text: Vec<(String, String)> = Vec::new();
-                let mut chapters = Vec::new();
-                for (ch_id, ch_title, ch_desc, ch_pos) in &chapter_rows {
-                    let elements: Vec<DocumentElement> = {
-                        let mut el_stmt = db
+                    // Load chapter markers for any video elements in this
+                    // chapter. Small N — a chapter rarely has more than a
+                    // handful of videos, so a per-element query is fine.
+                    let mut els = els;
+                    for el in els.iter_mut() {
+                        if el.element_type != "video" {
+                            continue;
+                        }
+                        let mut vc_stmt = db
                             .conn()
                             .prepare(
-                                "SELECT id, title, element_type, content_cid, position, duration_seconds, content_inline \
-                                 FROM course_elements WHERE chapter_id = ?1 ORDER BY position ASC",
+                                "SELECT title, start_seconds, position \
+                             FROM video_chapters WHERE element_id = ?1 \
+                             ORDER BY position ASC",
                             )
                             .map_err(|e| e.to_string())?;
-
-                        let els = el_stmt
-                            .query_map(params![ch_id], |row| {
-                                let el_id: String = row.get(0)?;
-                                let element_type: String = row.get(2)?;
-                                if element_type == "text" {
-                                    if let Some(text) = row.get::<_, Option<String>>(6)? {
-                                        inline_text.push((el_id.clone(), text));
-                                    }
-                                }
-                                Ok(DocumentElement {
-                                    id: el_id,
-                                    title: row.get(1)?,
-                                    element_type,
-                                    content_hash: row.get(3)?,
-                                    position: row.get(4)?,
-                                    duration_seconds: row.get(5)?,
-                                    // video_chapters are joined in below after the
-                                    // element list is materialised, to keep the row
-                                    // closure free of outer borrows.
-                                    video_chapters: Vec::new(),
+                        let vcs: Vec<_> = vc_stmt
+                            .query_map(params![el.id], |row| {
+                                Ok(crate::domain::course_document::VideoChapter {
+                                    title: row.get(0)?,
+                                    start_seconds: row.get(1)?,
+                                    position: row.get(2)?,
                                 })
                             })
                             .map_err(|e| e.to_string())?
-                            .collect::<Result<Vec<_>, _>>()
-                            .map_err(|e| e.to_string())?;
+                            .filter_map(|r| r.ok())
+                            .collect();
+                        el.video_chapters = vcs;
+                    }
+                    els
+                };
 
-                        // Load chapter markers for any video elements in this
-                        // chapter. Small N — a chapter rarely has more than a
-                        // handful of videos, so a per-element query is fine.
-                        let mut els = els;
-                        for el in els.iter_mut() {
-                            if el.element_type != "video" {
-                                continue;
-                            }
-                            let mut vc_stmt = db
-                                .conn()
-                                .prepare(
-                                    "SELECT title, start_seconds, position \
-                             FROM video_chapters WHERE element_id = ?1 \
-                             ORDER BY position ASC",
-                                )
-                                .map_err(|e| e.to_string())?;
-                            let vcs: Vec<_> = vc_stmt
-                                .query_map(params![el.id], |row| {
-                                    Ok(crate::domain::course_document::VideoChapter {
-                                        title: row.get(0)?,
-                                        start_seconds: row.get(1)?,
-                                        position: row.get(2)?,
-                                    })
-                                })
-                                .map_err(|e| e.to_string())?
-                                .filter_map(|r| r.ok())
-                                .collect();
-                            el.video_chapters = vcs;
-                        }
-                        els
-                    };
+                chapters.push(DocumentChapter {
+                    id: ch_id.clone(),
+                    position: *ch_pos,
+                    title: ch_title.clone(),
+                    description: ch_desc.clone(),
+                    elements,
+                });
+            }
 
-                    chapters.push(DocumentChapter {
-                        id: ch_id.clone(),
-                        position: *ch_pos,
-                        title: ch_title.clone(),
-                        description: ch_desc.clone(),
-                        elements,
-                    });
-                }
+            let created_at = parse_datetime_to_unix(&course.created_at);
+            let updated_at = chrono::Utc::now().timestamp();
+            let tutor_policy = alexandria_studio::store::tutor_policy(db.conn(), &course.id)
+                .map_err(|error| error.to_string())?;
 
-                let created_at = parse_datetime_to_unix(&course.created_at);
-                let updated_at = chrono::Utc::now().timestamp();
-                let tutor_policy = alexandria_studio::store::tutor_policy(db.conn(), &course.id)
-                    .map_err(|error| error.to_string())?;
-
-                Ok((
-                    CourseDocumentPayload {
-                        version: crate::domain::course_document::COURSE_DOCUMENT_VERSION,
-                        course_id: course.id.clone(),
-                        author_address: course.author_address.clone(),
-                        author_did: Some(author_did),
-                        title: course.title.clone(),
-                        description: course.description.clone(),
-                        thumbnail_hash: course.thumbnail_cid.clone(),
-                        tags: course.tags.clone().unwrap_or_default(),
-                        skill_ids: course.skill_ids.clone().unwrap_or_default(),
-                        chapters,
-                        created_at,
-                        updated_at,
-                        kind: course.kind.clone(),
-                        completion_policy,
-                        tutor_policy,
-                    },
-                    inline_text,
-                ))
-            },
-        )
+            Ok((
+                CourseDocumentPayload {
+                    version: crate::domain::course_document::COURSE_DOCUMENT_VERSION,
+                    course_id: course.id.clone(),
+                    author_address: course.author_address.clone(),
+                    author_did: Some(author_did),
+                    title: course.title.clone(),
+                    description: course.description.clone(),
+                    thumbnail_hash: course.thumbnail_cid.clone(),
+                    tags: course.tags.clone().unwrap_or_default(),
+                    skill_ids: course.skill_ids.clone().unwrap_or_default(),
+                    chapters,
+                    created_at,
+                    updated_at,
+                    kind: course.kind.clone(),
+                    completion_policy,
+                    tutor_policy,
+                },
+                inline_text,
+            ))
+        })
         .await?;
+
+    // Every package element of a course being published must name its
+    // archive before anything is stored.
+    let package_hashes = if publish {
+        package_hashes(&payload)?
+    } else {
+        Vec::new()
+    };
 
     if !profile_unchanged() {
         return Err("profile changed during publication".into());
     }
-    content_course::materialize_text_lessons(&state.content_node, &mut payload, &inline_text)
+    content_course::materialize_text_lessons(node, &mut payload, &inline_text)
         .await
         .map_err(|error| error.to_string())?;
+    if publish {
+        // A package travels like any other file of a published course: its
+        // archive goes into the served store, pinned, before the course is
+        // announced. Local preparation leaves it a draft nobody is served.
+        for hash in &package_hashes {
+            packages::publish(db, node, dirs, hash)
+                .await
+                .map_err(|error| format!("package {hash}: {error}"))?;
+        }
+    }
     if !profile_unchanged() {
         return Err("profile changed during publication".into());
     }
 
     // Sign the document
-    let signed = content_course::sign_course_document(&payload, &w.signing_key)
-        .map_err(|e| e.to_string())?;
+    let signed =
+        content_course::sign_course_document(&payload, signer.key).map_err(|e| e.to_string())?;
 
     // Publish to iroh
-    let result = content_course::publish_course_document(&state.content_node, &signed)
+    let result = content_course::publish_course_document(node, &signed)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -561,7 +651,7 @@ async fn prepare_course_document(
     }
 
     // Update the course and build the catalog announcement off the runtime.
-    let update_course_id = course_id.clone();
+    let update_course_id = course_id.to_string();
     let content_hash = result.content_hash.clone();
     let content_size = result.size;
     let document_version = i64::from(signed.version);
@@ -571,110 +661,122 @@ async fn prepare_course_document(
         .map(serde_json_canonicalizer::to_string)
         .transpose()
         .map_err(|error| error.to_string())?;
-    let (announcement, signed_ann, version) = state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Instructor,
-            state.profile_lease(),
-            "courses.publish.commit",
-            move |db| {
-                // The signed document carries the lesson text as it was read.
-                // If an author edited a lesson while it uploaded, publishing
-                // would record a document that no longer matches the draft.
-                for (element_id, expected_text) in &inline_text {
-                    let matches: bool = db
-                        .conn()
-                        .query_row(
-                            "SELECT EXISTS(SELECT 1 FROM course_elements e \
+    let signing_key = signer.key.clone();
+    let stake_address = signer.stake_address.to_string();
+    let (announcement, version) = db
+        .run("courses.publish.commit", move |db| {
+            // The signed document carries the lesson text as it was read.
+            // If an author edited a lesson while it uploaded, publishing
+            // would record a document that no longer matches the draft.
+            for (element_id, expected_text) in &inline_text {
+                let matches: bool = db
+                    .conn()
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM course_elements e \
                              JOIN course_chapters ch ON ch.id = e.chapter_id \
                              WHERE e.id = ?1 AND ch.course_id = ?2 \
                              AND e.content_inline = ?3 AND e.element_type = 'text')",
-                            params![element_id, update_course_id, expected_text],
-                            |row| row.get(0),
-                        )
-                        .map_err(|error| error.to_string())?;
-                    if !matches {
-                        return Err(
-                            "lesson changed during publication; review and publish again".into(),
-                        );
-                    }
+                        params![element_id, update_course_id, expected_text],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| error.to_string())?;
+                if !matches {
+                    return Err(
+                        "lesson changed during publication; review and publish again".into(),
+                    );
                 }
+            }
 
-                record_course_document_binding(
-                    db.conn(),
-                    &update_course_id,
-                    &content_hash,
-                    document_version,
-                    completion_policy_json.as_deref(),
-                    publish,
-                )?;
+            record_course_document_binding(
+                db.conn(),
+                &update_course_id,
+                &content_hash,
+                document_version,
+                completion_policy_json.as_deref(),
+                publish,
+            )?;
 
-                // Track as a non-evictable pin (authored content)
-                crate::content_store::storage::upsert_pin(
-                    db.conn(),
-                    &content_hash,
-                    "course",
-                    content_size,
-                    false, // auto_unpin = false: authored content is never evicted
-                )?;
+            // Track as a non-evictable pin (authored content)
+            crate::content_store::storage::upsert_pin(
+                db.conn(),
+                &content_hash,
+                "course",
+                content_size,
+                false, // auto_unpin = false: authored content is never evicted
+            )?;
 
-                // Read back the updated course to get the new version number
-                let updated_course = get_course_by_id(db.conn(), &update_course_id)?;
-                let version = updated_course.version;
+            // Read back the updated course to get the new version number
+            let updated_course = get_course_by_id(db.conn(), &update_course_id)?;
+            let version = updated_course.version;
 
-                if !publish {
-                    return Ok((None, None, version));
-                }
+            if !publish {
+                return Ok((None, version));
+            }
 
-                // Build a catalog announcement for P2P discovery
-                let announcement = catalog::build_catalog_announcement(
-                    &payload.course_id,
-                    &payload.author_address,
-                    &payload.title,
-                    payload.description.as_deref(),
-                    &content_hash,
-                    payload.thumbnail_hash.as_deref(),
-                    &payload.tags,
-                    &payload.skill_ids,
-                    version,
-                    &payload.kind,
-                );
+            // Build a catalog announcement for P2P discovery
+            let announcement = catalog::build_catalog_announcement(
+                &payload.course_id,
+                &payload.author_address,
+                &payload.title,
+                payload.description.as_deref(),
+                &content_hash,
+                payload.thumbnail_hash.as_deref(),
+                &payload.tags,
+                &payload.skill_ids,
+                version,
+                &payload.kind,
+            );
 
-                // Sign the announcement payload to get the signature for the catalog entry
-                let ann_json = serde_json::to_vec(&announcement).map_err(|e| e.to_string())?;
-                let signed_ann = crate::p2p::signing::sign_gossip_message(
-                    crate::p2p::types::TOPIC_CATALOG,
-                    ann_json,
-                    &w.signing_key,
-                    &w.stake_address,
-                );
-                let signature_hex = hex::encode(&signed_ann.signature);
+            // Sign the announcement payload to get the signature for the catalog entry
+            let ann_json = serde_json::to_vec(&announcement).map_err(|e| e.to_string())?;
+            let signed_ann = crate::p2p::signing::sign_gossip_message(
+                crate::p2p::types::TOPIC_CATALOG,
+                ann_json,
+                &signing_key,
+                &stake_address,
+            );
+            let signature_hex = hex::encode(&signed_ann.signature);
 
-                // Insert into local catalog table (author's own course, pinned=1)
-                catalog::insert_own_catalog_entry(db, &announcement, &signature_hex)
-                    .map_err(|e| format!("catalog insert: {e}"))?;
+            // Insert into local catalog table (author's own course, pinned=1)
+            catalog::insert_own_catalog_entry(db, &announcement, &signature_hex)
+                .map_err(|e| format!("catalog insert: {e}"))?;
 
-                Ok((Some(announcement), Some(signed_ann), version))
-            },
-        )
+            Ok((Some((announcement, signed_ann)), version))
+        })
         .await?;
 
-    // Local preparation intentionally leaves the draft out of the catalog.
-    if let (Some(announcement), Some(signed_ann)) = (announcement, signed_ann) {
-        let p2p_node = state.p2p_node.lock().await;
-        if let Some(ref node) = *p2p_node {
-            if let Err(e) = node.publish_signed(&signed_ann).await {
-                log::warn!("Failed to broadcast catalog announcement via P2P: {e}");
-            } else {
-                log::info!(
-                    "Broadcast catalog announcement for '{}' (v{version})",
-                    announcement.title
-                );
+    Ok(PreparedCourse {
+        result,
+        announcement,
+        version,
+    })
+}
+
+/// The archive hash of every package element in a course document, refused
+/// when a package element has none.
+fn package_hashes(payload: &CourseDocumentPayload) -> Result<Vec<String>, String> {
+    let mut hashes = Vec::new();
+    for element in payload
+        .chapters
+        .iter()
+        .flat_map(|chapter| &chapter.elements)
+        .filter(|element| element.element_type == PACKAGE_ELEMENT_TYPE)
+    {
+        match element.content_hash.as_deref() {
+            Some(hash) if !hash.is_empty() => {
+                if !hashes.iter().any(|known| known == hash) {
+                    hashes.push(hash.to_string());
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "the package element \"{}\" has no package attached",
+                    element.title
+                ))
             }
         }
     }
-
-    Ok(result)
+    Ok(hashes)
 }
 
 fn record_course_document_binding(
@@ -1048,5 +1150,196 @@ mod tests {
         assert!(course.tags.is_none());
         assert!(course.skill_ids.is_none());
         assert!(course.content_cid.is_none());
+    }
+
+    /// Publishing a course that holds a standards package, at the host seam:
+    /// a migrated database, a running content node and the profile's package
+    /// directories, driven through the function the publish command uses.
+    mod packages_in_courses {
+        use std::sync::Mutex;
+
+        use ed25519_dalek::SigningKey;
+        use tempfile::TempDir;
+
+        use super::*;
+        use crate::content_store::content;
+        use crate::content_store::node::ContentNode;
+        use crate::domain::package::{Package, PackageArchiveLocation};
+        use crate::packages::tests::induction_package;
+        use crate::packages::{self, PackageDirs};
+
+        const AUTHOR: &str = "stake_test1uauthor";
+
+        struct Author {
+            db: Mutex<Database>,
+            node: ContentNode,
+            dirs: PackageDirs,
+            key: SigningKey,
+            root: TempDir,
+        }
+
+        impl Author {
+            async fn new() -> Self {
+                let root = TempDir::new().expect("temp dir");
+                let dirs = PackageDirs {
+                    archives: root.path().join("packages"),
+                    cache: root.path().join("packagecache"),
+                };
+                dirs.ensure().expect("package dirs");
+                let node = ContentNode::new(&root.path().join("iroh"));
+                node.start(None).await.expect("start node");
+                let db = test_db();
+                setup_identity(&db);
+                Self {
+                    db: Mutex::new(db),
+                    node,
+                    dirs,
+                    key: SigningKey::from_bytes(&[7u8; 32]),
+                    root,
+                }
+            }
+
+            async fn import(&self) -> Package {
+                let source = self.root.path().join("induction.zip");
+                std::fs::write(&source, induction_package()).expect("write package");
+                packages::import(&self.db, &self.dirs, &source)
+                    .await
+                    .expect("import")
+            }
+
+            /// A draft course whose one chapter holds a package element.
+            fn course_with(&self, package_hash: Option<&str>) {
+                let db = self.db.lock().unwrap();
+                insert_course(&db, "course-induction", "Induction", "draft");
+                db.conn()
+                    .execute(
+                        "INSERT INTO course_chapters (id, course_id, title, position) \
+                         VALUES ('chapter-1', 'course-induction', 'Start', 0)",
+                        [],
+                    )
+                    .unwrap();
+                db.conn()
+                    .execute(
+                        "INSERT INTO course_elements \
+                         (id, chapter_id, title, element_type, content_cid, position) \
+                         VALUES ('element-package', 'chapter-1', 'Warehouse induction', 'package', ?1, 0)",
+                        params![package_hash],
+                    )
+                    .unwrap();
+            }
+
+            async fn prepare(&self, publish: bool) -> Result<PreparedCourse, String> {
+                prepare_course_document_core(
+                    &self.db,
+                    &self.node,
+                    &self.dirs,
+                    CourseSigner {
+                        key: &self.key,
+                        stake_address: AUTHOR,
+                    },
+                    "course-induction",
+                    publish,
+                    &|| true,
+                )
+                .await
+            }
+
+            fn pin(&self, hash: &str) -> Option<(String, i64)> {
+                self.db
+                    .lock()
+                    .unwrap()
+                    .conn()
+                    .query_row(
+                        "SELECT pin_type, auto_unpin FROM pins WHERE cid = ?1",
+                        [hash],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()
+                    .unwrap()
+            }
+        }
+
+        #[tokio::test]
+        async fn a_published_course_carries_its_package_by_content_hash_and_serves_the_archive() {
+            let author = Author::new().await;
+            let package = author.import().await;
+            author.course_with(Some(&package.hash));
+
+            let prepared = author.prepare(true).await.expect("publish");
+
+            let document = content_course::resolve_course_document(
+                &author.node,
+                &prepared.result.content_hash,
+            )
+            .await
+            .expect("the signed document is in the store");
+            let element = &document.chapters[0].elements[0];
+            assert_eq!(element.element_type, "package");
+            assert_eq!(
+                element.content_hash.as_deref(),
+                Some(package.hash.as_str()),
+                "the document names the archive by its content hash"
+            );
+            assert_eq!(
+                content::get_bytes(&author.node, &package.hash)
+                    .await
+                    .expect("the served store holds the archive"),
+                induction_package()
+            );
+            let stored = packages::get(&author.db, &package.hash)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(stored.location, PackageArchiveLocation::Store);
+            assert_eq!(
+                author.pin(&package.hash),
+                Some(("course".to_string(), 0)),
+                "pinned and never evicted"
+            );
+            assert!(
+                prepared.announcement.is_some(),
+                "a published course is announced"
+            );
+        }
+
+        #[tokio::test]
+        async fn publishing_refuses_a_package_element_with_no_package_attached() {
+            let author = Author::new().await;
+            author.course_with(None);
+
+            let error = author.prepare(true).await.err().expect("refused");
+
+            assert!(error.contains("Warehouse induction"), "{error}");
+            let status: String = author
+                .db
+                .lock()
+                .unwrap()
+                .conn()
+                .query_row(
+                    "SELECT status FROM courses WHERE id = 'course-induction'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(status, "draft");
+        }
+
+        #[tokio::test]
+        async fn preparing_a_draft_locally_leaves_its_package_off_the_served_store() {
+            let author = Author::new().await;
+            let package = author.import().await;
+            author.course_with(Some(&package.hash));
+
+            let prepared = author.prepare(false).await.expect("prepare locally");
+
+            assert!(prepared.announcement.is_none());
+            assert!(!content::has(&author.node, &package.hash).await.unwrap());
+            assert_eq!(author.pin(&package.hash), None);
+            let stored = packages::get(&author.db, &package.hash)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(stored.location, PackageArchiveLocation::Draft);
+        }
     }
 }

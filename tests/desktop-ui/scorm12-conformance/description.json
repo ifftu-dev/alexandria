@@ -1,0 +1,46 @@
+{
+  "standard": "scorm12",
+  "identifier": "dev.alexandria.fixture.scorm12-conformance",
+  "title": "SCORM 1.2 conformance",
+  "tree": {
+    "id": "conformance",
+    "title": "SCORM 1.2 conformance",
+    "visible": true,
+    "children": [
+      {
+        "id": "probe",
+        "title": "Probe with manifest values",
+        "visible": true,
+        "launch": {
+          "path": "probe.html",
+          "kind": "sco",
+          "launch_data": "chapter=3&mode=practice",
+          "mastery_score": 75.0,
+          "max_time_allowed": "0000:30:00",
+          "time_limit_action": "exit,message"
+        }
+      },
+      {
+        "id": "plain",
+        "title": "Probe without manifest values",
+        "visible": true,
+        "launch": {
+          "path": "probe.html",
+          "parameters": "?plain",
+          "kind": "sco"
+        }
+      },
+      {
+        "id": "media",
+        "title": "Long media",
+        "visible": true,
+        "launch": {
+          "path": "media.html",
+          "kind": "asset"
+        }
+      }
+    ]
+  },
+  "files": 3,
+  "uncompressed_bytes": 3583
+}

@@ -113,7 +113,8 @@
       "subjective": "Subjective",
       "essay": "Written response",
       "interactive": "Interactive",
-      "content": "Content"
+      "content": "Content",
+      "package": "Package"
     },
     "feedback": "Feedback",
     "feedbackTitle": "Share lesson feedback",
@@ -161,6 +162,73 @@
     "deleteTitle": "Delete this note?",
     "deleteBody": "It is removed from this course on all your devices.",
     "deleteFailed": "That note couldn't be deleted. Try again."
+  },
+  "package": {
+    "label": {
+      "region": "Package content notice",
+      "publisher": "Third-party content from {publisher}.",
+      "file": "Third-party content from a file you opened on this device.",
+      "phrase": "Alexandria never asks for your recovery phrase inside it.",
+      "focusOn": "Focus mode",
+      "focusOff": "Exit focus mode"
+    },
+    "toc": "Lessons",
+    "frameTitle": "Package content: {title}",
+    "preparing": "Preparing the package…",
+    "unpacking": "Unpacking {done} of {total} files…",
+    "unenrolled": "Enrol in this course to take this package. Your progress in it is saved under your enrolment.",
+    "missing": "This package is not on this device yet.",
+    "loadFailed": "The package could not be opened: {error}",
+    "unsupported": "This package uses a standard the player cannot run yet.",
+    "status": {
+      "completed": "Completed",
+      "inProgress": "In progress",
+      "notStarted": "Not started"
+    },
+    "score": "Score {score}%",
+    "selfReported": "Self-reported by the package; it earns no credential.",
+    "selfReportedShort": "self-reported",
+    "attempt": "Attempt {number}",
+    "previousLesson": "Previous lesson",
+    "nextLesson": "Next lesson",
+    "previous": "Previous",
+    "continue": "Continue",
+    "suspend": "Suspend",
+    "exit": "Exit",
+    "exitBody": "Leave this package for good? Its own rules decide what counts; you cannot resume this attempt afterwards.",
+    "exitConfirm": "Exit package",
+    "choose": "Choose a lesson from the list to go on.",
+    "suspended": "Your place in this package is saved.",
+    "resume": "Resume",
+    "ended": "You have left this package. Start a fresh attempt to take it again.",
+    "fresh": "Start a fresh attempt",
+    "freshBody": "Start this package again from the beginning? Your place in the current attempt is set aside. A completed package stays completed.",
+    "freshConfirm": "Start again",
+    "freshCancel": "Cancel",
+    "saveError": "Your progress in this package could not be saved. Keep going: it is saved with your next change, and you can resume from the last saved point.",
+    "details": "Details",
+    "blocked": {
+      "popup": "The package tried to open a pop-up window. It opened inside the player instead.",
+      "dialog": "The package tried to show a dialog box, which packages cannot do here.",
+      "plugin": "The package needs a browser plug-in, which cannot run here.",
+      "remote": "The package tried to load something from {host}. Packages run offline, so it was blocked.",
+      "remoteUnknown": "The package tried to load something from the internet. Packages run offline, so it was blocked."
+    },
+    "dismiss": "Dismiss",
+    "unitWindow": {
+      "body": "This unit is open in its own window.",
+      "focus": "Bring to front",
+      "end": "End this unit"
+    },
+    "unitExited": "This unit has finished. Choose the next one from the list.",
+    "focusForced": "This unit needs the whole screen, so it stays in focus mode until you leave it.",
+    "courseComplete": "Course complete. Package results are self-reported, so this course earns no credential."
+  },
+  "packageFile": {
+    "open": "Open a package file",
+    "opening": "Opening the package…",
+    "fileFilter": "Standards package",
+    "failed": "The package could not be opened: {error}"
   },
   "hosted": {
     "title": "{role} at {org}",

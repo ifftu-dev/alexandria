@@ -21,3 +21,7 @@ cardano/governance/build/** linguist-generated
 # unmodified upstream copy (see its NOTICE). Keep git's whitespace checks off
 # it rather than editing a file whose provenance depends on being unchanged.
 crates/alexandria-mcp/tests/schema/*.schema.json -whitespace linguist-vendored
+
+# The SCORM 2004 test suite's LMS test packages and cases, unchanged from
+# upstream (see the README beside them).
+tests/desktop-ui/scorm2004-conformance/adl/** -text -whitespace linguist-vendored

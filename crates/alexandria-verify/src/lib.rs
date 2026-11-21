@@ -38,6 +38,7 @@ pub mod json;
 pub mod org;
 pub mod policy;
 pub mod qualification;
+pub mod record_export;
 pub mod talent;
 pub mod trust;
 pub mod vc;

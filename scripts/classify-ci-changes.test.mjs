@@ -59,6 +59,42 @@ test("desktop UI fixtures and browser configuration run frontend gates", () => {
   }
 })
 
+test("the vendored SCORM runtime runs the browser checks as well as backend gates", () => {
+  assert.deepEqual(classifyChangedFiles(["src-tauri/resources/scorm-again/scorm12.min.js"]), {
+    backend: true,
+    frontend: true,
+    security: true,
+    release: false,
+  })
+})
+
+test("the package wrapper and bootstrap run the browser checks as well as backend gates", () => {
+  assert.deepEqual(classifyChangedFiles(["src-tauri/src/package_serving/wrapper.js"]), {
+    backend: true,
+    frontend: true,
+    security: true,
+    release: false,
+  })
+})
+
+test("the player's fixture packages run the backend test that pins their descriptions", () => {
+  for (const path of [
+    "tests/desktop-ui/package-player/package/quiz/index.html",
+    "tests/desktop-ui/package-isolation/package/peer.html",
+    "tests/desktop-ui/scorm12-conformance/package/imsmanifest.xml",
+    "tests/desktop-ui/package-player-2004/package/intro.html",
+    "tests/desktop-ui/scorm2004-conformance/adl/packages/SX-02/imsmanifest.xml",
+    "tests/desktop-ui/scorm2004-edition3/package/imsmanifest.xml",
+  ]) {
+    assert.deepEqual(classifyChangedFiles([path]), {
+      backend: true,
+      frontend: true,
+      security: true,
+      release: false,
+    }, path)
+  }
+})
+
 test("future committee world and core packages run backend gates", () => {
   for (const path of [
     "committee/runtime/src/main.rs",

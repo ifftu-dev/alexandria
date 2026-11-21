@@ -1,0 +1,45 @@
+{
+  "id": "36ce99ba-0f75-804a-86da-af3c1f668e0a",
+  "actor": {
+    "objectType": "Agent",
+    "account": {
+      "homePage": "urn:uuid:044eac38-2871-47c7-a8d8-5c25a8a9479c",
+      "name": "z6Mkj9TgfkWPT8imPBwQQYfDBh9QAiQksXmkb4vgzotjCNYx"
+    }
+  },
+  "verb": {
+    "id": "http://adlnet.gov/expapi/verbs/progressed",
+    "display": {
+      "en-US": "progressed"
+    }
+  },
+  "object": {
+    "objectType": "Activity",
+    "id": "did:key:z6MkoRwQfNfmnSY6h11tXjnjt58Ta512cEk3QitVxRh3xU1g/courses/59fb4b553e7cf374392d9387f819a087afd1f135663d1a92473845def73c4a66/elements/b7159f93e1ce2ea232131615ea188b904138b52267893a3f8af92f1ea7a73c8c",
+    "definition": {
+      "type": "http://adlnet.gov/expapi/activities/lesson",
+      "name": {
+        "en-US": "Test element"
+      }
+    }
+  },
+  "timestamp": "2026-11-19T10:00:00.000Z",
+  "result": {
+    "extensions": {
+      "https://w3id.org/xapi/cmi5/result/extensions/progress": 40
+    }
+  },
+  "context": {
+    "registration": "65836678-5403-8754-a2ca-63fb784c6f96",
+    "platform": "Alexandria",
+    "language": "en-US",
+    "contextActivities": {
+      "parent": [
+        {
+          "objectType": "Activity",
+          "id": "did:key:z6MkoRwQfNfmnSY6h11tXjnjt58Ta512cEk3QitVxRh3xU1g/courses/59fb4b553e7cf374392d9387f819a087afd1f135663d1a92473845def73c4a66"
+        }
+      ]
+    }
+  }
+}

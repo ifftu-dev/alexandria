@@ -18,9 +18,26 @@ alexandria-ai = { path = "../alexandria-ai" }
 alexandria-verify = { path = "../alexandria-verify" }
 ed25519-dalek = { version = "2" }
 thiserror = "2"
+# Standards package import (`package`). These two parse what a stranger
+# supplied, so the versions matter: zip 9 and quick-xml 0.41 are the releases
+# that fix the advisories `.cargo/audit.toml` accepts for the older copies
+# elsewhere in the tree. Only Stored and Deflate entries are read, and
+# `ZipArchive::extract` is never called: extraction is this crate's own
+# bounded loop.
+zip = { version = "9", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+quick-xml = "0.41"
+percent-encoding = "2"
+# xAPI statement builder (`xapi`): per-recipient identifiers are HKDF-SHA256
+# subkeys of the learner's key and HMAC-SHA256 keyed hashes. Already in the
+# tree through the app's keystore.
+hkdf = "0.12"
+hmac = "0.12"
+sha2 = "0.10"
 
 [target.'cfg(unix)'.dependencies]
 tokio = { version = "1", features = ["net", "io-util", "rt", "sync", "time"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util"] }
+tempfile = "3"

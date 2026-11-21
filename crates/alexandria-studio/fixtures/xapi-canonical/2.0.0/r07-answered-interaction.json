@@ -1,0 +1,65 @@
+{
+  "id": "f8f89646-140d-8d2c-8ee5-882d23885f41",
+  "actor": {
+    "objectType": "Agent",
+    "account": {
+      "homePage": "urn:uuid:044eac38-2871-47c7-a8d8-5c25a8a9479c",
+      "name": "z6Mkj9TgfkWPT8imPBwQQYfDBh9QAiQksXmkb4vgzotjCNYx"
+    }
+  },
+  "verb": {
+    "id": "http://adlnet.gov/expapi/verbs/answered",
+    "display": {
+      "en-US": "answered"
+    }
+  },
+  "object": {
+    "objectType": "Activity",
+    "id": "did:key:z6MkoRwQfNfmnSY6h11tXjnjt58Ta512cEk3QitVxRh3xU1g/courses/59fb4b553e7cf374392d9387f819a087afd1f135663d1a92473845def73c4a66/elements/b7159f93e1ce2ea232131615ea188b904138b52267893a3f8af92f1ea7a73c8c/packages/19ffd3ae8430b64d88265892dc4ab2f08bb6ff63010912ee50f76dcae620134a/activities/item_1/interactions/q1",
+    "definition": {
+      "type": "http://adlnet.gov/expapi/activities/cmi.interaction",
+      "interactionType": "choice",
+      "correctResponsesPattern": [
+        "b"
+      ],
+      "choices": [
+        {
+          "id": "a",
+          "description": {
+            "en-US": "A"
+          }
+        },
+        {
+          "id": "b",
+          "description": {
+            "en-US": "B"
+          }
+        }
+      ]
+    }
+  },
+  "timestamp": "2026-11-19T10:00:00.000Z",
+  "result": {
+    "success": true,
+    "response": "b"
+  },
+  "context": {
+    "registration": "a0e9d119-dded-8ecd-bb40-f852f5730c3d",
+    "platform": "Alexandria",
+    "language": "en-US",
+    "contextActivities": {
+      "parent": [
+        {
+          "objectType": "Activity",
+          "id": "did:key:z6MkoRwQfNfmnSY6h11tXjnjt58Ta512cEk3QitVxRh3xU1g/courses/59fb4b553e7cf374392d9387f819a087afd1f135663d1a92473845def73c4a66/elements/b7159f93e1ce2ea232131615ea188b904138b52267893a3f8af92f1ea7a73c8c/packages/19ffd3ae8430b64d88265892dc4ab2f08bb6ff63010912ee50f76dcae620134a/activities/item_1"
+        }
+      ],
+      "grouping": [
+        {
+          "objectType": "Activity",
+          "id": "did:key:z6MkoRwQfNfmnSY6h11tXjnjt58Ta512cEk3QitVxRh3xU1g/courses/59fb4b553e7cf374392d9387f819a087afd1f135663d1a92473845def73c4a66"
+        }
+      ]
+    }
+  }
+}

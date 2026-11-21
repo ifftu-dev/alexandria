@@ -9,8 +9,8 @@ Status: live
 > it with `--check` to see whether this file is stale.
 
 **Engine**: SQLCipher (rusqlite, `bundled-sqlcipher`) — each profile is its own encrypted database, opened with `PRAGMA key`.
-**Schema**: 43 migrations from a baseline, family `alexandria.profile`, epoch 1.
-**Objects**: 139 tables, 132 indexes, 1 view, 6 triggers.
+**Schema**: 48 migrations from a baseline, family `alexandria.profile`, epoch 1.
+**Objects**: 152 tables, 137 indexes, 1 view, 10 triggers.
 
 ---
 
@@ -66,6 +66,11 @@ and requires a database's history to be an exact prefix of this list:
 41. `key_registry_lookup_only`
 42. `status_list_valid_from`
 43. `exchange_requests`
+44. `packages`
+45. `package_attempts`
+46. `learning_records`
+47. `record_sending`
+48. `cmi5_sessions`
 
 A database is stamped with its schema family before any normal query runs:
 
@@ -344,6 +349,7 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `course_document_version` INTEGER
 - `completion_policy_json` TEXT
 - `draft_completion_policy_json` TEXT
+- `creator_did` TEXT
 
 #### `element_progress`
 
@@ -1773,6 +1779,160 @@ Columns dropped with them: `local_identity.account_role` (superseded by the
 - `put_body` TEXT
 - `last_error_detail` TEXT
 
+### Standards packages (4)
+
+#### `package_activity_state`
+
+- `attempt_id` TEXT PK → `package_attempts.id`
+- `activity_id` TEXT PK — activity identifier from the package's activity tree
+- `runtime_json` TEXT NOT NULL — the last commit's run-time data, as the content stored it
+- `complete` INTEGER NOT NULL default `0` — whether the activity counts as complete under its standard's rule
+- `score` REAL — reported score normalised to 0..1, self-reported
+- `total_seconds` REAL NOT NULL default `0` — sum of the reported times of finished sessions
+- `session_seconds` REAL NOT NULL default `0` — reported time of the session still open, folded into total_seconds when it ends
+- `updated_at` TEXT NOT NULL
+
+#### `package_attempts`
+
+- `id` TEXT PK
+- `enrollment_id` TEXT NOT NULL → `enrollments.id`
+- `element_id` TEXT NOT NULL → `course_elements.id`
+- `package_hash` TEXT NOT NULL → `packages.hash` — the archive the element carried when the attempt began
+- `attempt_number` INTEGER NOT NULL — 1 for the first attempt at the element under this enrolment
+- `status` TEXT NOT NULL — completed: the package reported completion; closed: replaced by a fresh attempt
+- `started_at` TEXT NOT NULL
+- `ended_at` TEXT — when the attempt completed or was closed
+- `updated_at` TEXT NOT NULL
+
+#### `package_sequencing_state`
+
+- `attempt_id` TEXT PK → `package_attempts.id`
+- `state_json` TEXT NOT NULL — global objectives and tracking state, as the sequencing engine stores it
+- `updated_at` TEXT NOT NULL
+
+#### `packages`
+
+- `hash` TEXT PK — BLAKE3 of the archive's own bytes (hex); a package element's content hash
+- `standard` TEXT NOT NULL
+- `edition` TEXT — SCORM 2004 only
+- `title` TEXT NOT NULL
+- `description_json` TEXT NOT NULL — parsed package description, including the activity tree
+- `archive_bytes` INTEGER NOT NULL
+- `location` TEXT NOT NULL — draft: the profile's packages directory, never served; store: the served content store
+- `imported_at` TEXT NOT NULL
+- `last_opened_at` TEXT — last extraction for a launch; the idle check drops the extracted files after a period without one
+
+### Learning records (2)
+
+#### `learning_record_outbox`
+
+- `recipient_id` TEXT PK
+- `record_id` TEXT PK → `learning_records.id`
+- `state` TEXT NOT NULL default `'queued'` — failed: the last try failed; retried at next_attempt_at
+- `attempts` INTEGER NOT NULL default `0` — tries so far
+- `last_error` TEXT — why the last try failed, shown in the activity log
+- `next_attempt_at` TEXT — when to try again after a failure
+- `sent_at` TEXT
+- `created_at` TEXT NOT NULL
+- `updated_at` TEXT NOT NULL
+
+#### `learning_records`
+
+- `seq` INTEGER PK — write order; the oldest record has the lowest
+- `id` TEXT NOT NULL — the record's stable local id; each recipient's statement id is a keyed hash of it
+- `learner_did` TEXT NOT NULL — the learner the record is about, named by DID on the device
+- `kind` TEXT NOT NULL — interaction: a response a package reported, sent only under a scope that names it
+- `verb` TEXT NOT NULL — the event's verb (registered, launched, progressed, completed, passed, failed, scored, responded)
+- `course_id` TEXT NOT NULL
+- `element_id` TEXT — NULL for a course-level record
+- `registration` TEXT — the local enrolment or package attempt the record belongs to
+- `activity_id` TEXT NOT NULL — the activity's identifier (a DID URL under the course's creator)
+- `summary` INTEGER NOT NULL default `0` — 1: kept as the one summary of its attempt at this activity when the log was over its limit
+- `event_json` TEXT NOT NULL — the learning event, built into a statement per recipient
+- `bytes` INTEGER NOT NULL — size counted against the log's limit
+- `recorded_at` TEXT NOT NULL — when the event happened, RFC 3339 UTC
+
+### Record sending (4)
+
+#### `record_access_log`
+
+- `seq` INTEGER PK — write order
+- `at` TEXT NOT NULL — when, RFC 3339 UTC
+- `recipient_id` TEXT NOT NULL
+- `recipient_kind` TEXT NOT NULL
+- `recipient_name` TEXT NOT NULL — what the learner knows the recipient as (a store's address, an organisation)
+- `action` TEXT NOT NULL — void: statements withdrawing records already sent, on removal
+- `course_ids` TEXT NOT NULL — the scope in force
+- `include_interactions` INTEGER NOT NULL
+- `record_count` INTEGER NOT NULL
+- `record_ids` TEXT NOT NULL — local ids of the records sent or voided; voiding on removal reads them
+- `identifier` TEXT NOT NULL — the account name the records carried
+- `outcome` TEXT NOT NULL
+- `detail` TEXT — why it failed
+
+#### `record_destination_secrets`
+
+- `recipient_id` TEXT PK → `record_destinations.recipient_id`
+- `secret` TEXT NOT NULL
+
+#### `record_destinations`
+
+- `recipient_id` TEXT PK → `record_recipients.id`
+- `endpoint` TEXT NOT NULL — the store's xAPI base address, normalised to end in a slash
+- `location` TEXT NOT NULL — where the address resolved when the learner approved it; sending stops if it resolves elsewhere
+- `username` TEXT NOT NULL — the key the store issued to this learner
+- `xapi_version` TEXT NOT NULL — the version negotiated with the store (2.0.0 or 1.0.3)
+
+#### `record_recipients`
+
+- `id` TEXT PK — the recipient id in learning_record_outbox
+- `kind` TEXT NOT NULL — destination: a store the learner named; share: a record share through the hosted service
+- `label` TEXT NOT NULL — every identifier the recipient sees is derived from this label; never changes
+- `identifier` TEXT NOT NULL — the actor the recipient sees: one made for it, the learner's DID, or an account it proposed
+- `proposed_home_page` TEXT — the proposed account, when identifier = proposed
+- `proposed_name` TEXT
+- `actor_name` TEXT NOT NULL — the account name records carry at this recipient, as the learner saw it before approving
+- `course_ids` TEXT NOT NULL — scope: JSON array of the course ids whose records the recipient receives
+- `include_interactions` INTEGER NOT NULL default `0` — scope: 1 also sends interaction-level records (individual responses)
+- `created_at` TEXT NOT NULL — when the learner approved it
+
+### cmi5 sessions (3)
+
+#### `cmi5_sessions`
+
+- `id` TEXT PK — the session identifier the unit was given (UUID)
+- `attempt_id` TEXT NOT NULL → `package_attempts.id`
+- `activity_id` TEXT NOT NULL — the unit's identifier in the course structure
+- `status` TEXT NOT NULL default `'open'`
+- `launched_at` TEXT NOT NULL
+- `last_statement_at` TEXT — when the unit last sent a statement that was accepted
+- `ended_at` TEXT
+
+#### `cmi5_statements`
+
+- `seq` INTEGER PK — the order statements were stored in
+- `id` TEXT NOT NULL — the statement id (UUID)
+- `attempt_id` TEXT NOT NULL → `package_attempts.id`
+- `session_id` TEXT NOT NULL
+- `activity_id` TEXT NOT NULL — the unit, block or course the statement is about, by course structure identifier
+- `verb` TEXT — the cmi5 defined verb (launched, initialized, completed, passed, failed, terminated, abandoned, satisfied); NULL for a cmi5 allowed statement
+- `score` REAL — a passed or failed statement's score, normalised
+- `duration_seconds` REAL
+- `statement_json` TEXT NOT NULL
+- `stored_at` TEXT NOT NULL
+
+#### `xapi_documents`
+
+- `package_hash` TEXT PK
+- `kind` TEXT PK
+- `activity_id` TEXT PK default `''` — '' for an agent profile document
+- `registration` TEXT PK default `''` — state documents only; '' when none was named
+- `document_id` TEXT PK — the stateId or profileId
+- `content_type` TEXT NOT NULL
+- `body` BLOB NOT NULL
+- `etag` TEXT NOT NULL — SHA-256 of the body, quoted, for concurrency control
+- `updated_at` TEXT NOT NULL
+
 ---
 
 ## View and triggers
@@ -1784,7 +1944,7 @@ CREATE VIEW current_reputation_assertions AS
 SELECT * FROM reputation_assertions WHERE input_policy_state = 'valid';
 ```
 
-Triggers: `chat_message_search_delete`, `chat_message_search_insert`, `chat_message_search_update`, `completion_request_existing_journal`, `completion_request_journal_handoff`, `snapshot_submission_checkpoint`.
+Triggers: `chat_message_search_delete`, `chat_message_search_insert`, `chat_message_search_update`, `completion_request_existing_journal`, `completion_request_journal_handoff`, `package_element_never_graded`, `package_element_never_skill_tagged`, `package_element_no_grading_insert`, `package_element_no_grading_update`, `snapshot_submission_checkpoint`.
 
 ---
 
@@ -1828,6 +1988,8 @@ erDiagram
     classrooms ||--o{ classroom_join_requests : classroom_id
     classrooms ||--o{ classroom_members : classroom_id
     classroom_channels ||--o{ classroom_messages : channel_id
+    package_attempts ||--o{ cmi5_sessions : attempt_id
+    package_attempts ||--o{ cmi5_statements : attempt_id
     enrollments ||--o{ completion_claims : enrollment_id
     completion_claims ||--o{ completion_witness_requests : claim_id
     courses ||--o{ course_chapters : course_id
@@ -1876,11 +2038,19 @@ erDiagram
     interview_sessions ||--o{ interview_transcript_segments : session_id
     chat_messages ||--o{ learning_memory : source_message_id
     chat_threads ||--o{ learning_memory : thread_id
+    learning_records ||--o{ learning_record_outbox : record_id
     subject_fields ||--o{ opinions : subject_field_id
+    package_attempts ||--o{ package_activity_state : attempt_id
+    packages ||--o{ package_attempts : package_hash
+    course_elements ||--o{ package_attempts : element_id
+    enrollments ||--o{ package_attempts : enrollment_id
+    package_attempts ||--o{ package_sequencing_state : attempt_id
     plugin_installed ||--o{ plugin_dependencies : dependency_cid
     plugin_installed ||--o{ plugin_dependencies : plugin_cid
     plugin_installed ||--o{ plugin_irl_submissions : plugin_cid
     plugin_installed ||--o{ plugin_permissions : plugin_cid
+    record_destinations ||--o{ record_destination_secrets : recipient_id
+    record_recipients ||--o{ record_destinations : recipient_id
     skills ||--o{ reputation_assertions : skill_id
     reputation_snapshots ||--o{ reputation_snapshot_inputs : snapshot_id
     credentials ||--o{ reputation_snapshots : credential_id

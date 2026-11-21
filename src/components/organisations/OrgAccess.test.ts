@@ -14,8 +14,20 @@ function grant(over: Partial<GrantView> = {}): GrantView {
     grantId: 'g-1', orgDomain: 'acme.example', orgName: 'Acme Hiring', purpose: 'Backend engineer shortlist',
     skills: [{ skillId: 'skill_big_o', name: 'Big-O Analysis', hasEvidence: true, bloomLevel: 3, level: 4 }],
     sync: false, grantedAt: 1_900_000_000, syncedAt: 1_900_000_000, syncError: null, revokedAt: null,
-    lastViewedAt: '2026-10-10T09:00:00Z', viewCount: 3, ...over,
+    lastViewedAt: '2026-10-10T09:00:00Z', viewCount: 3, records: null, ...over,
   }
+}
+
+/** A record-only share: two courses with responses, under an identifier made for Acme. */
+function recordShare(): GrantView {
+  return grant({
+    grantId: 'g-rec', skills: [], syncedAt: null,
+    records: {
+      courses: [{ id: 'c-safety', title: 'Warehouse safety' }, { id: 'c-forklift', title: 'Forklift basics' }],
+      include_interactions: true, identifier: 'pairwise', actor_name: 'z6MkPairwiseForAcme',
+      status: { queued: 0, failed: 0, sent: 5, last_error: null, next_attempt_at: null, last_sent_at: '2026-11-20T09:01:00.000Z' },
+    },
+  })
 }
 
 function arm(grants: GrantView[]) {
@@ -24,9 +36,19 @@ function arm(grants: GrantView[]) {
       case 'org_grants': return { grants, problems: [] }
       case 'fetch_visibility': return { items: [{ directory: 'Alexandria Cloud', organisationId: 'org-9', institution: 'City College', visibleToAdministrators: false }], problems: [] }
       case 'fetch_access_log': return { items: [], problems: [] }
+      case 'record_access_log': return [{
+        seq: 1, at: '2026-11-20T09:01:00.000Z', recipient_id: 'd-1', recipient_kind: 'destination',
+        recipient_name: 'https://lrs.example.org/xapi/', action: 'send',
+        scope: { course_ids: ['c-1'], include_interactions: false }, record_count: 4,
+        identifier: 'z6MkMadeForThisStore', accepted: true, detail: null,
+      }]
       // The follow-up commands answer from the local record: no view counts.
       case 'org_grant_set_sync': return { ...grant(), sync: args!.sync as boolean, lastViewedAt: null, viewCount: null }
       case 'org_grant_revoke': return { ...grant(), revokedAt: 1_900_100_000, lastViewedAt: null, viewCount: null }
+      case 'org_grant_narrow_records': return {
+        ...recordShare(), lastViewedAt: null, viewCount: null,
+        records: { ...recordShare().records!, courses: [{ id: 'c-safety', title: 'Warehouse safety' }], include_interactions: false },
+      }
       case 'org_sync_now': return { sent: 1, unchanged: 2, failed: [] }
       case 'set_visibility': return null
       default: throw new Error(command)
@@ -56,6 +78,25 @@ describe('OrgAccess', () => {
     expect(cards[0]!.text()).toContain('organisations.access.updated')
     expect(cards[1]!.text()).toContain('organisations.access.syncFailed')
     expect(cards[1]!.text()).toContain('organisations.access.notViewed')
+  })
+
+  it('shows a record share and narrows it to fewer courses without responses', async () => {
+    arm([recordShare()])
+    const wrapper = mountAccess(); await flushPromises()
+    const records = wrapper.find('[data-testid=grant-records]')
+    expect(records.text()).toContain('Warehouse safety, Forklift basics')
+    expect(records.text()).toContain('organisations.records.withResponses')
+    expect(wrapper.find('[data-testid=narrow-apply]').attributes('disabled')).toBeDefined()
+
+    await wrapper.find('[data-testid=narrow-course-c-forklift]').setValue(false)
+    await wrapper.find('[data-testid=narrow-interactions]').setValue(false)
+    await wrapper.find('[data-testid=narrow-apply]').trigger('click'); await flushPromises()
+    expect(mocks.invoke).toHaveBeenCalledWith('org_grant_narrow_records', {
+      grantId: 'g-rec', courseIds: ['c-safety'], includeInteractions: false,
+    })
+    const after = wrapper.find('[data-testid=grant-records]').text()
+    expect(after).not.toContain('Forklift basics')
+    expect(after).not.toContain('organisations.records.withResponses')
   })
 
   it('turns keeping up to date on through org_grant_set_sync and shows what came back', async () => {
@@ -115,5 +156,13 @@ describe('OrgAccess', () => {
     const wrapper = mountAccess(); await flushPromises()
     await button(wrapper, 'organisations.access.visibility.allow').trigger('click'); await flushPromises()
     expect(mocks.invoke).toHaveBeenCalledWith('set_visibility', { directoryUrl: CLOUD, organisationId: 'org-9', visible: true })
+  })
+
+  it('lists what this device sent beside who has looked', async () => {
+    arm([])
+    const wrapper = mountAccess(); await flushPromises()
+    const sends = wrapper.findAll('[data-testid=record-send-entry]')
+    expect(sends).toHaveLength(1)
+    expect(sends[0]!.text()).toContain('organisations.records.log.sent')
   })
 })

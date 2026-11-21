@@ -7,11 +7,26 @@ const BACKEND_PREFIXES = [
   "patches/",
   "scripts/",
   "src-tauri/",
+  // The player's fixture packages: a backend test pins their descriptions.
+  "tests/desktop-ui/package-player/",
+  "tests/desktop-ui/package-isolation/",
+  "tests/desktop-ui/scorm12-conformance/",
+  "tests/desktop-ui/package-player-2004/",
+  "tests/desktop-ui/scorm2004-conformance/",
+  "tests/desktop-ui/scorm2004-edition2/",
+  "tests/desktop-ui/scorm2004-edition3/",
   "world/",
 ]
 
 const BACKEND_FILES = new Set([".gitattributes", "Cargo.lock", "Cargo.toml"])
-const FRONTEND_PREFIXES = ["src/", "tests/desktop-ui/"]
+const FRONTEND_PREFIXES = [
+  "src/",
+  "tests/desktop-ui/",
+  // The vendored SCORM runtime, the package wrapper and the bootstrap are
+  // exercised by the browser checks.
+  "src-tauri/resources/scorm-again/",
+  "src-tauri/src/package_serving/",
+]
 const FRONTEND_FILES = new Set([
   "index.html",
   "package-lock.json",
