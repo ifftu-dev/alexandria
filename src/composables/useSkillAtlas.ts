@@ -5,9 +5,10 @@ import { useCourseCompletion } from '@/composables/useCourseCompletion'
 import { useLocalApi } from '@/composables/useLocalApi'
 import { onProfileLocked, onProfileReady, useProfiles } from '@/composables/useProfiles'
 import { CREDENTIALS_CHANGED } from '@/composables/credentialEvents'
-import type { SkillGraphEdge, SkillInfo, SubjectFieldInfo, VerifiableCredential } from '@/types'
+import type { SkillGraphEdge, SkillGraphRelation, SkillInfo, SubjectFieldInfo, VerifiableCredential } from '@/types'
 import { buildSkillAtlas, type AtlasModel } from '@/utils/skillAtlas'
-import { createAtlasViewState, type AtlasViewState } from '@/utils/skillAtlasView'
+import { createAtlasViewState, type AtlasCamera, type AtlasViewState } from '@/utils/skillAtlasView'
+import { webLayoutEntry, type WebPoint } from '@/utils/webGeometry'
 import { errorMessage } from '@/utils/errorMessage'
 
 export type AtlasSurface = 'page' | 'modal'
@@ -29,11 +30,36 @@ export interface AtlasFeedback {
 
 // Each load replaces the whole snapshot, so it is never made deeply reactive.
 const model = shallowRef<AtlasModel | null>(null)
+
+/** Dragged Web dots: one set for the graph named by `key`, shared by every Web surface. */
+const webDragged = shallowRef<{ key: string; positions: ReadonlyMap<string, WebPoint> } | null>(null)
+const EMPTY_POSITIONS: ReadonlyMap<string, WebPoint> = markRaw(new Map())
+const webGraph = computed(() => model.value ? webLayoutEntry(model.value).graph : null)
+const webPositions = computed<ReadonlyMap<string, WebPoint>>(() => {
+  if (!model.value) return EMPTY_POSITIONS
+  const entry = webLayoutEntry(model.value), dragged = webDragged.value
+  if (dragged?.key !== entry.key) return entry.layout
+  return markRaw(new Map([...entry.layout].map(([id, point]) => [id, dragged.positions.get(id) ?? point])))
+})
+
+/** Records dragged Web dots for the loaded graph; dots it does not hold are ignored. */
+function setWebPositions(positions: ReadonlyMap<string, WebPoint>): void {
+  if (!model.value) return
+  const entry = webLayoutEntry(model.value)
+  const previous = webDragged.value?.key === entry.key ? webDragged.value.positions : null
+  const next = new Map(previous ?? [])
+  for (const [id, point] of positions) if (entry.layout.has(id)) next.set(id, { x: point.x, y: point.y })
+  webDragged.value = { key: entry.key, positions: next }
+}
+/** Puts every dragged Web dot back in its resting place, on every surface. */
+function resetWebPositions(): void { webDragged.value = null }
 const phase = ref<AtlasPhase>('idle')
 const error = ref<string | null>(null)
 const refreshing = ref(false)
 const pageView = ref<AtlasViewState>(createAtlasViewState())
 const modalView = ref<AtlasViewState>(createAtlasViewState())
+/** The sidebar graph's own Web camera; it shares the rest of the modal's view state. Null fits what is shown. */
+const sidebarWebCamera = shallowRef<AtlasCamera | null>(null)
 const skillsTab = ref<AtlasTab>('credentials')
 const modalOpen = ref(false)
 const feedback = ref<AtlasFeedback | null>(null)
@@ -50,6 +76,8 @@ interface SkillReturn {
   surface: AtlasSurface
   /** Set once the learner explicitly asks to go back. */
   explicit: boolean
+  /** Whether returning restores the surface: the expanded graph reopens only if it was open (not when Open skill came from the sidebar). */
+  restore: boolean
 }
 
 // A return belongs to one explicit Open skill action and one profile session.
@@ -101,6 +129,8 @@ function clearProfileState(): void {
   refreshing.value = false
   pageView.value = createAtlasViewState()
   modalView.value = createAtlasViewState()
+  sidebarWebCamera.value = null
+  webDragged.value = null
   skillsTab.value = 'credentials'
   modalOpen.value = false
   clearFeedback()
@@ -122,14 +152,16 @@ async function load(): Promise<void> {
   try {
     const did = await invoke<string | null>('get_local_did')
     if (!current(ticket, profileId)) return
-    const [skills, edges, credentials, subjectFields] = await Promise.all([
+    const [skills, edges, relations, credentials, subjectFields] = await Promise.all([
       invoke<SkillInfo[]>('list_skills'),
       invoke<SkillGraphEdge[]>('list_skill_graph_edges'),
+      // Relations only add connections; without them the graph still works.
+      invoke<SkillGraphRelation[]>('list_skill_graph_relations').catch((): SkillGraphRelation[] => []),
       did ? invoke<VerifiableCredential[]>('list_credentials', { subject: did, activeOnly: true }) : Promise.resolve([]),
       invoke<SubjectFieldInfo[]>('list_subject_fields'),
     ])
     if (!current(ticket, profileId)) return
-    const nextModel = buildSkillAtlas({ skills, edges, activeCredentials: credentials, subjectDid: did, subjectFields })
+    const nextModel = buildSkillAtlas({ skills, edges, relations, activeCredentials: credentials, subjectDid: did, subjectFields })
     const improvedIds: string[] = []
     const newlyEarned: string[] = []
     clearFeedback()
@@ -183,7 +215,12 @@ async function ensureLoaded(): Promise<void> {
 
 function updateView(surface: AtlasSurface, patch: Partial<AtlasViewState>): void {
   const target = surface === 'page' ? pageView : modalView
-  target.value = { ...target.value, ...patch, ...(patch.camera ? { camera: { ...patch.camera } } : {}) }
+  target.value = { ...target.value, ...patch, ...(patch.camera ? { camera: { ...patch.camera } } : {}),
+    ...(patch.webCamera ? { webCamera: { ...patch.webCamera } } : {}) }
+}
+
+function setSidebarWebCamera(camera: AtlasCamera | null): void {
+  sidebarWebCamera.value = camera ? { ...camera } : null
 }
 
 function resetView(surface: AtlasSurface): void {
@@ -201,7 +238,8 @@ function acknowledgeFeedback(revision: number): void {
 
 async function openSkill(router: Router, surface: AtlasSurface, id: string): Promise<void> {
   const ticket = generation
-  const pending: SkillReturn = { router, surface, origin: router.currentRoute.value.fullPath, detail: `/skills/${encodeURIComponent(id)}`, explicit: false }
+  const pending: SkillReturn = { router, surface, origin: router.currentRoute.value.fullPath, detail: `/skills/${encodeURIComponent(id)}`, explicit: false,
+    restore: surface === 'page' || modalOpen.value }
   skillReturn = pending
   try {
     const failure = await router.push(pending.detail)
@@ -247,7 +285,7 @@ export function installSkillAtlasRefresh(router: Router): () => void {
       if (skillReturn?.router === router && to.fullPath !== skillReturn.detail) {
         const pending = skillReturn
         skillReturn = null
-        if (from.fullPath === pending.detail && to.fullPath === pending.origin && (back || pending.explicit)) {
+        if (pending.restore && from.fullPath === pending.detail && to.fullPath === pending.origin && (back || pending.explicit)) {
           if (pending.surface === 'modal') modalOpen.value = true
           else skillsTab.value = 'graph'
         }
@@ -286,6 +324,7 @@ export function useSkillAtlas() {
   return {
     model: readonly(model), phase: readonly(phase), error: readonly(error), refreshing: readonly(refreshing), isLoading: readonly(isLoading),
     pageView: readonly(pageView), modalView: readonly(modalView), skillsTab: readonly(skillsTab), modalOpen: readonly(modalOpen), feedback: readonly(feedback),
+    webGraph, webPositions, setWebPositions, resetWebPositions, sidebarWebCamera: readonly(sidebarWebCamera), setSidebarWebCamera,
     ensureLoaded, refresh, openSkill, returnToAtlas, activateSurface, updateView, resetView, setSkillsTab, setModalOpen, feedbackFor, acknowledgeFeedback, reset: clearProfileState,
   }
 }

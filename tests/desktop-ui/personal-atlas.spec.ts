@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 test('RTL page stays within the viewport with the real locale dropdown stylesheet loaded', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto('/tests/desktop-ui/?screen=personal-atlas&view=detailed&theme=light&locale=ur&scenario=stress')
+  await page.goto('/tests/desktop-ui/?screen=personal-atlas&view=detailed&expanded=detailed&theme=light&locale=ur&scenario=stress')
   await expect(page.locator('.fixture-sidebar')).toBeVisible()
   expect(await page.locator('html').evaluate(el => getComputedStyle(el).transform)).toBe('none')
   const bounds = await page.locator('.personal-fixture').boundingBox()
@@ -19,10 +19,10 @@ for (const theme of ['light', 'dark']) {
   test(`${theme} personal page and modal restore detail navigation, levels and controls`, async ({ page }, testInfo) => {
     const errors: string[] = []
     page.on('pageerror', error => errors.push(error.message))
-    await page.goto(`/tests/desktop-ui/?screen=personal-atlas&view=detailed&theme=${theme}`)
+    await page.goto(`/tests/desktop-ui/?screen=personal-atlas&view=detailed&expanded=detailed&theme=${theme}`)
     const sidebar = page.locator('.fixture-sidebar')
     await expect(sidebar).toContainText('Computer Science')
-    await expect(sidebar).toContainText('2 Understand')
+    await expect(sidebar.getByRole('button', { name: 'Big-O Analysis, earned, Bloom level 2 Understand', exact: true })).toBeVisible()
     await page.getByRole('tab', { name: 'My Graph', exact: true }).click()
     const atlas = page.locator('.fixture-page .atlas')
     await expect(atlas.getByRole('heading', { name: '1 earned · 102 Ready · 103 loaded skills' })).toBeVisible()
@@ -41,7 +41,7 @@ for (const theme of ['light', 'dark']) {
     await expect(atlas.getByRole('button', { name: 'Focus dependents', exact: true })).toHaveAttribute('aria-pressed', 'true')
     await page.getByRole('button', { name: 'Simulate level update' }).click()
     await expect(atlas.locator('.atlas-inspector')).toContainText('5 Evaluate')
-    await expect(sidebar).toContainText('5 Evaluate')
+    await expect(sidebar.getByRole('button', { name: 'Big-O Analysis, earned, Bloom level 5 Evaluate', exact: true })).toBeVisible()
     await sidebar.getByRole('button', { name: /Expand skill map/ }).click()
     const dialog = page.getByRole('dialog')
     await dialog.getByRole('searchbox').fill('Big-O')
@@ -65,7 +65,7 @@ for (const theme of ['light', 'dark']) {
     await page.getByRole('button', { name: 'Lock profile', exact: true }).click()
     await expect(atlas).toHaveCount(0)
     await page.getByRole('button', { name: 'Unlock another profile', exact: true }).click()
-    await expect(sidebar).not.toContainText('5 Evaluate')
+    await expect(sidebar).toContainText('0 earned · 103 Ready · 103 loaded skills')
     await page.getByRole('tab', { name: 'My Graph', exact: true }).click()
     // The next profile never chose a view, so it opens in Simple rather than the last profile's Detailed.
     await expect(atlas.getByRole('button', { name: 'Simple', exact: true })).toHaveAttribute('aria-pressed', 'true')
@@ -80,7 +80,7 @@ for (const theme of ['light', 'dark']) {
 test('mobile modal handles long labels, learning and reduced motion without leaving a scroll lock', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.goto('/tests/desktop-ui/?screen=personal-atlas&view=detailed&theme=dark&scenario=stress')
+  await page.goto('/tests/desktop-ui/?screen=personal-atlas&view=detailed&expanded=detailed&theme=dark&scenario=stress')
   await page.getByRole('button', { name: /Expand skill map/ }).click()
   const dialog = page.getByRole('dialog')
   await dialog.getByRole('searchbox').fill('stewardship')
@@ -105,7 +105,7 @@ test('mobile modal handles long labels, learning and reduced motion without leav
 })
 
 test('mouse drag changes camera without opening a skill and ordinary wheel scroll still moves the page', async ({ page }) => {
-  await page.goto('/tests/desktop-ui/?screen=personal-atlas&view=detailed')
+  await page.goto('/tests/desktop-ui/?screen=personal-atlas&view=detailed&expanded=detailed')
   await page.getByRole('tab', { name: 'My Graph', exact: true }).click()
   await page.getByRole('button', { name: 'Explore Computer Science', exact: true }).click()
   const map = page.locator('.atlas-map')
@@ -127,7 +127,7 @@ test.describe('native touch navigation', () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
   test('horizontal swipe pans while vertical swipe scrolls the page', async ({ page, browserName }) => {
     test.skip(browserName !== 'chromium', 'Native touch synthesis uses Chromium CDP; WebKit covers taps, controls and responsive layout.')
-    await page.goto('/tests/desktop-ui/?screen=personal-atlas&view=detailed')
+    await page.goto('/tests/desktop-ui/?screen=personal-atlas&view=detailed&expanded=detailed')
     await page.getByRole('tab', { name: 'My Graph', exact: true }).tap()
     await page.getByRole('button', { name: 'Explore Computer Science', exact: true }).tap()
     const map = page.locator('.atlas-map')
@@ -157,7 +157,7 @@ for (const theme of ['light', 'dark']) {
   test(`${theme} Bloom emphasis changes overview and list while earned learning opens an enrollable course`, async ({ page }, testInfo) => {
     const errors: string[] = []
     page.on('pageerror', error => errors.push(error.message))
-    await page.goto(`/tests/desktop-ui/?screen=personal-atlas&view=detailed&theme=${theme}`)
+    await page.goto(`/tests/desktop-ui/?screen=personal-atlas&view=detailed&expanded=detailed&theme=${theme}`)
     await page.getByRole('tab', { name: 'My Graph', exact: true }).click()
     const atlas = page.locator('.fixture-page .atlas')
     const list = atlas.getByRole('list', { name: 'Full-label skill list' })
@@ -203,7 +203,7 @@ for (const theme of ['light', 'dark']) {
 }
 
 test('review: overview keyboard activation keeps focus in the atlas', async ({ page }) => {
-  await page.goto('/tests/desktop-ui/?screen=personal-atlas&view=detailed')
+  await page.goto('/tests/desktop-ui/?screen=personal-atlas&view=detailed&expanded=detailed')
   await page.getByRole('tab', { name: 'My Graph', exact: true }).click()
   const atlas = page.locator('.fixture-page .atlas')
   const field = atlas.getByRole('button', { name: 'Explore Computer Science', exact: true })
@@ -213,7 +213,7 @@ test('review: overview keyboard activation keeps focus in the atlas', async ({ p
 })
 
 test('review: only the foreground atlas announces credential updates', async ({ page }) => {
-  await page.goto('/tests/desktop-ui/?screen=personal-atlas&view=detailed')
+  await page.goto('/tests/desktop-ui/?screen=personal-atlas&view=detailed&expanded=detailed')
   await page.getByRole('tab', { name: 'My Graph', exact: true }).click()
   await page.locator('.fixture-sidebar').getByRole('button', { name: /Expand skill map/ }).click()
   await page.getByRole('button', { name: 'Simulate level update' }).evaluate((button: HTMLButtonElement) => button.click())
@@ -223,7 +223,7 @@ test('review: only the foreground atlas announces credential updates', async ({ 
 
 for (const theme of ['light', 'dark']) {
   for (const width of [1280, 390]) {
-    test(`${theme} Simple view at ${width}px is the default and one switch moves the page and modal together`, async ({ page }, testInfo) => {
+    test(`${theme} at ${width}px the page opens in Simple, the expanded graph in Web, and each remembers its own switch`, async ({ page }, testInfo) => {
       const errors: string[] = []
       page.on('pageerror', error => errors.push(error.message))
       await page.setViewportSize({ width, height: 844 })
@@ -238,16 +238,69 @@ for (const theme of ['light', 'dark']) {
       await page.screenshot({ animations: 'disabled', path: testInfo.outputPath(`personal-simple-${theme}-${width}.png`) })
       await page.locator('.fixture-sidebar').getByRole('button', { name: /Expand skill map/ }).click()
       const dialog = page.getByRole('dialog')
-      await expect(dialog.getByRole('button', { name: 'Simple', exact: true })).toHaveAttribute('aria-pressed', 'true')
+      await expect(dialog.getByRole('button', { name: 'Web', exact: true })).toHaveAttribute('aria-pressed', 'true')
+      await expect(dialog.getByRole('group', { name: 'Skill map' }).locator('.web-dot')).toHaveCount(103)
+      await page.screenshot({ animations: 'disabled', path: testInfo.outputPath(`personal-expanded-web-${theme}-${width}.png`) })
       await dialog.getByRole('button', { name: 'Detailed', exact: true }).click()
-      await expect(dialog.getByRole('searchbox')).toBeVisible()
+      await expect(dialog.getByRole('button', { name: 'Detailed', exact: true })).toHaveAttribute('aria-pressed', 'true')
       await page.keyboard.press('Escape')
       await expect(dialog).toHaveCount(0)
-      await expect(atlas.getByRole('button', { name: 'Detailed', exact: true })).toHaveAttribute('aria-pressed', 'true')
-      await expect(atlas.getByRole('searchbox')).toBeVisible()
+      await expect(atlas.getByRole('button', { name: 'Simple', exact: true })).toHaveAttribute('aria-pressed', 'true')
+      await page.locator('.fixture-sidebar').getByRole('button', { name: /Expand skill map/ }).click()
+      await expect(dialog.getByRole('button', { name: 'Detailed', exact: true })).toHaveAttribute('aria-pressed', 'true')
       expect(errors).toEqual([])
     })
   }
+}
+
+for (const theme of ['light', 'dark']) {
+  test(`${theme} sidebar Web graph works in place and expands to the same selection`, async ({ page }, testInfo) => {
+    const errors: string[] = []
+    page.on('pageerror', error => errors.push(error.message))
+    await page.goto(`/tests/desktop-ui/?screen=personal-atlas&theme=${theme}`)
+    // The app sidebar's widget is 223 pixels wide inside its 240-pixel column.
+    await page.addStyleTag({ content: '.personal-layout { grid-template-columns: 249px minmax(0, 1fr) !important }' })
+    const sidebar = page.locator('.fixture-sidebar')
+    const web = sidebar.getByRole('group', { name: 'Your skill web' })
+    await expect(web.getByRole('button')).toHaveCount(103)
+    const graphWidth = (await web.boundingBox())!.width
+    expect(graphWidth).toBeGreaterThan(215)
+    expect(graphWidth).toBeLessThanOrEqual(223)
+    await sidebar.screenshot({ animations: 'disabled', path: testInfo.outputPath(`sidebar-web-${theme}.png`) })
+    const bigO = web.getByRole('button', { name: 'Big-O Analysis, earned, Bloom level 2 Understand', exact: true })
+    await bigO.hover()
+    // Names are drawn in their own layer above the dots.
+    await expect(web.locator('.web-name', { hasText: 'Big-O Analysis' })).toBeVisible()
+    await bigO.click()
+    await expect(bigO).toHaveAttribute('aria-pressed', 'true')
+    await expect(sidebar.locator('.sidebar-caption')).toContainText('Earned · 2 Understand')
+    await page.mouse.move(0, 0)
+    await sidebar.screenshot({ animations: 'disabled', path: testInfo.outputPath(`sidebar-web-selected-${theme}.png`) })
+    // The wheel over the graph zooms it and leaves the page where it was.
+    const scroll = await page.locator('.personal-fixture').evaluate(el => el.scrollTop)
+    const before = await bigO.boundingBox()
+    const box = (await web.boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    await page.mouse.wheel(0, -400)
+    await expect.poll(async () => (await bigO.boundingBox())!.width).toBeGreaterThanOrEqual(before!.width)
+    await expect.poll(async () => JSON.stringify(await bigO.boundingBox())).not.toBe(JSON.stringify(before))
+    expect(await page.locator('.personal-fixture').evaluate(el => el.scrollTop)).toBe(scroll)
+    await sidebar.screenshot({ animations: 'disabled', path: testInfo.outputPath(`sidebar-web-zoomed-${theme}.png`) })
+    await sidebar.getByRole('button', { name: 'Reset zoom and moved dots', exact: true }).click()
+    await expect.poll(async () => JSON.stringify(await bigO.boundingBox())).toBe(JSON.stringify(before))
+    const field = sidebar.getByRole('button', { name: /^Computer Science/ })
+    await field.click()
+    await expect(field).toHaveAttribute('aria-pressed', 'true')
+    await sidebar.screenshot({ animations: 'disabled', path: testInfo.outputPath(`sidebar-web-field-${theme}.png`) })
+    await field.click()
+    await expect(field).toHaveAttribute('aria-pressed', 'false')
+    await sidebar.getByRole('button', { name: 'Expand Big-O Analysis in the skill map', exact: true }).click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.locator('.atlas-inspector').getByRole('heading', { name: 'Big-O Analysis' })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+    expect(errors).toEqual([])
+  })
 }
 
 test('review: Browse Goal saves a goal instead of opening course discovery', async ({ page }) => {

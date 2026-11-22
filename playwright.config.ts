@@ -1,6 +1,8 @@
 import { defineConfig } from '@playwright/test'
 
 const port = process.env.DESKTOP_UI_PORT ?? '5184'
+/** Specs that hold the main thread to a time budget. */
+const PERFORMANCE = '**/atlas-performance.spec.ts'
 
 export default defineConfig({
   testDir: './tests/desktop-ui',
@@ -17,8 +19,11 @@ export default defineConfig({
     viewport: { width: 1280, height: 800 },
   },
   projects: [
-    { name: 'chromium', use: { browserName: 'chromium' } },
-    { name: 'webkit', use: { browserName: 'webkit' } },
+    { name: 'chromium', use: { browserName: 'chromium' }, testIgnore: PERFORMANCE },
+    { name: 'webkit', use: { browserName: 'webkit' }, testIgnore: PERFORMANCE },
+    // Main-thread budgets measure wall time, which browsers running beside
+    // them stretch: they run after the rest, alone, one test at a time.
+    { name: 'performance', use: { browserName: 'chromium' }, testMatch: PERFORMANCE, dependencies: ['chromium', 'webkit'], fullyParallel: false, workers: 1 },
   ],
   webServer: {
     command: `npm run dev -- --host 127.0.0.1 --port ${port} --strictPort`,

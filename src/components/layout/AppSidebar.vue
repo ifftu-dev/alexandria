@@ -666,10 +666,13 @@ const classroomPreviews = computed(() =>
    ═══════════════════════════════════════════ */
 
 .sb-skill-graph {
-  overflow: hidden;
+  flex: none;
+  overflow-x: hidden;
+  overflow-y: auto;
   border-top: 1px solid var(--app-border);
   padding: 0.5rem;
-  max-height: 16rem;
+  /* Room for the graph, its caption and a few fields; the nav above keeps the rest. */
+  max-height: min(27rem, 60%);
   opacity: 1;
 }
 

@@ -18,12 +18,12 @@ function button(name: string, root: ParentNode = document) {
 }
 async function click(name: string, root: ParentNode = document) { button(name, root).click(); await flushPromises() }
 /** Whether the view switch inside `root` shows this view as active. */
-function showing(view: 'Simple' | 'Detailed', root: ParentNode = document) {
+function showing(view: 'Web' | 'Simple' | 'Detailed', root: ParentNode = document) {
   return button(view, root).getAttribute('aria-pressed') === 'true'
 }
 /** The skills page (the modal is teleported outside it). */
 const page = () => wrapper!.element as HTMLElement
-const map = (root: ParentNode) => root.querySelector('[aria-label="Skill map"]') ?? (() => { throw new Error('Missing skill map') })()
+const map = (root: ParentNode) => root.querySelector('[role="group"][aria-label="Skill map"]') ?? (() => { throw new Error('Missing skill map') })()
 const dialog = () => document.querySelector<HTMLElement>('[role="dialog"]') ?? (() => { throw new Error('Missing modal') })()
 async function setup(options: AtlasBackendOptions = {}) {
   const backend = atlasBackend('stress', options)
@@ -47,34 +47,51 @@ async function setup(options: AtlasBackendOptions = {}) {
   await flushPromises()
   return { backend, router, atlas, profiles: useProfiles() }
 }
-it('opens both surfaces in the remembered view', async () => {
-  const { atlas } = await setup({ views: { 'profile-a': 'detailed' } })
-  await click('My Graph')
-  expect(showing('Detailed', page())).toBe(true)
-  expect(page().querySelector('input[type="search"]')).not.toBeNull()
-  atlas.setModalOpen(true)
-  await flushPromises()
-  expect(showing('Detailed', dialog())).toBe(true)
-  expect(dialog().querySelector('input[type="search"]')).not.toBeNull()
-})
+const PAGE_KEY = 'ui.skill_graph_view'
+const EXPANDED_KEY = 'ui.skill_graph_expanded_view'
+type Backend = Awaited<ReturnType<typeof setup>>['backend']
+const stored = (backend: Backend, profile: string, key: string) => backend.settingsOf(profile).find(entry => entry.key === key)
 
-it('opens in Simple for a profile that never chose, and a switch on one surface moves the other', async () => {
-  const { atlas, backend } = await setup()
+it('opens the page in Simple and the expanded graph in Web for a profile that never chose', async () => {
+  const { atlas } = await setup()
   await click('My Graph')
   expect(showing('Simple', page())).toBe(true)
   expect(page().querySelector('input[type="search"]')).toBeNull()
-  await click('Detailed', page())
-  expect(backend.settingsOf('profile-a').find(entry => entry.key === 'ui.skill_graph_view')?.current_value).toBe('detailed')
   atlas.setModalOpen(true)
   await flushPromises()
-  expect(showing('Detailed', dialog())).toBe(true)
-  await click('Simple', dialog())
-  expect(showing('Simple', page())).toBe(true)
-  expect(backend.settingsOf('profile-a').find(entry => entry.key === 'ui.skill_graph_view')?.current_value).toBe('simple')
+  expect(showing('Web', dialog())).toBe(true)
+  // Web keeps search, and the skill map's dots carry the presenter's names.
+  expect(dialog().querySelector('input[type="search"]')).not.toBeNull()
+  expect(button('Big-O Analysis, earned, Bloom level 2 Understand', map(dialog())).querySelector('.web-dot')).not.toBeNull()
 })
 
-it('returns the next profile to its own remembered view after a lock', async () => {
-  const { profiles, router, backend } = await setup({ views: { 'profile-b': 'detailed' } })
+it('opens each surface in its own remembered view', async () => {
+  const { atlas } = await setup({ views: { 'profile-a': 'detailed' }, expandedViews: { 'profile-a': 'simple' } })
+  await click('My Graph')
+  expect(showing('Detailed', page())).toBe(true)
+  atlas.setModalOpen(true)
+  await flushPromises()
+  expect(showing('Simple', dialog())).toBe(true)
+})
+
+it('remembers a switch on one surface without moving the other', async () => {
+  const { atlas, backend } = await setup()
+  await click('My Graph')
+  await click('Web', page())
+  expect(showing('Web', page())).toBe(true)
+  expect(stored(backend, 'profile-a', PAGE_KEY)?.current_value).toBe('web')
+  expect(stored(backend, 'profile-a', EXPANDED_KEY)?.is_default).toBe(true)
+  atlas.setModalOpen(true)
+  await flushPromises()
+  expect(showing('Web', dialog())).toBe(true)
+  await click('Detailed', dialog())
+  expect(stored(backend, 'profile-a', EXPANDED_KEY)?.current_value).toBe('detailed')
+  expect(showing('Web', page())).toBe(true)
+  expect(stored(backend, 'profile-a', PAGE_KEY)?.current_value).toBe('web')
+})
+
+it('returns the next profile to its own remembered views after a lock', async () => {
+  const { profiles, router, backend, atlas } = await setup({ views: { 'profile-b': 'detailed' }, expandedViews: { 'profile-b': 'simple' } })
   const { clearSettingsCache } = await import('@/composables/useSettings')
   await click('My Graph')
   expect(showing('Simple', page())).toBe(true)
@@ -86,12 +103,16 @@ it('returns the next profile to its own remembered view after a lock', async () 
   await flushPromises()
   await click('My Graph')
   expect(showing('Detailed', page())).toBe(true)
-  await click('Simple', page())
-  expect(backend.settingsOf('profile-b').find(entry => entry.key === 'ui.skill_graph_view')?.current_value).toBe('simple')
-  expect(backend.settingsOf('profile-a').find(entry => entry.key === 'ui.skill_graph_view')?.is_default).toBe(true)
+  atlas.setModalOpen(true)
+  await flushPromises()
+  expect(showing('Simple', dialog())).toBe(true)
+  await click('Web', dialog())
+  expect(stored(backend, 'profile-b', EXPANDED_KEY)?.current_value).toBe('web')
+  expect(stored(backend, 'profile-a', PAGE_KEY)?.is_default).toBe(true)
+  expect(stored(backend, 'profile-a', EXPANDED_KEY)?.is_default).toBe(true)
 })
 
-it('keeps the Simple view through Open skill and return on the page and in the modal', async () => {
+it('keeps each surface\'s view through Open skill and return', async () => {
   const { atlas, router } = await setup({ views: { 'profile-a': 'detailed' } })
   await click('My Graph')
   await click('Simple', page())
@@ -105,10 +126,12 @@ it('keeps the Simple view through Open skill and return on the page and in the m
   await flushPromises()
   atlas.setModalOpen(true)
   await flushPromises()
+  // The expanded graph opens in Web, and selecting a dot opens the same inspector.
   await click('Big-O Analysis, earned, Bloom level 2 Understand', map(dialog()))
   await click('Open skill', dialog())
   await click('Back to all skills')
-  expect(showing('Simple', dialog())).toBe(true)
+  expect(showing('Web', dialog())).toBe(true)
+  expect(dialog().querySelector('[aria-label="Skill inspector"]')?.textContent).toContain('Big-O Analysis')
 })
 
 it('keeps browse filters separate and restores graph selection, camera and controls after opening a real skill detail', async () => {
@@ -201,7 +224,7 @@ it('keeps Ready learning accessible, updates the skill filter on route reuse and
   await click('My Graph')
   await click('Detailed')
   await wrapper!.get('input[type="search"]').setValue('Sorting Algorithms')
-  await click('Sorting Algorithms, not yet earned, Ready, learning-outcome Bloom level 3 Apply')
+  await click('Sorting Algorithms, not yet earned, Ready, learning-outcome Bloom level 3 Apply', document.querySelector('[aria-label="Full-label skill list"]')!)
   await click('Find learning opportunities')
   expect(wrapper!.text()).toContain('Learning for Sorting Algorithms')
   expect(wrapper!.findAll('a.cc-grid').map(course => course.text())).toEqual([expect.stringContaining('Practising sorting algorithms')])
@@ -219,7 +242,7 @@ it('keeps Ready learning accessible, updates the skill filter on route reuse and
 })
 
 it('reports settings that fail to load in the modal and loads the remembered view on retry', async () => {
-  const { atlas, backend } = await setup({ views: { 'profile-a': 'detailed' } })
+  const { atlas, backend } = await setup({ expandedViews: { 'profile-a': 'detailed' } })
   const { clearSettingsCache } = await import('@/composables/useSettings')
   clearSettingsCache()
   let failing = true

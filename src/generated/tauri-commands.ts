@@ -311,6 +311,7 @@ export const TAURI_COMMANDS = [
   "list_role_session_reviews",
   "list_settings",
   "list_skill_graph_edges",
+  "list_skill_graph_relations",
   "list_skills",
   "list_snapshots",
   "list_subject_fields",

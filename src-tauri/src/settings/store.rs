@@ -271,7 +271,7 @@ mod tests {
     }
 
     #[test]
-    fn set_raw_holds_skill_graph_view_to_simple_or_detailed() {
+    fn set_raw_holds_skill_graph_view_to_web_simple_or_detailed() {
         let db = db();
         let err = SettingsStore::set_raw(db.conn(), "ui.skill_graph_view", "fancy").unwrap_err();
         assert!(matches!(err, SettingsError::InvalidValue { .. }));
@@ -281,6 +281,50 @@ mod tests {
         );
 
         SettingsStore::set_raw(db.conn(), "ui.skill_graph_view", "detailed").unwrap();
+        assert_eq!(
+            SettingsStore::get(db.conn(), keys::UI_SKILL_GRAPH_VIEW),
+            "detailed"
+        );
+
+        SettingsStore::set_raw(db.conn(), "ui.skill_graph_view", "web").unwrap();
+        assert_eq!(
+            SettingsStore::get(db.conn(), keys::UI_SKILL_GRAPH_VIEW),
+            "web"
+        );
+    }
+
+    #[test]
+    fn set_raw_holds_skill_graph_expanded_view_to_web_simple_or_detailed() {
+        let db = db();
+        let err =
+            SettingsStore::set_raw(db.conn(), "ui.skill_graph_expanded_view", "fancy").unwrap_err();
+        assert!(matches!(err, SettingsError::InvalidValue { .. }));
+        assert_eq!(
+            SettingsStore::get(db.conn(), keys::UI_SKILL_GRAPH_EXPANDED_VIEW),
+            "web"
+        );
+
+        for value in ["simple", "detailed", "web"] {
+            SettingsStore::set_raw(db.conn(), "ui.skill_graph_expanded_view", value).unwrap();
+            assert_eq!(
+                SettingsStore::get(db.conn(), keys::UI_SKILL_GRAPH_EXPANDED_VIEW),
+                value
+            );
+        }
+    }
+
+    /// The page and expanded-graph views are separate preferences:
+    /// writing one leaves the other on its own default.
+    #[test]
+    fn skill_graph_page_and_expanded_views_are_stored_apart() {
+        let db = db();
+        SettingsStore::set_raw(db.conn(), "ui.skill_graph_view", "detailed").unwrap();
+        assert_eq!(
+            SettingsStore::get(db.conn(), keys::UI_SKILL_GRAPH_EXPANDED_VIEW),
+            "web"
+        );
+
+        SettingsStore::set_raw(db.conn(), "ui.skill_graph_expanded_view", "simple").unwrap();
         assert_eq!(
             SettingsStore::get(db.conn(), keys::UI_SKILL_GRAPH_VIEW),
             "detailed"
@@ -380,14 +424,45 @@ mod tests {
         let applied = SettingsStore::apply_sync_row(
             db.conn(),
             "ui.skill_graph_view",
-            "simple",
+            "web",
             "2999-01-01T00:00:00",
         )
         .unwrap();
         assert!(applied);
         assert_eq!(
             SettingsStore::get(db.conn(), keys::UI_SKILL_GRAPH_VIEW),
+            "web"
+        );
+    }
+
+    #[test]
+    fn apply_sync_row_holds_skill_graph_expanded_view_to_its_closed_set() {
+        let db = db();
+        SettingsStore::set_raw(db.conn(), "ui.skill_graph_expanded_view", "simple").unwrap();
+        let applied = SettingsStore::apply_sync_row(
+            db.conn(),
+            "ui.skill_graph_expanded_view",
+            "fancy",
+            "2999-01-01T00:00:00",
+        )
+        .unwrap();
+        assert!(!applied);
+        assert_eq!(
+            SettingsStore::get(db.conn(), keys::UI_SKILL_GRAPH_EXPANDED_VIEW),
             "simple"
+        );
+
+        let applied = SettingsStore::apply_sync_row(
+            db.conn(),
+            "ui.skill_graph_expanded_view",
+            "detailed",
+            "2999-01-01T00:00:00",
+        )
+        .unwrap();
+        assert!(applied);
+        assert_eq!(
+            SettingsStore::get(db.conn(), keys::UI_SKILL_GRAPH_EXPANDED_VIEW),
+            "detailed"
         );
     }
 

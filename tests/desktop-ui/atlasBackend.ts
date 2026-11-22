@@ -1,5 +1,5 @@
 import taxonomy from '../../bootstrap/public_taxonomy.json'
-import type { Chapter, Course, Element, Identity, SkillInfo, SkillGraphEdge, VerifiableCredential } from '@/types'
+import type { Chapter, Course, Element, Identity, SkillInfo, SkillGraphEdge, SkillGraphRelation, VerifiableCredential } from '@/types'
 import type { SettingEntry } from '@/composables/useSettings'
 import type { SkillGraphView } from '@/composables/useSkillGraphView'
 
@@ -38,8 +38,10 @@ export function scaleTaxonomy() {
 }
 
 export interface AtlasBackendOptions {
-  /** Remembered skill graph view per profile; a profile left out has never chosen. */
+  /** The skills page's remembered view per profile; a profile left out has never chosen. */
   views?: Partial<Record<string, SkillGraphView>>
+  /** The expanded graph's remembered view per profile; a profile left out has never chosen. */
+  expandedViews?: Partial<Record<string, SkillGraphView>>
 }
 
 /**
@@ -71,6 +73,8 @@ export function atlasBackend(scenario: AtlasScenario | null = null, options: Atl
   const edges: SkillGraphEdge[] = graph.edges.map(edge => ({ ...edge,
     skill_name: skillById.get(edge.skill_id)!.name, skill_bloom: skillById.get(edge.skill_id)!.bloom_level,
     prerequisite_name: skillById.get(edge.prerequisite_id)!.name, prerequisite_bloom: skillById.get(edge.prerequisite_id)!.bloom_level }))
+  // The bundled relations in every scenario; scale skills add none.
+  const relations: SkillGraphRelation[] = taxonomy.skill_relations.map(({ skill_id, related_skill_id, relation_type }) => ({ skill_id, related_skill_id, relation_type }))
   if (stress) {
     skills.push({ id: 'fixture-unassigned', name: 'A very long skill label about community stewardship, collaborative problem solving, and inclusive systems design — نام کی مکمل وضاحت',
       description: 'Long bilingual label and unloaded prerequisite', subject_id: null, subject_name: null,
@@ -100,14 +104,17 @@ export function atlasBackend(scenario: AtlasScenario | null = null, options: Atl
     { key: 'learner.targets', kind: 'json', default_value: '[]' },
     { key: 'instructor.graph_prefs', kind: 'json', default_value: '{}' },
     { key: 'ui.skill_graph_view', kind: 'string', default_value: 'simple' },
+    { key: 'ui.skill_graph_expanded_view', kind: 'string', default_value: 'web' },
   ]
   const settingsByProfile = new Map<string, SettingEntry[]>()
   function settingsOf(profile: string): SettingEntry[] {
     let entries = settingsByProfile.get(profile)
     if (!entries) {
-      const view = options.views?.[profile]
+      const seeded: Record<string, string | undefined> = {
+        'ui.skill_graph_view': options.views?.[profile], 'ui.skill_graph_expanded_view': options.expandedViews?.[profile],
+      }
       entries = settingDefaults.map(({ key, kind, default_value }) => {
-        const current_value = key === 'ui.skill_graph_view' && view ? view : default_value
+        const current_value = seeded[key] ?? default_value
         return { key, scope: 'sync', category: '', label: key, description: '', kind, default_value, current_value, is_default: current_value === default_value }
       })
       settingsByProfile.set(profile, entries)
@@ -141,6 +148,7 @@ export function atlasBackend(scenario: AtlasScenario | null = null, options: Atl
       case 'list_subjects': return subjects
       case 'list_skills': return skills
       case 'list_skill_graph_edges': return edges
+      case 'list_skill_graph_relations': return relations
       // The credentials page reads anchor state; fixture credentials are never anchored.
       case 'list_credential_anchors': return []
       case 'list_credentials': {

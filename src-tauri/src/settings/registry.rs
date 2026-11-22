@@ -207,11 +207,22 @@ pub mod keys {
     pub const UI_SKILL_GRAPH_VIEW: SettingKey<String> = SettingKey {
         key: "ui.skill_graph_view",
         scope: Scope::Sync,
-        allowed_values: Some(&["simple", "detailed"]),
+        allowed_values: Some(&["web", "simple", "detailed"]),
         category: "Appearance",
         label: "Skill graph view",
-        description: "Simple or detailed. Every skill graph opens in the last view you chose.",
+        description: "Web, simple or detailed. The skills page opens in the last view you chose.",
         default: || "simple".to_string(),
+    };
+
+    pub const UI_SKILL_GRAPH_EXPANDED_VIEW: SettingKey<String> = SettingKey {
+        key: "ui.skill_graph_expanded_view",
+        scope: Scope::Sync,
+        allowed_values: Some(&["web", "simple", "detailed"]),
+        category: "Appearance",
+        label: "Expanded skill graph view",
+        description: "Web, simple or detailed. The graph expanded from the sidebar opens \
+                      in the last view you chose there.",
+        default: || "web".to_string(),
     };
 
     pub const UI_ACTIVE_MODE: SettingKey<String> = SettingKey {
@@ -659,6 +670,7 @@ pub fn all_entries(
         entry!(UI_SIDEBAR_COLLAPSED),
         entry!(UI_SIDEBAR_SECTIONS),
         entry!(UI_SKILL_GRAPH_VIEW),
+        entry!(UI_SKILL_GRAPH_EXPANDED_VIEW),
         entry!(UI_KEYBOARD_SHORTCUTS),
         entry!(UI_OMNI_RECENTS),
         entry!(SENTINEL_AI_SCORING),
@@ -731,6 +743,7 @@ pub fn lookup(key: &str) -> Option<KeyMeta> {
     check!(UI_SIDEBAR_COLLAPSED);
     check!(UI_SIDEBAR_SECTIONS);
     check!(UI_SKILL_GRAPH_VIEW);
+    check!(UI_SKILL_GRAPH_EXPANDED_VIEW);
     check!(UI_KEYBOARD_SHORTCUTS);
     check!(UI_OMNI_RECENTS);
     check!(SENTINEL_AI_SCORING);
@@ -855,8 +868,8 @@ mod tests {
         assert_eq!(lookup_meta("ui.motion"), Some((Scope::Device, "string")));
     }
 
-    /// The Simple/Detailed skill graph view is one profile preference
-    /// that follows the learner across devices and starts on Simple.
+    /// The skills page's remembered graph view (Web, Simple or Detailed)
+    /// follows the learner across devices and starts on Simple.
     #[test]
     fn skill_graph_view_is_a_synced_preference_defaulting_to_simple() {
         let overrides = std::collections::HashMap::new();
@@ -875,11 +888,34 @@ mod tests {
         // The closed value set lives on the key definition.
         assert_eq!(
             lookup("ui.skill_graph_view").and_then(|meta| meta.allowed_values),
-            Some(&["simple", "detailed"][..])
+            Some(&["web", "simple", "detailed"][..])
         );
         assert_eq!(
             lookup("ui.theme").and_then(|meta| meta.allowed_values),
             None
+        );
+    }
+
+    /// The graph expanded from the sidebar remembers its own view, with
+    /// the same closed value set as the skills page but starting on Web.
+    #[test]
+    fn skill_graph_expanded_view_is_a_synced_preference_defaulting_to_web() {
+        let overrides = std::collections::HashMap::new();
+        let entries = all_entries(&overrides);
+        let view = entries
+            .iter()
+            .find(|e| e.key == "ui.skill_graph_expanded_view")
+            .expect("ui.skill_graph_expanded_view is registered");
+        assert_eq!(view.default_value, "web");
+        assert_eq!(view.current_value, "web");
+        assert_eq!(view.scope, Scope::Sync);
+        assert_eq!(
+            lookup_meta("ui.skill_graph_expanded_view"),
+            Some((Scope::Sync, "string"))
+        );
+        assert_eq!(
+            lookup("ui.skill_graph_expanded_view").and_then(|meta| meta.allowed_values),
+            Some(&["web", "simple", "detailed"][..])
         );
     }
 
