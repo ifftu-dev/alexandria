@@ -84,7 +84,7 @@ function dot(wrapper: VueWrapper, name: string) {
   return found
 }
 
-const faded = (wrapper: VueWrapper) => dots(wrapper).filter(item => item.find('.is-faded').exists()).map(item => item.attributes('data-skill')).sort()
+const faded = (wrapper: VueWrapper) => dots(wrapper).filter(item => item.classes('is-faded')).map(item => item.attributes('data-skill')).sort()
 const focusedSkill = () => (document.activeElement as HTMLElement | null)?.dataset.skill
 const key = async (wrapper: VueWrapper, name: string) => {
   const target = (document.activeElement as HTMLElement | null) ?? wrapper.element

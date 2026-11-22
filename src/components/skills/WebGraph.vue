@@ -13,23 +13,27 @@
  *   paths, name places, the camera and fit, roving focus, drag with its live
  *   run, pan, wheel and pinch. It takes the same inputs as this component's
  *   props, a root element whose descendants carry `data-skill`, and the
- *   layers it moves with the pan; it places and sizes the dots for the zoom.
- * - `WebGraphDot` is the Web skin of one skill; `WebGraphLines` is the lines
- *   as an SVG group; `WebGraphNames` is the names. None is a control.
+ *   layers it moves with the pan; it scales the drawing and places each
+ *   dot's button for the zoom.
+ * - `WebGraphDots` draws the dots and `WebGraphLines` the lines, as SVG
+ *   groups in layout units scaled by the zoom; `WebGraphNames` is the names.
+ *   None is a control: each dot's control is a transparent button.
  * - This component assembles them for the sidebar: one layer holding an SVG
- *   of lines, one button per dot (placed and sized by `useWebGraph`) and
- *   the names.
+ *   of lines and dots, one transparent button per dot (placed and sized by
+ *   `useWebGraph`) and the names.
  * - The explorer (ticket 05) does not mount this component, because its node
  *   elements must stay the same DOM nodes across Web, Simple and Detailed so
  *   they can travel and keep focus. In Web its adapter (`useExplorerWeb`)
  *   calls `useWebGraph` with the explorer's map element as root and its
  *   canvas and names layer as layers; `useWebGraph` places and sizes the
- *   explorer's existing node elements, which render `WebGraphDot` in place
- *   of the Simple or Detailed skin and bind the same attributes and
- *   handlers as the template below (`data-skill`, `tabindex` from `roving`,
+ *   explorer's existing node elements as the dots' buttons. They render
+ *   `WebGraphDot` in place of the Simple or Detailed skin, seen only while
+ *   nodes travel between views, and bind the same attributes and handlers as
+ *   the template below (`data-skill`, `tabindex` from `roving`,
  *   `aria-pressed`, click, pointerenter and pointerleave on the node; key,
- *   focus, pointer, click-capture and wheel handlers on the root), draws
- *   `WebGraphLines` in its canvas and `WebGraphNames` in its names layer. `zoomBy` and `panBy` serve its zoom and pan
+ *   focus, pointer, pointerleave, click-capture and wheel handlers on the
+ *   root). It draws `WebGraphLines` and `WebGraphDots` in its canvas and
+ *   `WebGraphNames` in its names layer. `zoomBy` and `panBy` serve its zoom and pan
  *   buttons (`AtlasMapTools`); a null camera fits what is shown.
  * - The memoised Web graph and layout of a model come from `webLayoutEntry`
  *   (`@/utils/webGeometry`), computed once per model for every surface.
@@ -47,7 +51,7 @@ import type { AtlasCamera } from '@/utils/skillAtlasView'
 import { createAtlasPresenter } from './atlasPresentation'
 import { webLayoutEntry, type WebPoint } from '@/utils/webGeometry'
 import { useWebGraph } from './useWebGraph'
-import WebGraphDot from './WebGraphDot.vue'
+import WebGraphDots from './WebGraphDots.vue'
 import WebGraphLines from './WebGraphLines.vue'
 import WebGraphNames from './WebGraphNames.vue'
 
@@ -87,7 +91,7 @@ const web = useWebGraph(() => ({
   select: id => emit('select', id), active: id => emit('active', id),
   camera: camera => emit('update:camera', camera), drag: positions => emit('drag', positions),
 }, root, () => [layer.value])
-const { dots, names, lines } = web
+const { dots, dotLayers, selectedDot, names, lines, hoverId } = web
 /** Accessible names, once per model and language: a pan or zoom only looks them up. */
 const accessibleNames = computed(() => {
   void locale.value
@@ -96,12 +100,10 @@ const accessibleNames = computed(() => {
 </script>
 
 <template>
-  <div ref="root" class="web-graph" :class="{ 'is-compact': compact }" role="group" :aria-label="label" :aria-describedby="describedBy" @keydown="web.keyDown" @keyup="web.keyUp" @focusin="web.focusIn" @focusout="web.focusOut" @pointerdown="web.pointerDown" @pointermove="web.pointerMove" @pointerup="web.pointerUp" @pointercancel="web.pointerUp" @lostpointercapture="web.pointerUp" @click.capture="web.clickCapture" @wheel="web.wheel">
+  <div ref="root" class="web-graph" :class="{ 'is-compact': compact, 'is-over-dot': hoverId !== null }" role="group" :aria-label="label" :aria-describedby="describedBy" @keydown="web.keyDown" @keyup="web.keyUp" @focusin="web.focusIn" @focusout="web.focusOut" @pointerdown="web.pointerDown" @pointermove="web.pointerMove" @pointerup="web.pointerUp" @pointercancel="web.pointerUp" @lostpointercapture="web.pointerUp" @pointerleave="web.pointerLeave" @click.capture="web.clickCapture" @wheel="web.wheel">
     <div ref="layer" class="web-layer">
-      <svg class="web-canvas" width="1" height="1" aria-hidden="true"><WebGraphLines :lines="lines" :compact="compact" /></svg>
-      <button v-for="dot in dots" :key="dot.id" class="web-node" type="button" :data-skill="dot.id" :tabindex="dot.roving ? 0 : -1" :aria-label="accessibleNames.get(dot.id)" :aria-pressed="dot.selected" :style="{ '--field': dot.color }" @click="web.dotClick(dot.id)" @pointerenter="web.hover(dot.id)" @pointerleave="web.hover(null)">
-        <WebGraphDot :state="dot.state" :selected="dot.selected" :faded="dot.faded" :compact="compact" />
-      </button>
+      <svg class="web-canvas" width="1" height="1" aria-hidden="true"><WebGraphLines :lines="lines" :compact="compact" /><WebGraphDots :layers="dotLayers" :selected="selectedDot" :compact="compact" /></svg>
+      <button v-for="dot in dots" :key="dot.id" class="web-node" :class="{ 'is-faded': dot.faded }" type="button" :data-skill="dot.id" :tabindex="dot.roving ? 0 : -1" :aria-label="accessibleNames.get(dot.id)" :aria-pressed="dot.selected" @click="web.dotClick(dot.id)" @pointerenter="web.dotEnter($event, dot.id)" @pointerleave="web.dotLeave($event)" />
       <WebGraphNames :names="names" :compact="compact" />
     </div>
   </div>
@@ -113,7 +115,8 @@ const accessibleNames = computed(() => {
 /* Moved by the pan (useWebGraph sets its transform); point 0, 0 of the layout sits at its origin. */
 .web-layer { position: absolute; top: 0; left: 0; width: 0; height: 0; }
 .web-canvas { position: absolute; top: 0; left: 0; display: block; overflow: visible; }
-/* Placed and sized by useWebGraph (transform, width and height). */
-.web-node { position: absolute; top: 0; left: 0; display: grid; grid-template: 100% / 100%; place-items: center; padding: 0; margin: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+/* The dot's transparent button, placed and sized by useWebGraph (transform, width and height); the dot itself is drawn in the SVG. */
+.web-node { position: absolute; top: 0; left: 0; padding: 0; margin: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.web-graph.is-over-dot { cursor: pointer; }
 .web-node:focus-visible { outline: 3px solid var(--app-ring); outline-offset: 2px; }
 </style>

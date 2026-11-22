@@ -9,13 +9,16 @@ import { continueWebLayout, webDotRadius, webNamePlaces, webNearestInDirection, 
 // camera's zoom is screen pixels per layout unit. Lines, arrowheads and names
 // keep their size on screen at any zoom.
 //
-// The camera never re-renders the dots. The pan is one transform on the
-// graph's layers. The zoom is written straight onto each dot's element (its
-// box, which its skin fills), so a zoom costs one pass over the dots and no
-// render; a CSS variable on a shared ancestor would restyle every element
-// under it, which is several times slower on a large graph. Only the names,
-// which are few and placed in screen pixels, and the arrowheads follow the
-// camera through a render.
+// The camera never re-renders or restyles the dots. Dots and lines are drawn
+// in SVG in layout units, as a few paths, inside groups scaled by the zoom
+// (strokes do not scale), and the pan is one transform on the graph's
+// layers: a pan or zoom changes one or two transforms. Each dot also has a
+// transparent button, for the pointer, keyboard focus and assistive
+// technology; after a zoom the buttons are moved in small batches when the
+// main thread is idle, and the pointer finds dots by position, so a button
+// still on its way never takes a click. Only the names, which are few and
+// placed in screen pixels, and the arrowheads follow the camera through a
+// render.
 /** The camera's zoom range. */
 export const WEB_MIN_ZOOM = 0.2
 export const WEB_MAX_ZOOM = 6
@@ -104,6 +107,19 @@ export interface WebName {
   selected: boolean
   faded: boolean
 }
+
+/** Dots of one field, state and emphasis, as SVG path data in layout units: discs, and the round caps that keep them at least the smallest size on screen. */
+export interface WebDotLayer {
+  key: string
+  color: string
+  state: WebDotState
+  faded: boolean
+  discs: string
+  caps: string
+}
+
+/** How many dot buttons are moved per idle task after a zoom. */
+export const WEB_PLACE_BATCH = 200
 
 /** What a Web graph draws and how; the component's props, read through a getter so the composable sees changes. */
 export interface WebGraphInput {
@@ -337,50 +353,118 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
     }
     return Math.min(style.maxPixels, width)
   }
+  // Dots as SVG paths, grouped by field colour, state and emphasis, in layout
+  // units: a pan or zoom never rebuilds them. A disc has the dot's radius and
+  // scales with the zoom; a zero-length round-capped stroke at its centre,
+  // which does not scale, keeps it at least the smallest size on screen.
+  const n2 = (value: number) => value.toFixed(2)
+  function disc(dot: WebDot): string {
+    const r = dot.radius
+    return `M ${n2(dot.x - r)} ${n2(dot.y)} a ${n2(r)} ${n2(r)} 0 1 0 ${n2(2 * r)} 0 a ${n2(r)} ${n2(r)} 0 1 0 ${n2(-2 * r)} 0 Z`
+  }
+  const cap = (dot: WebDot) => `M ${n2(dot.x)} ${n2(dot.y)} h 0`
+  const dotLayers = computed<WebDotLayer[]>(() => {
+    const layers = new Map<string, WebDotLayer & { discList: string[]; capList: string[] }>()
+    for (const dot of dots.value) {
+      const key = `${dot.color}|${dot.state}|${dot.faded ? 1 : 0}`
+      let layer = layers.get(key)
+      if (!layer) layers.set(key, layer = { key, color: dot.color, state: dot.state, faded: dot.faded, discs: '', caps: '', discList: [], capList: [] })
+      layer.discList.push(disc(dot))
+      layer.capList.push(cap(dot))
+    }
+    return [...layers.values()].map(({ discList, capList, ...layer }) => ({ ...layer, discs: discList.join(' '), caps: capList.join(' ') }))
+  })
+  /** The selected dot, drawn again on top with its selection ring. */
+  const selectedDot = computed(() => {
+    const dot = dots.value.find(item => item.selected)
+    return dot ? { dot, disc: disc(dot), cap: cap(dot) } : null
+  })
+
   /**
-   * Places and sizes every dot's element for the zoom, in layer pixels: the
-   * pointer target's box (an SVG `foreignObject`'s geometry attributes, or an
-   * HTML element's transform and size), which the skin fills less the
-   * padding, and the lines group's scale. Run after each render and on every zoom, never
-   * through one, so a zoom renders no dot. The owner's templates bind none of
-   * these.
+   * Places and sizes each dot's button for the zoom, in layer pixels: an SVG
+   * `foreignObject`'s geometry attributes, or an HTML element's transform and
+   * size. The owner's templates bind none of these. After a render every
+   * button is placed at once; after a zoom alone they are placed in batches
+   * of `WEB_PLACE_BATCH`, one task per frame, because the drawn dots already
+   * follow the zoom and the pointer finds dots by position.
    */
   /** What was last written to each element, so a write that changes nothing (most dots sit at the smallest size when zoomed out) is skipped. */
   let placed = new WeakMap<Element, { x: string; y: string; hit: string }>()
   let placedIn: HTMLElement | undefined
-  function placeDots(): void {
+  let pending: WebDot[] = []
+  let pendingZoom = 1
+  let batchTimer: ReturnType<typeof setTimeout> | undefined
+  /** One batch per frame: a task after the next frame, so the frames between restyle one batch each. */
+  function nextBatch(): void {
+    batchTimer = setTimeout(() => {
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => { batchTimer = setTimeout(placeBatch, 0) })
+      else placeBatch()
+    }, 0)
+  }
+  function placeOne(node: Element, dot: WebDot, zoom: number): void {
+    const hitPixels = dotPixels(dot.radius) + 2 * WEB_HIT_PADDING
+    const next = { x: (dot.x * zoom - hitPixels / 2).toFixed(1), y: (dot.y * zoom - hitPixels / 2).toFixed(1), hit: hitPixels.toFixed(1) }
+    const last = placed.get(node)
+    if (node instanceof SVGElement) {
+      if (last?.x !== next.x) node.setAttribute('x', next.x)
+      if (last?.y !== next.y) node.setAttribute('y', next.y)
+      if (last?.hit !== next.hit) { node.setAttribute('width', next.hit); node.setAttribute('height', next.hit) }
+    } else if (node instanceof HTMLElement) {
+      if (last?.x !== next.x || last.y !== next.y) node.style.transform = `translate(${next.x}px, ${next.y}px)`
+      if (last?.hit !== next.hit) node.style.width = node.style.height = `${next.hit}px`
+    }
+    placed.set(node, next)
+  }
+  function dotNodes(): Map<string, Element> {
+    const nodes = new Map<string, Element>()
+    for (const node of root.value?.querySelectorAll('[data-skill]') ?? []) if (node instanceof HTMLElement || node instanceof SVGElement) nodes.set(node.dataset.skill ?? '', node)
+    return nodes
+  }
+  function cancelBatches(): void {
+    if (batchTimer !== undefined) clearTimeout(batchTimer)
+    batchTimer = undefined
+    pending = []
+  }
+  function placeBatch(count = WEB_PLACE_BATCH): void {
+    batchTimer = undefined
+    const nodes = dotNodes()
+    for (const dot of pending.splice(0, count)) { const node = nodes.get(dot.id); if (node) placeOne(node, dot, pendingZoom) }
+    if (pending.length) nextBatch()
+  }
+  /** Moves every button still waiting after a zoom, now: before an owner measures them. */
+  function flushPlacement(): void {
+    if (batchTimer !== undefined) clearTimeout(batchTimer)
+    placeBatch(Infinity)
+  }
+  /** Places every button now: after a render, and before an owner measures them (such as a view switch). */
+  function placeAll(): void {
+    cancelBatches()
     const element = root.value
     // A root that went and came back (the explorer leaving Web and returning)
     // had its nodes' attributes reset by the other views: write them all again.
     if (element !== placedIn) { placed = new WeakMap(); placedIn = element }
     if (!element) return
+    const nodes = dotNodes(), { zoom } = camera.value
+    for (const dot of dots.value) { const node = nodes.get(dot.id); if (node) placeOne(node, dot, zoom) }
+  }
+  /** The zoom on the scaled groups (dots and lines), set directly, so a zoom renders and restyles no dot. */
+  function scaleGroups(): void {
     const { zoom } = camera.value
-    const nodes = new Map<string, Element>()
-    for (const node of element.querySelectorAll('[data-skill]')) if (node instanceof HTMLElement || node instanceof SVGElement) nodes.set(node.dataset.skill ?? '', node)
-    for (const dot of dots.value) {
-      const node = nodes.get(dot.id)
-      if (!node) continue
-      const hitPixels = dotPixels(dot.radius) + 2 * WEB_HIT_PADDING
-      const next = { x: (dot.x * zoom - hitPixels / 2).toFixed(1), y: (dot.y * zoom - hitPixels / 2).toFixed(1), hit: hitPixels.toFixed(1) }
-      const last = placed.get(node)
-      if (node instanceof SVGElement) {
-        if (last?.x !== next.x) node.setAttribute('x', next.x)
-        if (last?.y !== next.y) node.setAttribute('y', next.y)
-        if (last?.hit !== next.hit) { node.setAttribute('width', next.hit); node.setAttribute('height', next.hit) }
-      } else if (node instanceof HTMLElement) {
-        if (last?.x !== next.x || last.y !== next.y) node.style.transform = `translate(${next.x}px, ${next.y}px)`
-        if (last?.hit !== next.hit) node.style.width = node.style.height = `${next.hit}px`
-      }
-      placed.set(node, next)
-    }
-    for (const layer of layerList.value) {
-      const lines = layer?.querySelector<SVGGElement>('.web-lines')
-      if (lines) lines.style.transform = `scale(${zoom})`
-    }
+    for (const layer of layerList.value) for (const group of layer?.querySelectorAll<SVGGElement>('.web-scaled') ?? []) group.style.transform = `scale(${zoom})`
   }
   const zoom = computed(() => camera.value.zoom)
   const compactFlag = computed(() => field('compact'))
-  watch([root, layerList, dots, zoom, compactFlag], placeDots, { flush: 'post' })
+  // A render (new dots, a new root or layer) places every button at once.
+  watch([root, layerList, dots, compactFlag], () => { scaleGroups(); placeAll() }, { flush: 'post' })
+  // A zoom alone scales the drawing at once and moves the buttons in batches.
+  watch(zoom, () => {
+    scaleGroups()
+    if (!root.value) return
+    pending = [...dots.value]
+    pendingZoom = zoom.value
+    if (batchTimer === undefined) nextBatch()
+  }, { flush: 'post' })
+  onBeforeUnmount(cancelBatches)
 
   const NO_NAMES: readonly WebName[] = Object.freeze([])
   /**
@@ -567,9 +651,11 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
     }
     if (pointers.size > 2) return
     suppressClick = false
-    gesture = { kind: 'press', pointerId: event.pointerId, id: skillOf(event.target), start: local(event) }
+    gesture = { kind: 'press', pointerId: event.pointerId, id: event.isTrusted ? dotAt(local(event)) : skillOf(event.target), start: local(event) }
   }
   function pointerMove(event: PointerEvent): void {
+    // A real pointer hovers by position (see dotAt); synthetic events use the buttons' own enter and leave.
+    if (event.isTrusted && !gesture && event.pointerType !== 'touch') hover(dotAt(local(event)))
     if (!pointers.has(event.pointerId)) return
     const at = local(event)
     pointers.set(event.pointerId, at)
@@ -608,13 +694,43 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
     gesture = null
     if (root.value?.hasPointerCapture?.(event.pointerId)) root.value.releasePointerCapture(event.pointerId)
   }
-  /** A click that ends a drag or a pan selects nothing. Keyboard clicks (detail 0) always pass. */
+  /**
+   * A click that ends a drag or a pan selects nothing. Keyboard clicks
+   * (detail 0) always pass. A real click is resolved by position: if it
+   * landed on a button not yet moved after a zoom, the dot under the
+   * pointer is chosen instead (or nothing, over the background).
+   */
   function clickCapture(event: MouseEvent): void {
-    if (!suppressClick || event.detail === 0) return
-    suppressClick = false
+    if (event.detail === 0) return
+    if (suppressClick) {
+      suppressClick = false
+      event.stopPropagation()
+      event.preventDefault()
+      return
+    }
+    if (!event.isTrusted) return
+    const target = skillOf(event.target), at = dotAt(local(event))
+    if (target === null || target === at) return
     event.stopPropagation()
     event.preventDefault()
+    if (at) events.select(at)
   }
+  /** The shown dot under a point of the root, within its pointer target, nearest first. */
+  function dotAt(point: WebPoint): string | null {
+    const { zoom } = camera.value, at = pan.value
+    let best: string | null = null, bestDistance = Infinity
+    for (const dot of dots.value) {
+      const distance = Math.hypot(dot.x * zoom + at.x - point.x, dot.y * zoom + at.y - point.y)
+      if (distance <= dotPixels(dot.radius) / 2 + WEB_HIT_PADDING && distance < bestDistance) { best = dot.id; bestDistance = distance }
+    }
+    return best
+  }
+  function pointerLeave(event: PointerEvent): void {
+    if (event.isTrusted && !gesture) hover(null)
+  }
+  /** A button's own enter and leave serve synthetic events (tests, assistive tools); real pointers hover by position. */
+  function dotEnter(event: PointerEvent, id: string): void { if (!event.isTrusted) hover(id) }
+  function dotLeave(event: PointerEvent): void { if (!event.isTrusted) hover(null) }
 
   function dotClick(id: string): void { events.select(id) }
 
@@ -674,7 +790,7 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
   function hover(id: string | null): void { hoverId.value = id }
 
   return {
-    size, camera, pan, dots, names, lines, graph, motionReduced, rovingId, namedIds, litIds, dotPixels,
-    zoomBy, panBy, wheel, dotClick, pointerDown, pointerMove, pointerUp, clickCapture, focus, focusIn, focusOut, keyDown, keyUp, hover,
+    size, camera, pan, dots, dotLayers, selectedDot, names, lines, graph, motionReduced, rovingId, namedIds, litIds, dotPixels, hoverId, placeAll, flushPlacement,
+    zoomBy, panBy, wheel, dotClick, pointerDown, pointerMove, pointerUp, pointerLeave, clickCapture, focus, focusIn, focusOut, keyDown, keyUp, hover, dotEnter, dotLeave, dotAt,
   }
 }

@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * The Web skin of one skill: a dot in the field colour (`--field` on an
- * ancestor), filled when earned, a ring on the page background when ready
- * next, a pale tint otherwise. It fills the box `useWebGraph` sizes for the
- * dot's radius and the zoom, less the pointer padding (WEB_HIT_PADDING). It draws no control and no
- * name: the owner wraps it in the skill's button (the Web graph's own, or the
- * explorer's node element in the Web view), which carries the accessible
- * name, and names are drawn in their own layer (`WebGraphNames`), so the skin
- * is hidden from assistive technology.
+ * The Web skin of one explorer node: a dot in the field colour (`--field` on
+ * an ancestor), filled when earned, a ring on the page background when ready
+ * next, a pale tint otherwise. It fills the node's box, which `useWebGraph`
+ * sizes for the dot's radius and the zoom, less the pointer padding
+ * (WEB_HIT_PADDING). The Web view draws its dots in the canvas
+ * (`WebGraphDots`), so the explorer shows this skin only while nodes travel
+ * between views. It draws no control and no name, so it is hidden from
+ * assistive technology.
  */
 import type { WebDotState } from './useWebGraph'
 

@@ -996,6 +996,7 @@ describe('Web view', () => {
     await button(wrapper, 'Names').trigger('click')
     // Hold the camera still, so screen places compare directly.
     await wrapper.setProps({ view: { ...wrapper.props('view'), webCamera: { x: 0, y: 0, zoom: 1 } } })
+    vi.runAllTimers()
     const before = { b: place('b'), c: place('c') }
     const start = centre('b')
     const dot = wrapper.get('[data-skill="b"] .map-node').element
@@ -1014,8 +1015,9 @@ describe('Web view', () => {
     await button(wrapper, 'Reset exploration').trigger('click')
     expect(wrapper.emitted('web-reset')).toHaveLength(1)
     expect(wrapper.props('view')).toEqual({ ...initialView(), webNames: true })
-    // Fitted again, the dragged dot is back beside Calculus as laid out.
+    // Fitted again, the dragged dot is back beside Calculus as laid out (its button moved once the zoom's batches ran).
     await wrapper.setProps({ view: { ...wrapper.props('view'), webCamera: { x: 0, y: 0, zoom: 1 } } })
+    vi.runAllTimers()
     expect(place('b')).toEqual(before.b)
     const pending = vi.getTimerCount()
     await button(wrapper, 'Simple').trigger('click')

@@ -113,6 +113,7 @@ export function useExplorerWeb({ input: source, update, dragged, reset: resetOwn
   // by layers of their own, so a camera move re-renders them, not the explorer.
   const lineLayer = { get items() { return active.value ? [graph.lines.value] : [] } }
   const nameLayer = { get items() { return active.value ? [graph.names.value] : [] } }
+  const dotLayer = { get items() { return active.value ? [{ layers: graph.dotLayers.value, selected: graph.selectedDot.value }] : [] } }
   const zoomLayer = { get items() {
     if (!active.value) return []
     const zoom = graph.camera.value.zoom
@@ -142,6 +143,9 @@ export function useExplorerWeb({ input: source, update, dragged, reset: resetOwn
     if (at) update({ webCamera: at })
   }
   watch(() => input().viewMode, publishCamera, { flush: 'sync' })
+  // Leaving Web, the explorer measures the nodes to move them to the next
+  // view: any buttons still waiting to be moved after a zoom are moved first.
+  watch(() => input().viewMode, (mode, before) => { if (before === 'web' && mode !== 'web') graph.flushPlacement() }, { flush: 'sync' })
   onBeforeUnmount(publishCamera)
   /**
    * A view update with the camera a gesture has moved but not yet published.
@@ -217,12 +221,15 @@ export function useExplorerWeb({ input: source, update, dragged, reset: resetOwn
   function focusOut(event: FocusEvent): void { if (active.value) graph.focusOut(event) }
   function wheel(event: WheelEvent): void { if (active.value) graph.wheel(event) }
   function hover(skillId: string | null): void { if (active.value) graph.hover(skillId) }
+  function dotEnter(event: PointerEvent, skillId: string): void { if (active.value) graph.dotEnter(event, skillId) }
+  function dotLeave(event: PointerEvent): void { if (active.value) graph.dotLeave(event) }
+  function pointerLeave(event: PointerEvent): void { if (active.value) graph.pointerLeave(event) }
   function zoom(direction: 1 | -1): void { graph.zoomBy(direction > 0 ? WEB_ZOOM_STEP : 1 / WEB_ZOOM_STEP) }
   function pan(dx: number, dy: number): void { graph.panBy(dx, dy) }
 
   return {
-    active, narrowed, nodes, nodeBoxes, canvasBox, dot, lineLayer, nameLayer, zoomLayer, withPendingCamera,
+    active, narrowed, nodes, nodeBoxes, canvasBox, dot, lineLayer, nameLayer, dotLayer, zoomLayer, withPendingCamera,
     select, focusField, allFields, narrow, depthPatch, fit, reset, zoom, pan,
-    pointerDown, pointerMove, pointerEnd, click, keyDown, keyUp, focusIn, focusOut, wheel, hover,
+    pointerDown, pointerMove, pointerEnd, pointerLeave, click, keyDown, keyUp, focusIn, focusOut, wheel, hover, dotEnter, dotLeave,
   }
 }

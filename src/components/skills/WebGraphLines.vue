@@ -15,7 +15,7 @@ const EMPHASES = ['faded', 'plain', 'lit'] as const
 </script>
 
 <template>
-  <g class="web-lines" :class="{ 'is-compact': compact }" aria-hidden="true">
+  <g class="web-lines web-scaled" :class="{ 'is-compact': compact }" aria-hidden="true">
     <template v-for="emphasis in EMPHASES" :key="emphasis">
       <path v-if="lines.relations[emphasis]" class="web-relation" :class="`is-${emphasis}`" :d="lines.relations[emphasis]" />
       <path v-if="lines.prerequisites[emphasis]" class="web-line" :class="`is-${emphasis}`" :d="lines.prerequisites[emphasis]" />

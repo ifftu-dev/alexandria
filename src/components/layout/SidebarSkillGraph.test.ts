@@ -42,7 +42,7 @@ const shown = (view: VueWrapper) => new Set(dots(view).map(item => item.attribut
 /** Dots whose name shows under them. */
 const named = (view: VueWrapper) => view.findAll('.web-name').length
 const places = (view: VueWrapper) => dots(view).map(item => `${item.attributes('data-skill')} ${item.attributes('style')}`)
-const faded = (view: VueWrapper) => dots(view).filter(item => item.find('.is-faded').exists()).map(item => item.attributes('data-skill'))
+const faded = (view: VueWrapper) => dots(view).filter(item => item.classes('is-faded')).map(item => item.attributes('data-skill'))
 /** Line segments drawn by the paths matching a selector: each starts with a move. */
 const segments = (view: VueWrapper, selector: string) => view.findAll(selector).reduce((sum, path) => sum + (path.attributes('d')?.match(/M/g)?.length ?? 0), 0)
 

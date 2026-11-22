@@ -11,6 +11,7 @@ import { useExplorerWeb } from './useExplorerWeb'
 import WebGraphDot from './WebGraphDot.vue'
 import WebGraphLines from './WebGraphLines.vue'
 import WebGraphNames from './WebGraphNames.vue'
+import WebGraphDots from './WebGraphDots.vue'
 import type { WebPoint } from '@/utils/webGeometry'
 import { animateMotion, motionDuration, useMotion } from '@/composables/useMotion'
 import type { SkillGraphView } from '@/composables/useSkillGraphView'
@@ -717,7 +718,7 @@ function setBloom(event: Event): void {
             </div>
             <!-- One canvas and one element per node in every view: a switch re-skins and moves them. -->
             <div class="atlas-stage">
-            <div ref="mapElement" class="atlas-map" :class="{ 'is-simple': simple, 'is-web': webMode, 'is-switching': switching }" :style="{ height: webMode ? undefined : `${simple ? simpleGeometry.height : height}px`, '--disc-size': `${SIMPLE_DISC_SIZE}px` }" :data-camera="detailedMode ? cameraLabel : undefined" :tabindex="detailedMode ? 0 : undefined" role="group" :aria-label="t('skills.atlas.map')" :aria-describedby="simple ? undefined : `${id}-map-help`" @keydown="keyPan" @keyup="web.keyUp" @focusin="web.focusIn" @focusout="web.focusOut" @wheel="web.wheel" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerEnd" @pointercancel="pointerEnd" @lostpointercapture="pointerEnd" @click.capture="mapClick">
+            <div ref="mapElement" class="atlas-map" :class="{ 'is-simple': simple, 'is-web': webMode, 'is-switching': switching }" :style="{ height: webMode ? undefined : `${simple ? simpleGeometry.height : height}px`, '--disc-size': `${SIMPLE_DISC_SIZE}px` }" :data-camera="detailedMode ? cameraLabel : undefined" :tabindex="detailedMode ? 0 : undefined" role="group" :aria-label="t('skills.atlas.map')" :aria-describedby="simple ? undefined : `${id}-map-help`" @keydown="keyPan" @keyup="web.keyUp" @focusin="web.focusIn" @focusout="web.focusOut" @wheel="web.wheel" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerEnd" @pointercancel="pointerEnd" @lostpointercapture="pointerEnd" @pointerleave="web.pointerLeave" @click.capture="mapClick">
               <svg ref="canvas" class="atlas-canvas" :viewBox="canvasBox.viewBox" :width="canvasBox.width" :height="canvasBox.height">
                 <template v-if="detailedMode">
                   <g v-for="region in layout.regions" :key="region.field.id === null ? 'unassigned' : `field:${region.field.id}`" :style="{ '--field': color(region.field.id) }">
@@ -727,6 +728,7 @@ function setBloom(event: Event): void {
                 </template>
                 <g class="map-edges" aria-hidden="true">
                   <AtlasNodeLayer v-if="webMode" v-slot="{ items }" :source="web.lineLayer"><WebGraphLines v-for="lines in items" :key="0" :lines="lines" /></AtlasNodeLayer>
+                  <AtlasNodeLayer v-if="webMode" v-slot="{ items }" :source="web.dotLayer"><WebGraphDots v-for="drawn in items" :key="0" :layers="drawn.layers" :selected="drawn.selected" /></AtlasNodeLayer>
                   <template v-else>
                     <template v-if="simple"><path class="map-edge map-edge-faded" :d="edgePaths.faded.path" /><path class="map-edge-head map-edge-faded" :d="edgePaths.faded.heads" /></template>
                     <path class="map-edge" :d="edgePaths.plain.path" /><path class="map-edge-head" :d="edgePaths.plain.heads" />
@@ -735,7 +737,7 @@ function setBloom(event: Event): void {
                 </g>
                 <AtlasNodeLayer v-slot="{ items }" :source="nodeLayer">
                   <foreignObject v-for="node in items" :key="node.skill.id" v-memo="[node, nodeBoxes, viewMode, web.dot(node), locale, onScreen(node), node.skill.id === view.selectedSkillId, node.readyNext, bloomMatch(node), dimmed(node), labelQuiet(node), highlightedIds.includes(node.skill.id)]" class="map-node-box" :data-skill="node.skill.id" :x="nodeBoxes.get(node.skill.id)?.x" :y="nodeBoxes.get(node.skill.id)?.y" :width="nodeBoxes.get(node.skill.id)?.width" :height="nodeBoxes.get(node.skill.id)?.height" :style="{ '--field': color(node.fieldId) }">
-                    <button class="map-node" :class="{ 'is-selected': node.skill.id === view.selectedSkillId, 'is-earned': node.status === 'earned', 'is-ready-next': node.readyNext, 'is-bloom-match': bloomMatch(node), 'is-dimmed': dimmed(node), 'is-updated': highlightedIds.includes(node.skill.id) }" type="button" :inert="(detailedMode && !onScreen(node)) || undefined" :tabindex="webMode ? (web.dot(node)?.roving ? 0 : -1) : undefined" :aria-label="nodeText(node).name" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)" @pointerenter="web.hover(node.skill.id)" @pointerleave="web.hover(null)">
+                    <button class="map-node" :class="{ 'is-selected': node.skill.id === view.selectedSkillId, 'is-earned': node.status === 'earned', 'is-ready-next': node.readyNext, 'is-bloom-match': bloomMatch(node), 'is-dimmed': dimmed(node), 'is-updated': highlightedIds.includes(node.skill.id) }" type="button" :inert="(detailedMode && !onScreen(node)) || undefined" :tabindex="webMode ? (web.dot(node)?.roving ? 0 : -1) : undefined" :aria-label="nodeText(node).name" :aria-pressed="node.skill.id === view.selectedSkillId" @click="select(node.skill.id)" @pointerenter="web.dotEnter($event, node.skill.id)" @pointerleave="web.dotLeave($event)">
                       <template v-if="simple">
                         <span class="node-disc" aria-hidden="true">{{ node.status === 'earned' && node.earnedBloom ? node.earnedBloom.rank + 1 : '' }}</span><span class="node-label" :class="{ 'is-label-quiet': labelQuiet(node) }" dir="auto">{{ node.skill.name }}</span>
                       </template>
@@ -916,8 +918,20 @@ function setBloom(event: Event): void {
 .map-node:hover .node-label, .map-node:focus-visible .node-label { opacity: 1; }
 /* Web: the same node elements wear a dot skin, placed in screen pixels on a still canvas; the Web graph takes every gesture. */
 .atlas-map.is-web { height: min(560px, 64vh); touch-action: none; background-image: none; }
-/* A Web node's box is placed and sized by useWebGraph; it lets the pointer through around the dot's button. */
+/*
+ * In Web a node is the dot's transparent button, placed and sized by
+ * useWebGraph; the dot is drawn in the canvas (WebGraphDots). Its skin shows
+ * only while nodes travel between views, when the drawn dots are hidden with
+ * the edges. The box lets the pointer through around the button.
+ */
 .atlas-map.is-web .map-node-box { overflow: visible; pointer-events: none; }
+.atlas-map.is-web:not(.is-switching) .map-node .web-skin { visibility: hidden; }
+/*
+ * The Detailed map's compositor hint costs more than it saves in Web: with
+ * 1,500 node boxes on one composited canvas, every zoom out re-layerizes all
+ * of them (about 35 ms at CI speed). A Web pan is cheap without it.
+ */
+.atlas-map.is-web .atlas-canvas { will-change: auto; }
 .atlas-map.is-web .map-node { pointer-events: auto; }
 .atlas-web-names { position: absolute; top: 0; left: 0; width: 0; height: 0; pointer-events: none; }
 .atlas .atlas-map.is-web .map-node { display: grid; grid-template: 100% / 100%; place-items: center; box-sizing: border-box; width: 100%; height: 100%; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; box-shadow: none; overflow: visible; }

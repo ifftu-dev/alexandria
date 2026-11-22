@@ -73,6 +73,15 @@ test('a 1,500-skill Web view pans and zooms without a main-thread task over 50 m
   // A fitted camera leaves a margin, so a corner is background: dragging it pans.
   const corner = { x: box.x + 8, y: box.y + 8 }
   const startCamera = await map.getAttribute('data-camera')
+  // Clicked by position, found before tracing: a role query, or a locator's
+  // checks before a click, run scripts on the page's main thread (one
+  // computes the accessible name of every dot's button), which is the test's
+  // work, not the app's.
+  const centreOf = async (name: string) => {
+    const button = (await atlas.getByRole('button', { name, exact: true }).boundingBox())!
+    return { x: button.x + button.width / 2, y: button.y + button.height / 2 }
+  }
+  const zoomIn = await centreOf('Zoom in'), zoomOut = await centreOf('Zoom out')
   const tasks = await mainThreadTasks(browser, page, async () => {
     for (const [dx, dy] of [[200, 120], [240, 60], [120, 200]]) {
       await page.mouse.move(corner.x, corner.y)
@@ -80,9 +89,10 @@ test('a 1,500-skill Web view pans and zooms without a main-thread task over 50 m
       await page.mouse.move(corner.x + dx!, corner.y + dy!, { steps: 24 })
       await page.mouse.up()
     }
-    await atlas.getByRole('button', { name: 'Zoom in', exact: true }).click()
-    await atlas.getByRole('button', { name: 'Zoom out', exact: true }).click()
-    await page.evaluate(() => new Promise<void>(resolve => setTimeout(resolve, 250)))
+    await page.mouse.click(zoomIn.x, zoomIn.y)
+    await page.mouse.click(zoomOut.x, zoomOut.y)
+    // Long enough for the dots' buttons to finish moving after the zoom.
+    await page.evaluate(() => new Promise<void>(resolve => setTimeout(resolve, 600)))
   })
   expect(await map.getAttribute('data-camera')).not.toBe(startCamera)
   expect(report('Web pan', tasks, testInfo)).toBeLessThanOrEqual(LONG_TASK_BUDGET_MS)
