@@ -286,7 +286,9 @@ function pull(sim: Simulation, pairs: Int32Array, stiffness: Float64Array, lengt
     const i = pairs[k * 2]!, j = pairs[k * 2 + 1]!
     const dx = x[j]! - x[i]!, dy = y[j]! - y[i]!
     const d = Math.hypot(dx, dy) || 1
-    const scale = Math.min(d - length, WEB_MAX_STRETCH) / d * strength * stiffness[k]! * alpha
+    // Let neighbours follow the pointer across fields. At rest, cap long links to keep fields together.
+    const stretch = sim.pinned[i] || sim.pinned[j] ? d - length : Math.min(d - length, WEB_MAX_STRETCH)
+    const scale = stretch / d * strength * stiffness[k]! * alpha
     vx[i]! += dx * scale; vy[i]! += dy * scale
     vx[j]! -= dx * scale; vy[j]! -= dy * scale
   }

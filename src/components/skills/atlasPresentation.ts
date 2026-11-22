@@ -3,13 +3,13 @@ import { BLOOM_ORDER, type BloomLevel } from '@/utils/bloom'
 import type { AtlasField, AtlasNode } from '@/utils/skillAtlas'
 
 /**
- * Distinct field colours, `--atlas-field-0` to `--atlas-field-7` in
+ * Distinct field colours, `--atlas-field-0` to `--atlas-field-8` in
  * `main.css`, light and dark. A field's colour is its atlas slot modulo this
  * size: slots past the palette wrap around and share a colour. The palette
  * holds at least as many colours as there are bundled fields (a test pins
  * this), so bundling a field beyond it means adding a colour first.
  */
-export const ATLAS_PALETTE_SIZE = 8
+export const ATLAS_PALETTE_SIZE = 9
 
 export function atlasFieldColor(field: Pick<AtlasField, 'id' | 'slot'>): string {
   if (field.id === null || field.slot === null) return 'var(--app-muted-foreground)'

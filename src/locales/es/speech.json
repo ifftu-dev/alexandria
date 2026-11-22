@@ -1,0 +1,22 @@
+{
+  "packs": {
+    "title": "Comprobación de pronunciación",
+    "intro": "Descarga un idioma para comprobar con qué claridad se entiende cada palabra que lees en voz alta. Los paquetes de idioma los comparten todas las personas que usan este dispositivo.",
+    "honesty": "Las comprobaciones se hacen en este dispositivo con modelos Whisper de código abierto, así que las grabaciones nunca salen de él. Estiman con qué claridad se entendió cada palabra, no tu acento.",
+    "loadError": "No se pudieron cargar los paquetes de idioma.",
+    "error": "Algo salió mal: {error}",
+    "installed": "Instalado",
+    "download": "Descargar",
+    "add": "Añadir",
+    "remove": "Quitar",
+    "downloading": "Descargando, {percent} %",
+    "megabytes": "{value} MB",
+    "enhancedName": "Inglés mejorado",
+    "enhancedHint": "Comprobaciones de inglés más precisas, descarga más grande",
+    "sharedTitle": "Otros idiomas",
+    "sharedMissing": "Estos idiomas comparten un modelo. El primero descarga {size}; añadir más después es instantáneo.",
+    "sharedPresent": "El modelo compartido ({size}) ya está en este dispositivo. Añadir un idioma es instantáneo, y quitar uno conserva el modelo mientras otro idioma lo use.",
+    "sharedWith": "{size}, compartido con {languages}",
+    "limited": "A menudo falla por ahora"
+  }
+}

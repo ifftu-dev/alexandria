@@ -1,0 +1,6 @@
+/target
+# The compiled .wasm in dist/ IS checked in (parent .gitignore would
+# otherwise drop it because of the Vue build output convention). The
+# negation here makes the policy explicit.
+!dist/
+!dist/**

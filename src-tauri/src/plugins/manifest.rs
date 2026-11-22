@@ -84,6 +84,12 @@ pub fn validate(manifest: &PluginManifest) -> Result<(), String> {
     // We don't reject the manifest here — the *load* path is the
     // right place to decide what a Phase-1 host will actually run.
 
+    if manifest.authoring
+        && (manifest.kinds != [PluginKind::Interactive] || manifest.grader.is_some())
+    {
+        return Err("visual authoring requires an interactive-only plugin".into());
+    }
+
     // Platforms must be a subset of the known set.
     for p in &manifest.platforms {
         if !matches!(
@@ -119,6 +125,10 @@ pub fn validate(manifest: &PluginManifest) -> Result<(), String> {
             return Err(format!("duplicate dependency declared: {dep}"));
         }
     }
+
+    // Settings: bounded, uniquely keyed, defaults within their own rules.
+    // Unknown setting types parse (forward compatibility) and are skipped.
+    crate::plugins::settings::validate_specs(&manifest.settings)?;
 
     // Entry path must be relative, no traversal. This is re-checked
     // at the asset-protocol layer too, but fail early on install.

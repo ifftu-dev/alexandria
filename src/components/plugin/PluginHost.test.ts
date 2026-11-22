@@ -74,3 +74,20 @@ it('in a hosted attempt hands the submission to the page and grades, stores and 
   expect(announced).not.toHaveBeenCalled()
   wrapper.unmount()
 })
+
+it('routes public configuration only to the visual authoring editor', async () => {
+  backend(async () => null)
+  const configuration = { preset: 'arm-raise' }
+  invoke.mockImplementation(async command => {
+    if (command === 'plugin_get_manifest') return { ...manifest, authoring: true, kinds: ['interactive'], grader: null }
+    if (command === 'plugin_list' || command === 'plugin_list_permissions') return []
+    return null
+  })
+  for (const mode of ['learn', 'author'] as const) {
+    const wrapper = mount(PluginHost, { props: { element, mode }, global: { mocks: { $t: (key: string) => key } } })
+    await flushPromises()
+    wrapper.findComponent(PluginIframe).vm.$emit('emit-event', 3, 'author_config', configuration)
+    expect(wrapper.emitted('author-config')).toEqual(mode === 'author' ? [[JSON.stringify(configuration)]] : undefined)
+    wrapper.unmount()
+  }
+})

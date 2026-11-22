@@ -49,12 +49,12 @@ const segments = (view: VueWrapper, selector: string) => view.findAll(selector).
 it('draws the graph behind one Tab stop with the presenter\'s names; refreshes on evidence, not on navigation', async () => {
   const { backend, wrapper, router, profiles, announceCredentialsChanged } = await setup()
   expect(graph(wrapper).attributes('aria-label')).toBe('Your skill web')
-  expect(dots(wrapper)).toHaveLength(103)
+  expect(dots(wrapper)).toHaveLength(113)
   const stops = wrapper.findAll('[data-skill]').filter(item => item.attributes('tabindex') === '0')
   expect(stops).toHaveLength(1)
   expect(dot(wrapper, BIG_O).attributes('aria-pressed')).toBe('false')
   expect(wrapper.text()).toContain('Computer Science')
-  expect(wrapper.text()).toContain('1 earned · 102 Ready · 103 loaded skills')
+  expect(wrapper.text()).toContain('1 earned · 112 Ready · 113 loaded skills')
   expect(wrapper.text()).not.toContain('Locked')
   expect(wrapper.text()).not.toContain('Showing')
   const before = backend.state.reads
@@ -73,7 +73,7 @@ it('draws the graph behind one Tab stop with the presenter\'s names; refreshes o
   expect(backend.state.reads).toBe(before + 1)
   announceCredentialsChanged()
   await flushPromises()
-  expect(wrapper.text()).toContain('0 earned · 103 Ready · 103 loaded skills')
+  expect(wrapper.text()).toContain('0 earned · 113 Ready · 113 loaded skills')
   expect(backend.state.reads).toBe(before + 2)
   await profiles.lockProfile()
   await flushPromises()
@@ -109,7 +109,7 @@ it('selects a clicked dot in place and captions it with Open skill and Expand, w
   element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
   await flushPromises()
   expect(atlas.modalView.value.selectedSkillId).toBeNull()
-  expect(caption().text()).toContain('1 earned · 102 Ready · 103 loaded skills')
+  expect(caption().text()).toContain('1 earned · 112 Ready · 113 loaded skills')
 })
 
 it('follows the Names, Arrows and Related toggles set in the expanded graph, and keeps its own camera', async () => {
@@ -121,7 +121,7 @@ it('follows the Names, Arrows and Related toggles set in the expanded graph, and
   const before = places(wrapper)
   atlas.updateView('modal', { webNames: true, webArrows: true, webRelated: false, webCamera: { x: 0, y: 0, zoom: 4 } })
   await flushPromises()
-  expect(named(wrapper)).toBe(103)
+  expect(named(wrapper)).toBe(113)
   expect(segments(wrapper, '.web-head')).toBeGreaterThan(0)
   expect(segments(wrapper, '.web-relation')).toBe(0)
   // The expanded graph's camera is its own: nothing moved here.
@@ -225,5 +225,5 @@ it('keeps the loading, empty and error states, and retry draws the graph', async
   answer!()
   await flushPromises()
   expect(wrapper.find('[role="alert"]').exists()).toBe(false)
-  expect(dots(wrapper)).toHaveLength(103)
+  expect(dots(wrapper)).toHaveLength(113)
 })

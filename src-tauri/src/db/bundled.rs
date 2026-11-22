@@ -42,7 +42,7 @@ const PUBLIC_TAXONOMY_JSON: &str = include_str!("../../../bootstrap/public_taxon
 /// Revision of the bundled taxonomy as an exchanged snapshot. Bump it, and the
 /// exporter example in `alexandria-learning-contracts`, whenever bundled
 /// skills or prerequisites change: the digest changes with them.
-pub(crate) const TAXONOMY_SNAPSHOT_REVISION: &str = "bundled-v2";
+pub(crate) const TAXONOMY_SNAPSHOT_REVISION: &str = "bundled-v3";
 
 /// The bundled taxonomy as the snapshot organisations and optional AI checks
 /// pin by digest, bound to this build's network.
@@ -293,7 +293,17 @@ INSERT OR IGNORE INTO question_banks (id, skill_id, label, pass_threshold, draw_
   ('qb_stakeholder_comm', 'skill_stakeholder_comm', 'Stakeholder communication', 0.7, 3, 'bundled', 1),
   ('qb_conflict_resolution', 'skill_conflict_resolution', 'Conflict resolution', 0.7, 3, 'bundled', 1),
   ('qb_decision_making', 'skill_decision_making', 'Decision making', 0.7, 3, 'bundled', 1),
-  ('qb_change_management', 'skill_change_management', 'Leading change', 0.7, 3, 'bundled', 1);
+  ('qb_change_management', 'skill_change_management', 'Leading change', 0.7, 3, 'bundled', 1),
+  ('qb_english_alphabet', 'skill_english_alphabet', 'English alphabet and phonics', 0.7, 3, 'bundled', 1),
+  ('qb_english_vocabulary', 'skill_english_vocabulary', 'Everyday English vocabulary', 0.7, 3, 'bundled', 1),
+  ('qb_english_reading', 'skill_english_reading', 'Reading simple English', 0.7, 3, 'bundled', 1),
+  ('qb_english_sentence_structure', 'skill_english_sentence_structure', 'English sentence structure', 0.7, 3, 'bundled', 1),
+  ('qb_english_articles', 'skill_english_articles', 'English articles', 0.7, 3, 'bundled', 1),
+  ('qb_english_tenses', 'skill_english_tenses', 'English verb tenses', 0.7, 3, 'bundled', 1),
+  ('qb_english_prepositions', 'skill_english_prepositions', 'English prepositions', 0.7, 3, 'bundled', 1),
+  ('qb_english_writing', 'skill_english_writing', 'Writing everyday English', 0.7, 3, 'bundled', 1),
+  ('qb_english_pronunciation', 'skill_english_pronunciation', 'English pronunciation', 0.7, 3, 'bundled', 1),
+  ('qb_english_conversation', 'skill_english_conversation', 'Everyday English conversation', 0.7, 3, 'bundled', 1);
 
 WITH bundled(id, bank_id, prompt, options, correct_indices, difficulty, points) AS (VALUES
   ('bq_js1', 'qb_js', 'Which keyword declares a block-scoped variable?',
@@ -415,7 +425,87 @@ WITH bundled(id, bank_id, prompt, options, correct_indices, difficulty, points) 
   ('bq_change_management3', 'qb_change_management', 'Which help a change stick?',
     '["Early involvement of the people affected", "Visible quick wins", "Announcing it once and moving on", "Updating processes and incentives to match"]', '[0,1,3]', 2, 1.0),
   ('bq_change_management4', 'qb_change_management', 'You announced a reorg by email and people are anxious. A better next step is:',
-    '["Send a longer email", "Hold conversations where people can ask what it means for them", "Wait for the anxiety to pass", "Reverse the reorg"]', '[1]', 2, 1.0)
+    '["Send a longer email", "Hold conversations where people can ask what it means for them", "Wait for the anxiety to pass", "Reverse the reorg"]', '[1]', 2, 1.0),
+  ('bq_english_alphabet1', 'qb_english_alphabet', 'Which is the small (lower-case) form of the letter G?',
+    '["q", "g", "j", "p"]', '[1]', 1, 1.0),
+  ('bq_english_alphabet2', 'qb_english_alphabet', 'How many letters are in the English alphabet?',
+    '["24", "26", "28", "52"]', '[1]', 1, 1.0),
+  ('bq_english_alphabet3', 'qb_english_alphabet', 'Which words have the same vowel sound as see?',
+    '["tea", "key", "bed", "sheep"]', '[0,1,3]', 2, 1.0),
+  ('bq_english_alphabet4', 'qb_english_alphabet', 'In the word knife, which letter is silent?',
+    '["n", "i", "k", "f"]', '[2]', 2, 1.0),
+  ('bq_english_vocabulary1', 'qb_english_vocabulary', 'Which day comes after Tuesday?',
+    '["Monday", "Thursday", "Wednesday", "Sunday"]', '[2]', 1, 1.0),
+  ('bq_english_vocabulary2', 'qb_english_vocabulary', 'Your father''s sister is your:',
+    '["aunt", "niece", "cousin", "grandmother"]', '[0]', 1, 1.0),
+  ('bq_english_vocabulary3', 'qb_english_vocabulary', 'Which are things you can eat?',
+    '["bread", "rice", "chair", "apple"]', '[0,1,3]', 1, 1.0),
+  ('bq_english_vocabulary4', 'qb_english_vocabulary', 'Someone helps you carry a heavy bag. What do you say?',
+    '["Sorry", "Thank you", "Excuse me", "Goodbye"]', '[1]', 1, 1.0),
+  ('bq_english_reading1', 'qb_english_reading', 'A shop sign says: Open 9 am to 6 pm, closed on Sundays. When can you visit?',
+    '["Sunday at 10 am", "Monday at 8 pm", "Saturday at 11 am", "Every day at 7 am"]', '[2]', 1, 1.0),
+  ('bq_english_reading2', 'qb_english_reading', 'A message says: I will be late, the bus is stuck in traffic. Why is the writer late?',
+    '["They woke up late", "Their bus is delayed by traffic", "They missed the bus", "They are ill"]', '[1]', 1, 1.0),
+  ('bq_english_reading3', 'qb_english_reading', 'A form asks for your Date of Birth. What should you write?',
+    '["Today''s date", "The day you were born", "Your age", "Your address"]', '[1]', 1, 1.0),
+  ('bq_english_reading4', 'qb_english_reading', 'Read: Riya finished her work early, so she went to the market and bought vegetables. What did Riya do first?',
+    '["She went to the market", "She bought vegetables", "She finished her work", "She cooked dinner"]', '[2]', 2, 1.0),
+  ('bq_english_sentence_structure1', 'qb_english_sentence_structure', 'Which sentence has the correct English word order?',
+    '["I tea drink.", "I drink tea.", "Tea I drink.", "Drink I tea."]', '[1]', 1, 1.0),
+  ('bq_english_sentence_structure2', 'qb_english_sentence_structure', 'Choose the correct question.',
+    '["Where you live?", "Where do you live?", "Where you do live?", "You live where do?"]', '[1]', 2, 1.0),
+  ('bq_english_sentence_structure3', 'qb_english_sentence_structure', 'Choose the correct negative sentence.',
+    '["She not likes coffee.", "She doesn''t likes coffee.", "She doesn''t like coffee.", "She no like coffee."]', '[2]', 2, 1.0),
+  ('bq_english_sentence_structure4', 'qb_english_sentence_structure', 'Which sentences are correct?',
+    '["They are students.", "He is a doctor.", "I am happy.", "She are my sister."]', '[0,1,2]', 2, 1.0),
+  ('bq_english_articles1', 'qb_english_articles', 'I saw ___ elephant at the zoo.',
+    '["a", "an", "the", "no article"]', '[1]', 1, 1.0),
+  ('bq_english_articles2', 'qb_english_articles', 'Please close ___ door. (There is only one door in the room.)',
+    '["a", "an", "the", "no article"]', '[2]', 1, 1.0),
+  ('bq_english_articles3', 'qb_english_articles', 'Which need the article an?',
+    '["umbrella", "hour", "university", "orange"]', '[0,1,3]', 3, 1.0),
+  ('bq_english_articles4', 'qb_english_articles', 'Choose the correct sentence.',
+    '["He is engineer.", "He is an engineer.", "He is the engineer of.", "He is a engineer."]', '[1]', 2, 1.0),
+  ('bq_english_tenses1', 'qb_english_tenses', 'Choose the correct sentence.',
+    '["I am knowing the answer.", "I know the answer.", "I knowing the answer.", "I am know the answer."]', '[1]', 2, 1.0),
+  ('bq_english_tenses2', 'qb_english_tenses', 'Yesterday I ___ to the market.',
+    '["go", "goed", "went", "have gone"]', '[2]', 1, 1.0),
+  ('bq_english_tenses3', 'qb_english_tenses', 'Which sentence fits: I lost my keys and still cannot find them.',
+    '["I have lost my keys.", "I lose my keys.", "I am losing my keys yesterday.", "I will lost my keys."]', '[0]', 3, 1.0),
+  ('bq_english_tenses4', 'qb_english_tenses', 'Look! It ___ outside.',
+    '["rains", "is raining", "rained", "has rain"]', '[1]', 2, 1.0),
+  ('bq_english_prepositions1', 'qb_english_prepositions', 'The meeting is ___ Monday.',
+    '["in", "on", "at", "to"]', '[1]', 1, 1.0),
+  ('bq_english_prepositions2', 'qb_english_prepositions', 'The book is ___ the table.',
+    '["on", "at", "of", "to"]', '[0]', 1, 1.0),
+  ('bq_english_prepositions3', 'qb_english_prepositions', 'Which are correct?',
+    '["at 7 o''clock", "in July", "on 15 August", "in Monday"]', '[0,1,2]', 2, 1.0),
+  ('bq_english_prepositions4', 'qb_english_prepositions', 'She lives ___ Delhi.',
+    '["on", "at", "in", "to"]', '[2]', 1, 1.0),
+  ('bq_english_writing1', 'qb_english_writing', 'Which sentence is written correctly?',
+    '["my name is amit.", "My name is Amit.", "My Name Is Amit", "my name is Amit"]', '[1]', 1, 1.0),
+  ('bq_english_writing2', 'qb_english_writing', 'Which is the best subject line for an email asking for two days of leave?',
+    '["Hi", "Leave request: 12-13 March", "Urgent!!!", "Please read"]', '[1]', 1, 1.0),
+  ('bq_english_writing3', 'qb_english_writing', 'Which are clear, natural phrases for a work email?',
+    '["Could you please send the report by Friday?", "Please let me know if you have any questions.", "Kindly do the needful.", "Thank you for your help."]', '[0,1,3]', 2, 1.0),
+  ('bq_english_writing4', 'qb_english_writing', 'Which sentence is correct?',
+    '["We discussed about the plan.", "We discussed the plan.", "We discuss about plan.", "We discussing the plan."]', '[1]', 2, 1.0),
+  ('bq_english_pronunciation1', 'qb_english_pronunciation', 'Which pair differs only in the first sound, v versus w?',
+    '["vet / wet", "ship / sheep", "thin / tin", "bed / bad"]', '[0]', 1, 1.0),
+  ('bq_english_pronunciation2', 'qb_english_pronunciation', 'Which syllable is stressed in the word photograph?',
+    '["PHO-to-graph", "pho-TO-graph", "pho-to-GRAPH", "All syllables equally"]', '[0]', 2, 1.0),
+  ('bq_english_pronunciation3', 'qb_english_pronunciation', 'Which words start with the soft th sound of think (tongue between the teeth, no voice)?',
+    '["thin", "three", "this", "thank"]', '[0,1,3]', 3, 1.0),
+  ('bq_english_pronunciation4', 'qb_english_pronunciation', 'In the word banana, the first and last a are usually said as:',
+    '["A long aa, as in car", "A short, weak uh sound (schwa)", "The letter name A", "Silent"]', '[1]', 2, 1.0),
+  ('bq_english_conversation1', 'qb_english_conversation', 'Someone says: Nice to meet you. A natural reply is:',
+    '["Nice to meet you too.", "Yes, I am meeting.", "Thank you, sorry.", "Same to same."]', '[0]', 1, 1.0),
+  ('bq_english_conversation2', 'qb_english_conversation', 'You want directions to the station. What is the most polite way to ask?',
+    '["Tell me the station.", "Station where?", "Excuse me, could you tell me the way to the station?", "You know station?"]', '[2]', 1, 1.0),
+  ('bq_english_conversation3', 'qb_english_conversation', 'You did not hear what someone said. Which are polite things to say?',
+    '["Sorry, could you repeat that?", "Pardon?", "What?!", "Could you say that more slowly, please?"]', '[0,1,3]', 2, 1.0),
+  ('bq_english_conversation4', 'qb_english_conversation', 'You answer a work phone call. What is a good way to start?',
+    '["Hello, this is Priya speaking. How can I help?", "Who is this?", "Yes, tell.", "Speak."]', '[0]', 1, 1.0)
 )
 INSERT OR IGNORE INTO assessment_items
   (id, item_kind, skill_id, content_public, grader_private,
@@ -473,6 +563,16 @@ UPDATE skills SET synonyms = 'stakeholders,stakeholder management,communication,
 UPDATE skills SET synonyms = 'conflict,conflicts,disagreement,difficult conversations,negotiation,mediation' WHERE id = 'skill_conflict_resolution';
 UPDATE skills SET synonyms = 'decisions,make decisions,decision making,leadership,leader' WHERE id = 'skill_decision_making';
 UPDATE skills SET synonyms = 'change management,lead change,leading change,reorg,reorganization,reorganisation,transformation' WHERE id = 'skill_change_management';
+UPDATE skills SET synonyms = 'english alphabet,abc,phonics,english letters,spelling' WHERE id = 'skill_english_alphabet';
+UPDATE skills SET synonyms = 'english vocabulary,english words,word power' WHERE id = 'skill_english_vocabulary';
+UPDATE skills SET synonyms = 'english reading,read english,reading comprehension' WHERE id = 'skill_english_reading';
+UPDATE skills SET synonyms = 'english grammar,grammar,sentence formation,sentence structure' WHERE id = 'skill_english_sentence_structure';
+UPDATE skills SET synonyms = 'articles,a an the,determiners' WHERE id = 'skill_english_articles';
+UPDATE skills SET synonyms = 'tenses,english tenses,verb tenses' WHERE id = 'skill_english_tenses';
+UPDATE skills SET synonyms = 'prepositions,english prepositions' WHERE id = 'skill_english_prepositions';
+UPDATE skills SET synonyms = 'english writing,written english,write english,email writing,written communication,business writing' WHERE id = 'skill_english_writing';
+UPDATE skills SET synonyms = 'pronunciation,accent,accent training,neutral accent,phonetics,diction' WHERE id = 'skill_english_pronunciation';
+UPDATE skills SET synonyms = 'spoken english,english speaking,speak english,fluent english,english fluency,english communication,verbal communication' WHERE id = 'skill_english_conversation';
 "#;
 
 /// Bundled goal templates mapping exams, curricula and job roles onto
@@ -517,12 +617,16 @@ INSERT OR REPLACE INTO goal_templates (id, kind, key, label, board, grade, skill
    '["skill_prioritization","skill_goal_setting","skill_stakeholder_comm","skill_decision_making","skill_user_research"]', 'bundled', 1),
   ('gt_role_eng_dir', 'job_role', 'engineering_director', 'Engineering Director', NULL, NULL,
    '["skill_goal_setting","skill_decision_making","skill_change_management","skill_stakeholder_comm","skill_hiring_interviews","skill_performance_reviews"]', 'bundled', 1),
+  ('gt_role_support', 'job_role', 'customer_support_associate', 'Customer Support Associate', NULL, NULL,
+   '["skill_english_conversation","skill_english_pronunciation","skill_english_writing","skill_english_tenses","skill_english_vocabulary"]', 'bundled', 1),
 
   -- Additional exams
   ('gt_exam_gate', 'exam', 'gate_cse', 'GATE — Computer Science', NULL, NULL,
    '["skill_big_o","skill_arrays","skill_graphs","skill_dp","skill_logic"]', 'bundled', 1),
   ('gt_exam_gre', 'exam', 'gre', 'GRE (General)', NULL, NULL,
    '["skill_logic","skill_probability","skill_combinatorics"]', 'bundled', 1),
+  ('gt_exam_ielts', 'exam', 'ielts', 'IELTS (English test)', NULL, NULL,
+   '["skill_english_reading","skill_english_writing","skill_english_conversation","skill_english_pronunciation","skill_english_tenses","skill_english_vocabulary"]', 'bundled', 1),
   ('gt_exam_upsc', 'exam', 'upsc_prelims', 'UPSC Civil Services (Prelims)', NULL, NULL,
    '["skill_constitutional_literacy","skill_federalism_vs_centralism","skill_public_finance_literacy","skill_media_literacy_political"]', 'bundled', 1),
 
@@ -811,6 +915,7 @@ mod tests {
             ("sf_leadership", 5),
             ("sf_math", 6),
             ("sf_web", 7),
+            ("sf_languages", 8),
         ]
         .map(|(id, slot)| (id.to_string(), slot));
         assert_eq!(slots, expected);

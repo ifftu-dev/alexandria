@@ -1,0 +1,22 @@
+{
+  "packs": {
+    "title": "Vérification de la prononciation",
+    "intro": "Téléchargez une langue pour vérifier avec quelle clarté chaque mot que vous lisez à voix haute est perçu. Les packs de langue sont partagés par toutes les personnes qui utilisent cet appareil.",
+    "honesty": "Les vérifications se font sur cet appareil avec des modèles Whisper open source : vos enregistrements ne le quittent jamais. Elles estiment la clarté de chaque mot, pas votre accent.",
+    "loadError": "Impossible de charger les packs de langue.",
+    "error": "Un problème est survenu : {error}",
+    "installed": "Installé",
+    "download": "Télécharger",
+    "add": "Ajouter",
+    "remove": "Supprimer",
+    "downloading": "Téléchargement, {percent} %",
+    "megabytes": "{value} Mo",
+    "enhancedName": "Anglais amélioré",
+    "enhancedHint": "Vérifications de l’anglais plus précises, téléchargement plus lourd",
+    "sharedTitle": "Autres langues",
+    "sharedMissing": "Ces langues partagent un même modèle. La première demande un téléchargement de {size} ; ajouter les suivantes est instantané.",
+    "sharedPresent": "Le modèle partagé ({size}) est sur cet appareil. Ajouter une langue est instantané, et en supprimer une conserve le modèle tant qu’une autre langue l’utilise.",
+    "sharedWith": "{size}, partagé avec {languages}",
+    "limited": "Souvent erroné pour l’instant"
+  }
+}

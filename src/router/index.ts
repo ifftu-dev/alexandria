@@ -438,8 +438,11 @@ const router = createRouter({
     },
 
     // Settings — full-page, section-deep-linkable (/settings/:section).
+    // `/settings/plugins/:cid` renders one plugin's settings page inside the
+    // same shell (one route record, so the Settings page and its search stay
+    // mounted when opening a plugin).
     {
-      path: '/settings/:section?',
+      path: '/settings/:section?/:cid?',
       name: 'settings',
       component: () => import('@/pages/Settings.vue'),
       meta: { layout: 'app' },

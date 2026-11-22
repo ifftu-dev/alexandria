@@ -111,6 +111,9 @@ pub struct DocumentElement {
     /// BLAKE3 hash of the element content blob (video, PDF, package
     /// archive, etc.).
     pub content_hash: Option<String>,
+    /// Interactive plugin that consumes the public configuration in content_hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_cid: Option<String>,
     /// Duration in seconds (for video/audio elements).
     pub duration_seconds: Option<i64>,
     /// Optional timestamp-based chapter markers for video elements.
@@ -222,6 +225,7 @@ mod tests {
                     element_type: "text".into(),
                     content_hash: Some("hash1".into()),
                     duration_seconds: None,
+                    plugin_cid: None,
                     video_chapters: vec![],
                 }],
             }],
@@ -299,6 +303,7 @@ mod tests {
                     element_type: "video".into(),
                     content_hash: Some("hash".into()),
                     duration_seconds: Some(300),
+                    plugin_cid: None,
                     video_chapters: vec![VideoChapter {
                         title: "Intro".into(),
                         start_seconds: 0,
@@ -312,6 +317,7 @@ mod tests {
                     element_type: "assessment".into(),
                     content_hash: None,
                     duration_seconds: None,
+                    plugin_cid: None,
                     video_chapters: vec![],
                 },
             ],

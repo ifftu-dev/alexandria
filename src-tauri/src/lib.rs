@@ -37,6 +37,7 @@ pub mod ratelimit;
 pub mod record_sending;
 pub mod sentinel;
 pub mod settings;
+pub mod speech;
 pub mod studio;
 pub mod tutoring;
 pub(crate) mod vocabulary;
@@ -1667,6 +1668,11 @@ pub fn run() {
             commands::settings::list_settings,
             commands::settings::set_setting,
             commands::settings::reset_setting,
+            // Pronunciation-check language packs (device-wide)
+            commands::speech::speech_packs_list,
+            commands::speech::speech_pack_install,
+            commands::speech::speech_pack_remove,
+            commands::speech::speech_check,
             // Profile lifecycle (multi-user)
             commands::profile::list_profiles,
             commands::profile::get_active_profile_id,
@@ -2220,6 +2226,10 @@ pub fn run() {
             commands::plugins::plugin_uninstall,
             commands::plugins::plugin_list,
             commands::plugins::plugin_get_manifest,
+            commands::plugins::plugin_get_settings,
+            commands::plugins::plugin_set_setting,
+            commands::plugins::plugin_reset_settings,
+            commands::plugins::plugin_settings_index,
             commands::plugins::plugin_list_dependencies,
             commands::plugins::plugin_save_element_state,
             commands::plugins::plugin_load_element_state,

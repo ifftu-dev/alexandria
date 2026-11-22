@@ -76,6 +76,7 @@ pub mod sentinel_processes;
 pub mod settings;
 pub mod skill_bootstrap;
 pub mod snapshot;
+pub mod speech;
 pub mod talent_index;
 pub mod taxonomy;
 pub mod updater;

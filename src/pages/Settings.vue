@@ -30,6 +30,7 @@ import RelayManager from '@/components/settings/RelayManager.vue'
 import UpdatePanel from '@/components/settings/UpdatePanel.vue'
 import NotificationsPanel from '@/components/settings/NotificationsPanel.vue'
 import PluginsPanel from '@/components/settings/PluginsPanel.vue'
+import PluginSettingsView from '@/components/settings/PluginSettingsView.vue'
 import GuardianPanel from '@/components/settings/GuardianPanel.vue'
 import OrganisationsSettings from '@/components/organisations/OrganisationsSettings.vue'
 import CloudOriginField from '@/components/settings/CloudOriginField.vue'
@@ -37,7 +38,9 @@ import IntegrityHistorySection from '@/components/integrity/IntegrityHistorySect
 import AssistantAccessPanel from '@/components/settings/AssistantAccessPanel.vue'
 import LanguageSelector from '@/components/settings/LanguageSelector.vue'
 import type { SettingsSectionId } from '@/composables/useSettingsModal'
-import type { Identity, SeedCatalog } from '@/types'
+import type { Identity, PluginSettingsIndexEntry, SeedCatalog } from '@/types'
+import { matchesAllTerms, searchPlugins, searchTerms, type PluginSearchResult } from '@/utils/settingsSearch'
+import { pluginMonogram, pluginThumbGradient } from '@/utils/pluginThumb'
 
 const { t } = useI18n()
 const { invoke } = useLocalApi()
@@ -114,13 +117,41 @@ function themeLabel(opt: 'light' | 'dark' | 'system'): string {
 // ---- Search ----
 const searchQuery = ref('')
 const filteredSections = computed<SectionMeta[]>(() => {
-  const q = searchQuery.value.trim().toLowerCase()
-  if (!q) return SECTIONS.value
-  return SECTIONS.value.filter((s) => {
-    const hay = [s.label, s.desc, ...s.keywords].join(' ').toLowerCase()
-    return q.split(/\s+/).every((term) => hay.includes(term))
-  })
+  const terms = searchTerms(searchQuery.value)
+  if (!terms.length) return SECTIONS.value
+  return SECTIONS.value.filter((s) => matchesAllTerms([s.label, s.desc, ...s.keywords], terms))
 })
+
+// Installed plugins and their manifest-declared settings join the search.
+// The index is reloaded each time a search starts, so a plugin installed or
+// renamed since the page opened is found.
+const pluginIndex = ref<PluginSettingsIndexEntry[]>([])
+const pluginThumbs = ref<Record<string, string>>({})
+async function loadPluginIndex() {
+  try {
+    pluginIndex.value = await invoke<PluginSettingsIndexEntry[]>('plugin_settings_index')
+  } catch {
+    pluginIndex.value = []
+  }
+}
+const pluginResults = computed<PluginSearchResult[]>(() => searchPlugins(pluginIndex.value, searchQuery.value))
+watch(() => searchQuery.value.trim() !== '', (searching) => {
+  if (searching) void loadPluginIndex()
+})
+watch(pluginResults, async (results) => {
+  for (const r of results) {
+    if (!r.icon_path || r.plugin_cid in pluginThumbs.value) continue
+    pluginThumbs.value = { ...pluginThumbs.value, [r.plugin_cid]: '' }
+    const url = await invoke<string>('plugin_read_asset_data_url', { pluginCid: r.plugin_cid, path: r.icon_path }).catch(() => '')
+    if (url) pluginThumbs.value = { ...pluginThumbs.value, [r.plugin_cid]: url }
+  }
+})
+const searchHasResults = computed(() => filteredSections.value.length > 0 || pluginResults.value.length > 0)
+
+/** Open a plugin's settings page, scrolled to one setting when given. */
+function openPluginSettings(cid: string, settingKey: string | null) {
+  void router.push({ path: `/settings/plugins/${cid}`, query: settingKey ? { setting: settingKey } : {} })
+}
 
 /** Per-section match terms shown as chips under a section in search mode,
  *  so the user sees WHY a section matched (e.g. searching "touch id" under
@@ -134,7 +165,12 @@ function matchedKeywords(s: SectionMeta): string[] {
 
 function onSearchEnter() {
   const first = filteredSections.value[0]
-  if (first) setSection(first.id)
+  if (first) {
+    setSection(first.id)
+    return
+  }
+  const plugin = pluginResults.value[0]
+  if (plugin) openPluginSettings(plugin.plugin_cid, plugin.target_setting)
 }
 
 // Active section is driven by the route param so settings is deep-linkable
@@ -147,9 +183,16 @@ const activeSection = computed<SettingsSectionId>(() => {
 })
 
 function setSection(id: SettingsSectionId) {
-  if (route.params.section === id) return
+  if (route.params.section === id && !activePluginCid.value) return
   void router.push(`/settings/${id}`)
 }
+
+/** `/settings/plugins/:cid` — one plugin's settings page inside the shell. */
+const activePluginCid = computed<string | null>(() =>
+  activeSection.value === 'plugins' && typeof route.params.cid === 'string' && route.params.cid
+    ? route.params.cid
+    : null,
+)
 
 const showingSection = computed(() => typeof route.params.section === 'string' && SECTION_IDS.includes(route.params.section as SettingsSectionId))
 const contentScroll = ref<HTMLElement | null>(null)
@@ -158,7 +201,7 @@ const navigationHeading = ref<HTMLElement | null>(null)
 // The new section settles in where the old one stood; focus and scroll
 // never wait for it.
 const settleSection = useSettleIn()
-watch(() => route.params.section, async () => {
+watch(() => [route.params.section, route.params.cid], async () => {
   await nextTick()
   contentScroll.value?.scrollTo?.({ top: 0 })
   if (showingSection.value) sectionHeading.value?.focus({ preventScroll: true })
@@ -536,7 +579,7 @@ function onSectionClick(id: SettingsSectionId) {
               </div>
 
               <nav class="min-h-0 flex-1 overflow-y-auto px-3 pb-4 md:px-2" :aria-label="$t('settings.nav.heading')">
-                <p v-if="filteredSections.length === 0" class="px-3 py-4 text-xs text-muted-foreground">
+                <p v-if="!searchHasResults" class="px-3 py-4 text-xs text-muted-foreground">
                   {{ $t('settings.nav.noMatch', { query: searchQuery }) }}
                 </p>
                 <button
@@ -565,13 +608,56 @@ function onSectionClick(id: SettingsSectionId) {
                   </span>
                   <svg class="h-4 w-4 shrink-0 text-muted-foreground md:hidden rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
                 </button>
+
+                <!-- Search mode: installed plugins and their settings -->
+                <div v-if="pluginResults.length" role="group" aria-labelledby="settings-plugin-results" class="mt-2">
+                  <p id="settings-plugin-results" class="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {{ $t('settings.nav.sections.plugins.label') }}
+                  </p>
+                  <div v-for="r in pluginResults" :key="r.plugin_cid">
+                    <button
+                      class="settings-nav-item pressable selection-indicator"
+                      :class="{ 'settings-nav-item--active': activePluginCid === r.plugin_cid }"
+                      :aria-current="activePluginCid === r.plugin_cid ? 'page' : undefined"
+                      @click="openPluginSettings(r.plugin_cid, r.target_setting)"
+                    >
+                      <span
+                        class="settings-nav-icon settings-plugin-thumb"
+                        aria-hidden="true"
+                        :style="pluginThumbs[r.plugin_cid] ? undefined : { background: pluginThumbGradient(r.plugin_cid) }"
+                      >
+                        <img v-if="pluginThumbs[r.plugin_cid]" :src="pluginThumbs[r.plugin_cid]" alt="" class="h-full w-full object-cover">
+                        <span v-else>{{ pluginMonogram(r.name) }}</span>
+                      </span>
+                      <span class="flex flex-1 flex-col text-start min-w-0">
+                        <span class="text-sm font-medium truncate">{{ r.name }}</span>
+                        <span v-if="r.description" class="mt-1 text-xs leading-relaxed text-muted-foreground md:truncate md:text-[11px]">{{ r.description }}</span>
+                      </span>
+                      <svg class="h-4 w-4 shrink-0 text-muted-foreground md:hidden rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="m9 5 7 7-7 7" /></svg>
+                    </button>
+                    <span v-if="r.matched_settings.length" class="settings-plugin-matches flex flex-wrap gap-1 pb-2">
+                      <button
+                        v-for="m in r.matched_settings"
+                        :key="m.key"
+                        type="button"
+                        class="settings-setting-chip pressable rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/20"
+                        :aria-label="$t('plugins.settingsPage.openSetting', { setting: m.label, plugin: r.name })"
+                        @click="openPluginSettings(r.plugin_cid, m.key)"
+                      >{{ m.label }}</button>
+                    </span>
+                  </div>
+                </div>
               </nav>
             </aside>
 
             <!-- Content panel -->
             <section class="settings-content flex-1 flex flex-col min-w-0 min-h-0">
               <header class="settings-section-header shrink-0 border-b border-border px-4 py-3 md:px-6 md:py-4">
-                <router-link to="/settings" class="mb-1 inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary md:hidden">
+                <router-link v-if="activePluginCid" to="/settings/plugins" class="mb-1 inline-flex min-h-11 md:min-h-0 items-center gap-1 text-sm font-medium text-primary">
+                  <svg class="h-5 w-5 md:h-4 md:w-4 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="m15 5-7 7 7 7" /></svg>
+                  {{ $t('plugins.settingsPage.back') }}
+                </router-link>
+                <router-link v-else to="/settings" class="mb-1 inline-flex min-h-11 items-center gap-1 text-sm font-medium text-primary md:hidden">
                   <svg class="h-5 w-5 rtl:rotate-180" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" aria-hidden="true"><path d="m15 5-7 7 7 7" /></svg>
                   {{ $t('settings.nav.heading') }}
                 </router-link>
@@ -958,7 +1044,8 @@ function onSectionClick(id: SettingsSectionId) {
 
                 <!-- ──────────── Plugins ──────────── -->
                 <template v-else-if="activeSection === 'plugins'">
-                  <PluginsPanel />
+                  <PluginSettingsView v-if="activePluginCid" :key="activePluginCid" :cid="activePluginCid" @changed="loadPluginIndex" />
+                  <PluginsPanel v-else />
                 </template>
 
                 <!-- ──────────── Guardian (oversight transparency) ──────────── -->
@@ -1112,6 +1199,18 @@ function onSectionClick(id: SettingsSectionId) {
   color: var(--app-primary);
 }
 
+.settings-plugin-thumb {
+  overflow: hidden;
+  border-radius: 0.375rem;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+/* Matched-setting chips sit under the plugin result, aligned with its text. */
+.settings-plugin-matches { padding-inline-start: 2.875rem; }
+.settings-setting-chip:focus-visible { outline: 2px solid var(--app-primary); outline-offset: 1px; }
+
 .settings-nav-icon {
   display: inline-flex;
   flex-shrink: 0;
@@ -1235,6 +1334,8 @@ function onSectionClick(id: SettingsSectionId) {
   .settings-page--detail .settings-content { display: flex; }
   .settings-nav-item { padding: 1rem 0.75rem; border-bottom: 1px solid var(--app-border); border-radius: 0; }
   .settings-nav-icon { width: 2.5rem; height: 2.5rem; border-radius: 0.75rem; background: var(--app-muted); }
+  .settings-plugin-matches { padding-inline-start: 3.875rem; padding-block: 0.5rem; border-bottom: 1px solid var(--app-border); }
+  .settings-setting-chip { min-height: 32px; font-size: 0.75rem; }
   .settings-body :deep(.btn), .settings-body :deep(summary), .settings-copy-btn { min-height: 44px; }
   .settings-body :deep(.btn) { white-space: normal; }
   .settings-body :deep(input:not([type="checkbox"]):not([type="radio"]):not([type="range"])),

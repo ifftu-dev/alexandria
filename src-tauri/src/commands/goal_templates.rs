@@ -418,6 +418,30 @@ mod tests {
     }
 
     #[test]
+    fn a_spoken_english_goal_finds_english_skills() {
+        let db = crate::db::Database::open_in_memory().unwrap();
+        db.run_migrations().unwrap();
+        crate::db::bundled::install_bundled_data(db.conn()).unwrap();
+        let found = parse_jd_text(
+            db.conn(),
+            "Customer support associate: fluent spoken English, clear pronunciation, and good email writing.",
+        )
+        .unwrap();
+        let ids: Vec<&str> = found
+            .suggestions
+            .iter()
+            .map(|s| s.skill_id.as_str())
+            .collect();
+        for skill in [
+            "skill_english_conversation",
+            "skill_english_pronunciation",
+            "skill_english_writing",
+        ] {
+            assert!(ids.contains(&skill), "{skill} missing from {ids:?}");
+        }
+    }
+
+    #[test]
     fn fresh_development_profile_can_choose_and_resolve_goals_without_seeding() {
         let db = crate::db::Database::open_in_memory().unwrap();
         db.run_migrations().unwrap();

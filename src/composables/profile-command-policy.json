@@ -30,6 +30,10 @@
     "is_biometric_available": "Unlock-screen device capability check.",
     "tutoring_check_devices": "Device capability enumeration.",
     "tutoring_list_devices": "Device capability enumeration.",
-    "notifications_pending_open": "Validated recipient-bound tap available to the locked picker; contains only local routing IDs and destination. A matching admitted profile consumes it separately."
+    "notifications_pending_open": "Validated recipient-bound tap available to the locked picker; contains only local routing IDs and destination. A matching admitted profile consumes it separately.",
+    "speech_packs_list": "Device-wide pronunciation-check language packs; reads no profile data.",
+    "speech_pack_install": "Device-wide language pack download; can run for minutes, so it must not hold a profile lease.",
+    "speech_pack_remove": "Device-wide language pack removal; touches no profile data.",
+    "speech_check": "On-device pronunciation check against a device-wide model; reads and stores no profile data."
   }
 }

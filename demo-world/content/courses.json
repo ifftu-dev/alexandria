@@ -2440,6 +2440,897 @@
       ]
     },
     {
+      "description": "A beginner course for native Hindi speakers who want to read, write and speak English. Explanations start in Hindi and move steadily into English as you learn: letters and sounds, everyday words, building sentences, tenses, writing messages and emails, and speaking with confidence. हिंदी में समझिए, अंग्रेज़ी में बोलिए।",
+      "id": "course_english_hindi_101",
+      "kind": "course",
+      "provenance": "ai_generated",
+      "skill_ids": [
+        "skill_english_alphabet",
+        "skill_english_vocabulary",
+        "skill_english_reading",
+        "skill_english_sentence_structure",
+        "skill_english_articles",
+        "skill_english_tenses",
+        "skill_english_prepositions",
+        "skill_english_writing",
+        "skill_english_pronunciation",
+        "skill_english_conversation"
+      ],
+      "tags": [
+        "english",
+        "language",
+        "hindi",
+        "beginner",
+        "speaking",
+        "writing"
+      ],
+      "thumbnail_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 640 360\"><defs><linearGradient id=\"g\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\"><stop offset=\"0%\" stop-color=\"#ea580c\"/><stop offset=\"100%\" stop-color=\"#312e81\"/></linearGradient></defs><rect width=\"640\" height=\"360\" fill=\"url(#g)\"/><g opacity=\"0.13\" fill=\"#fff\" font-family=\"system-ui,sans-serif\" font-weight=\"700\"><text x=\"70\" y=\"120\" font-size=\"96\">A</text><text x=\"500\" y=\"125\" font-size=\"96\">अ</text><text x=\"110\" y=\"320\" font-size=\"72\">b</text><text x=\"470\" y=\"320\" font-size=\"72\">क</text></g><text x=\"320\" y=\"175\" text-anchor=\"middle\" fill=\"#fff\" font-family=\"system-ui,sans-serif\" font-size=\"24\" font-weight=\"700\" opacity=\"0.92\">English for Hindi Speakers</text><text x=\"320\" y=\"205\" text-anchor=\"middle\" fill=\"#fff\" font-family=\"system-ui,sans-serif\" font-size=\"14\" opacity=\"0.75\">पढ़ना · लिखना · बोलना</text></svg>",
+      "title": "English for Hindi Speakers",
+      "chapters": [
+        {
+          "id": "ch_eng_1",
+          "title": "Letters and Sounds · अक्षर और ध्वनियाँ",
+          "description": "The alphabet, spelling patterns, and the English sounds Hindi does not separate",
+          "position": 0,
+          "elements": [
+            {
+              "id": "el_eng_v_1_1",
+              "title": "स्वागत है · Welcome",
+              "element_type": "video",
+              "position": 0,
+              "media_id": "eng_v_1_1",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_alphabet",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_1_1",
+              "title": "Welcome · स्वागत है",
+              "element_type": "text",
+              "position": 1,
+              "content_inline": "<h2>Welcome · स्वागत है</h2>\n<p>नमस्ते! यह कोर्स उन लोगों के लिए है जिनकी मातृभाषा हिंदी है और जो अंग्रेज़ी <strong>पढ़ना, लिखना और बोलना</strong> सीखना चाहते हैं। आपको पहले से अंग्रेज़ी आना ज़रूरी नहीं है।</p>\n<p><strong>How this course works · यह कोर्स कैसे चलता है:</strong></p>\n<ul>\n  <li>शुरुआत में समझाने की भाषा ज़्यादातर हिंदी है और उदाहरण अंग्रेज़ी में। हर अध्याय के साथ अंग्रेज़ी बढ़ती जाएगी, और आख़िरी अध्याय लगभग पूरा अंग्रेज़ी में है।</li>\n  <li>नए शब्दों के साथ कोष्ठक में देवनागरी में उच्चारण दिया गया है, जैसे <strong>Hello (हेलो)</strong>। ध्यान रखें: कुछ अंग्रेज़ी ध्वनियाँ देवनागरी में ठीक-ठीक नहीं लिखी जा सकतीं। ऐसी जगहों पर हम साफ़-साफ़ बताएँगे।</li>\n  <li>हर अध्याय के अंत में एक छोटा quiz (प्रश्नोत्तरी) है। आख़िरी अध्याय में आप अपनी आवाज़ रिकॉर्ड करके किसी tutor या साथी से review करवाएँगे।</li>\n</ul>\n<p><strong>Six chapters · छह अध्याय:</strong></p>\n<ol>\n  <li>Letters and Sounds — अक्षर और ध्वनियाँ</li>\n  <li>First Words — पहले शब्द</li>\n  <li>Building Sentences — वाक्य बनाना</li>\n  <li>Talking About Time — समय और काल</li>\n  <li>Writing Everyday English — रोज़ की अंग्रेज़ी लिखना</li>\n  <li>Speaking with Confidence — आत्मविश्वास से बोलना</li>\n</ol>\n<p><strong>एक सलाह:</strong> रोज़ 20–30 मिनट पढ़ें और हर अंग्रेज़ी उदाहरण को ज़ोर से बोलें। गलतियाँ होंगी, और यही सीखने का तरीका है। <em>Mistakes are how we learn.</em></p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_alphabet",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_v_1_2",
+              "title": "छब्बीस अक्षर · The 26 Letters",
+              "element_type": "video",
+              "position": 2,
+              "media_id": "eng_v_1_2",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_alphabet",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_1_2",
+              "title": "The 26 Letters · अंग्रेज़ी के 26 अक्षर",
+              "element_type": "text",
+              "position": 3,
+              "content_inline": "<h2>The 26 Letters · अंग्रेज़ी के 26 अक्षर</h2>\n<p>अंग्रेज़ी वर्णमाला (alphabet, उच्चारण: ऐल्फ़बेट) में सिर्फ़ 26 अक्षर हैं। हर अक्षर के दो रूप होते हैं: <strong>capital letter</strong> (बड़ा अक्षर) और <strong>small letter</strong> (छोटा अक्षर)।</p>\n<table>\n  <tr><th>Letter</th><th>नाम</th><th>Letter</th><th>नाम</th></tr>\n  <tr><td><strong>A a</strong></td><td>ए</td><td><strong>B b</strong></td><td>बी</td></tr>\n  <tr><td><strong>C c</strong></td><td>सी</td><td><strong>D d</strong></td><td>डी</td></tr>\n  <tr><td><strong>E e</strong></td><td>ई</td><td><strong>F f</strong></td><td>एफ़</td></tr>\n  <tr><td><strong>G g</strong></td><td>जी</td><td><strong>H h</strong></td><td>एच</td></tr>\n  <tr><td><strong>I i</strong></td><td>आई</td><td><strong>J j</strong></td><td>जे</td></tr>\n  <tr><td><strong>K k</strong></td><td>के</td><td><strong>L l</strong></td><td>एल</td></tr>\n  <tr><td><strong>M m</strong></td><td>एम</td><td><strong>N n</strong></td><td>एन</td></tr>\n  <tr><td><strong>O o</strong></td><td>ओ</td><td><strong>P p</strong></td><td>पी</td></tr>\n  <tr><td><strong>Q q</strong></td><td>क्यू</td><td><strong>R r</strong></td><td>आर</td></tr>\n  <tr><td><strong>S s</strong></td><td>एस</td><td><strong>T t</strong></td><td>टी</td></tr>\n  <tr><td><strong>U u</strong></td><td>यू</td><td><strong>V v</strong></td><td>वी</td></tr>\n  <tr><td><strong>W w</strong></td><td>डब्ल्यू</td><td><strong>X x</strong></td><td>एक्स</td></tr>\n  <tr><td><strong>Y y</strong></td><td>वाई</td><td><strong>Z z</strong></td><td>ज़ेड</td></tr>\n</table>\n<p>Z को भारत और ब्रिटेन में \"ज़ेड\" कहते हैं, अमेरिका में \"ज़ी\"। दोनों सही हैं।</p>\n<p><strong>Capital letter कब लिखें?</strong></p>\n<ul>\n  <li>वाक्य के पहले शब्द का पहला अक्षर: <code>My name is Ravi.</code></li>\n  <li>नाम — लोगों, शहरों, देशों, दिनों और महीनों के: <code>Ravi, Delhi, India, Monday, January</code></li>\n  <li>\"मैं\" के लिए <strong>I</strong> हमेशा capital होता है, वाक्य के बीच में भी: <code>Ravi and I are friends.</code></li>\n</ul>\n<p><strong>Handwriting tips · लिखने के सुझाव:</strong></p>\n<ul>\n  <li>बाएँ से दाएँ लिखें, देवनागरी की तरह। पर ऊपर शिरोरेखा नहीं लगती; हर अक्षर अलग रहता है।</li>\n  <li>चार लाइनों वाली कॉपी में अभ्यास करें: <code>a, c, e, o</code> बीच की जगह में रहते हैं; <code>b, d, h, k, l</code> ऊपर जाते हैं; <code>g, j, p, q, y</code> नीचे जाते हैं।</li>\n  <li>इन जोड़ों में गड़बड़ आम है: <code>b / d</code>, <code>p / q</code>, <code>m / n</code>, <code>u / v</code>। इन्हें रोज़ पाँच-पाँच बार लिखें।</li>\n  <li>पहले पूरी वर्णमाला capital में लिखें, फिर small में, फिर दोनों साथ: <code>Aa Bb Cc</code>।</li>\n</ul>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_alphabet",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_v_1_3",
+              "title": "अक्षर और ध्वनि · Letters and Sounds",
+              "element_type": "video",
+              "position": 4,
+              "media_id": "eng_v_1_3",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_alphabet",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_pronunciation",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_1_3",
+              "title": "Letters and Sounds · अक्षर और ध्वनि",
+              "element_type": "text",
+              "position": 5,
+              "content_inline": "<h2>Letters and Sounds · अक्षर और ध्वनि अलग हैं</h2>\n<p>देवनागरी में जो लिखा जाता है, लगभग वही बोला जाता है। अंग्रेज़ी में ऐसा नहीं है: एक ही अक्षर कई तरह से बोला जा सकता है, और कई बार कोई अक्षर बोला ही नहीं जाता। इसलिए हर नया शब्द <strong>देखकर और सुनकर</strong> सीखें।</p>\n<p><strong>Vowels (स्वर अक्षर):</strong> <code>a, e, i, o, u</code>, और कभी-कभी <code>y</code> (जैसे <code>my</code>, <code>happy</code>)। बाकी अक्षर <strong>consonants</strong> (व्यंजन अक्षर) हैं। ध्यान दें: स्वर अक्षर सिर्फ़ 5 हैं, पर अंग्रेज़ी में स्वर ध्वनियाँ लगभग 20 हैं!</p>\n<p><strong>एक अक्षर, कई ध्वनियाँ:</strong></p>\n<table>\n  <tr><th>Letter</th><th>Examples (उच्चारण)</th></tr>\n  <tr><td>a</td><td><code>cat</code> (कैट), <code>cake</code> (केक), <code>car</code> (कार)</td></tr>\n  <tr><td>o</td><td><code>hot</code> (हॉट), <code>go</code> (गो), <code>do</code> (डू)</td></tr>\n  <tr><td>c</td><td><code>cat</code> (कैट) में \"क\", <code>city</code> (सिटी) में \"स\"</td></tr>\n  <tr><td>g</td><td><code>go</code> (गो) में \"ग\", <code>page</code> (पेज) में \"ज\"</td></tr>\n</table>\n<p><strong>Common letter patterns · आम जोड़े:</strong></p>\n<table>\n  <tr><th>Pattern</th><th>Sound</th><th>Examples</th></tr>\n  <tr><td>sh</td><td>श</td><td><code>ship</code> (शिप), <code>fish</code> (फ़िश)</td></tr>\n  <tr><td>ch</td><td>च</td><td><code>chair</code> (चेयर), <code>teacher</code> (टीचर)</td></tr>\n  <tr><td>ee</td><td>ई (लंबा)</td><td><code>see</code> (सी), <code>tree</code> (ट्री)</td></tr>\n  <tr><td>oo</td><td>ऊ या उ</td><td><code>food</code> (फ़ूड), <code>book</code> (बुक)</td></tr>\n  <tr><td>ph</td><td>फ़</td><td><code>phone</code> (फ़ोन), <code>photo</code> (फ़ोटो)</td></tr>\n</table>\n<p><strong>Silent e (मूक e):</strong> शब्द के अंत का <code>e</code> अक्सर खुद नहीं बोला जाता, पर पहले वाले स्वर को उसके \"नाम\" जैसा बना देता है:</p>\n<table>\n  <tr><th>Without e</th><th>With e</th></tr>\n  <tr><td><code>hat</code> (हैट)</td><td><code>hate</code> (हेट)</td></tr>\n  <tr><td><code>bit</code> (बिट)</td><td><code>bite</code> (बाइट)</td></tr>\n  <tr><td><code>not</code> (नॉट)</td><td><code>note</code> (नोट)</td></tr>\n</table>\n<p><strong>Silent letters (मूक अक्षर):</strong> <code>know</code> (नो) में k नहीं बोलते, <code>write</code> (राइट) में w नहीं, <code>hour</code> (आवर) में h नहीं।</p>\n<p><strong>सुझाव:</strong> ऐसी dictionary या app इस्तेमाल करें जिसमें शब्द सुनाई दे। नया शब्द लिखते समय उसकी spelling और आवाज़ दोनों याद करें।</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_alphabet",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_pronunciation",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_v_1_4",
+              "title": "नई ध्वनियाँ · New Sounds",
+              "element_type": "video",
+              "position": 6,
+              "media_id": "eng_v_1_4",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_pronunciation",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_1_4",
+              "title": "New Sounds · हिंदी से अलग ध्वनियाँ",
+              "element_type": "text",
+              "position": 7,
+              "content_inline": "<h2>New Sounds · हिंदी से अलग ध्वनियाँ</h2>\n<p>अंग्रेज़ी की कुछ ध्वनियाँ हिंदी में अलग से नहीं होतीं, या हम दो ध्वनियों को एक जैसा बोल देते हैं। <strong>देवनागरी इन्हें ठीक-ठीक नहीं लिख सकती</strong>, इसलिए यहाँ मुँह, जीभ और होंठ की स्थिति पर ध्यान दें। शीशे के सामने अभ्यास करें।</p>\n<p><strong>1. V और W</strong> — हिंदी में \"व\" एक ही ध्वनि है, पर अंग्रेज़ी में ये दो अलग ध्वनियाँ हैं:</p>\n<ul>\n  <li><strong>V</strong>: ऊपर के दाँत नीचे के होंठ पर हल्के से रखें और आवाज़ के साथ हवा निकालें — <code>very, van, voice</code>।</li>\n  <li><strong>W</strong>: दाँत होंठ को नहीं छूते। होंठ गोल करें, जैसे \"ऊ\" बोलने वाले हों, फिर खोलें — <code>we, water, window</code>।</li>\n</ul>\n<p>अभ्यास: <code>vet / wet</code>, <code>vine / wine</code>, <code>very well</code>।</p>\n<p><strong>2. TH</strong> — दो ध्वनियाँ। दोनों में जीभ की नोक ऊपर और नीचे के दाँतों के बीच से हल्की-सी बाहर आती है:</p>\n<ul>\n  <li>बिना आवाज़ (voiceless): <code>thin, think, three</code> — \"थ\" जैसी लगती है, पर थ नहीं है।</li>\n  <li>आवाज़ के साथ (voiced): <code>this, that, mother</code> — \"द\" जैसी लगती है, पर द नहीं है।</li>\n</ul>\n<p>अगर <code>thin</code> को \"टिन\" बोलेंगे, तो सुनने वाला <code>tin</code> समझ सकता है।</p>\n<p><strong>3. Z</strong> — नुक़्ते वाला \"ज़\", \"ज\" नहीं: <code>zoo</code> (ज़ू), <code>zero</code> (ज़ीरो), <code>busy</code> (बिज़ी), <code>is</code> (इज़)। यह \"स\" जैसी ध्वनि है, बस गले से आवाज़ के साथ।</p>\n<p><strong>4. F</strong> — नुक़्ते वाला \"फ़\": ऊपर के दाँत नीचे के होंठ पर रखें और हवा निकालें। हिंदी का \"फ\" (दोनों होंठ बंद करके) नहीं: <code>fan</code> (फ़ैन), <code>coffee</code> (कॉफ़ी), <code>life</code> (लाइफ़)। ध्यान दें: <code>fan</code> और <code>pan</code> अलग शब्द हैं।</p>\n<p><strong>5. Short and long vowels · छोटे और लंबे स्वर</strong> — हिंदी में इ/ई और उ/ऊ का फ़र्क आप पहले से जानते हैं। अंग्रेज़ी में भी यही फ़र्क शब्द बदल देता है:</p>\n<table>\n  <tr><th>Short (छोटा)</th><th>Long (लंबा)</th></tr>\n  <tr><td><code>ship</code> (शिप) जहाज़</td><td><code>sheep</code> (शीप) भेड़</td></tr>\n  <tr><td><code>sit</code> (सिट) बैठना</td><td><code>seat</code> (सीट) सीट</td></tr>\n  <tr><td><code>live</code> (लिव) रहना</td><td><code>leave</code> (लीव) छोड़ना</td></tr>\n  <tr><td><code>full</code> (फ़ुल) भरा हुआ</td><td><code>fool</code> (फ़ूल) मूर्ख</td></tr>\n</table>\n<p>ये ध्वनियाँ धीरे-धीरे आती हैं। अध्याय 6 में हम इनका और अभ्यास करेंगे।</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_pronunciation",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_1_5",
+              "title": "Letters and Sounds Quiz",
+              "element_type": "quiz",
+              "position": 8,
+              "content_inline": "{\n  \"title\": \"Letters and Sounds Quiz\",\n  \"pass_threshold\": 0.66,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"How many letters are there in the English alphabet?\",\n      \"options\": [\n        \"24\",\n        \"26\",\n        \"36\",\n        \"52\"\n      ],\n      \"correct_indices\": [\n        1\n      ],\n      \"explanation\": \"There are 26 letters. Each has a capital and a small form. (26 अक्षर, हर एक के दो रूप।)\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q2\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Which of these words must always start with a capital letter?\",\n      \"options\": [\n        \"monday\",\n        \"apple\",\n        \"window\",\n        \"happy\"\n      ],\n      \"correct_indices\": [\n        0\n      ],\n      \"explanation\": \"Days of the week are names, so they start with a capital: Monday. (दिनों के नाम capital से।)\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q3\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"In the word \\\"write\\\", which letter is silent?\",\n      \"options\": [\n        \"r\",\n        \"t\",\n        \"w\",\n        \"i\"\n      ],\n      \"correct_indices\": [\n        2\n      ],\n      \"explanation\": \"\\\"Write\\\" sounds like \\\"right\\\" (राइट). The w is not spoken.\",\n      \"points\": 1,\n      \"difficulty\": 2\n    },\n    {\n      \"id\": \"q4\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"How do you make the \\\"v\\\" sound in \\\"very\\\"?\",\n      \"options\": [\n        \"Round your lips, like for ऊ\",\n        \"Touch your top teeth to your bottom lip\",\n        \"Put your tongue between your teeth\",\n        \"Close both lips\"\n      ],\n      \"correct_indices\": [\n        1\n      ],\n      \"explanation\": \"V: top teeth on the bottom lip. W: rounded lips, teeth do not touch. (V में दाँत होंठ पर।)\",\n      \"points\": 1,\n      \"difficulty\": 2\n    },\n    {\n      \"id\": \"q5\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Which pair is different only because of a short and a long vowel?\",\n      \"options\": [\n        \"vet / wet\",\n        \"thin / tin\",\n        \"ship / sheep\",\n        \"fan / pan\"\n      ],\n      \"correct_indices\": [\n        2\n      ],\n      \"explanation\": \"Ship has a short i (इ) and sheep a long ee (ई). The other pairs differ in a consonant.\",\n      \"points\": 1,\n      \"difficulty\": 2\n    }\n  ]\n}",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_alphabet",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_pronunciation",
+                  "weight": 1.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "ch_eng_2",
+          "title": "First Words · पहले शब्द",
+          "description": "Greetings, numbers, everyday words and first reading practice",
+          "position": 1,
+          "elements": [
+            {
+              "id": "el_eng_v_2_1",
+              "title": "अभिवादन · Greetings",
+              "element_type": "video",
+              "position": 0,
+              "media_id": "eng_v_2_1",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_vocabulary",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_conversation",
+                  "weight": 0.5
+                }
+              ]
+            },
+            {
+              "id": "el_eng_2_1",
+              "title": "Greetings and Polite Words · अभिवादन और शिष्टाचार",
+              "element_type": "text",
+              "position": 1,
+              "content_inline": "<h2>Greetings and Polite Words · अभिवादन और शिष्टाचार</h2>\n<p>अंग्रेज़ी में बातचीत लगभग हमेशा किसी अभिवादन से शुरू होती है। ये शब्द रोज़ इस्तेमाल होंगे, इसलिए इन्हें सबसे पहले याद करें।</p>\n<table>\n  <tr><th>English (उच्चारण)</th><th>हिंदी</th><th>कब बोलें</th></tr>\n  <tr><td>Hello (हेलो)</td><td>नमस्ते</td><td>किसी से भी, कभी भी</td></tr>\n  <tr><td>Hi (हाय)</td><td>नमस्ते (अनौपचारिक)</td><td>दोस्तों और जान-पहचान वालों से</td></tr>\n  <tr><td>Good morning (गुड मॉर्निंग)</td><td>सुप्रभात</td><td>सुबह, दोपहर 12 बजे से पहले</td></tr>\n  <tr><td>Good afternoon (गुड आफ़्टरनून)</td><td>नमस्ते</td><td>दोपहर 12 से लगभग शाम 5 बजे तक</td></tr>\n  <tr><td>Good evening (गुड ईवनिंग)</td><td>नमस्ते</td><td>शाम को मिलने पर</td></tr>\n  <tr><td>Good night (गुड नाइट)</td><td>शुभ रात्रि</td><td>सिर्फ़ रात को विदा लेते समय या सोने से पहले — मिलने पर नहीं!</td></tr>\n  <tr><td>Goodbye / Bye (गुडबाय / बाय)</td><td>फिर मिलेंगे</td><td>जाते समय</td></tr>\n</table>\n<p><strong>Magic words · जादुई शब्द:</strong></p>\n<table>\n  <tr><th>English (उच्चारण)</th><th>हिंदी</th><th>Example</th></tr>\n  <tr><td>Please (प्लीज़)</td><td>कृपया</td><td><code>Can I have some water, please?</code></td></tr>\n  <tr><td>Thank you / Thanks (थैंक यू)</td><td>धन्यवाद / शुक्रिया</td><td>जवाब: <code>You're welcome.</code> (योर वेलकम)</td></tr>\n  <tr><td>Sorry (सॉरी)</td><td>माफ़ कीजिए</td><td>गलती होने पर: <code>Sorry, I'm late.</code></td></tr>\n  <tr><td>Excuse me (एक्सक्यूज़ मी)</td><td>सुनिए / ज़रा रास्ता दीजिए</td><td>ध्यान खींचने या रास्ता माँगने के लिए</td></tr>\n</table>\n<p><code>Thank you</code> में \"th\" के लिए जीभ दाँतों के बीच रखें; \"टैंक यू\" न बोलें। देवनागरी का \"थैंक\" सिर्फ़ अंदाज़ा है।</p>\n<p><strong>Sir और Madam:</strong> भारत में दफ़्तर, दुकान और स्कूल में \"Sir\" और \"Madam\" या \"Ma'am\" आम हैं और विनम्र माने जाते हैं। कई दूसरे देशों में लोग Mr या Ms के साथ उपनाम (surname) इस्तेमाल करते हैं, जैसे <code>Good morning, Ms Sharma.</code>, या सिर्फ़ पहला नाम। दोनों तरीके ठीक हैं; आसपास के लोग कैसे बोलते हैं, सुनकर वैसा ही करें।</p>\n<p><strong>A short conversation · छोटी बातचीत:</strong></p>\n<blockquote><p>A: Good morning! How are you? (हाउ आर यू?)</p><p>B: I'm fine, thank you. And you?</p><p>A: I'm good, thanks.</p></blockquote>\n<p><code>How are you?</code> अक्सर सिर्फ़ अभिवादन होता है, सवाल नहीं। जवाब छोटा रखें।</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_vocabulary",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_conversation",
+                  "weight": 0.5
+                }
+              ]
+            },
+            {
+              "id": "el_eng_v_2_2",
+              "title": "संख्या, दिन और समय · Numbers, Days and Time",
+              "element_type": "video",
+              "position": 2,
+              "media_id": "eng_v_2_2",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_vocabulary",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_2_2",
+              "title": "Numbers, Days, Months and Time · संख्याएँ, दिन, महीने, समय",
+              "element_type": "text",
+              "position": 3,
+              "content_inline": "<h2>Numbers, Days, Months and Time · संख्याएँ, दिन, महीने, समय</h2>\n<p><strong>Numbers · संख्याएँ</strong></p>\n<table>\n  <tr><th>#</th><th>English</th><th>#</th><th>English</th></tr>\n  <tr><td>1</td><td>one (वन)</td><td>2</td><td>two (टू)</td></tr>\n  <tr><td>3</td><td>three (थ्री)</td><td>4</td><td>four (फ़ोर)</td></tr>\n  <tr><td>5</td><td>five (फ़ाइव)</td><td>6</td><td>six (सिक्स)</td></tr>\n  <tr><td>7</td><td>seven (सेवन)</td><td>8</td><td>eight (एट)</td></tr>\n  <tr><td>9</td><td>nine (नाइन)</td><td>10</td><td>ten (टेन)</td></tr>\n</table>\n<p>11–20: <code>eleven, twelve, thirteen, fourteen, fifteen, sixteen, seventeen, eighteen, nineteen, twenty</code>। दहाइयाँ: <code>thirty</code> (30), <code>forty</code> (40 — spelling में u नहीं), <code>fifty</code> (50), <code>one hundred</code> (100), <code>one thousand</code> (1000)।</p>\n<p><strong>-teen और -ty में फ़र्क:</strong> <code>thirTEEN</code> (13) में ज़ोर आख़िर में, <code>THIRty</code> (30) में ज़ोर शुरू में। दाम या फ़ोन नंबर बताते समय यह फ़र्क बहुत ज़रूरी है।</p>\n<p><strong>लाख और करोड़:</strong> भारत में <code>1,00,000</code> लिखते हैं (one lakh)। अंतरराष्ट्रीय अंग्रेज़ी में इसे <code>100,000</code> (one hundred thousand) लिखते हैं। 10 लाख = <code>one million</code>, 1 करोड़ = <code>ten million</code>।</p>\n<p><strong>Days · दिन</strong> (हमेशा capital letter से):</p>\n<table>\n  <tr><th>English</th><th>हिंदी</th><th>English</th><th>हिंदी</th></tr>\n  <tr><td>Monday (मंडे)</td><td>सोमवार</td><td>Friday (फ़्राइडे)</td><td>शुक्रवार</td></tr>\n  <tr><td>Tuesday (ट्यूज़डे)</td><td>मंगलवार</td><td>Saturday (सैटरडे)</td><td>शनिवार</td></tr>\n  <tr><td>Wednesday (वेन्ज़डे)</td><td>बुधवार</td><td>Sunday (संडे)</td><td>रविवार</td></tr>\n  <tr><td>Thursday (थर्ज़डे)</td><td>गुरुवार</td><td></td><td></td></tr>\n</table>\n<p><code>Wednesday</code> में पहला d नहीं बोला जाता।</p>\n<p><strong>Months · महीने:</strong> <code>January, February, March, April, May, June, July, August, September, October, November, December</code>।</p>\n<p><strong>Time · समय:</strong> <code>What time is it?</code> (व्हॉट टाइम इज़ इट?) — <code>It's seven o'clock.</code></p>\n<table>\n  <tr><th>Time</th><th>English</th><th>हिंदी</th></tr>\n  <tr><td>7:15</td><td>seven fifteen / quarter past seven</td><td>सवा सात</td></tr>\n  <tr><td>7:30</td><td>seven thirty / half past seven</td><td>साढ़े सात</td></tr>\n  <tr><td>6:45</td><td>six forty-five / quarter to seven</td><td>पौने सात</td></tr>\n  <tr><td>1:30</td><td>one thirty / half past one</td><td>डेढ़</td></tr>\n  <tr><td>2:30</td><td>two thirty / half past two</td><td>ढाई</td></tr>\n</table>\n<p><code>a.m.</code> = रात 12 बजे से दोपहर 12 बजे तक; <code>p.m.</code> = दोपहर 12 बजे से रात 12 बजे तक। जैसे <code>9 a.m.</code> = सुबह 9 बजे, <code>9 p.m.</code> = रात 9 बजे।</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_vocabulary",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_v_2_3",
+              "title": "रोज़ के शब्द · Everyday Words",
+              "element_type": "video",
+              "position": 4,
+              "media_id": "eng_v_2_3",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_vocabulary",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_2_3",
+              "title": "Everyday Words · रोज़ के शब्द",
+              "element_type": "text",
+              "position": 5,
+              "content_inline": "<h2>Everyday Words · रोज़ के शब्द</h2>\n<p>आप जितना सोचते हैं, उससे ज़्यादा अंग्रेज़ी पहले से जानते हैं: <code>bus, ticket, station, phone, doctor</code> जैसे शब्द हिंदी में भी रोज़ बोले जाते हैं। नीचे के शब्द रोज़ 10–10 करके याद करें।</p>\n<p><strong>Family · परिवार</strong></p>\n<table>\n  <tr><th>English</th><th>हिंदी</th><th>English</th><th>हिंदी</th></tr>\n  <tr><td>mother (मदर)</td><td>माँ</td><td>father (फ़ादर)</td><td>पिता</td></tr>\n  <tr><td>brother (ब्रदर)</td><td>भाई</td><td>sister (सिस्टर)</td><td>बहन</td></tr>\n  <tr><td>son (सन)</td><td>बेटा</td><td>daughter (डॉटर)</td><td>बेटी</td></tr>\n  <tr><td>husband (हज़्बंड)</td><td>पति</td><td>wife (वाइफ़)</td><td>पत्नी</td></tr>\n  <tr><td>grandmother</td><td>दादी / नानी</td><td>grandfather</td><td>दादा / नाना</td></tr>\n  <tr><td>uncle (अंकल)</td><td>चाचा, मामा, मौसा, फूफा</td><td>aunt (आंट)</td><td>चाची, मामी, मौसी, बुआ</td></tr>\n</table>\n<p>अंग्रेज़ी में चाचा, मामा, मौसा और फूफा सब <code>uncle</code> हैं, और चचेरे-ममेरे भाई-बहन सब <code>cousin</code>। ज़रूरत हो तो साफ़ कहें: <code>my father's brother</code> (चाचा/ताऊ), <code>my mother's sister</code> (मौसी)।</p>\n<p><strong>Home and food · घर और खाना</strong></p>\n<table>\n  <tr><th>English</th><th>हिंदी</th><th>English</th><th>हिंदी</th></tr>\n  <tr><td>house / home</td><td>घर</td><td>room</td><td>कमरा</td></tr>\n  <tr><td>kitchen (किचन)</td><td>रसोई</td><td>door (डोर)</td><td>दरवाज़ा</td></tr>\n  <tr><td>window (विंडो)</td><td>खिड़की</td><td>chair (चेयर)</td><td>कुर्सी</td></tr>\n  <tr><td>water (वॉटर)</td><td>पानी</td><td>rice (राइस)</td><td>चावल</td></tr>\n  <tr><td>milk</td><td>दूध</td><td>vegetables (वेजिटेबल्स)</td><td>सब्ज़ियाँ</td></tr>\n  <tr><td>fruit (फ़्रूट)</td><td>फल</td><td>salt / sugar</td><td>नमक / चीनी</td></tr>\n</table>\n<p><strong>Work and travel · काम और सफ़र</strong></p>\n<table>\n  <tr><th>English</th><th>हिंदी</th><th>English</th><th>हिंदी</th></tr>\n  <tr><td>office</td><td>दफ़्तर</td><td>job</td><td>नौकरी</td></tr>\n  <tr><td>colleague (कॉलीग)</td><td>सहकर्मी</td><td>salary (सैलरी)</td><td>तनख़्वाह</td></tr>\n  <tr><td>leave (लीव)</td><td>छुट्टी</td><td>meeting</td><td>मीटिंग, बैठक</td></tr>\n  <tr><td>road (रोड)</td><td>सड़क</td><td>straight (स्ट्रेट)</td><td>सीधा</td></tr>\n  <tr><td>left (लेफ़्ट)</td><td>बायाँ</td><td>right (राइट)</td><td>दायाँ</td></tr>\n  <tr><td>near (नियर)</td><td>पास</td><td>far (फ़ार)</td><td>दूर</td></tr>\n</table>\n<p><strong>Plural · बहुवचन:</strong> ज़्यादातर शब्दों में <code>-s</code> जोड़ते हैं: <code>one book, two books</code>। कुछ शब्द अलग हैं: <code>man → men</code>, <code>woman → women</code> (विमिन), <code>child → children</code>।</p>\n<p><strong>सुझाव:</strong> कार्ड के एक तरफ़ अंग्रेज़ी शब्द और दूसरी तरफ़ हिंदी अर्थ लिखें। घर की चीज़ों पर उनके अंग्रेज़ी नाम की पर्ची चिपकाएँ।</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_vocabulary",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_lab_dictation",
+              "title": "Language Lab: Dictation · सुनिए और लिखिए",
+              "element_type": "plugin",
+              "position": 6,
+              "content_inline": "{\"activity\":\"dictation\",\"items\":[{\"text\":\"Good morning.\",\"hint_hi\":\"सुप्रभात (सुबह का अभिवादन)\"},{\"text\":\"Thank you very much.\",\"hint_hi\":\"आपका बहुत-बहुत धन्यवाद।\"},{\"text\":\"My mother is a doctor.\",\"hint_hi\":\"मेरी माँ डॉक्टर हैं।\"},{\"text\":\"Please give me some water.\",\"hint_hi\":\"कृपया मुझे थोड़ा पानी दीजिए।\"},{\"text\":\"The office is near the station.\",\"hint_hi\":\"दफ़्तर स्टेशन के पास है।\"},{\"text\":\"I have two brothers and one sister.\",\"hint_hi\":\"मेरे दो भाई और एक बहन हैं।\"}]}",
+              "plugin_cid": "c5e17fce7fce75301a54935a0a06537eeb0e64e989a9be4c69e2b16ad5a02f7b",
+              "plugin_version": "0.1.0",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_vocabulary",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_writing",
+                  "weight": 0.5
+                }
+              ]
+            },
+            {
+              "id": "el_eng_v_2_4",
+              "title": "पढ़ने का अभ्यास · Reading Practice",
+              "element_type": "video",
+              "position": 7,
+              "media_id": "eng_v_2_4",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_reading",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_2_4",
+              "title": "Reading Practice · पढ़ने का अभ्यास",
+              "element_type": "text",
+              "position": 8,
+              "content_inline": "<h2>Reading Practice · पढ़ने का अभ्यास</h2>\n<p><strong>1. Signs · सूचना-पट</strong> — ये शब्द आपको स्टेशन, दफ़्तर और दुकानों में दिखेंगे:</p>\n<table>\n  <tr><th>Sign</th><th>हिंदी</th><th>Sign</th><th>हिंदी</th></tr>\n  <tr><td>ENTRY / EXIT</td><td>प्रवेश / निकास</td><td>OPEN / CLOSED</td><td>खुला / बंद</td></tr>\n  <tr><td>PUSH / PULL</td><td>धकेलें / खींचें</td><td>DANGER</td><td>ख़तरा</td></tr>\n  <tr><td>NO PARKING</td><td>यहाँ गाड़ी खड़ी न करें</td><td>WAIT HERE</td><td>यहाँ इंतज़ार करें</td></tr>\n</table>\n<p><strong>2. A form · फ़ॉर्म</strong></p>\n<table>\n  <tr><th>Form field</th><th>हिंदी में मतलब</th></tr>\n  <tr><td>First name / Surname</td><td>पहला नाम / उपनाम</td></tr>\n  <tr><td>Date of birth (DD/MM/YYYY)</td><td>जन्म तिथि (दिन/महीना/साल)</td></tr>\n  <tr><td>Address</td><td>पता</td></tr>\n  <tr><td>Mobile number</td><td>मोबाइल नंबर</td></tr>\n  <tr><td>Signature</td><td>हस्ताक्षर</td></tr>\n</table>\n<p><strong>3. A text message · संदेश</strong></p>\n<blockquote><p>Hi Priya, I am running late. The bus is very slow today. I will reach the office at 10:15. Sorry! – Amit</p></blockquote>\n<p><code>running late</code> = देर हो रही है। सोचिए: अमित को देर क्यों हो रही है? वह कितने बजे पहुँचेगा?</p>\n<p><strong>4. A short story · छोटी कहानी</strong> — पहले एक बार चुपचाप पढ़ें, फिर ज़ोर से।</p>\n<blockquote><p>Meena lives in Lucknow with her parents. Every morning she wakes up at six o'clock. She drinks a cup of tea and reads the newspaper. Then she takes a bus to her office. She works at a bank near the railway station. In the evening, she walks in the park with her mother. On Sundays, she cooks lunch for the whole family.</p></blockquote>\n<table>\n  <tr><th>Word</th><th>हिंदी</th><th>Word</th><th>हिंदी</th></tr>\n  <tr><td>lives</td><td>रहती है</td><td>wakes up</td><td>जागती है</td></tr>\n  <tr><td>a cup of</td><td>एक कप</td><td>newspaper</td><td>अख़बार</td></tr>\n  <tr><td>takes a bus</td><td>बस से जाती है</td><td>near</td><td>के पास</td></tr>\n  <tr><td>cooks lunch</td><td>दोपहर का खाना बनाती है</td><td>whole family</td><td>पूरा परिवार</td></tr>\n</table>\n<p><strong>Questions · प्रश्न</strong> (पहले खुद जवाब सोचें):</p>\n<ol>\n  <li>Where does Meena live?</li>\n  <li>What does she drink in the morning?</li>\n  <li>Where does she work?</li>\n  <li>What does she do on Sundays?</li>\n</ol>\n<p><strong>Answers · उत्तर:</strong> 1. In Lucknow. 2. Tea. 3. At a bank near the railway station. 4. She cooks lunch for the whole family.</p>\n<p>ध्यान दें: <code>she lives, she wakes, she drinks</code> — she/he के साथ क्रिया में <code>-s</code> लगता है। इसके बारे में अध्याय 4 में पढ़ेंगे।</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_reading",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_lab_reading",
+              "title": "Language Lab: Reading · पढ़िए और समझिए",
+              "element_type": "plugin",
+              "position": 9,
+              "content_inline": "{\"activity\":\"reading\",\"passage\":\"Ravi is a student. He lives in Jaipur with his parents and his younger sister, Neha. Every day, he goes to college by bicycle. His college is not far from his house. After class, he plays cricket with his friends. On Saturday, Ravi helps his father in the family shop. The shop sells shoes. In the evening, the family eats dinner together and talks about the day.\",\"glossary\":{\"student\":\"छात्र, विद्यार्थी\",\"lives\":\"रहता है\",\"parents\":\"माता-पिता\",\"younger\":\"छोटी (उम्र में)\",\"sister\":\"बहन\",\"college\":\"कॉलेज, महाविद्यालय\",\"bicycle\":\"साइकिल\",\"far\":\"दूर\",\"after\":\"के बाद\",\"friends\":\"दोस्त\",\"helps\":\"मदद करता है\",\"shop\":\"दुकान\",\"sells\":\"बेचती है\",\"shoes\":\"जूते\",\"evening\":\"शाम\",\"dinner\":\"रात का खाना\",\"together\":\"साथ मिलकर\",\"talks\":\"बातें करता है\"},\"questions\":[{\"prompt\":\"Where does Ravi live?\",\"prompt_hi\":\"रवि कहाँ रहता है?\",\"options\":[\"In Delhi\",\"In Jaipur\",\"In Lucknow\",\"In Pune\"]},{\"prompt\":\"How does Ravi go to college?\",\"prompt_hi\":\"रवि कॉलेज कैसे जाता है?\",\"options\":[\"By bus\",\"On foot\",\"By bicycle\",\"By car\"]},{\"prompt\":\"What does he do after class?\",\"prompt_hi\":\"क्लास के बाद वह क्या करता है?\",\"options\":[\"He plays cricket.\",\"He works in the shop.\",\"He cooks dinner.\",\"He reads a book.\"]},{\"prompt\":\"What does the family shop sell?\",\"prompt_hi\":\"परिवार की दुकान में क्या बिकता है?\",\"options\":[\"Books\",\"Vegetables\",\"Clothes\",\"Shoes\"]},{\"prompt\":\"Who is Neha?\",\"prompt_hi\":\"नेहा कौन है?\",\"options\":[\"Ravi's mother\",\"Ravi's sister\",\"Ravi's friend\",\"Ravi's teacher\"]}],\"grader_private\":{\"answers\":[1,2,0,3,1]}}",
+              "plugin_cid": "c5e17fce7fce75301a54935a0a06537eeb0e64e989a9be4c69e2b16ad5a02f7b",
+              "plugin_version": "0.1.0",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_reading",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_vocabulary",
+                  "weight": 0.5
+                }
+              ]
+            },
+            {
+              "id": "el_eng_2_5",
+              "title": "First Words Quiz",
+              "element_type": "quiz",
+              "position": 10,
+              "content_inline": "{\n  \"title\": \"First Words Quiz\",\n  \"pass_threshold\": 0.66,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"When do you say \\\"Good night\\\"?\",\n      \"options\": [\n        \"When you meet someone in the evening\",\n        \"When you meet someone in the morning\",\n        \"When you thank someone\",\n        \"When you leave at night or go to bed\"\n      ],\n      \"correct_indices\": [\n        3\n      ],\n      \"explanation\": \"\\\"Good night\\\" is only for saying goodbye at night. To greet someone in the evening, say \\\"Good evening\\\".\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q2\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"What is the English word for \\\"रसोई\\\"?\",\n      \"options\": [\n        \"window\",\n        \"office\",\n        \"kitchen\",\n        \"bedroom\"\n      ],\n      \"correct_indices\": [\n        2\n      ],\n      \"explanation\": \"रसोई = kitchen (किचन).\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q3\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"What is \\\"Excuse me\\\" used for?\",\n      \"options\": [\n        \"Getting someone's attention politely\",\n        \"Saying goodbye\",\n        \"Replying to \\\"thank you\\\"\",\n        \"Greeting someone in the morning\"\n      ],\n      \"correct_indices\": [\n        0\n      ],\n      \"explanation\": \"Use \\\"Excuse me\\\" to get attention or to ask someone to let you pass. (सुनिए / ज़रा रास्ता दीजिए)\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q4\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"How do you say 1,00,000 (one lakh) in international English?\",\n      \"options\": [\n        \"one million\",\n        \"ten thousand\",\n        \"ten million\",\n        \"one hundred thousand\"\n      ],\n      \"correct_indices\": [\n        3\n      ],\n      \"explanation\": \"One lakh = 100,000 = one hundred thousand. Ten lakh = one million.\",\n      \"points\": 1,\n      \"difficulty\": 2\n    },\n    {\n      \"id\": \"q5\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Read: \\\"Hi Priya, I am running late. I will reach the office at 10:15.\\\" What does the writer mean?\",\n      \"options\": [\n        \"The writer is already at the office\",\n        \"The writer will arrive later than planned\",\n        \"The writer is running to the office\",\n        \"The writer will not come today\"\n      ],\n      \"correct_indices\": [\n        1\n      ],\n      \"explanation\": \"\\\"Running late\\\" means you will arrive later than planned. (देर हो रही है)\",\n      \"points\": 1,\n      \"difficulty\": 2\n    }\n  ]\n}",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_vocabulary",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_reading",
+                  "weight": 1.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "ch_eng_3",
+          "title": "Building Sentences · वाक्य बनाना",
+          "description": "Word order, questions and negatives, articles and prepositions",
+          "position": 2,
+          "elements": [
+            {
+              "id": "el_eng_v_3_1",
+              "title": "शब्दों का क्रम · Word Order",
+              "element_type": "video",
+              "position": 0,
+              "media_id": "eng_v_3_1",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_sentence_structure",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_3_1",
+              "title": "Word Order · शब्दों का क्रम",
+              "element_type": "text",
+              "position": 1,
+              "content_inline": "<h2>Word Order · शब्दों का क्रम: SOV से SVO</h2>\n<p>हिंदी में क्रिया (verb) आम तौर पर वाक्य के अंत में आती है: <strong>कर्ता + कर्म + क्रिया</strong> (Subject–Object–Verb)। अंग्रेज़ी में क्रिया कर्ता के ठीक बाद आती है: <strong>Subject + Verb + Object</strong>।</p>\n<table>\n  <tr><th>हिंदी</th><th>English</th></tr>\n  <tr><td>मैं चाय पीता हूँ।</td><td><code>I drink tea.</code></td></tr>\n  <tr><td>राम किताब पढ़ता है।</td><td><code>Ram reads a book.</code></td></tr>\n  <tr><td>हम हिंदी बोलते हैं।</td><td><code>We speak Hindi.</code></td></tr>\n  <tr><td>वह खाना बनाती है।</td><td><code>She cooks food.</code></td></tr>\n</table>\n<p>गलत: <code>I tea drink.</code> ✗ — सही: <code>I drink tea.</code> ✓</p>\n<p><strong>am / is / are</strong> — हिंदी के \"हूँ / है / हैं\" के लिए अंग्रेज़ी में <code>am, is, are</code> हैं, और ये भी कर्ता के ठीक बाद आते हैं:</p>\n<table>\n  <tr><th>Subject</th><th>Verb</th><th>हिंदी</th></tr>\n  <tr><td>I</td><td>am</td><td>मैं ... हूँ</td></tr>\n  <tr><td>He / She / It</td><td>is</td><td>वह / यह ... है</td></tr>\n  <tr><td>You / We / They</td><td>are</td><td>तुम / आप / हम / वे ... हो / हैं</td></tr>\n</table>\n<table>\n  <tr><th>हिंदी</th><th>English</th></tr>\n  <tr><td>मैं शिक्षक हूँ।</td><td><code>I am a teacher.</code></td></tr>\n  <tr><td>वह बीमार है।</td><td><code>She is ill.</code></td></tr>\n  <tr><td>हम तैयार हैं।</td><td><code>We are ready.</code></td></tr>\n  <tr><td>यह मेरा घर है।</td><td><code>This is my house.</code></td></tr>\n</table>\n<p>हिंदी में \"है\" अंत में आता है; अंग्रेज़ी में <code>is</code> बीच में। इसे छोड़ें भी नहीं: <code>She ill.</code> ✗ — <code>She is ill.</code> ✓</p>\n<p>बोलचाल में छोटे रूप (short forms) आम हैं: <code>I am → I'm</code>, <code>he is → he's</code>, <code>they are → they're</code>।</p>\n<p><strong>अभ्यास:</strong> शब्दों को सही क्रम में लगाइए — (milk / I / drink) → <code>I drink milk.</code>; (is / my / Asha / sister) → <code>Asha is my sister.</code></p>\n<p><code>a teacher</code> में <code>a</code> क्यों आया? यह हम दो पाठ बाद पढ़ेंगे।</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_sentence_structure",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_v_3_2",
+              "title": "प्रश्न और नहीं · Questions and Negatives",
+              "element_type": "video",
+              "position": 2,
+              "media_id": "eng_v_3_2",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_sentence_structure",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_3_2",
+              "title": "Questions and Negatives · प्रश्न और \"नहीं\"",
+              "element_type": "text",
+              "position": 3,
+              "content_inline": "<h2>Questions and Negatives · प्रश्न और \"नहीं\"</h2>\n<p>हिंदी में हाँ/ना वाला प्रश्न बनाने के लिए वाक्य के शुरू में \"क्या\" जोड़ते हैं, या सिर्फ़ आवाज़ ऊपर उठाते हैं: \"तुम चाय पीते हो?\" अंग्रेज़ी में <strong>शब्दों का क्रम बदलता है</strong>।</p>\n<p><strong>1. am / is / are वाले वाक्य:</strong> इन्हें कर्ता से पहले ले आइए।</p>\n<ul>\n  <li><code>You are ready.</code> → <code>Are you ready?</code></li>\n  <li><code>She is a doctor.</code> → <code>Is she a doctor?</code></li>\n</ul>\n<p><strong>2. बाकी क्रियाएँ:</strong> शुरू में <code>do</code> या <code>does</code> (he/she/it के साथ) लगाइए।</p>\n<ul>\n  <li><code>You drink tea.</code> → <code>Do you drink tea?</code></li>\n  <li><code>She lives here.</code> → <code>Does she live here?</code></li>\n</ul>\n<p><code>does</code> के बाद क्रिया में <code>-s</code> नहीं लगता: <code>Does she lives here?</code> ✗</p>\n<p><strong>Negatives · \"नहीं\" वाले वाक्य:</strong> <code>not</code> क्रिया से पहले आता है।</p>\n<table>\n  <tr><th>हिंदी</th><th>English</th></tr>\n  <tr><td>मैं थका नहीं हूँ।</td><td><code>I am not tired.</code></td></tr>\n  <tr><td>वह घर पर नहीं है।</td><td><code>He is not (isn't) at home.</code></td></tr>\n  <tr><td>मैं मांस नहीं खाता।</td><td><code>I do not (don't) eat meat.</code></td></tr>\n  <tr><td>वह अंग्रेज़ी नहीं बोलती।</td><td><code>She does not (doesn't) speak English.</code></td></tr>\n</table>\n<p>गलत: <code>I not eat meat.</code> ✗ — सही: <code>I don't eat meat.</code> ✓</p>\n<p><strong>Question words · प्रश्नवाचक शब्द</strong></p>\n<table>\n  <tr><th>English</th><th>हिंदी</th><th>English</th><th>हिंदी</th></tr>\n  <tr><td>What</td><td>क्या</td><td>Who</td><td>कौन</td></tr>\n  <tr><td>Where</td><td>कहाँ</td><td>Why</td><td>क्यों</td></tr>\n  <tr><td>When</td><td>कब</td><td>How</td><td>कैसे</td></tr>\n  <tr><td>How much</td><td>कितना (दाम, मात्रा)</td><td>How many</td><td>कितने (गिनती)</td></tr>\n</table>\n<p>हिंदी में प्रश्नवाचक शब्द अक्सर बीच में आता है (\"तुम कहाँ रहते हो?\"); अंग्रेज़ी में <strong>शुरू में</strong>: question word + do/does/am/is/are + subject + verb।</p>\n<ul>\n  <li><code>Where do you live?</code> — तुम कहाँ रहते हो?</li>\n  <li><code>What is your name?</code> — आपका नाम क्या है?</li>\n  <li><code>Why is he late?</code> — उसे देर क्यों हुई?</li>\n  <li><code>When does the train leave?</code> — ट्रेन कब छूटती है?</li>\n</ul>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_sentence_structure",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_lab_builder",
+              "title": "Language Lab: Build Sentences · वाक्य बनाइए",
+              "element_type": "plugin",
+              "position": 4,
+              "content_inline": "{\"activity\":\"builder\",\"items\":[{\"tiles\":[\"rice.\",\"eat\",\"I\"],\"hint_hi\":\"मैं चावल खाता हूँ।\"},{\"tiles\":[\"a\",\"book.\",\"reads\",\"Ram\"],\"hint_hi\":\"राम एक किताब पढ़ता है।\"},{\"tiles\":[\"is\",\"teacher.\",\"My\",\"a\",\"father\"],\"hint_hi\":\"मेरे पिता शिक्षक हैं।\"},{\"tiles\":[\"cricket\",\"Sunday.\",\"play\",\"We\",\"on\"],\"hint_hi\":\"हम रविवार को क्रिकेट खेलते हैं।\"},{\"tiles\":[\"tea?\",\"you\",\"Do\",\"like\"],\"hint_hi\":\"क्या आपको चाय पसंद है?\"},{\"tiles\":[\"coffee.\",\"not\",\"drink\",\"does\",\"He\"],\"hint_hi\":\"वह कॉफ़ी नहीं पीता।\"}],\"grader_private\":{\"items\":[{\"answer\":\"I eat rice.\"},{\"answer\":\"Ram reads a book.\"},{\"answer\":\"My father is a teacher.\"},{\"answer\":\"We play cricket on Sunday.\",\"also\":[\"On Sunday we play cricket.\"]},{\"answer\":\"Do you like tea?\"},{\"answer\":\"He does not drink coffee.\"}]}}",
+              "plugin_cid": "c5e17fce7fce75301a54935a0a06537eeb0e64e989a9be4c69e2b16ad5a02f7b",
+              "plugin_version": "0.1.0",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_sentence_structure",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_v_3_3",
+              "title": "आर्टिकल · A, An, The",
+              "element_type": "video",
+              "position": 5,
+              "media_id": "eng_v_3_3",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_articles",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_3_3",
+              "title": "A, An, The · आर्टिकल",
+              "element_type": "text",
+              "position": 6,
+              "content_inline": "<h2>A, An, The · आर्टिकल</h2>\n<p>हिंदी में a, an, the जैसे शब्द नहीं होते, इसलिए हिंदी बोलने वाले अक्सर इन्हें छोड़ देते हैं: <code>I am teacher.</code> ✗ अंग्रेज़ी में गिनी जा सकने वाली किसी एक चीज़ (singular countable noun) से पहले लगभग हमेशा कोई शब्द चाहिए — <code>a, an, the, my, this</code> आदि।</p>\n<p><strong>A / An</strong> — कोई भी एक; पहली बार ज़िक्र; पेशा:</p>\n<ul>\n  <li><code>I have a phone.</code></li>\n  <li><code>She is a nurse.</code> — पेशे के साथ a/an ज़रूरी है।</li>\n</ul>\n<p><strong>a या an?</strong> यह <em>ध्वनि</em> से तय होता है, अक्षर से नहीं:</p>\n<table>\n  <tr><th>an + स्वर ध्वनि</th><th>a + व्यंजन ध्वनि</th></tr>\n  <tr><td><code>an apple, an egg</code></td><td><code>a book, a car</code></td></tr>\n  <tr><td><code>an hour</code> (आवर — h नहीं बोलते)</td><td><code>a university</code> (यूनिवर्सिटी — \"य\" से शुरू)</td></tr>\n  <tr><td><code>an MBA</code> (एम — स्वर से शुरू)</td><td><code>a uniform</code> (यूनिफ़ॉर्म)</td></tr>\n</table>\n<p><strong>The</strong> — कोई ख़ास चीज़, जिसे बोलने वाला और सुनने वाला दोनों जानते हैं:</p>\n<ul>\n  <li><code>I bought a book. The book is very good.</code> — दूसरी बार वही किताब।</li>\n  <li><code>Please close the door.</code> — इसी कमरे का दरवाज़ा।</li>\n  <li>जो एक ही है: <code>the sun, the moon, the internet</code></li>\n  <li>नदियाँ और पर्वत-श्रृंखलाएँ: <code>the Ganga, the Himalayas</code></li>\n  <li>सबसे अच्छा/बड़ा: <code>the best student, the biggest city</code></li>\n</ul>\n<p><strong>कोई article नहीं:</strong> आम बात करते समय बहुवचन और न गिने जाने वाले शब्द (<code>I like dogs.</code>, <code>Milk is good for health.</code>); नाम (<code>Delhi, India, Ravi</code>); भाषाएँ (<code>I speak Hindi.</code>); खाने के समय (<code>I had lunch.</code>)।</p>\n<p><strong>\"एक\" हमेशा \"a\" नहीं है:</strong> हिंदी के \"वह डॉक्टर है\" में \"एक\" नहीं है, फिर भी अंग्रेज़ी में <code>He is a doctor.</code> और जब गिनती ज़रूरी हो, तब \"एक\" = <code>one</code>: \"मेरा एक ही भाई है\" → <code>I have only one brother.</code></p>\n<table>\n  <tr><th>✗</th><th>✓</th></tr>\n  <tr><td>I am engineer.</td><td><code>I am an engineer.</code></td></tr>\n  <tr><td>I have car.</td><td><code>I have a car.</code></td></tr>\n  <tr><td>She is best student.</td><td><code>She is the best student.</code></td></tr>\n  <tr><td>I went to the Mumbai.</td><td><code>I went to Mumbai.</code></td></tr>\n</table>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_articles",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_v_3_4",
+              "title": "प्रीपोज़िशन · In, On, At",
+              "element_type": "video",
+              "position": 7,
+              "media_id": "eng_v_3_4",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_prepositions",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_3_4",
+              "title": "In, On, At · प्रीपोज़िशन",
+              "element_type": "text",
+              "position": 8,
+              "content_inline": "<h2>In, On, At · प्रीपोज़िशन</h2>\n<p>हिंदी में \"में, पर, से, तक, के साथ\" जैसे शब्द संज्ञा के <strong>बाद</strong> आते हैं: \"मेज़ पर\", \"घर में\"। अंग्रेज़ी में ऐसे शब्द (prepositions) संज्ञा से <strong>पहले</strong> आते हैं।</p>\n<table>\n  <tr><th>हिंदी</th><th>English</th></tr>\n  <tr><td>मेज़ पर</td><td><code>on the table</code></td></tr>\n  <tr><td>घर में</td><td><code>in the house</code></td></tr>\n  <tr><td>स्टेशन पर</td><td><code>at the station</code></td></tr>\n  <tr><td>दिल्ली से</td><td><code>from Delhi</code></td></tr>\n  <tr><td>शाम तक</td><td><code>until the evening</code></td></tr>\n  <tr><td>रवि के साथ</td><td><code>with Ravi</code></td></tr>\n</table>\n<p><strong>Place · जगह</strong></p>\n<ul>\n  <li><strong>in</strong> — किसी चीज़ के अंदर, या शहर/देश में: <code>in the box, in Mumbai, in India</code></li>\n  <li><strong>on</strong> — किसी सतह पर: <code>on the wall, on the floor</code>; बस/ट्रेन में सवार: <code>on the bus</code></li>\n  <li><strong>at</strong> — किसी ख़ास जगह या बिंदु पर: <code>at the door, at the bus stop, at home, at work</code></li>\n</ul>\n<p><strong>Time · समय</strong></p>\n<table>\n  <tr><th>Word</th><th>किसके साथ</th><th>Examples</th></tr>\n  <tr><td>at</td><td>घड़ी का समय</td><td><code>at 7 o'clock, at noon, at night</code></td></tr>\n  <tr><td>on</td><td>दिन और तारीख़</td><td><code>on Monday, on 15 August, on my birthday</code></td></tr>\n  <tr><td>in</td><td>महीना, साल, दिन का हिस्सा</td><td><code>in May, in 2025, in the morning, in the evening</code></td></tr>\n</table>\n<p>याद रखें: <code>at night</code> पर <code>in the morning</code> और <code>in the evening</code>।</p>\n<p><strong>हिंदी से आने वाली आम गलतियाँ:</strong></p>\n<table>\n  <tr><th>✗</th><th>✓</th><th>क्यों</th></tr>\n  <tr><td>I will go to home.</td><td><code>I will go home.</code></td><td><code>home</code> के साथ to नहीं लगता</td></tr>\n  <tr><td>He is angry on me.</td><td><code>He is angry with me.</code></td><td>\"मुझ पर गुस्सा\" = angry with</td></tr>\n  <tr><td>She is married with Raj.</td><td><code>She is married to Raj.</code></td><td>married के साथ to</td></tr>\n  <tr><td>I live here since two years.</td><td><code>I have lived here for two years.</code></td><td>अवधि के लिए for; शुरुआत के लिए since (since 2020)</td></tr>\n</table>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_prepositions",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_3_5",
+              "title": "Building Sentences Quiz",
+              "element_type": "quiz",
+              "position": 9,
+              "content_inline": "{\n  \"title\": \"Building Sentences Quiz\",\n  \"pass_threshold\": 0.66,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Which sentence has correct English word order?\",\n      \"options\": [\n        \"I tea drink every day.\",\n        \"Every day tea I drink.\",\n        \"I drink tea every day.\",\n        \"Drink I tea every day.\"\n      ],\n      \"correct_indices\": [\n        2\n      ],\n      \"explanation\": \"English uses Subject + Verb + Object: I drink tea. (क्रिया कर्ता के ठीक बाद।)\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q2\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Make a question from \\\"She lives in Pune.\\\"\",\n      \"options\": [\n        \"Does she live in Pune?\",\n        \"Does she lives in Pune?\",\n        \"She does live in Pune?\",\n        \"Is she live in Pune?\"\n      ],\n      \"correct_indices\": [\n        0\n      ],\n      \"explanation\": \"Use does + base verb: Does she live...? After does, the verb has no -s.\",\n      \"points\": 1,\n      \"difficulty\": 2\n    },\n    {\n      \"id\": \"q3\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Choose the right word: \\\"He is ___ engineer.\\\"\",\n      \"options\": [\n        \"a\",\n        \"an\",\n        \"the\",\n        \"(no word)\"\n      ],\n      \"correct_indices\": [\n        1\n      ],\n      \"explanation\": \"\\\"Engineer\\\" starts with a vowel sound, so: an engineer. Jobs need a/an.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q4\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"How do you say \\\"मेज़ पर\\\" in English?\",\n      \"options\": [\n        \"table on\",\n        \"the table on\",\n        \"in table\",\n        \"on the table\"\n      ],\n      \"correct_indices\": [\n        3\n      ],\n      \"explanation\": \"English prepositions come before the noun: on the table.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q5\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Choose the correct sentence.\",\n      \"options\": [\n        \"See you on 7 o'clock.\",\n        \"See you at Monday.\",\n        \"See you on Monday.\",\n        \"See you in Monday.\"\n      ],\n      \"correct_indices\": [\n        2\n      ],\n      \"explanation\": \"Use on for days (on Monday) and at for clock times (at 7 o'clock).\",\n      \"points\": 1,\n      \"difficulty\": 2\n    }\n  ]\n}",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_sentence_structure",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_articles",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_prepositions",
+                  "weight": 1.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "ch_eng_4",
+          "title": "Talking About Time · समय और काल",
+          "description": "Present, past, future and the present perfect",
+          "position": 3,
+          "elements": [
+            {
+              "id": "el_eng_v_4_1",
+              "title": "वर्तमान काल · Present Simple and Continuous",
+              "element_type": "video",
+              "position": 0,
+              "media_id": "eng_v_4_1",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_tenses",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_4_1",
+              "title": "Present Simple and Present Continuous",
+              "element_type": "text",
+              "position": 1,
+              "content_inline": "<h2>Present Simple and Present Continuous</h2>\n<p><strong>Present simple</strong> is for habits and facts (आदतें और सामान्य सच):</p>\n<ul>\n  <li><code>I work in a bank.</code></li>\n  <li><code>She drinks tea every morning.</code></li>\n  <li><code>Water boils at 100°C.</code></li>\n</ul>\n<p>With <strong>he, she, it</strong> (or one person's name), add <code>-s</code> or <code>-es</code> to the verb: <code>I work → she works</code>, <code>I go → he goes</code>, <code>I watch → she watches</code>, <code>I have → he has</code>.</p>\n<p><strong>Present continuous</strong> is for actions happening now or around now (अभी हो रहा है): <code>am / is / are + verb-ing</code>.</p>\n<ul>\n  <li><code>I am working now.</code></li>\n  <li><code>She is cooking.</code></li>\n  <li><code>They are watching TV.</code></li>\n</ul>\n<table>\n  <tr><th>हिंदी</th><th>English</th><th>Tense</th></tr>\n  <tr><td>मैं रोज़ बस से जाता हूँ।</td><td><code>I go by bus every day.</code></td><td>present simple</td></tr>\n  <tr><td>मैं अभी बस से जा रहा हूँ।</td><td><code>I am going by bus right now.</code></td><td>present continuous</td></tr>\n</table>\n<p>हिंदी का \"रहा हूँ / रही है\" लगभग अंग्रेज़ी के <code>-ing</code> जैसा है। पर \"जाता हूँ\" वाला रूप आदत बताता है, इसलिए उसके लिए present simple।</p>\n<p><strong>Time words:</strong> present simple — <code>every day, usually, always, often, never</code>; present continuous — <code>now, right now, at the moment, these days</code>.</p>\n<p><strong>State verbs · स्थिति वाली क्रियाएँ:</strong> some verbs describe a state, not an action, and are normally <em>not</em> used with -ing: <code>know, understand, believe, like, love, want, need, have</code> (owning), <code>belong, seem</code>.</p>\n<table>\n  <tr><th>✗</th><th>✓</th></tr>\n  <tr><td>I am knowing him.</td><td><code>I know him.</code></td></tr>\n  <tr><td>He is having a car.</td><td><code>He has a car.</code></td></tr>\n  <tr><td>I am understanding.</td><td><code>I understand.</code></td></tr>\n  <tr><td>She is wanting tea.</td><td><code>She wants tea.</code></td></tr>\n</table>\n<p>हिंदी में \"मैं उसे जानता हूँ\" में \"जानता हूँ\" है, पर अंग्रेज़ी में यह <code>I know him</code> ही होगा। Note: <code>have</code> for eating or activities can take -ing: <code>I am having lunch.</code> ✓ <code>We are having a meeting.</code> ✓ — but not for owning things.</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_tenses",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_v_4_2",
+              "title": "बीता हुआ समय · Past Simple",
+              "element_type": "video",
+              "position": 2,
+              "media_id": "eng_v_4_2",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_tenses",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_4_2",
+              "title": "Past Simple: Regular and Irregular Verbs",
+              "element_type": "text",
+              "position": 3,
+              "content_inline": "<h2>Past Simple: Regular and Irregular Verbs</h2>\n<p>Use the <strong>past simple</strong> for finished actions at a finished time (बीते हुए समय में पूरा हुआ काम): <code>yesterday, last week, in 2019, two days ago</code>.</p>\n<p><strong>Regular verbs:</strong> add <code>-ed</code>.</p>\n<ul>\n  <li><code>work → worked</code>, <code>play → played</code>, <code>watch → watched</code></li>\n  <li>ending in e, add only d: <code>live → lived</code></li>\n  <li>consonant + y → ied: <code>study → studied</code></li>\n  <li>short verbs often double the last letter: <code>stop → stopped</code></li>\n</ul>\n<p><strong>Saying -ed:</strong> it has three sounds — \"t\" in <code>worked</code> (वर्क्ट), \"d\" in <code>played</code> (प्लेड), and a full extra syllable \"id\" only after t or d: <code>wanted</code> (वॉन्टिड), <code>needed</code>. Do not say \"work-ed\" (वर्क-एड).</p>\n<p><strong>Common irregular verbs · अनियमित क्रियाएँ</strong> — these must be learned by heart:</p>\n<table>\n  <tr><th>Verb → Past</th><th>हिंदी</th><th>Verb → Past</th><th>हिंदी</th></tr>\n  <tr><td>go → <strong>went</strong></td><td>जाना</td><td>come → <strong>came</strong></td><td>आना</td></tr>\n  <tr><td>eat → <strong>ate</strong></td><td>खाना</td><td>drink → <strong>drank</strong></td><td>पीना</td></tr>\n  <tr><td>see → <strong>saw</strong></td><td>देखना</td><td>take → <strong>took</strong></td><td>लेना</td></tr>\n  <tr><td>give → <strong>gave</strong></td><td>देना</td><td>buy → <strong>bought</strong></td><td>ख़रीदना</td></tr>\n  <tr><td>make → <strong>made</strong></td><td>बनाना</td><td>get → <strong>got</strong></td><td>पाना</td></tr>\n  <tr><td>have → <strong>had</strong></td><td>रखना / खाना</td><td>do → <strong>did</strong></td><td>करना</td></tr>\n  <tr><td>say → <strong>said</strong></td><td>कहना</td><td>write → <strong>wrote</strong></td><td>लिखना</td></tr>\n  <tr><td>read → <strong>read (रेड)</strong></td><td>पढ़ना</td><td>speak → <strong>spoke</strong></td><td>बोलना</td></tr>\n  <tr><td>tell → <strong>told</strong></td><td>बताना</td><td>think → <strong>thought</strong></td><td>सोचना</td></tr>\n  <tr><td>sleep → <strong>slept</strong></td><td>सोना</td><td>leave → <strong>left</strong></td><td>छोड़ना / निकलना</td></tr>\n</table>\n<p>The past form is the same for every subject: <code>I went, she went, they went</code> — no -s.</p>\n<p><strong>Questions and negatives use did</strong>, and after did the verb goes back to its base form:</p>\n<table>\n  <tr><th>✗</th><th>✓</th></tr>\n  <tr><td>Did you went to the market?</td><td><code>Did you go to the market?</code></td></tr>\n  <tr><td>I didn't saw him.</td><td><code>I didn't see him.</code></td></tr>\n</table>\n<p><strong>was / were</strong> (था / थी / थे): <code>am, is → was</code>; <code>are → were</code>. <code>I was tired.</code> <code>They were at home.</code></p>\n<blockquote><p>Yesterday I got up at seven. I had breakfast and went to work by bus. In the evening I met my friend, and we watched a film.</p></blockquote>\n<p>Find the six past-tense verbs in this paragraph, then write three sentences about your own yesterday.</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_tenses",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_v_4_3",
+              "title": "भविष्य और प्रेज़ेंट परफ़ेक्ट · Future and Present Perfect",
+              "element_type": "video",
+              "position": 4,
+              "media_id": "eng_v_4_3",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_tenses",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_4_3",
+              "title": "Future and Present Perfect",
+              "element_type": "text",
+              "position": 5,
+              "content_inline": "<h2>Future and Present Perfect</h2>\n<p><strong>Future with will:</strong> decisions made now, promises, predictions. <code>I will call you tomorrow.</code> (मैं कल तुम्हें फ़ोन करूँगा।) <code>I think it will rain.</code> Negative: <code>I won't (will not) be late.</code></p>\n<p><strong>Future with going to:</strong> plans you have already made. <code>I am going to visit my village next month.</code> (मैं अगले महीने गाँव जाने वाला हूँ।) Hindi \"जाने वाला हूँ\" is close to <code>going to</code>.</p>\n<p><strong>Present perfect:</strong> <code>have / has + past participle</code> (verb's third form). Use it for a past action whose result matters now, for life experience, and with unfinished time (<code>today, this week</code>). Common words: <code>already, just, yet, ever, never</code>.</p>\n<ul>\n  <li><code>I have lost my keys.</code> — they are still lost now.</li>\n  <li><code>She has finished her work.</code></li>\n  <li><code>Have you ever been to Goa?</code></li>\n  <li><code>I haven't eaten yet.</code></li>\n</ul>\n<table>\n  <tr><th>Base</th><th>Past</th><th>Past participle</th></tr>\n  <tr><td>eat</td><td>ate</td><td>eaten</td></tr>\n  <tr><td>go</td><td>went</td><td>gone / been</td></tr>\n  <tr><td>see</td><td>saw</td><td>seen</td></tr>\n  <tr><td>do</td><td>did</td><td>done</td></tr>\n  <tr><td>write</td><td>wrote</td><td>written</td></tr>\n  <tr><td>take</td><td>took</td><td>taken</td></tr>\n  <tr><td>finish</td><td>finished</td><td>finished</td></tr>\n  <tr><td>buy</td><td>bought</td><td>bought</td></tr>\n</table>\n<p><strong>Present perfect or past simple?</strong> The key rule: if you say <em>when</em> it happened (<code>yesterday, last week, in 2020, at 5 o'clock</code>), use the <strong>past simple</strong>.</p>\n<table>\n  <tr><th>✗</th><th>✓</th></tr>\n  <tr><td>I have eaten yesterday.</td><td><code>I ate yesterday.</code> / <code>I have already eaten.</code></td></tr>\n  <tr><td>I have seen him last week.</td><td><code>I saw him last week.</code></td></tr>\n</table>\n<p>हिंदी में \"मैंने खाना खा लिया है\" और \"मैंने कल खाना खाया\" दोनों में \"खाया\" आता है। अंग्रेज़ी में \"कल\" जैसा समय बताने वाला शब्द हो, तो past simple लगाइए।</p>\n<p><strong>for and since</strong> (हिंदी में दोनों के लिए \"से\"): <code>I have lived here for five years.</code> (for + अवधि) <code>I have lived here since 2020.</code> (since + शुरुआत का समय)</p>\n<table>\n  <tr><th>Tense</th><th>Form</th><th>Example</th></tr>\n  <tr><td>Present simple</td><td>verb / verb-s</td><td><code>She works here.</code></td></tr>\n  <tr><td>Present continuous</td><td>am/is/are + verb-ing</td><td><code>She is working now.</code></td></tr>\n  <tr><td>Past simple</td><td>verb-ed / irregular</td><td><code>She worked yesterday.</code></td></tr>\n  <tr><td>Future</td><td>will + verb / going to + verb</td><td><code>She will work tomorrow.</code></td></tr>\n  <tr><td>Present perfect</td><td>have/has + past participle</td><td><code>She has worked here since 2021.</code></td></tr>\n</table>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_tenses",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_4_4",
+              "title": "Tenses Quiz",
+              "element_type": "quiz",
+              "position": 6,
+              "content_inline": "{\n  \"title\": \"Tenses Quiz\",\n  \"pass_threshold\": 0.66,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Choose the correct sentence.\",\n      \"options\": [\n        \"I know the answer.\",\n        \"I am knowing the answer.\",\n        \"I knowing the answer.\",\n        \"I am know the answer.\"\n      ],\n      \"correct_indices\": [\n        0\n      ],\n      \"explanation\": \"\\\"Know\\\" is a state verb, so it is not used with -ing: I know.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q2\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"\\\"She ___ to work by bus every day.\\\"\",\n      \"options\": [\n        \"go\",\n        \"going\",\n        \"goes\",\n        \"is go\"\n      ],\n      \"correct_indices\": [\n        2\n      ],\n      \"explanation\": \"A habit with she uses present simple + -s/-es: she goes.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q3\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"\\\"Yesterday we ___ a film.\\\"\",\n      \"options\": [\n        \"have watched\",\n        \"watch\",\n        \"are watching\",\n        \"watched\"\n      ],\n      \"correct_indices\": [\n        3\n      ],\n      \"explanation\": \"\\\"Yesterday\\\" is a finished time, so use the past simple: watched.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q4\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Which sentence is correct?\",\n      \"options\": [\n        \"I have seen him yesterday.\",\n        \"I saw him yesterday.\",\n        \"I have saw him yesterday.\",\n        \"I seen him yesterday.\"\n      ],\n      \"correct_indices\": [\n        1\n      ],\n      \"explanation\": \"With a finished time word like yesterday, use the past simple: I saw him yesterday.\",\n      \"points\": 1,\n      \"difficulty\": 2\n    },\n    {\n      \"id\": \"q5\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"\\\"Did you ___ your homework?\\\"\",\n      \"options\": [\n        \"did\",\n        \"done\",\n        \"do\",\n        \"does\"\n      ],\n      \"correct_indices\": [\n        2\n      ],\n      \"explanation\": \"After did, use the base form of the verb: Did you do...?\",\n      \"points\": 1,\n      \"difficulty\": 2\n    }\n  ]\n}",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_tenses",
+                  "weight": 1.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "ch_eng_5",
+          "title": "Writing Everyday English · लिखना",
+          "description": "Punctuation, messages and emails, and common mistakes to fix",
+          "position": 4,
+          "elements": [
+            {
+              "id": "el_eng_v_5_1",
+              "title": "विराम-चिह्न · Capitals and Punctuation",
+              "element_type": "video",
+              "position": 0,
+              "media_id": "eng_v_5_1",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_writing",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_5_1",
+              "title": "Capitals and Punctuation",
+              "element_type": "text",
+              "position": 1,
+              "content_inline": "<h2>Capitals and Punctuation</h2>\n<p>Punctuation marks show where a sentence ends and how to read it. Hindi uses the पूर्ण विराम (।); English uses a <strong>full stop</strong> (.) — a small dot on the line. Never use । in English writing.</p>\n<table>\n  <tr><th>Mark</th><th>Name</th><th>Use</th><th>Example</th></tr>\n  <tr><td>.</td><td>full stop (US: period)</td><td>end of a statement</td><td><code>I live in Patna.</code></td></tr>\n  <tr><td>?</td><td>question mark</td><td>end of a question</td><td><code>Where do you live?</code></td></tr>\n  <tr><td>!</td><td>exclamation mark</td><td>strong feeling; use rarely</td><td><code>What a surprise!</code></td></tr>\n  <tr><td>,</td><td>comma</td><td>short pause, lists, after a greeting</td><td><code>I bought rice, dal and sugar.</code></td></tr>\n  <tr><td>'</td><td>apostrophe</td><td>short forms and belonging</td><td><code>don't, it's, Ravi's bag</code></td></tr>\n  <tr><td>\" \"</td><td>quotation marks</td><td>someone's exact words</td><td><code>She said, \"I am ready.\"</code></td></tr>\n</table>\n<p><strong>Capital letters:</strong> the first word of a sentence; the word <code>I</code>; names of people, places, days and months; languages and nationalities (<code>Hindi, English, Indian</code>).</p>\n<p><strong>it's or its?</strong> <code>it's</code> = it is (<code>It's raining.</code>). <code>its</code> = belonging to it, with no apostrophe (<code>The dog wagged its tail.</code>). Plurals never take an apostrophe: <code>two books</code>, not <code>two book's</code>.</p>\n<p><strong>Spaces:</strong> no space <em>before</em> . , ? ! and one space <em>after</em>. ✗ <code>Hello ,how are you ?</code> ✓ <code>Hello, how are you?</code> (हिंदी टाइप करते समय कई लोग । से पहले स्पेस देते हैं; अंग्रेज़ी में विराम-चिह्न से पहले स्पेस नहीं।)</p>\n<ul>\n  <li>Don't write whole sentences in CAPITALS — it reads like shouting.</li>\n  <li>Avoid <code>!!!</code> and <code>???</code> in work messages.</li>\n</ul>\n<p><strong>Practice:</strong> correct this — <code>my name is anil i live in jaipur</code> → <code>My name is Anil. I live in Jaipur.</code></p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_writing",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_v_5_2",
+              "title": "मैसेज और ईमेल · Messages and Emails",
+              "element_type": "video",
+              "position": 2,
+              "media_id": "eng_v_5_2",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_writing",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_5_2",
+              "title": "Writing a Message and a Short Email",
+              "element_type": "text",
+              "position": 3,
+              "content_inline": "<h2>Writing a Message and a Short Email</h2>\n<p>A short email has four parts:</p>\n<ol>\n  <li><strong>Subject line</strong> — short and specific: <code>Leave request for 12 March</code>, not <code>Request</code> or <code>Hi</code>.</li>\n  <li><strong>Greeting</strong> — <code>Dear Mr Verma,</code> (formal), <code>Hello Neha,</code> or <code>Hi Neha,</code> (friendly).</li>\n  <li><strong>Body</strong> — two to four short sentences: why you are writing, the details, and what you need.</li>\n  <li><strong>Closing</strong> — <code>Thank you,</code> or <code>Regards,</code> and your name.</li>\n</ol>\n<p><strong>Template 1: asking for leave</strong></p>\n<blockquote><p>Subject: Leave request for 12 March</p><p>Dear Mr Verma,</p><p>I would like to take one day of leave on Thursday, 12 March, to attend my sister's wedding. I have finished the monthly report, and Sunita has agreed to answer my calls that day.</p><p>Please let me know if this is all right.</p><p>Thank you,</p><p>Rakesh Kumar</p></blockquote>\n<p><strong>Template 2: asking for information</strong></p>\n<blockquote><p>Subject: Question about evening English classes</p><p>Hello,</p><p>I saw your notice about evening English classes. Could you please tell me the fees and the class timings? I would also like to know if there is a weekend batch.</p><p>Thank you,</p><p>Pooja Singh</p></blockquote>\n<p><strong>Template 3: a quick message to a colleague</strong></p>\n<blockquote><p>Hi Arjun, the meeting has moved to 3 p.m. Please bring the sales report. Thanks!</p></blockquote>\n<p><strong>Useful polite phrases:</strong> <code>Could you please...?</code> · <code>I would like to...</code> · <code>Please let me know...</code> · <code>Thank you for your quick reply.</code> · <code>Sorry for the late reply.</code></p>\n<p><strong>Clear for every reader:</strong> phrases like <code>Kindly do the needful</code>, <code>Please revert</code> and <code>Can we prepone the meeting?</code> are common and well understood in Indian offices, but many readers outside India find them unclear. When you write to a wider audience, say exactly what you need:</p>\n<table>\n  <tr><th>Instead of</th><th>Try</th></tr>\n  <tr><td>Kindly do the needful.</td><td><code>Could you please send the signed form by Friday?</code></td></tr>\n  <tr><td>Please revert.</td><td><code>Please reply when you can.</code></td></tr>\n  <tr><td>Can we prepone the meeting?</td><td><code>Can we move the meeting earlier, to 2 p.m.?</code></td></tr>\n</table>\n<p>ये वाक्य गलत नहीं हैं, बस हर जगह समझे नहीं जाते। साफ़ लिखिए कि आपको क्या चाहिए और कब तक।</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_writing",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_v_5_3",
+              "title": "आम गलतियाँ · Common Mistakes",
+              "element_type": "video",
+              "position": 4,
+              "media_id": "eng_v_5_3",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_writing",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_tenses",
+                  "weight": 0.5
+                },
+                {
+                  "skill_id": "skill_english_articles",
+                  "weight": 0.5
+                }
+              ]
+            },
+            {
+              "id": "el_eng_5_3",
+              "title": "Common Hindi-Influenced Mistakes",
+              "element_type": "text",
+              "position": 5,
+              "content_inline": "<h2>Common Hindi-Influenced Mistakes</h2>\n<p>These mistakes come from translating Hindi word by word. They are very common and easy to fix once you notice them. (हिंदी से शब्द-दर-शब्द अनुवाद करने से ये गलतियाँ होती हैं।) Indian English is a real, respected variety of English; the aim here is to be understood easily everywhere, in India and abroad.</p>\n<table>\n  <tr><th>Instead of</th><th>Say</th><th>Why</th></tr>\n  <tr><td>I am having a car.</td><td><code>I have a car.</code></td><td>\"have\" for owning is not used with -ing</td></tr>\n  <tr><td>He is knowing English.</td><td><code>He knows English.</code></td><td>know, like, want, understand rarely take -ing</td></tr>\n  <tr><td>We discussed about the plan.</td><td><code>We discussed the plan.</code> / <code>We talked about the plan.</code></td><td>\"discuss\" already includes \"about\"</td></tr>\n  <tr><td>Please return back the book.</td><td><code>Please return the book.</code></td><td>\"return\" already means \"give back\"</td></tr>\n  <tr><td>He is my cousin brother.</td><td><code>He is my cousin.</code></td><td>\"cousin\" covers चचेरा/ममेरा भाई and बहन</td></tr>\n  <tr><td>I have seen this film yesterday.</td><td><code>I saw this film yesterday.</code></td><td>finished time → past simple</td></tr>\n  <tr><td>I am engineer.</td><td><code>I am an engineer.</code></td><td>jobs need a/an</td></tr>\n  <tr><td>I came yesterday only.</td><td><code>I came just yesterday.</code></td><td>Hindi \"ही\" (कल ही) → just/only before the word</td></tr>\n  <tr><td>Myself Ravi.</td><td><code>I'm Ravi.</code> / <code>My name is Ravi.</code></td><td>\"myself\" is not used to introduce yourself</td></tr>\n  <tr><td>What is your good name?</td><td><code>What is your name?</code> / <code>May I know your name?</code></td><td>\"good name\" is a translation of शुभ नाम</td></tr>\n  <tr><td>Where you are going?</td><td><code>Where are you going?</code></td><td>questions change the word order</td></tr>\n</table>\n<p><strong>Five-step self-check before you send:</strong></p>\n<ol>\n  <li>Does every sentence have a subject and a verb, in that order?</li>\n  <li>Does every single job or thing have <code>a, an, the, my</code> or <code>this</code> before it?</li>\n  <li>Did you use the past simple with <code>yesterday, last, ago</code>?</li>\n  <li>Capital letters at the start, full stops at the end?</li>\n  <li>Read it aloud once. If it sounds like a Hindi sentence in English words, rewrite it.</li>\n</ol>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_writing",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_tenses",
+                  "weight": 0.5
+                },
+                {
+                  "skill_id": "skill_english_articles",
+                  "weight": 0.5
+                }
+              ]
+            },
+            {
+              "id": "el_eng_lab_writing",
+              "title": "Language Lab: Writing Practice · लिखने का अभ्यास",
+              "element_type": "plugin",
+              "position": 6,
+              "content_inline": "{\"activity\":\"writing\",\"items\":[{\"prompt_hi\":\"“मेरा नाम ___ है।” अंग्रेज़ी में लिखिए और खाली जगह में अपना नाम भरिए।\",\"prompt_en\":\"Write “My name is ___.” with your own name.\",\"hint_hi\":\"नाम भी बड़े अक्षर से शुरू होता है, जैसे: My name is Sunita.\"},{\"prompt_hi\":\"मैं एक छात्र हूँ।\",\"prompt_en\":\"Translate: I am a student.\",\"hint_hi\":\"हिंदी में “हूँ” अंत में आता है, अंग्रेज़ी में am कर्ता के ठीक बाद: I am …\"},{\"prompt_hi\":\"मेरे पास एक छाता है।\",\"prompt_en\":\"Translate: I have an umbrella.\",\"hint_hi\":\"umbrella स्वर की ध्वनि (अ) से शुरू होता है, इसलिए a नहीं, an लगेगा।\"},{\"prompt_hi\":\"मैं एक घंटे में आऊँगा / आऊँगी।\",\"prompt_en\":\"Translate: I will come in an hour.\",\"hint_hi\":\"hour में h नहीं बोला जाता (आवर), इसलिए an hour लिखते हैं।\"},{\"prompt_hi\":\"अपने शहर के बारे में एक वाक्य लिखिए (कम से कम 5 शब्द)।\",\"prompt_en\":\"Write one sentence about your city (at least 5 words).\",\"hint_hi\":\"उदाहरण: My city is big and very busy.\"},{\"prompt_hi\":\"अपने दोस्त को एक छोटा संदेश लिखिए: उसे कल शाम चाय पर बुलाइए।\",\"prompt_en\":\"Write a short message inviting your friend for tea tomorrow evening.\",\"hint_hi\":\"tea और tomorrow ज़रूर लिखिए। उदाहरण: Hi Rahul, please come for tea tomorrow evening.\"}],\"grader_private\":{\"items\":[{\"require\":[\"my name is\"],\"min_words\":4},{\"accept\":[\"I am a student.\",\"I'm a student.\"],\"require\":[\"student\"]},{\"accept\":[\"I have an umbrella.\"],\"require\":[\"umbrella\"]},{\"accept\":[\"I will come in an hour.\",\"I'll come in an hour.\"],\"require\":[\"an hour\"]},{\"min_words\":5},{\"require\":[\"tea\",\"tomorrow\"],\"min_words\":6}]}}",
+              "plugin_cid": "c5e17fce7fce75301a54935a0a06537eeb0e64e989a9be4c69e2b16ad5a02f7b",
+              "plugin_version": "0.1.0",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_writing",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_articles",
+                  "weight": 0.5
+                }
+              ]
+            },
+            {
+              "id": "el_eng_5_4",
+              "title": "Writing Quiz",
+              "element_type": "quiz",
+              "position": 7,
+              "content_inline": "{\n  \"title\": \"Writing Quiz\",\n  \"pass_threshold\": 0.66,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Which sentence is written correctly?\",\n      \"options\": [\n        \"my name is anil.\",\n        \"My name is Anil.\",\n        \"My name is anil।\",\n        \"My Name Is Anil\"\n      ],\n      \"correct_indices\": [\n        1\n      ],\n      \"explanation\": \"Capital letter at the start and for names, and a full stop (not ।) at the end.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q2\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Which is the best subject line for an email asking for a day off?\",\n      \"options\": [\n        \"Hi\",\n        \"Request\",\n        \"Leave request for 12 March\",\n        \"URGENT!!!\"\n      ],\n      \"correct_indices\": [\n        2\n      ],\n      \"explanation\": \"A good subject line is short and says exactly what the email is about.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q3\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Which sentence is clearest for a reader outside India?\",\n      \"options\": [\n        \"Could you please send the report by Friday?\",\n        \"Kindly do the needful.\",\n        \"Please revert ASAP.\",\n        \"Do the needful at the earliest.\"\n      ],\n      \"correct_indices\": [\n        0\n      ],\n      \"explanation\": \"Say exactly what you need and by when. (साफ़ लिखिए कि क्या चाहिए और कब तक।)\",\n      \"points\": 1,\n      \"difficulty\": 2\n    },\n    {\n      \"id\": \"q4\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Choose the correct sentence.\",\n      \"options\": [\n        \"We discussed about the budget.\",\n        \"We discussed on the budget.\",\n        \"We did discussion about budget.\",\n        \"We discussed the budget.\"\n      ],\n      \"correct_indices\": [\n        3\n      ],\n      \"explanation\": \"\\\"Discuss\\\" takes no preposition: discuss the budget, or talk about the budget.\",\n      \"points\": 1,\n      \"difficulty\": 2\n    },\n    {\n      \"id\": \"q5\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Which sentence uses it's and its correctly?\",\n      \"options\": [\n        \"It's raining, so the dog is in it's house.\",\n        \"Its raining, so the dog is in its house.\",\n        \"It's raining, so the dog is in its house.\",\n        \"Its' raining, so the dog is in its' house.\"\n      ],\n      \"correct_indices\": [\n        2\n      ],\n      \"explanation\": \"It's = it is. Its = belonging to it, with no apostrophe.\",\n      \"points\": 1,\n      \"difficulty\": 3\n    }\n  ]\n}",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_writing",
+                  "weight": 1.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "ch_eng_6",
+          "title": "Speaking with Confidence · बोलना",
+          "description": "Word stress, everyday conversations and recorded speaking practice",
+          "position": 5,
+          "elements": [
+            {
+              "id": "el_eng_v_6_1",
+              "title": "शब्दों पर ज़ोर · Word Stress and the Schwa",
+              "element_type": "video",
+              "position": 0,
+              "media_id": "eng_v_6_1",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_pronunciation",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_6_1",
+              "title": "Word Stress and the Schwa",
+              "element_type": "text",
+              "position": 1,
+              "content_inline": "<h2>Word Stress and the Schwa</h2>\n<p>In English words with two or more syllables, one syllable is <strong>stressed</strong>: it is louder, longer and a little higher. Hindi gives syllables more equal weight, so Hindi speakers sometimes stress the wrong part, and listeners may not recognise the word. (हिंदी में सभी हिस्सों पर लगभग बराबर ज़ोर होता है; अंग्रेज़ी में एक हिस्से पर ज़्यादा।)</p>\n<p>CAPITALS show the stressed syllable:</p>\n<table>\n  <tr><th>Word</th><th>Stress</th><th>Word</th><th>Stress</th></tr>\n  <tr><td>photo</td><td>PHO-to</td><td>photography</td><td>pho-TO-gra-phy</td></tr>\n  <tr><td>computer</td><td>com-PU-ter</td><td>hotel</td><td>ho-TEL</td></tr>\n  <tr><td>develop</td><td>de-VEL-op</td><td>economy</td><td>e-CON-o-my</td></tr>\n  <tr><td>teacher</td><td>TEA-cher</td><td>economic</td><td>e-co-NOM-ic</td></tr>\n</table>\n<p>Stress can even change the meaning: <code>REcord</code> (a noun: रिकॉर्ड) and <code>reCORD</code> (a verb: रिकॉर्ड करना); <code>PREsent</code> (a gift) and <code>preSENT</code> (to show).</p>\n<p><strong>The schwa /ə/</strong> is the most common vowel sound in English. It is a short, relaxed \"uh\" — very close to the short अ in Hindi, as at the start of <em>अब</em>. The difference: English uses it only in weak, <em>unstressed</em> syllables, whatever the spelling.</p>\n<table>\n  <tr><th>Word</th><th>Sounds like</th><th>Dictionary</th></tr>\n  <tr><td>banana</td><td>buh-NAA-nuh</td><td>/bəˈnɑːnə/</td></tr>\n  <tr><td>about</td><td>uh-BOUT</td><td>/əˈbaʊt/</td></tr>\n  <tr><td>today</td><td>tuh-DAY</td><td>/təˈdeɪ/</td></tr>\n  <tr><td>doctor</td><td>DOK-tuh(r)</td><td>/ˈdɒktə(r)/</td></tr>\n</table>\n<p>Devanagari cannot show this well: बनाना suggests three equal \"आ\" sounds, but in English only the middle one is full. (देवनागरी में लिखा उच्चारण यहाँ सिर्फ़ अंदाज़ा है।)</p>\n<p><strong>Weak words in sentences:</strong> small words like <code>a, the, to, of, and, can</code> are usually weak and quick, while the important words are stressed: <code>I WANT to GO to the MARket.</code> <code>a CUP of TEA</code> sounds like \"uh CUP uh TEA\".</p>\n<p><strong>Practice:</strong> clap on the stressed syllable as you say each word. In a dictionary, the mark ˈ comes just before the stressed syllable.</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_pronunciation",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_v_6_2",
+              "title": "रोज़ की बातचीत · Everyday Conversations",
+              "element_type": "video",
+              "position": 2,
+              "media_id": "eng_v_6_2",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_conversation",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_6_2",
+              "title": "Everyday Conversations",
+              "element_type": "text",
+              "position": 3,
+              "content_inline": "<h2>Everyday Conversations</h2>\n<p>Read each dialogue aloud, taking both parts. Then change the names and details and say it again about yourself.</p>\n<p><strong>1. Introducing yourself</strong></p>\n<blockquote><p>A: Hi, I'm Neha. Nice to meet you.</p><p>B: Nice to meet you too. I'm Sameer.</p><p>A: Where are you from, Sameer?</p><p>B: I'm from Indore, but I live in Pune now. I work for a software company. What about you?</p><p>A: I'm a teacher. I teach maths at a school near here.</p></blockquote>\n<p>Useful: <code>I'm from...</code> · <code>I work as a.../I work for...</code> · <code>I'm studying...</code> · <code>In my free time, I like...</code>. Say <code>I'm Neha</code>, not <code>Myself Neha</code>.</p>\n<p><strong>2. Asking for help and directions</strong></p>\n<blockquote><p>A: Excuse me, could you help me? I'm looking for the railway station.</p><p>B: Sure. Go straight, then take the second left. It's next to the post office.</p><p>A: Is it far?</p><p>B: No, it's about five minutes on foot.</p><p>A: Thank you so much!</p><p>B: You're welcome.</p></blockquote>\n<p>When you don't understand, say so: <code>Sorry, could you say that again, please?</code> · <code>Could you speak a little more slowly?</code> (समझ न आए तो दोबारा पूछना बिल्कुल ठीक है।)</p>\n<p><strong>3. A phone call</strong></p>\n<blockquote><p>A: Hello, this is Rakesh from Sharma Traders. May I speak to Ms Iyer, please?</p><p>B: Sorry, she's in a meeting. Can I take a message?</p><p>A: Yes, please ask her to call me back. My number is 98765 43210.</p><p>B: Sure, I'll tell her.</p></blockquote>\n<p>On the phone, say <code>This is Rakesh</code> or <code>Rakesh speaking</code>. Read phone numbers one digit at a time.</p>\n<p><strong>4. At a shop</strong></p>\n<blockquote><p>A: How much is this shirt?</p><p>B: It's 799 rupees.</p><p>A: Do you have it in a bigger size?</p><p>B: Yes, here you are.</p><p>A: Great, I'll take it.</p></blockquote>\n<p><strong>Polite tone:</strong> in English, a direct order such as <code>Give me water.</code> can sound rude even when you don't mean it. Say <code>Could I have some water, please?</code> (हिंदी में \"पानी दीजिए\" विनम्र है, पर अंग्रेज़ी में \"Give me water\" रूखा लग सकता है।)</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_conversation",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_v_6_3",
+              "title": "ज़ोर से अभ्यास · Practise Out Loud",
+              "element_type": "video",
+              "position": 4,
+              "media_id": "eng_v_6_3",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_pronunciation",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_conversation",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_6_3",
+              "title": "Practise Out Loud",
+              "element_type": "text",
+              "position": 5,
+              "content_inline": "<h2>Practise Out Loud</h2>\n<p>Speaking is a physical skill: your mouth needs practice, like riding a bicycle. Fifteen minutes every day works better than two hours once a week.</p>\n<p><strong>1. Shadowing.</strong> Choose one minute of clear English audio that has a transcript (a learners' news programme, a course video, an audiobook). Listen once. Then play it again and speak <em>along with</em> the speaker, a moment behind, copying the rhythm, stress and pauses. Repeat three to five times.</p>\n<p><strong>2. Minimal pairs.</strong> These word pairs differ in one sound only. Say each pair five times, then ask a partner to point at the word they hear.</p>\n<table>\n  <tr><th>Pair</th><th>Sounds</th><th>Tip</th></tr>\n  <tr><td>vet / wet</td><td>v – w</td><td>v: top teeth on lip; w: round lips, no teeth</td></tr>\n  <tr><td>thin / tin</td><td>th – t</td><td>tongue between the teeth for th</td></tr>\n  <tr><td>then / den</td><td>th – d</td><td>voiced th: tongue between the teeth</td></tr>\n  <tr><td>ship / sheep</td><td>short i – long ee</td><td>like इ and ई</td></tr>\n  <tr><td>full / fool</td><td>short u – long oo</td><td>like उ and ऊ</td></tr>\n  <tr><td>fan / pan</td><td>f – p</td><td>f: teeth on lip, lips stay open</td></tr>\n  <tr><td>sip / zip</td><td>s – z</td><td>z is s with your voice on (ज़)</td></tr>\n</table>\n<p><strong>3. Record and compare.</strong></p>\n<ol>\n  <li>Read a short paragraph aloud and record it on your phone.</li>\n  <li>If you can, listen to a model recording of the same text.</li>\n  <li>Note only two things to improve, for example \"I said 'wery' for very\" or \"I stressed DE-velop\".</li>\n  <li>Record again and listen to the difference. Keep one recording a week to hear your progress.</li>\n</ol>\n<p>अपनी आवाज़ सुनना पहले अजीब लगता है — यह बिल्कुल सामान्य है।</p>\n<p><strong>4. Find a partner.</strong> A classmate, colleague or family member who is also learning. Agree on ten minutes of English only, every day. Easy topics: your day, food, a film, your plans for the weekend. A tutor can also give regular feedback.</p>\n<p><strong>5. Fluency before perfection.</strong> Don't stop at every mistake. If you forget a word, describe it: \"the thing you use to cut vegetables\" (knife). Keep the conversation moving.</p>\n<p>Next: a read-aloud practice with an on-device pronunciation check, then two speaking tasks. You record yourself and a reviewer sends you feedback.</p>",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_pronunciation",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_conversation",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_lab_read_aloud",
+              "title": "Language Lab: Read Aloud · ज़ोर से पढ़िए",
+              "element_type": "plugin",
+              "position": 6,
+              "content_inline": "{\"activity\":\"read_aloud\",\"lang\":\"en\",\"skills\":[\"pronunciation\",\"fluency\"],\"items\":[{\"text\":\"Very well, thank you.\",\"hint_hi\":\"v बोलते समय ऊपर के दाँत नीचे के होंठ पर रखिए: very, wery नहीं।\"},{\"text\":\"I think it is Thursday.\",\"hint_hi\":\"th के लिए जीभ की नोक को दाँतों के बीच हल्का-सा रखिए: think, Thursday।\"},{\"text\":\"We went to the market on Wednesday.\",\"hint_hi\":\"w के लिए होंठ गोल कीजिए, दाँत होंठ को न छुएँ। Wednesday का पहला d नहीं बोला जाता: वेन्ज़डे।\"},{\"text\":\"Can I have a cup of tea, please?\",\"hint_hi\":\"a और of को हल्का और छोटा बोलिए; ज़ोर cup और tea पर दीजिए।\"},{\"text\":\"Please speak slowly and clearly.\",\"hint_hi\":\"sp, sl, cl से पहले “इ” मत जोड़िए: इस्पीक नहीं, speak।\"},{\"text\":\"My village is near the river.\",\"hint_hi\":\"village और river दोनों में v है, w नहीं।\"}]}",
+              "plugin_cid": "c5e17fce7fce75301a54935a0a06537eeb0e64e989a9be4c69e2b16ad5a02f7b",
+              "plugin_version": "0.1.0",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_pronunciation",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_reading",
+                  "weight": 0.5
+                }
+              ]
+            },
+            {
+              "id": "el_eng_6_4",
+              "title": "Speaking Task 1: Introduce Yourself",
+              "element_type": "plugin",
+              "position": 7,
+              "content_inline": "{\"accept\":\"audio/*,video/*\",\"default_skills\":[\"pronunciation\",\"fluency\",\"grammar\"],\"prompt\":\"Record a 45 to 90 second audio or video on your phone and upload it here. Introduce yourself in English. Say: your name; where you are from and where you live now; your work or studies; something about your family; one hobby or something you enjoy; and why you are learning English. Speak slowly and clearly: complete sentences matter more than speed. Your reviewer (a tutor or practice partner) will rate your pronunciation, fluency and grammar and send you feedback. हिंदी: अपने फ़ोन पर 45 से 90 सेकंड की रिकॉर्डिंग बनाइए और यहाँ अपलोड कीजिए। गलतियों की चिंता मत कीजिए — धीरे और साफ़ बोलिए।\"}",
+              "plugin_cid": "eff4179aaefa3fbe84bbaf79f02b6fdb73f16d730010d4570e3d4b790937fbcd",
+              "plugin_version": "0.1.0",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_conversation",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_pronunciation",
+                  "weight": 1.0
+                }
+              ]
+            },
+            {
+              "id": "el_eng_6_5",
+              "title": "Speaking Task 2: Read Aloud and Retell",
+              "element_type": "plugin",
+              "position": 8,
+              "content_inline": "{\"accept\":\"audio/*,video/*\",\"default_skills\":[\"pronunciation\",\"fluency\",\"grammar\"],\"prompt\":\"Record one audio or video of 45 to 90 seconds and upload it here. Part 1: read this paragraph aloud: \\\"Ravi works at a small shop in Jaipur. Every morning he opens the shop at nine o'clock. Last Sunday, a tourist from Australia asked him for directions to the old fort. Ravi was nervous, but he spoke slowly and used simple words. The tourist understood him and thanked him warmly. Now Ravi practises English for twenty minutes every evening.\\\" Part 2: without looking, retell the story in your own words in three to five sentences. Pay attention to the v and w sounds (Ravi, works, words, warmly) and the th sounds (the, thanked). Your reviewer (a tutor or practice partner) will rate your pronunciation, fluency and grammar. हिंदी: पहले अनुच्छेद को ज़ोर से पढ़िए, फिर बिना देखे कहानी अपने शब्दों में सुनाइए।\"}",
+              "plugin_cid": "eff4179aaefa3fbe84bbaf79f02b6fdb73f16d730010d4570e3d4b790937fbcd",
+              "plugin_version": "0.1.0",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_pronunciation",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_reading",
+                  "weight": 0.5
+                }
+              ]
+            },
+            {
+              "id": "el_eng_6_6",
+              "title": "Speaking Quiz",
+              "element_type": "quiz",
+              "position": 9,
+              "content_inline": "{\n  \"title\": \"Speaking Quiz\",\n  \"pass_threshold\": 0.66,\n  \"questions\": [\n    {\n      \"id\": \"q1\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Which syllable is stressed in \\\"photography\\\"?\",\n      \"options\": [\n        \"PHO-to-gra-phy\",\n        \"pho-TO-gra-phy\",\n        \"pho-to-GRA-phy\",\n        \"pho-to-gra-PHY\"\n      ],\n      \"correct_indices\": [\n        1\n      ],\n      \"explanation\": \"pho-TO-gra-phy. Compare PHO-to, where the first syllable is stressed.\",\n      \"points\": 1,\n      \"difficulty\": 2\n    },\n    {\n      \"id\": \"q2\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"Which pair practises the difference between v and w?\",\n      \"options\": [\n        \"vet / wet\",\n        \"ship / sheep\",\n        \"thin / tin\",\n        \"fan / pan\"\n      ],\n      \"correct_indices\": [\n        0\n      ],\n      \"explanation\": \"Vet / wet: v uses top teeth on the lip; w uses rounded lips.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q3\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"What is the schwa /ə/?\",\n      \"options\": [\n        \"A long \\\"ee\\\" sound\",\n        \"The \\\"th\\\" sound in \\\"think\\\"\",\n        \"A short, weak \\\"uh\\\" sound in unstressed syllables\",\n        \"A silent letter\"\n      ],\n      \"correct_indices\": [\n        2\n      ],\n      \"explanation\": \"The schwa is a short, relaxed \\\"uh\\\", close to the Hindi short अ, used in unstressed syllables.\",\n      \"points\": 1,\n      \"difficulty\": 2\n    },\n    {\n      \"id\": \"q4\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"You did not understand what someone said. What is the most polite reply?\",\n      \"options\": [\n        \"What?\",\n        \"Repeat.\",\n        \"You are not clear.\",\n        \"Sorry, could you say that again, please?\"\n      ],\n      \"correct_indices\": [\n        3\n      ],\n      \"explanation\": \"Sorry + could you + please is polite. (दोबारा पूछना बिल्कुल ठीक है।)\",\n      \"points\": 1,\n      \"difficulty\": 1\n    },\n    {\n      \"id\": \"q5\",\n      \"type\": \"single_choice\",\n      \"prompt\": \"What is the best way to introduce yourself?\",\n      \"options\": [\n        \"Myself Neha.\",\n        \"Hi, I'm Neha. Nice to meet you.\",\n        \"I am Neha only.\",\n        \"Neha is me.\"\n      ],\n      \"correct_indices\": [\n        1\n      ],\n      \"explanation\": \"\\\"I'm Neha\\\" or \\\"My name is Neha\\\" is natural. \\\"Myself Neha\\\" is not used outside India.\",\n      \"points\": 1,\n      \"difficulty\": 1\n    }\n  ]\n}",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_pronunciation",
+                  "weight": 1.0
+                },
+                {
+                  "skill_id": "skill_english_conversation",
+                  "weight": 1.0
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
       "description": "A fast, visual tour of time complexity: what it is, why it matters, and how to read the common classes (O(1), O(log n), O(n), O(n log n), O(n²)) without getting lost in the math.",
       "id": "course_tut_bigO",
       "kind": "tutorial",
@@ -2849,7 +3740,7 @@
       ]
     },
     {
-      "description": "A short course that demonstrates the first-party plugins: Music Reviews (live pitch-matched note review), IRL Review (human-instructor review of uploaded work), and the graded code editors (write JavaScript, TypeScript, C++, or Python with live evaluation and submit for a deterministic score).",
+      "description": "A short course that demonstrates the first-party plugins: Workout Assist (camera-based movement practice), Language Lab (read-aloud pronunciation practice), Music Reviews (live pitch-matched note review), IRL Review (human-instructor review of uploaded work), and the graded code editors (write JavaScript, TypeScript, C++, or Python with live evaluation and submit for a deterministic score).",
       "id": "course_plugin_demo",
       "kind": "course",
       "provenance": null,
@@ -2858,7 +3749,7 @@
         "demo",
         "plugins"
       ],
-      "thumbnail_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 640 360\"><defs><linearGradient id=\"g\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\"><stop offset=\"0%\" stop-color=\"#8b5cf6\"/><stop offset=\"100%\" stop-color=\"#06b6d4\"/></linearGradient></defs><rect width=\"640\" height=\"360\" fill=\"url(#g)\"/><g opacity=\"0.12\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\"><path d=\"M90 70 L150 70 Q150 52 168 52 Q186 52 186 70 L246 70 L246 130 Q264 130 264 148 Q264 166 246 166 L246 226 L90 226 L90 166 Q72 166 72 148 Q72 130 90 130 Z\"/><path d=\"M400 150 L460 150 Q460 132 478 132 Q496 132 496 150 L556 150 L556 210 Q574 210 574 228 Q574 246 556 246 L556 306 L400 306 L400 246 Q382 246 382 228 Q382 210 400 210 Z\"/></g><g opacity=\"0.1\" fill=\"#fff\"><path d=\"M470 88 L440 118 L470 148 L460 158 L420 118 L460 78 Z\"/><path d=\"M540 88 L570 118 L540 148 L550 158 L590 118 L550 78 Z\"/></g><g opacity=\"0.12\" fill=\"#fff\"><circle cx=\"150\" cy=\"290\" r=\"12\"/><rect x=\"160\" y=\"248\" width=\"8\" height=\"46\" rx=\"3\"/><path d=\"M160 248 L192 240 L192 254 L168 262 Z\"/><circle cx=\"184\" cy=\"278\" r=\"12\"/><rect x=\"194\" y=\"238\" width=\"8\" height=\"42\" rx=\"3\"/></g><text x=\"320\" y=\"172\" text-anchor=\"middle\" fill=\"#fff\" font-family=\"system-ui,sans-serif\" font-size=\"30\" font-weight=\"700\" opacity=\"0.92\">Plugins Showcase</text><text x=\"320\" y=\"206\" text-anchor=\"middle\" fill=\"#fff\" font-family=\"system-ui,sans-serif\" font-size=\"14\" opacity=\"0.7\">Music &middot; IRL Review &middot; Code Editors</text></svg>",
+      "thumbnail_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 640 360\"><defs><linearGradient id=\"g\" x1=\"0\" y1=\"0\" x2=\"1\" y2=\"1\"><stop offset=\"0%\" stop-color=\"#8b5cf6\"/><stop offset=\"100%\" stop-color=\"#06b6d4\"/></linearGradient></defs><rect width=\"640\" height=\"360\" fill=\"url(#g)\"/><g opacity=\"0.12\" fill=\"none\" stroke=\"#fff\" stroke-width=\"2\"><path d=\"M90 70 L150 70 Q150 52 168 52 Q186 52 186 70 L246 70 L246 130 Q264 130 264 148 Q264 166 246 166 L246 226 L90 226 L90 166 Q72 166 72 148 Q72 130 90 130 Z\"/><path d=\"M400 150 L460 150 Q460 132 478 132 Q496 132 496 150 L556 150 L556 210 Q574 210 574 228 Q574 246 556 246 L556 306 L400 306 L400 246 Q382 246 382 228 Q382 210 400 210 Z\"/></g><g opacity=\"0.1\" fill=\"#fff\"><path d=\"M470 88 L440 118 L470 148 L460 158 L420 118 L460 78 Z\"/><path d=\"M540 88 L570 118 L540 148 L550 158 L590 118 L550 78 Z\"/></g><g opacity=\"0.12\" fill=\"#fff\"><circle cx=\"150\" cy=\"290\" r=\"12\"/><rect x=\"160\" y=\"248\" width=\"8\" height=\"46\" rx=\"3\"/><path d=\"M160 248 L192 240 L192 254 L168 262 Z\"/><circle cx=\"184\" cy=\"278\" r=\"12\"/><rect x=\"194\" y=\"238\" width=\"8\" height=\"42\" rx=\"3\"/></g><text x=\"320\" y=\"172\" text-anchor=\"middle\" fill=\"#fff\" font-family=\"system-ui,sans-serif\" font-size=\"30\" font-weight=\"700\" opacity=\"0.92\">Plugins Showcase</text><text x=\"320\" y=\"206\" text-anchor=\"middle\" fill=\"#fff\" font-family=\"system-ui,sans-serif\" font-size=\"14\" opacity=\"0.7\">Music &middot; Movement &middot; Pronunciation &middot; Review &middot; Code</text></svg>",
       "title": "Plugins Showcase",
       "chapters": [
         {
@@ -2957,6 +3848,42 @@
               "skill_tags": [
                 {
                   "skill_id": "skill_python",
+                  "weight": 1.0
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "ch_plugin_demo_workout",
+          "title": "Workout Assist",
+          "description": "Follow a standing arm raise or record a new demonstration in the lesson editor.",
+          "position": 3,
+          "elements": [
+            {
+              "id": "el_plugin_demo_workout",
+              "title": "Practise a standing arm raise",
+              "element_type": "plugin",
+              "position": 0,
+              "content_inline": "{\"preset\":\"arm-raise\"}"
+            }
+          ]
+        },
+        {
+          "id": "ch_plugin_demo_language_lab",
+          "title": "Language Lab",
+          "description": "Listen to two English phrases and record yourself reading them aloud. With the English speech pack installed, you can check your recording on this device.",
+          "position": 4,
+          "elements": [
+            {
+              "id": "el_plugin_demo_pronunciation",
+              "title": "Practise English pronunciation",
+              "element_type": "plugin",
+              "position": 0,
+              "content_inline": "{\"activity\":\"read_aloud\",\"lang\":\"en\",\"skills\":[\"pronunciation\",\"fluency\"],\"items\":[{\"text\":\"Very well, thank you.\",\"hint_hi\":\"very बोलते समय ऊपर के दाँत नीचे के होंठ को हल्के से छुएँ।\"},{\"text\":\"We went for a walk.\",\"hint_hi\":\"we और walk की शुरुआत में होंठ गोल करें।\"}]}",
+              "skill_tags": [
+                {
+                  "skill_id": "skill_english_pronunciation",
                   "weight": 1.0
                 }
               ]

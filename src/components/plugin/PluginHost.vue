@@ -26,6 +26,7 @@
 
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import { readFile } from '@tauri-apps/plugin-fs'
 import { useLocalApi } from '@/composables/useLocalApi'
@@ -33,6 +34,7 @@ import { announceCredentialsChanged } from '@/composables/credentialEvents'
 import PluginIframe from './PluginIframe.vue'
 import PermissionPrompt from './PermissionPrompt.vue'
 import { AppSpinner, AppAlert } from '@/components/ui'
+import type { SpeechCheckResult } from '@/types'
 import type {
   Element,
   InstalledPlugin,
@@ -41,6 +43,7 @@ import type {
   PluginCapability,
   PluginPermissionRecord,
   PluginPermissionScope,
+  PluginSettingValues,
 } from '@/types'
 
 interface ScoreRecord {
@@ -70,6 +73,7 @@ const emit = defineEmits<{
   (e: 'complete'): void
   (e: 'scored-complete', score: number): void
   (e: 'submission', submission: unknown): void
+  (e: 'author-config', json: string): void
 }>()
 
 const { t } = useI18n()
@@ -93,6 +97,9 @@ const gradeNotice = ref<string | null>(null)
 // unsubmitted source). Loaded before the iframe mounts so it reaches the
 // plugin's `init`; the iframe is keyed on it so a late load still re-inits.
 const elementState = ref<unknown>(null)
+// The plugin's manifest-declared settings (Settings → Plugins → this plugin),
+// defaults filled in. Loaded with the manifest so they reach `init.settings`.
+const pluginSettings = ref<PluginSettingValues>({})
 
 // Session-scoped capability grants live in-memory only. Database rows
 // are for 'always' grants (persistent across vault sessions).
@@ -125,8 +132,9 @@ const pluginCid = computed(() => props.element.plugin_cid ?? '')
  *  hidden test expectations there; the learner can read anything the iframe
  *  receives, but the deterministic grader still gets the full content because
  *  `submitElement` passes the raw `content_inline` to `plugin_submit_and_grade`. */
+const publishedConfig = ref<string | null>(null)
 const elementContent = computed<unknown>(() => {
-  const raw = props.element.content_inline
+  const raw = props.element.content_inline ?? publishedConfig.value
   if (!raw) return null
   let parsed: unknown
   try {
@@ -163,16 +171,20 @@ onMounted(async () => {
     return
   }
   try {
-    const [list, m, perms, savedState] = await Promise.all([
+    const [list, m, perms, savedState, settings] = await Promise.all([
       invoke<InstalledPlugin[]>('plugin_list'),
       invoke<PluginManifest>('plugin_get_manifest', { pluginCid: pluginCid.value }),
       invoke<PluginPermissionRecord[]>('plugin_list_permissions', { pluginCid: pluginCid.value }),
-      props.hosted
+      props.hosted || props.mode === 'author'
         ? Promise.resolve(null)
         : invoke<string | null>('plugin_load_element_state', { elementId: props.element.id }).catch(
           () => null,
         ),
+      invoke<PluginSettingValues>('plugin_get_settings', { pluginCid: pluginCid.value }).catch(
+        () => ({}) as PluginSettingValues,
+      ),
     ])
+    pluginSettings.value = settings ?? {}
     if (savedState) {
       try {
         elementState.value = JSON.parse(savedState)
@@ -186,6 +198,11 @@ onMounted(async () => {
       manifest.value = m
       permissions.value = perms
       return
+    }
+    if (m.authoring && !props.element.content_inline && props.element.content_cid) {
+      const hash = props.element.content_cid
+      if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error('Invalid lesson content hash')
+      publishedConfig.value = await invoke<string>('content_resolve_text', { identifier: hash, maxBytes: 2_000_000 })
     }
     manifest.value = m
     permissions.value = perms
@@ -356,6 +373,7 @@ function onPersistState(blob: unknown) {
   // (e.g. a code editor's source) survives navigating away and restarting
   // the app. Best-effort + fire-and-forget: a failed save must not disrupt the
   // plugin. Reloaded into the plugin's `init` payload on next mount.
+  if (props.mode === 'author') return
   elementState.value = blob
   // A hosted item's work stays in memory: nothing about it is stored here.
   if (props.hosted) return
@@ -366,7 +384,32 @@ function onPersistState(blob: unknown) {
   }).catch((e) => console.debug('[alex] persist_state save failed', e))
 }
 
+const router = useRouter()
+
+/** `speech_check` payload: `{ lang, text, pcm16_b64 }`, all non-empty strings. */
+function speechCheckArgs(payload: unknown): { lang: string; text: string; pcm16B64: string } | null {
+  if (!payload || typeof payload !== 'object') return null
+  const { lang, text, pcm16_b64: pcm } = payload as Record<string, unknown>
+  if (typeof lang !== 'string' || typeof text !== 'string' || typeof pcm !== 'string') return null
+  if (!lang || !text.trim() || !pcm) return null
+  return { lang, text, pcm16B64: pcm }
+}
+
 async function onEmitEvent(requestId: number, type: string, payload: unknown) {
+  if (type === 'author_config') {
+    if (props.mode !== 'author' || !manifest.value?.authoring || !payload || typeof payload !== 'object') {
+      iframeRef.value?.resolveEvent(requestId, null, 'Author configuration unavailable')
+      return
+    }
+    const json = JSON.stringify(payload)
+    if (new TextEncoder().encode(json).length > 2_000_000) {
+      iframeRef.value?.resolveEvent(requestId, null, 'Lesson configuration is too large')
+      return
+    }
+    emit('author-config', json)
+    iframeRef.value?.resolveEvent(requestId, null)
+    return
+  }
   if (type === 'debug_log') {
     const msg = (payload as { msg?: string } | null)?.msg ?? ''
     void invoke('frontend_log', { message: `[plugin:${manifest.value?.name}] ${msg}` })
@@ -385,6 +428,34 @@ async function onEmitEvent(requestId: number, type: string, payload: unknown) {
     }
     return
   }
+  // On-device pronunciation check (src-tauri/src/speech). Gated on the
+  // plugin's ml_inference grant; a missing language pack fails with an error
+  // starting `speech_pack_missing:` that the plugin keys on.
+  if (type === 'speech_check') {
+    if (!grantedCapabilities.value.includes('ml_inference')) {
+      iframeRef.value?.resolveEvent(requestId, null, 'ml_inference not granted')
+      return
+    }
+    const args = speechCheckArgs(payload)
+    if (!args) {
+      iframeRef.value?.resolveEvent(requestId, null, 'speech_check needs { lang, text, pcm16_b64 }')
+      return
+    }
+    try {
+      const result = await invoke<SpeechCheckResult>('speech_check', args)
+      iframeRef.value?.resolveEvent(requestId, result)
+    } catch (e) {
+      iframeRef.value?.resolveEvent(requestId, null, String(e))
+    }
+    return
+  }
+  if (type === 'open_plugin_settings') {
+    iframeRef.value?.resolveEvent(requestId, null)
+    if (pluginCid.value) {
+      void router.push(`/settings/plugins/${encodeURIComponent(pluginCid.value)}`)
+    }
+    return
+  }
   // Fire-and-forget event (e.g. note_correct/note_wrong telemetry). Resolve it
   // so the plugin's emitEvent promise settles — the iframe no longer sends a
   // default response of its own.
@@ -396,6 +467,11 @@ async function onSubmit(requestId: number, submission: unknown, metadata: unknow
   const m = manifest.value
   if (!m) {
     iframeRef.value?.resolveSubmit(requestId, null, 'manifest unavailable')
+    return
+  }
+
+  if (props.mode === 'author') {
+    iframeRef.value?.resolveSubmit(requestId, null, 'Submissions are unavailable in author mode')
     return
   }
 
@@ -584,6 +660,7 @@ function onIframeError(msg: string) {
           :granted-capabilities="grantedCapabilities"
           :content="elementContent"
           :state="elementState"
+          :settings="pluginSettings"
           :mode="props.mode ?? 'learn'"
           :element-id="props.element.id"
           class="flex-1 min-h-0"

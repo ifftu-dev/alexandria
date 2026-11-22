@@ -397,6 +397,19 @@ async fn prepare_course_document(
 
     // Local preparation intentionally leaves the draft out of the catalog.
     if let Some((announcement, signed_ann)) = prepared.announcement {
+        if let Some(endpoint) = state.content_node.endpoint().await {
+            for hash in prepared
+                .public_plugin_lessons
+                .iter()
+                .chain(std::iter::once(&prepared.result.content_hash))
+            {
+                if let Ok(parsed) = crate::content_store::content::parse_hash(hash) {
+                    if let Err(error) = state.discovery.announce_have(parsed, &endpoint).await {
+                        log::warn!("Could not announce course content {hash}: {error}");
+                    }
+                }
+            }
+        }
         let p2p_node = state.p2p_node.lock().await;
         if let Some(ref node) = *p2p_node {
             if let Err(e) = node.publish_signed(&signed_ann).await {
@@ -425,6 +438,7 @@ pub(crate) struct CourseSigner<'a> {
 pub(crate) struct PreparedCourse {
     pub result: PublishCourseResult,
     pub announcement: Option<(CatalogAnnouncement, SignedGossipMessage)>,
+    public_plugin_lessons: Vec<String>,
     pub version: i64,
 }
 
@@ -451,7 +465,7 @@ pub(crate) async fn prepare_course_document_core(
 
     // Read course data off the async runtime before iroh calls.
     let read_course_id = course_id.to_string();
-    let (mut payload, inline_text) = db
+    let (mut payload, inline_lessons) = db
         .run("courses.publish.read", move |db| {
             let course = get_course_by_id(db.conn(), &read_course_id)?;
             if course.author_address != signer_address {
@@ -499,18 +513,17 @@ pub(crate) async fn prepare_course_document_core(
                 rows
             };
 
-            // Text lessons written in the studio are stored inline and
-            // uploaded as blobs before signing, so the signed document
-            // references content rather than carrying it.
-            let mut inline_text: Vec<(String, String)> = Vec::new();
+            // Store lesson text and public visual-editor configurations by hash.
+            let mut inline_lessons = Vec::new();
             let mut chapters = Vec::new();
             for (ch_id, ch_title, ch_desc, ch_pos) in &chapter_rows {
                 let elements: Vec<DocumentElement> = {
                     let mut el_stmt = db
                         .conn()
                         .prepare(
-                            "SELECT id, title, element_type, content_cid, position, duration_seconds, content_inline \
-                                 FROM course_elements WHERE chapter_id = ?1 ORDER BY position ASC",
+                            "SELECT e.id, e.title, e.element_type, e.content_cid, e.position, e.duration_seconds, e.content_inline, \
+                                    CASE WHEN e.element_type = 'plugin' AND json_extract(p.manifest_json, '$.authoring') = 1 THEN e.plugin_cid END \
+                                 FROM course_elements e LEFT JOIN plugin_installed p ON p.plugin_cid = e.plugin_cid WHERE e.chapter_id = ?1 ORDER BY e.position ASC",
                         )
                         .map_err(|e| e.to_string())?;
 
@@ -518,9 +531,10 @@ pub(crate) async fn prepare_course_document_core(
                         .query_map(params![ch_id], |row| {
                             let el_id: String = row.get(0)?;
                             let element_type: String = row.get(2)?;
-                            if element_type == "text" {
+                            let plugin_cid: Option<String> = row.get(7)?;
+                            if element_type == "text" || plugin_cid.is_some() {
                                 if let Some(text) = row.get::<_, Option<String>>(6)? {
-                                    inline_text.push((el_id.clone(), text));
+                                    inline_lessons.push(content_course::InlineLesson { id: el_id.clone(), body: text, plugin_cid: plugin_cid.clone() });
                                 }
                             }
                             Ok(DocumentElement {
@@ -533,6 +547,7 @@ pub(crate) async fn prepare_course_document_core(
                                 // video_chapters are joined in below after the
                                 // element list is materialised, to keep the row
                                 // closure free of outer borrows.
+                                plugin_cid,
                                 video_chapters: Vec::new(),
                             })
                         })
@@ -604,7 +619,7 @@ pub(crate) async fn prepare_course_document_core(
                     completion_policy,
                     tutor_policy,
                 },
-                inline_text,
+                inline_lessons,
             ))
         })
         .await?;
@@ -620,7 +635,7 @@ pub(crate) async fn prepare_course_document_core(
     if !profile_unchanged() {
         return Err("profile changed during publication".into());
     }
-    content_course::materialize_text_lessons(node, &mut payload, &inline_text)
+    content_course::materialize_public_lessons(node, &mut payload, &inline_lessons)
         .await
         .map_err(|error| error.to_string())?;
     if publish {
@@ -668,15 +683,15 @@ pub(crate) async fn prepare_course_document_core(
             // The signed document carries the lesson text as it was read.
             // If an author edited a lesson while it uploaded, publishing
             // would record a document that no longer matches the draft.
-            for (element_id, expected_text) in &inline_text {
+            for lesson in &inline_lessons {
                 let matches: bool = db
                     .conn()
                     .query_row(
                         "SELECT EXISTS(SELECT 1 FROM course_elements e \
                              JOIN course_chapters ch ON ch.id = e.chapter_id \
                              WHERE e.id = ?1 AND ch.course_id = ?2 \
-                             AND e.content_inline = ?3 AND e.element_type = 'text')",
-                        params![element_id, update_course_id, expected_text],
+                             AND e.content_inline = ?3 AND e.element_type = ?4 AND e.plugin_cid IS ?5)",
+                        params![lesson.id, update_course_id, lesson.body, if lesson.plugin_cid.is_some() { "plugin" } else { "text" }, lesson.plugin_cid],
                         |row| row.get(0),
                     )
                     .map_err(|error| error.to_string())?;
@@ -745,7 +760,15 @@ pub(crate) async fn prepare_course_document_core(
         })
         .await?;
 
+    let public_plugin_lessons = signed
+        .chapters
+        .iter()
+        .flat_map(|c| &c.elements)
+        .filter(|e| e.plugin_cid.is_some())
+        .filter_map(|e| e.content_hash.clone())
+        .collect();
     Ok(PreparedCourse {
+        public_plugin_lessons,
         result,
         announcement,
         version,
@@ -1257,6 +1280,44 @@ mod tests {
                     .optional()
                     .unwrap()
             }
+        }
+
+        #[tokio::test]
+        async fn workout_reference_is_public_and_bound_to_its_interactive_plugin() {
+            let author = Author::new().await;
+            author.course_with(None);
+            let config = r#"{"preset":"arm-raise"}"#;
+            let bundle = crate::plugins::builtins::BUILTIN_PLUGINS
+                .iter()
+                .find(|b| b.slug == "workout-assist")
+                .unwrap();
+            let cid = crate::plugins::verifier::compute_plugin_cid(bundle.manifest_json);
+            {
+                let db = author.db.lock().unwrap();
+                crate::plugins::registry::install_builtin(&db, author.root.path(), bundle).unwrap();
+                db.conn()
+                    .execute("DELETE FROM course_elements", [])
+                    .unwrap();
+                db.conn().execute("INSERT INTO course_elements (id,chapter_id,title,element_type,position,plugin_cid,content_inline) VALUES ('workout','chapter-1','Arm raise','plugin',0,?1,?2)", params![cid,config]).unwrap();
+            }
+            author.node.set_content_key([11; 32]).await;
+            let prepared = author.prepare(true).await.unwrap();
+            author.node.clear_content_key().await;
+            let release = content_course::resolve_course_document(
+                &author.node,
+                &prepared.result.content_hash,
+            )
+            .await
+            .unwrap();
+            let lesson = &release.chapters[0].elements[0];
+            assert_eq!(lesson.plugin_cid.as_ref(), Some(&cid));
+            let hash = lesson.content_hash.as_ref().unwrap();
+            assert_eq!(prepared.public_plugin_lessons, std::slice::from_ref(hash));
+            assert_eq!(
+                content::get_bytes(&author.node, hash).await.unwrap(),
+                config.as_bytes()
+            );
+            author.node.shutdown().await.unwrap();
         }
 
         #[tokio::test]

@@ -1,0 +1,22 @@
+{
+  "packs": {
+    "title": "发音检查",
+    "intro": "下载一种语言，检查你朗读的每个词听起来有多清晰。语言包由这台设备上的所有用户共享。",
+    "honesty": "检查在本设备上使用开源的 Whisper 模型运行，录音不会离开设备。它估计的是每个词听起来有多清晰，而不是你的口音。",
+    "loadError": "无法加载语言包。",
+    "error": "出了点问题：{error}",
+    "installed": "已安装",
+    "download": "下载",
+    "add": "添加",
+    "remove": "移除",
+    "downloading": "正在下载，{percent}%",
+    "megabytes": "{value} MB",
+    "enhancedName": "增强版英语",
+    "enhancedHint": "更准确的英语检查，下载更大",
+    "sharedTitle": "其他语言",
+    "sharedMissing": "这些语言共用一个模型。添加第一种需要下载 {size}；之后再添加其他语言即刻完成。",
+    "sharedPresent": "共用模型（{size}）已在本设备上。添加语言即刻完成；只要还有其他语言在使用，移除某种语言时会保留模型。",
+    "sharedWith": "{size}，与{languages}共用",
+    "limited": "目前常有错误"
+  }
+}

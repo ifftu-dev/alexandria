@@ -2998,6 +2998,7 @@ export interface PluginManifest {
   description: string | null
   author_did: string
   kinds: PluginKind[]
+  authoring?: boolean
   capabilities: PluginCapability[]
   grader: PluginGraderRef | null
   content_schema_cid: string | null
@@ -3013,6 +3014,61 @@ export interface PluginManifest {
    *  this plugin auto-installs them; uninstalling a still-depended-on plugin
    *  is refused. */
   dependencies: string[]
+  /** Author-declared settings rendered on the plugin's settings page
+   *  (`/settings/plugins/:cid`). Empty when the plugin declares none. */
+  settings: PluginSettingSpec[]
+}
+
+/** Setting types this host renders. `speech_packs` is a host widget that
+ *  stores no value. Any other `type` string is from a newer host: it parses
+ *  but is skipped. */
+export type PluginSettingType = 'toggle' | 'select' | 'number' | 'text' | 'speech_packs'
+
+/** One choice of a `select` setting. */
+export interface PluginSettingOption {
+  value: string
+  label: string
+}
+
+/** One entry of a manifest's `settings` array. Labels and descriptions come
+ *  from the plugin author and render as plain text. Mirrors the Rust
+ *  `PluginSettingSpec`. */
+export interface PluginSettingSpec {
+  key: string
+  type: string
+  label: string
+  description: string | null
+  default: unknown
+  options: PluginSettingOption[]
+  min: number | null
+  max: number | null
+  step: number | null
+  max_length: number | null
+  keywords: string[]
+}
+
+/** Current values of a plugin's value-bearing settings, defaults filled in.
+ *  The same map reaches the plugin as `init.settings`. */
+export type PluginSettingValues = Record<string, unknown>
+
+/** One setting in the global Settings search index. */
+export interface PluginSettingsIndexSetting {
+  key: string
+  label: string
+  description: string | null
+  keywords: string[]
+}
+
+/** One installed plugin in the global Settings search index
+ *  (`plugin_settings_index`). */
+export interface PluginSettingsIndexEntry {
+  plugin_cid: string
+  name: string
+  description: string | null
+  icon_path: string | null
+  subject_tags: string[]
+  enabled: boolean
+  settings: PluginSettingsIndexSetting[]
 }
 
 /** Phase-2 grader reference. Ignored in Phase 1 even if present. */
@@ -4082,4 +4138,49 @@ export interface NotificationOpen {
   profile_id: string
   recipient: string | null
   route: string
+}
+
+// ─── Pronunciation checks (src-tauri/src/speech) ───────────────────────────
+
+/** A downloadable pronunciation-check language pack (device-wide). */
+export interface SpeechPack {
+  /** Pack id: a language code, or `en-enhanced` for the optional English upgrade. */
+  lang: string
+  name: string
+  native_name: string
+  model_id: string
+  model_label: string
+  /** Bytes still to download; 0 when the model is already on disk. */
+  download_bytes: number
+  size_bytes: number
+  installed: boolean
+  /** Other packs that share this pack's model download. */
+  shared_with: string[]
+  /** For an upgrade pack, the language whose checks it improves. */
+  upgrades: string | null
+  /** Checks in this language are often wrong with the current model. */
+  limited_accuracy: boolean
+}
+
+/** Payload of the `speech-pack-progress` event. */
+export interface SpeechPackProgress {
+  model_id: string
+  lang: string
+  downloaded: number
+  total: number
+}
+
+export type SpeechWordStatus = 'clear' | 'unclear' | 'missed'
+
+export interface SpeechWordScore {
+  word: string
+  score: number
+  status: SpeechWordStatus
+}
+
+/** Result of `speech_check`. */
+export interface SpeechCheckResult {
+  heard: string
+  overall: number
+  words: SpeechWordScore[]
 }

@@ -98,5 +98,42 @@
     "loadFailed": "Impossible de charger l'extension : {error}",
     "graderUnavailable": "La notation s'exécute dans l'application de bureau. Vous pouvez lancer les tests ici, mais cet appareil ne peut pas soumettre pour notation.",
     "loading": "Chargement du module…"
+  },
+  "settingsPage": {
+    "back": "Toutes les extensions",
+    "openDocs": "Lire le guide",
+    "openSetting": "{setting} dans {plugin}",
+    "builtinProtected": "Les extensions intégrées ne peuvent pas être désinstallées.",
+    "settingsHeading": "Réglages de l'extension",
+    "authorNote": "Ces réglages sont fournis par le créateur de l'extension.",
+    "noSettings": "Cette extension n'a aucun réglage à modifier.",
+    "resetDefaults": "Rétablir les valeurs par défaut",
+    "saved": "Enregistré",
+    "saveFailed": "Impossible d'enregistrer ce réglage : {error}",
+    "resetFailed": "Impossible de rétablir les valeurs par défaut : {error}",
+    "loadFailed": "Impossible de charger cette extension : {error}",
+    "notInstalled": "Cette extension n'est pas installée sur cet appareil.",
+    "permissionsHeading": "Autorisations",
+    "permissionsIntro": "Ce que cette extension peut demander à utiliser. Si vous désactivez une autorisation, l'extension la redemandera la prochaine fois qu'elle en aura besoin.",
+    "permissionsEmpty": "Cette extension ne demande aucune autorisation.",
+    "notGranted": "Non autorisée",
+    "scope": {
+      "always": "Toujours autorisée",
+      "session": "Autorisée pour cette session",
+      "once": "Autorisée une fois"
+    },
+    "capability": {
+      "microphone": "Microphone",
+      "camera": "Caméra",
+      "midi": "Appareils MIDI",
+      "fullscreen": "Plein écran",
+      "clipboard": "Presse-papiers",
+      "storage": "Stockage sur cet appareil",
+      "mlInference": "IA sur l'appareil",
+      "instructorReview": "Boîte de révision de l'enseignant"
+    },
+    "dependenciesHeading": "Dépendances",
+    "dependenciesEmpty": "Cette extension n'a besoin d'aucune autre extension, et aucune n'a besoin d'elle.",
+    "requiredByHint": "Désinstallez d'abord celles-ci pour retirer cette extension."
   }
 }

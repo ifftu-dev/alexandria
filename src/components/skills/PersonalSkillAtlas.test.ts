@@ -143,7 +143,7 @@ it('keeps browse filters separate and restores graph selection, camera and contr
   // Search and the map tools belong to the Detailed view.
   await click('Detailed')
   // The list shows every loaded skill in its count and renders its first window.
-  expect(wrapper!.find('.atlas-list summary').text()).toContain('104 matching skills')
+  expect(wrapper!.find('.atlas-list summary').text()).toContain('114 matching skills')
   expect(wrapper!.findAll('[aria-label="Full-label skill list"] button')).toHaveLength(50)
   await wrapper!.get('input[type="search"]').setValue('Big-O')
   // The sidebar names its earned preview the same way, so pick from the page's list.

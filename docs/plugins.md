@@ -1,7 +1,7 @@
 # Community Plugin System
 
 Status: live
-Updated: 2026-11-21
+Updated: 2026-11-22
 
 Phase 1–2 implemented (iframe-sandboxed interactive plugins,
 WASM graders, capability consent, management UI). Phase-3 P2P catalog
@@ -157,14 +157,9 @@ graders are deferred to remediation package G06.
   `script-src 'self' plugin://<cid> 'nonce-…' 'wasm-unsafe-eval'`. The
   injected bootstrap script carries the per-response nonce; plugin-author
   inline scripts remain blocked.
-- The `allow` attribute (microphone, camera, midi, …) is built from the
-  manifest's **declared** capabilities; runtime gating is enforced by the
-  host through the consent flow, not by toggling the attribute (WKWebView
-  reads `allow` once at load).
-- On macOS the host installs a WKUIDelegate
-  (`src-tauri/src/macos_media_delegate.rs`) that auto-grants WebKit-level
-  media-capture requests — the plugin's own consent already ran through
-  `PermissionPrompt`, so the redundant native prompt is suppressed.
+- The host builds the iframe's `allow` attribute from **granted** capabilities
+  and reloads the frame when that attribute changes. On macOS the host also
+  passes the current camera and microphone grants to its WebKit media delegate.
 
 ## The `window.alex` API (protocol v1)
 
@@ -179,6 +174,20 @@ Injected by `bootstrap.js`. The only surface a plugin needs:
 | `persistState(blob)` | Opaque per-element state |
 | `emitEvent(type, payload)` | Telemetry / host-mediated events |
 | `onHost(handler)` | Receive `init`, `capability_granted/revoked`, `theme_changed` |
+
+### Authoring lesson content
+
+An interactive plugin can set `"authoring": true` in its manifest to open its
+own editor in the course composer. This requires `"kinds": ["interactive"]`
+and no grader. Read `init.payload.mode` to choose the author or learner view.
+Both receive the lesson configuration in `init.payload.content`.
+
+In author mode, send the complete public lesson configuration as a JSON
+object. For example, Workout Assist can stage its built-in arm raise with
+`await window.alex.emitEvent('author_config', { preset: 'arm-raise' })`.
+The host accepts up to 2,000,000 UTF-8 bytes of serialized JSON. The event
+stages the change in the composer. **Save** writes it to the draft, and
+publishing the course makes the configuration available to learners by hash.
 
 ### Capabilities
 
@@ -250,6 +259,7 @@ are interactive (replay, retry, review results), so the learner clicks
 | `mcq` | graded | Multiple-choice, deterministic WASM grader |
 | `music-trainer` | interactive | Capability-prompt demo (mic + amplitude meter) |
 | `music-reviews` | interactive | Scrolling-timeline pitch trainer; see its `README.md`. Pitch detection unit-tested via `ui/pitch.test.js` |
+| `workout-assist` | interactive | Records a coach's demonstration and compares the learner's visible joint angles with the recorded poses. |
 | `irl-review` | interactive | Upload work for human instructor review |
 | `editor-javascript` | graded | Write and run JavaScript with live evaluation; runs locally in a sandboxed Boa engine (pure-Rust JS → WebAssembly) against test cases; graded submissions are re-run by the host's deterministic grader |
 | `editor-typescript` | graded | Same, TypeScript — types are stripped in-engine (sucrase) then run on Boa |
@@ -263,6 +273,12 @@ Boa for C/C++) and CodeMirror live in each bundle's `ui/vendor/` and
 **are committed**, so the app and CI build with no extra step. Regenerate
 them with `plugins/builtin/editor-shared/build.sh` only after bumping a
 runtime version; they are embedded via `include_bytes!`.
+
+Workout Assist bundles Google's **MoveNet SinglePose Lightning v4** graph
+and weights with TensorFlow.js under Apache 2.0. After the camera and
+`ml_inference` grants, pose estimation runs on the device. The coach's take
+includes timed poses and, when available, a silent video. Learner camera
+frames stay on the learner's device. [Model download](https://www.kaggle.com/models/google/movenet/tfJs/singlepose-lightning/4) · [Recording and practice walkthrough](../demo-world/content/README.md#workout-assist)
 
 ## IRL Review flow
 

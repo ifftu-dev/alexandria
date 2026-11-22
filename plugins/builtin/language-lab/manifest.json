@@ -1,0 +1,27 @@
+{
+  "id": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z#language-lab",
+  "version": "0.1.0",
+  "api_version": "1",
+  "host_min_version": "0.1.0",
+  "name": "Language Lab",
+  "description": "Practise a new language: dictation, reading with a tap-to-translate glossary, guided writing, sentence building and read-aloud recordings with an on-device pronunciation check. Instructions in Hindi and English.",
+  "author_did": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+  "kinds": ["graded", "interactive"],
+  "scope": "global",
+  "capabilities": ["microphone", "ml_inference"],
+  "grader": {
+    "cid": "8cf06182f528aecfd2da4dd977c4e72701e9c5a536733988f70d9ccef06618f6",
+    "blake3": "8cf06182f528aecfd2da4dd977c4e72701e9c5a536733988f70d9ccef06618f6",
+    "entrypoint": "alex_grade"
+  },
+  "settings": [
+    {"key":"ui_language","type":"select","label":"Instruction language","description":"Language used for instructions and hints.","default":"hi","options":[{"value":"hi","label":"हिंदी (Hindi)"},{"value":"en","label":"English"}],"keywords":["hindi","english","instructions"]},
+    {"key":"speech_rate","type":"number","label":"Listening speed","description":"How fast example sentences are read aloud.","default":0.9,"min":0.5,"max":1.5,"step":0.1,"keywords":["speed","voice","slow"]},
+    {"key":"show_hints","type":"toggle","label":"Show Hindi hints","description":"Show Hindi meanings and tips next to exercises.","default":true,"keywords":["hints","translation"]},
+    {"key":"pronunciation_packs","type":"speech_packs","label":"Pronunciation language packs","description":"Download open-source speech models for on-device pronunciation checks.","keywords":["pronunciation","speech","model","download","language pack","whisper"]}
+  ],
+  "subject_tags": ["language", "english", "reading", "writing", "speaking"],
+  "platforms": ["macos", "windows", "linux", "ios", "android"],
+  "icon_path": "icon.svg",
+  "entry": "ui/index.html"
+}
