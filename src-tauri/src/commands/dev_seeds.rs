@@ -86,6 +86,7 @@ pub(super) const PROPOSALS: &[(&str, &str, &str, &str)] = &[
     ("web", "sf_web", "Proposal: set a performance budget for published web development projects", "Testing proposal: Web Development capstone submissions should ship under an agreed performance budget measured on a mid-range phone. Propose the budget, the measurement tool and the exceptions process."),
     ("civics", "sf_civics", "Proposal: require a source list on civic engagement discussion posts", "Testing proposal: posts in Civic Engagement that make factual claims should link their sources, with moderators able to request them before a post is promoted. Discuss the trade-off between rigour and participation."),
     ("leadership", "sf_leadership", "Proposal: require a written decision record for team-wide changes", "Testing proposal: Leadership & Management courses should teach a short decision record (options, choice, reasons, who decided) and ask learners to write one for any change that affects a whole team. Discuss how long it should be and when it is overkill."),
+    ("languages", "sf_languages", "Proposal: pair every spoken-English review task with a peer reviewer", "Testing proposal: Languages courses that ask learners to record speaking tasks should let a peer who has finished the course review them when no tutor is available, using the same pronunciation, fluency and grammar rubric. Discuss how peer reviews should count and how to keep them kind and useful."),
 ];
 
 fn subject_field_name(conn: &Connection, id: &str) -> Result<Option<String>, String> {
@@ -143,19 +144,26 @@ pub(super) fn catalog(db: &Database) -> Result<Vec<SeedResource>, String> {
         .filter(|c| c["kind"] == "course")
     {
         let id = c["id"].as_str().ok_or("Missing course ID")?;
-        let dependencies = if id == "course_plugin_demo" {
-            vec![
+        let mut dependencies: Vec<String> = match id {
+            "course_plugin_demo" => vec![
                 "plugin:music-reviews",
                 "plugin:workout-assist",
                 "plugin:irl-review",
                 "plugin:editors",
-            ]
-            .into_iter()
-            .map(str::to_owned)
-            .collect()
-        } else {
-            vec![]
-        };
+            ],
+            "course_english_hindi_101" => vec!["plugin:irl-review", "plugin:language-lab"],
+            _ => vec![],
+        }
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        if id == "course_english_hindi_101" {
+            dependencies.extend(
+                super::demo_resources::lesson_videos()?
+                    .iter()
+                    .map(|v| format!("media:{}", v.id)),
+            );
+        }
         add(
             format!("course:{id}"),
             c["title"].as_str().unwrap_or(id).into(),
@@ -220,6 +228,17 @@ pub(super) fn catalog(db: &Database) -> Result<Vec<SeedResource>, String> {
                 exists(db.conn(), table, column, &row_id)?,
             );
         }
+    }
+    for video in super::demo_resources::lesson_videos()? {
+        let cid = super::demo_resources::media_cid(&video.id)?;
+        add(
+            format!("media:{}", video.id),
+            video.title,
+            "Media",
+            "Bundled narrated lesson video with synthetic narration.".into(),
+            vec![],
+            exists(db.conn(), "pins", "cid", &cid)?,
+        );
     }
     for r in resources["media"]
         .as_array()
@@ -787,14 +806,14 @@ mod tests {
         for item in &selected {
             install(&db, dir.path(), item).unwrap();
         }
-        assert_eq!(count(&db, "courses"), 11);
+        assert_eq!(count(&db, "courses"), 12);
         assert_eq!(count(&db, "classrooms"), 3);
         assert_eq!(
             count(&db, "plugin_installed"),
             crate::plugins::builtins::BUILTIN_PLUGINS.len() as i64
         );
-        assert_eq!(count(&db, "question_banks"), 15);
-        assert_eq!(count(&db, "developer_discussion_drafts"), 14);
+        assert_eq!(count(&db, "question_banks"), 25);
+        assert_eq!(count(&db, "developer_discussion_drafts"), 15);
         assert_eq!(count(&db, "discussion_events"), 0);
         assert_eq!(count(&db, "assessment_attempts"), 0);
         assert_eq!(count(&db, "credentials"), 0);

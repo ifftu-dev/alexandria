@@ -98,5 +98,42 @@
     "loadFailed": "No se pudo cargar el plugin: {error}",
     "graderUnavailable": "La calificación se ejecuta en la aplicación de escritorio. Aquí puedes ejecutar las pruebas, pero este dispositivo no puede enviar para calificar.",
     "loading": "Cargando complemento…"
+  },
+  "settingsPage": {
+    "back": "Todos los plugins",
+    "openDocs": "Leer la guía",
+    "openSetting": "{setting} en {plugin}",
+    "builtinProtected": "Los plugins integrados no se pueden desinstalar.",
+    "settingsHeading": "Ajustes del plugin",
+    "authorNote": "Estos ajustes los define el creador del plugin.",
+    "noSettings": "Este plugin no tiene ajustes que cambiar.",
+    "resetDefaults": "Restablecer valores predeterminados",
+    "saved": "Guardado",
+    "saveFailed": "No se pudo guardar ese ajuste: {error}",
+    "resetFailed": "No se pudieron restablecer los valores predeterminados: {error}",
+    "loadFailed": "No se pudo cargar este plugin: {error}",
+    "notInstalled": "Este plugin no está instalado en este dispositivo.",
+    "permissionsHeading": "Permisos",
+    "permissionsIntro": "Lo que este plugin puede pedir usar. Si desactivas un permiso, el plugin lo volverá a pedir la próxima vez que lo necesite.",
+    "permissionsEmpty": "Este plugin no pide ningún permiso.",
+    "notGranted": "No permitido",
+    "scope": {
+      "always": "Permitido siempre",
+      "session": "Permitido en esta sesión",
+      "once": "Permitido una vez"
+    },
+    "capability": {
+      "microphone": "Micrófono",
+      "camera": "Cámara",
+      "midi": "Dispositivos MIDI",
+      "fullscreen": "Pantalla completa",
+      "clipboard": "Portapapeles",
+      "storage": "Almacenamiento en este dispositivo",
+      "mlInference": "IA en el dispositivo",
+      "instructorReview": "Bandeja de revisión del instructor"
+    },
+    "dependenciesHeading": "Dependencias",
+    "dependenciesEmpty": "Este plugin no necesita otros plugins y ninguno lo necesita a él.",
+    "requiredByHint": "Desinstala estos primero para quitar este plugin."
   }
 }

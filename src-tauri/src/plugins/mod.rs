@@ -10,6 +10,8 @@
 //!   and compute the content-addressed `plugin_cid`.
 //! - [`registry`] — on-disk bundle store + SQLite-backed install/list/uninstall
 //!   and per-plugin capability grants.
+//! - [`settings`] — validate manifest-declared plugin settings and store their
+//!   values per plugin id in `app_settings`.
 //! - [`asset_protocol`] — `plugin://` URI scheme handler with per-plugin CSP.
 //! - [`wasm_runtime`] — Wasmtime-backed grader runtime configured for
 //!   reproducible execution. Phase 2.
@@ -20,6 +22,7 @@ pub mod catalog;
 pub mod irl_review;
 pub mod manifest;
 pub mod registry;
+pub mod settings;
 pub mod verifier;
 // The grade envelope is platform-independent, so this module is always compiled.
 pub mod grade_contract;

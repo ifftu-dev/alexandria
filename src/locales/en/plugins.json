@@ -98,5 +98,42 @@
     "loadFailed": "Couldn't load the plugin: {error}",
     "graderUnavailable": "Grading runs on the desktop app. You can still run the tests here, but this device can't submit for a grade.",
     "loading": "Loading plugin…"
+  },
+  "settingsPage": {
+    "back": "All plugins",
+    "openDocs": "Read the guide",
+    "openSetting": "{setting} in {plugin}",
+    "builtinProtected": "Built-in plugins can't be uninstalled.",
+    "settingsHeading": "Plugin settings",
+    "authorNote": "These settings come from the plugin's creator.",
+    "noSettings": "This plugin has no settings to change.",
+    "resetDefaults": "Restore defaults",
+    "saved": "Saved",
+    "saveFailed": "Couldn't save that setting: {error}",
+    "resetFailed": "Couldn't restore the defaults: {error}",
+    "loadFailed": "Couldn't load this plugin: {error}",
+    "notInstalled": "This plugin isn't installed on this device.",
+    "permissionsHeading": "Permissions",
+    "permissionsIntro": "What this plugin may ask to use. If you turn a permission off, the plugin asks again the next time it needs it.",
+    "permissionsEmpty": "This plugin doesn't ask for any permissions.",
+    "notGranted": "Not allowed",
+    "scope": {
+      "always": "Always allowed",
+      "session": "Allowed this session",
+      "once": "Allowed once"
+    },
+    "capability": {
+      "microphone": "Microphone",
+      "camera": "Camera",
+      "midi": "MIDI devices",
+      "fullscreen": "Full screen",
+      "clipboard": "Clipboard",
+      "storage": "Storage on this device",
+      "mlInference": "On-device AI",
+      "instructorReview": "Instructor review inbox"
+    },
+    "dependenciesHeading": "Dependencies",
+    "dependenciesEmpty": "This plugin doesn't need other plugins, and none need it.",
+    "requiredByHint": "Uninstall these first to remove this plugin."
   }
 }

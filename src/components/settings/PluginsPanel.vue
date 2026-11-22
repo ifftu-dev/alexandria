@@ -41,6 +41,12 @@ function openDocs(p: InstalledPlugin) {
   void router.push(`/settings/plugins/${p.plugin_cid}/docs`)
 }
 
+// The card body opens the plugin's own settings page; the guide stays one
+// click away from there and from the card's Guide action.
+function openSettings(p: InstalledPlugin) {
+  void router.push(`/settings/plugins/${p.plugin_cid}`)
+}
+
 // ---- Tab state ------------------------------------------------------------
 const activeTab = ref<'installed' | 'inbox' | 'my-submissions'>('installed')
 const tabs = computed(() => [
@@ -423,9 +429,9 @@ async function loadMySubmissions() {
           tabindex="0"
           class="group relative flex cursor-pointer flex-col rounded-2xl border border-border bg-card/40 p-4 text-start transition-all hover:border-primary/50 hover:bg-card/70 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           :class="{ 'opacity-60': !p.enabled }"
-          @click="openDocs(p)"
-          @keydown.enter="openDocs(p)"
-          @keydown.space.prevent="openDocs(p)"
+          @click="openSettings(p)"
+          @keydown.enter.self="openSettings(p)"
+          @keydown.space.self.prevent="openSettings(p)"
         >
           <!-- Header: thumbnail + name -->
           <div class="flex items-start gap-3">
@@ -500,7 +506,7 @@ async function loadMySubmissions() {
             </div>
           </div>
 
-          <!-- Actions — stop propagation so they don't open docs -->
+          <!-- Actions — stop propagation so they don't open the settings page -->
           <div class="mt-4 flex items-center justify-between gap-2 border-t border-border/50 pt-3" @click.stop>
             <label class="flex items-center gap-1.5 text-xs text-muted-foreground" @click.stop>
               <input
@@ -512,6 +518,9 @@ async function loadMySubmissions() {
               {{ $t('settings.plugins.enabled') }}
             </label>
             <div class="flex items-center gap-1">
+              <AppButton size="sm" variant="ghost" @click.stop="openDocs(p)">
+                {{ $t('plugins.settingsPage.openDocs') }}
+              </AppButton>
               <AppButton
                 v-if="manifests[p.plugin_cid]?.donate_url"
                 size="sm"
@@ -531,7 +540,7 @@ async function loadMySubmissions() {
             </div>
           </div>
 
-          <!-- Open-docs affordance -->
+          <!-- Open-settings affordance -->
           <span class="pointer-events-none absolute end-3 top-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />

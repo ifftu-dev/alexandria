@@ -132,6 +132,12 @@ lru = "0.18.2"
 tract-onnx = { version = "0.21", default-features = false }
 candle-core = { version = "0.8", default-features = false }
 candle-nn = { version = "0.8", default-features = false }
+# On-device pronunciation checks (`speech`): OpenAI Whisper (MIT) in pure Rust.
+# Weights are downloaded per language pack at runtime, never bundled.
+candle-transformers = { version = "0.8", default-features = false }
+# GPT-2 pre-tokeniser regex for Whisper's byte-level BPE (`speech::tokenizer`);
+# the version candle-transformers already pulls in.
+fancy-regex = "0.13"
 ndarray = "0.16"
 
 # Common utilities (all platforms)

@@ -1,0 +1,3694 @@
+{
+  "videos": [
+    {
+      "id": "eng_v_1_1",
+      "lesson_element_id": "el_eng_1_1",
+      "title": "स्वागत है · Welcome",
+      "skill_id": "skill_english_alphabet",
+      "scenes": [
+        {
+          "title": "स्वागत है · Welcome",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "नमस्ते! अंग्रेज़ी सीखने के इस कोर्स में आपका स्वागत है।",
+              "show": "English for Hindi Speakers",
+              "sub": "हिंदी में समझिए, अंग्रेज़ी में बोलिए"
+            },
+            {
+              "voice": "hi",
+              "say": "यह कोर्स उन लोगों के लिए है जिनकी मातृभाषा हिंदी है। पहले से अंग्रेज़ी आना ज़रूरी नहीं है।"
+            },
+            {
+              "voice": "hi",
+              "say": "इस कोर्स में हम तीन काम सीखेंगे: अंग्रेज़ी पढ़ना, लिखना और बोलना।"
+            },
+            {
+              "voice": "en",
+              "say": "Read. Write. Speak.",
+              "show": "Read · Write · Speak",
+              "sub": "पढ़ना · लिखना · बोलना"
+            }
+          ]
+        },
+        {
+          "title": "हर पाठ में · Each lesson",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "हर पाठ में सबसे पहले एक छोटा वीडियो है, जैसे यह।",
+              "show": "1. वीडियो",
+              "sub": "देखिए और सुनिए"
+            },
+            {
+              "voice": "hi",
+              "say": "वीडियो के नीचे नोट्स हैं। जब चाहें, उन्हें पढ़कर दोहरा सकते हैं।",
+              "show": "2. नोट्स",
+              "sub": "बाद में दोहराने के लिए"
+            },
+            {
+              "voice": "hi",
+              "say": "हर अध्याय के अंत में एक छोटा क्विज़ है।",
+              "show": "3. क्विज़",
+              "sub": "ख़ुद को जाँचिए"
+            },
+            {
+              "voice": "hi",
+              "say": "आख़िरी अध्याय में अपनी आवाज़ रिकॉर्ड करके किसी टीचर या साथी को भेजनी है। वे आपको सुझाव देंगे।",
+              "show": "4. बोलने के काम",
+              "sub": "रिकॉर्ड करके भेजिए"
+            }
+          ]
+        },
+        {
+          "title": "दो आवाज़ें · Two voices",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इन वीडियो में दो आवाज़ें हैं। मैं हिंदी में समझाऊँगी, और अंग्रेज़ी के उदाहरण दूसरी आवाज़ में सुनाई देंगे।"
+            },
+            {
+              "voice": "hi",
+              "say": "सुनिए, कोर्स में आपका स्वागत, अंग्रेज़ी में।"
+            },
+            {
+              "voice": "en",
+              "say": "Hello! Welcome to the course.",
+              "show": "Hello! Welcome to the course.",
+              "sub": "नमस्ते! कोर्स में आपका स्वागत है।"
+            },
+            {
+              "voice": "hi",
+              "say": "कभी-कभी मैं कहूँगी, मेरे बाद दोहराइए। तब अंग्रेज़ी वाक्य के बाद थोड़ा समय मिलेगा। उसी समय ज़ोर से बोलिए।"
+            },
+            {
+              "voice": "hi",
+              "say": "चलिए, कोशिश करते हैं। मेरे बाद दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "Thank you.",
+              "show": "Thank you.",
+              "sub": "धन्यवाद",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "बहुत बढ़िया!"
+            }
+          ]
+        },
+        {
+          "title": "छह अध्याय · Six chapters",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इस कोर्स में छह अध्याय हैं। पहला: अक्षर और ध्वनियाँ।",
+              "show": "1. अक्षर और ध्वनियाँ",
+              "sub": "Letters and Sounds"
+            },
+            {
+              "voice": "hi",
+              "say": "दूसरा: पहले शब्द।",
+              "show": "2. पहले शब्द",
+              "sub": "First Words"
+            },
+            {
+              "voice": "hi",
+              "say": "तीसरा: वाक्य बनाना।",
+              "show": "3. वाक्य बनाना",
+              "sub": "Building Sentences"
+            },
+            {
+              "voice": "hi",
+              "say": "चौथा: समय और काल।",
+              "show": "4. समय और काल",
+              "sub": "Talking About Time"
+            },
+            {
+              "voice": "hi",
+              "say": "पाँचवाँ: रोज़ की अंग्रेज़ी लिखना।",
+              "show": "5. लिखना",
+              "sub": "Writing Everyday English"
+            },
+            {
+              "voice": "hi",
+              "say": "और छठा: आत्मविश्वास से बोलना।",
+              "show": "6. बोलना",
+              "sub": "Speaking with Confidence"
+            }
+          ]
+        },
+        {
+          "title": "एक सलाह · One tip",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "रोज़ बीस से तीस मिनट दीजिए, और हर उदाहरण ज़ोर से बोलिए।",
+              "show": "रोज़ 20–30 मिनट",
+              "sub": "हर उदाहरण ज़ोर से बोलिए"
+            },
+            {
+              "voice": "hi",
+              "say": "गलतियाँ होंगी, और यही सीखने का तरीका है। अंग्रेज़ी में कहते हैं:"
+            },
+            {
+              "voice": "en",
+              "say": "Mistakes are how we learn.",
+              "show": "Mistakes are how we learn.",
+              "sub": "गलतियों से ही हम सीखते हैं"
+            },
+            {
+              "voice": "hi",
+              "say": "अगले वीडियो में अंग्रेज़ी के छब्बीस अक्षर हैं। हर वीडियो के नीचे नोट्स हैं, और अध्याय के अंत में क्विज़।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 102
+    },
+    {
+      "id": "eng_v_1_2",
+      "lesson_element_id": "el_eng_1_2",
+      "title": "छब्बीस अक्षर · The 26 Letters",
+      "skill_id": "skill_english_alphabet",
+      "scenes": [
+        {
+          "title": "छब्बीस अक्षर · 26 letters",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इस वीडियो में हम अंग्रेज़ी के छब्बीस अक्षर और कैपिटल लेटर के नियम सीखेंगे।"
+            },
+            {
+              "voice": "hi",
+              "say": "हर अक्षर के दो रूप होते हैं: बड़ा, जिसे कैपिटल कहते हैं, और छोटा, जिसे स्मॉल कहते हैं।",
+              "show": "A a   B b   C c",
+              "sub": "कैपिटल (बड़ा) · स्मॉल (छोटा)"
+            },
+            {
+              "voice": "hi",
+              "say": "अब पूरी वर्णमाला सुनिए। पहले तेरह अक्षर।"
+            },
+            {
+              "voice": "en",
+              "say": "A, B, C, D, E, F, G, H, I, J, K, L, M.",
+              "show": "A B C D E F G H I J K L M"
+            },
+            {
+              "voice": "hi",
+              "say": "और बाकी तेरह।"
+            },
+            {
+              "voice": "en",
+              "say": "N, O, P, Q, R, S, T, U, V, W, X, Y, Z.",
+              "show": "N O P Q R S T U V W X Y Z"
+            },
+            {
+              "voice": "hi",
+              "say": "आख़िरी अक्षर को भारत और ब्रिटेन में ज़ेड कहते हैं, और अमेरिका में ज़ी। आपने अभी ज़ी सुना। दोनों सही हैं।",
+              "show": "Z = zed / zee",
+              "sub": "भारत, ब्रिटेन: ज़ेड · अमेरिका: ज़ी"
+            }
+          ]
+        },
+        {
+          "title": "मेरे बाद दोहराइए · Say it with me",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "अब छोटे-छोटे हिस्सों में, मेरे बाद दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "A, B, C, D, E, F, G.",
+              "show": "A B C D E F G",
+              "pause": 3
+            },
+            {
+              "voice": "en",
+              "say": "H, I, J, K, L, M, N.",
+              "show": "H I J K L M N",
+              "pause": 3
+            },
+            {
+              "voice": "en",
+              "say": "O, P, Q, R, S, T, U.",
+              "show": "O P Q R S T U",
+              "pause": 3
+            },
+            {
+              "voice": "en",
+              "say": "V, W, X, Y, Z.",
+              "show": "V W X Y Z",
+              "pause": 3
+            },
+            {
+              "voice": "hi",
+              "say": "शाबाश! रोज़ एक बार पूरी वर्णमाला बोलिए।"
+            }
+          ]
+        },
+        {
+          "title": "कैपिटल कब? · Capital letters",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "कैपिटल लेटर तीन जगह ज़रूर लगता है। पहला: वाक्य का पहला अक्षर।"
+            },
+            {
+              "voice": "en",
+              "say": "My name is Ravi.",
+              "show": "My name is Ravi.",
+              "sub": "वाक्य का पहला अक्षर कैपिटल"
+            },
+            {
+              "voice": "hi",
+              "say": "दूसरा: नाम। लोगों, शहरों, देशों, दिनों और महीनों के नाम।"
+            },
+            {
+              "voice": "en",
+              "say": "Delhi. India. Monday. January.",
+              "show": "Delhi · India · Monday · January",
+              "sub": "शहर · देश · दिन · महीना"
+            },
+            {
+              "voice": "hi",
+              "say": "तीसरा: मैं के लिए आई। यह हमेशा कैपिटल होता है, वाक्य के बीच में भी।"
+            },
+            {
+              "voice": "en",
+              "say": "Ravi and I are friends.",
+              "show": "Ravi and I are friends.",
+              "sub": "I = मैं — हमेशा कैपिटल"
+            }
+          ]
+        },
+        {
+          "title": "लिखने के सुझाव · Handwriting",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "अंग्रेज़ी भी बाएँ से दाएँ लिखी जाती है, पर ऊपर शिरोरेखा नहीं लगती। हर अक्षर अलग रहता है।",
+              "show": "शिरोरेखा नहीं",
+              "sub": "हर अक्षर अलग"
+            },
+            {
+              "voice": "hi",
+              "say": "इन जोड़ों में अक्सर गड़बड़ होती है। इन्हें रोज़ पाँच-पाँच बार लिखिए।",
+              "show": "b / d    p / q    m / n    u / v",
+              "sub": "रोज़ पाँच-पाँच बार लिखिए"
+            },
+            {
+              "voice": "hi",
+              "say": "चार लाइनों वाली कॉपी में पहले कैपिटल, फिर स्मॉल, फिर दोनों साथ लिखिए।",
+              "show": "Aa Bb Cc Dd Ee",
+              "sub": "चार लाइन वाली कॉपी में अभ्यास"
+            },
+            {
+              "voice": "hi",
+              "say": "अगले वीडियो में देखेंगे कि अक्षर और ध्वनि अलग क्यों हैं। नोट्स नीचे हैं।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 122
+    },
+    {
+      "id": "eng_v_1_3",
+      "lesson_element_id": "el_eng_1_3",
+      "title": "अक्षर और ध्वनि · Letters and Sounds",
+      "skill_id": "skill_english_alphabet",
+      "scenes": [
+        {
+          "title": "लिखना और बोलना · Spelling and sound",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "देवनागरी में जैसा लिखते हैं, लगभग वैसा ही बोलते हैं। अंग्रेज़ी में ऐसा नहीं है।"
+            },
+            {
+              "voice": "hi",
+              "say": "इस वीडियो में हम स्वर अक्षर, अक्षरों के आम जोड़े और साइलेंट अक्षर सीखेंगे।"
+            },
+            {
+              "voice": "hi",
+              "say": "अंग्रेज़ी में पाँच स्वर अक्षर हैं। सुनिए।"
+            },
+            {
+              "voice": "en",
+              "say": "A, E, I, O, U.",
+              "show": "a · e · i · o · u",
+              "sub": "स्वर अक्षर — कभी-कभी y भी"
+            },
+            {
+              "voice": "hi",
+              "say": "पर स्वर ध्वनियाँ लगभग बीस हैं! एक ही अक्षर कई तरह से बोला जाता है। सुनिए, ए अक्षर तीन शब्दों में।"
+            },
+            {
+              "voice": "en",
+              "say": "cat, cake, car.",
+              "show": "cat · cake · car",
+              "sub": "कैट · केक · कार"
+            },
+            {
+              "voice": "hi",
+              "say": "अब ओ अक्षर।"
+            },
+            {
+              "voice": "en",
+              "say": "hot, go, do.",
+              "show": "hot · go · do",
+              "sub": "हॉट · गो · डू"
+            },
+            {
+              "voice": "hi",
+              "say": "और सी अक्षर कभी क बोलता है, कभी स।"
+            },
+            {
+              "voice": "en",
+              "say": "cat, city.",
+              "show": "cat · city",
+              "sub": "क · स"
+            }
+          ]
+        },
+        {
+          "title": "अक्षरों के जोड़े · Letter pairs",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "कुछ अक्षर मिलकर एक ध्वनि बनाते हैं। एस और एच मिलकर श। मेरे बाद दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "ship, fish.",
+              "show": "sh = श : ship, fish",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "सी और एच मिलकर च।"
+            },
+            {
+              "voice": "en",
+              "say": "chair, teacher.",
+              "show": "ch = च : chair, teacher",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "दो ई मिलकर लंबी ई।"
+            },
+            {
+              "voice": "en",
+              "say": "see, tree.",
+              "show": "ee = ई : see, tree",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "दो ओ कभी लंबा ऊ बोलते हैं, कभी छोटा उ।"
+            },
+            {
+              "voice": "en",
+              "say": "food, book.",
+              "show": "oo = ऊ / उ : food, book",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "और पी और एच मिलकर फ़।"
+            },
+            {
+              "voice": "en",
+              "say": "phone, photo.",
+              "show": "ph = फ़ : phone, photo",
+              "pause": 2.5
+            }
+          ]
+        },
+        {
+          "title": "मूक ई · Silent e",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "शब्द के अंत में ई अक्षर अक्सर बोला नहीं जाता। पर वह पहले वाले स्वर को बदल देता है। मेरे बाद दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "hat, hate.",
+              "show": "hat → hate",
+              "sub": "हैट → हेट",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "bit, bite.",
+              "show": "bit → bite",
+              "sub": "बिट → बाइट",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "not, note.",
+              "show": "not → note",
+              "sub": "नॉट → नोट",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "देखा? आख़िर का ई चुप रहता है, पर पहला स्वर बदल जाता है।"
+            }
+          ]
+        },
+        {
+          "title": "साइलेंट अक्षर · Silent letters",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "कुछ शब्दों में एक अक्षर बिल्कुल नहीं बोला जाता। नो में के चुप है।"
+            },
+            {
+              "voice": "en",
+              "say": "know.",
+              "show": "know — k साइलेंट",
+              "sub": "नो"
+            },
+            {
+              "voice": "hi",
+              "say": "राइट में डब्ल्यू चुप है।"
+            },
+            {
+              "voice": "en",
+              "say": "write.",
+              "show": "write — w साइलेंट",
+              "sub": "राइट"
+            },
+            {
+              "voice": "hi",
+              "say": "और आवर में एच चुप है।"
+            },
+            {
+              "voice": "en",
+              "say": "hour.",
+              "show": "hour — h साइलेंट",
+              "sub": "आवर"
+            },
+            {
+              "voice": "hi",
+              "say": "इसलिए हर नया शब्द देखकर और सुनकर सीखिए। ऐसी डिक्शनरी चुनिए जिसमें शब्द सुनाई दे। नोट्स नीचे हैं।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 115
+    },
+    {
+      "id": "eng_v_1_4",
+      "lesson_element_id": "el_eng_1_4",
+      "title": "नई ध्वनियाँ · New Sounds",
+      "skill_id": "skill_english_pronunciation",
+      "scenes": [
+        {
+          "title": "वी और डब्ल्यू · V and W",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इस वीडियो में पाँच ऐसी ध्वनियाँ हैं जो हिंदी बोलने वालों को सबसे मुश्किल लगती हैं। शीशे के सामने अभ्यास कीजिए।"
+            },
+            {
+              "voice": "hi",
+              "say": "हिंदी में व एक ही ध्वनि है। अंग्रेज़ी में वी और डब्ल्यू दो अलग ध्वनियाँ हैं।"
+            },
+            {
+              "voice": "hi",
+              "say": "वी के लिए ऊपर के दाँत नीचे के होंठ पर हल्के से रखिए, और आवाज़ निकालिए। मेरे बाद दोहराइए।",
+              "show": "V: ऊपर के दाँत, नीचे का होंठ"
+            },
+            {
+              "voice": "en",
+              "say": "very, van, voice.",
+              "show": "very · van · voice",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "डब्ल्यू के लिए दाँत होंठ को नहीं छूते। होंठ गोल कीजिए, जैसे ऊ बोलना हो, फिर खोलिए।",
+              "show": "W: होंठ गोल — जैसे ऊ"
+            },
+            {
+              "voice": "en",
+              "say": "we, water, window.",
+              "show": "we · water · window",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "अब जोड़े सुनिए और दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "vet, wet.",
+              "show": "vet / wet",
+              "sub": "पशु-डॉक्टर / गीला",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "vine, wine.",
+              "show": "vine / wine",
+              "sub": "बेल / वाइन",
+              "pause": 2.5
+            }
+          ]
+        },
+        {
+          "title": "टी एच · TH",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "अब टी एच। जीभ की नोक ऊपर और नीचे के दाँतों के बीच से थोड़ी-सी बाहर लाइए।",
+              "show": "TH: जीभ की नोक दाँतों के बीच"
+            },
+            {
+              "voice": "hi",
+              "say": "पहली ध्वनि में गले से आवाज़ नहीं, सिर्फ़ हवा निकलती है। यह थ जैसी लगती है, पर थ नहीं है। मेरे बाद दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "thin, think, three.",
+              "show": "thin · think · three",
+              "sub": "बिना आवाज़ — सिर्फ़ हवा",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "दूसरी ध्वनि आवाज़ के साथ है। यह द जैसी लगती है, पर द नहीं है।"
+            },
+            {
+              "voice": "en",
+              "say": "this, that, mother.",
+              "show": "this · that · mother",
+              "sub": "आवाज़ के साथ",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "अगर थिन को टिन बोलेंगे, तो सुनने वाला टिन समझ सकता है। फ़र्क सुनिए।"
+            },
+            {
+              "voice": "en",
+              "say": "thin, tin.",
+              "show": "thin ≠ tin",
+              "sub": "पतला ≠ टिन धातु",
+              "pause": 2.5
+            }
+          ]
+        },
+        {
+          "title": "ज़ और फ़ · Z and F",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "ज़ेड नुक़्ते वाला ज़ है, ज नहीं। यह स जैसी ध्वनि है, बस गले से आवाज़ के साथ।"
+            },
+            {
+              "voice": "en",
+              "say": "zoo, zero, busy.",
+              "show": "Z = ज़ : zoo · zero · busy",
+              "sub": "ज़ू · ज़ीरो · बिज़ी",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "एफ़ नुक़्ते वाला फ़ है। ऊपर के दाँत नीचे के होंठ पर रखिए और हवा निकालिए। दोनों होंठ आपस में नहीं मिलते।"
+            },
+            {
+              "voice": "en",
+              "say": "fan, coffee, life.",
+              "show": "F = फ़ : fan · coffee · life",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "एफ़ और पी का फ़र्क सुनिए।"
+            },
+            {
+              "voice": "en",
+              "say": "fan, pan.",
+              "show": "fan ≠ pan",
+              "sub": "पंखा · कड़ाही",
+              "pause": 2.5
+            }
+          ]
+        },
+        {
+          "title": "छोटे और लंबे स्वर · Short and long vowels",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इ और ई का फ़र्क आप पहले से जानते हैं। अंग्रेज़ी में भी यह फ़र्क शब्द बदल देता है। मेरे बाद दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "ship, sheep.",
+              "show": "ship / sheep",
+              "sub": "जहाज़ / भेड़",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "sit, seat.",
+              "show": "sit / seat",
+              "sub": "बैठना / सीट",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "live, leave.",
+              "show": "live / leave",
+              "sub": "रहना / छोड़ना",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "full, fool.",
+              "show": "full / fool",
+              "sub": "भरा हुआ / मूर्ख",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "ये ध्वनियाँ धीरे-धीरे आती हैं। अध्याय छह में इनका और अभ्यास करेंगे। नोट्स और क्विज़ नीचे हैं।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 145
+    },
+    {
+      "id": "eng_v_2_1",
+      "lesson_element_id": "el_eng_2_1",
+      "title": "अभिवादन · Greetings",
+      "skill_id": "skill_english_vocabulary",
+      "scenes": [
+        {
+          "title": "अभिवादन · Greetings",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इस वीडियो में हम अभिवादन और शिष्टाचार के शब्द सीखेंगे। ये रोज़ काम आएँगे।"
+            },
+            {
+              "voice": "hi",
+              "say": "किसी से भी मिलें, तो हेलो कह सकते हैं।"
+            },
+            {
+              "voice": "en",
+              "say": "Hello.",
+              "show": "Hello",
+              "sub": "नमस्ते — किसी से भी"
+            },
+            {
+              "voice": "hi",
+              "say": "दोस्तों और जान-पहचान वालों से हाय।"
+            },
+            {
+              "voice": "en",
+              "say": "Hi.",
+              "show": "Hi",
+              "sub": "नमस्ते — दोस्तों से"
+            },
+            {
+              "voice": "hi",
+              "say": "समय के हिसाब से भी अभिवादन बदलता है। सुबह, दोपहर बारह बजे तक:"
+            },
+            {
+              "voice": "en",
+              "say": "Good morning.",
+              "show": "Good morning",
+              "sub": "सुबह — दोपहर 12 बजे तक"
+            },
+            {
+              "voice": "hi",
+              "say": "दोपहर बारह से शाम लगभग पाँच बजे तक:"
+            },
+            {
+              "voice": "en",
+              "say": "Good afternoon.",
+              "show": "Good afternoon",
+              "sub": "दोपहर — शाम लगभग 5 बजे तक"
+            },
+            {
+              "voice": "hi",
+              "say": "और शाम को मिलने पर:"
+            },
+            {
+              "voice": "en",
+              "say": "Good evening.",
+              "show": "Good evening",
+              "sub": "शाम को मिलने पर"
+            }
+          ]
+        },
+        {
+          "title": "विदा लेना · Saying goodbye",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "ध्यान दीजिए: गुड नाइट मिलने पर नहीं कहते। यह सिर्फ़ रात को विदा लेते समय या सोने से पहले कहते हैं।"
+            },
+            {
+              "voice": "en",
+              "say": "Good night. See you tomorrow.",
+              "show": "Good night. See you tomorrow.",
+              "sub": "रात को विदा लेते समय"
+            },
+            {
+              "voice": "hi",
+              "say": "जाते समय कहिए:"
+            },
+            {
+              "voice": "en",
+              "say": "Goodbye. Bye!",
+              "show": "Goodbye · Bye!",
+              "sub": "जाते समय"
+            },
+            {
+              "voice": "hi",
+              "say": "भारत में सर और मैडम विनम्र माने जाते हैं। कई देशों में लोग पहला नाम लेते हैं, या मिस्टर और मिज़ के साथ उपनाम। आसपास के लोग जैसे बोलें, वैसे बोलिए।",
+              "show": "Sir / Madam · Mr / Ms + उपनाम",
+              "sub": "आसपास के लोग जैसे बोलें, वैसे बोलिए"
+            }
+          ]
+        },
+        {
+          "title": "जादुई शब्द · Magic words",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "अब चार जादुई शब्द। मेरे बाद दोहराइए। पहला, कृपया।"
+            },
+            {
+              "voice": "en",
+              "say": "Please.",
+              "show": "Please",
+              "sub": "कृपया",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "धन्यवाद।"
+            },
+            {
+              "voice": "en",
+              "say": "Thank you.",
+              "show": "Thank you",
+              "sub": "धन्यवाद — जवाब: You're welcome.",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "माफ़ कीजिए।"
+            },
+            {
+              "voice": "en",
+              "say": "Sorry.",
+              "show": "Sorry",
+              "sub": "माफ़ कीजिए",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "और किसी का ध्यान खींचने या रास्ता माँगने के लिए:"
+            },
+            {
+              "voice": "en",
+              "say": "Excuse me.",
+              "show": "Excuse me",
+              "sub": "सुनिए · ज़रा रास्ता दीजिए",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "थैंक यू बोलते समय जीभ दाँतों के बीच रखिए। टैंक यू मत बोलिए।"
+            }
+          ]
+        },
+        {
+          "title": "छोटी बातचीत · A short conversation",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "अब एक छोटी बातचीत सुनिए। सुबह दफ़्तर में दो सहकर्मी मिलते हैं।"
+            },
+            {
+              "voice": "en",
+              "say": "Good morning! How are you?",
+              "show": "A: Good morning! How are you?",
+              "sub": "सुप्रभात! आप कैसे हैं?"
+            },
+            {
+              "voice": "en2",
+              "say": "I'm fine, thank you. And you?",
+              "show": "B: I'm fine, thank you. And you?",
+              "sub": "मैं ठीक हूँ, धन्यवाद। और आप?"
+            },
+            {
+              "voice": "en",
+              "say": "I'm good, thanks.",
+              "show": "A: I'm good, thanks."
+            },
+            {
+              "voice": "hi",
+              "say": "हाउ आर यू अक्सर सिर्फ़ अभिवादन होता है, असली सवाल नहीं। जवाब छोटा रखिए, और सामने वाले से भी पूछिए: ऐंड यू? नोट्स नीचे हैं।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 103
+    },
+    {
+      "id": "eng_v_2_2",
+      "lesson_element_id": "el_eng_2_2",
+      "title": "संख्या, दिन और समय · Numbers, Days and Time",
+      "skill_id": "skill_english_vocabulary",
+      "scenes": [
+        {
+          "title": "संख्याएँ · Numbers",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इस वीडियो में हम संख्याएँ, हफ़्ते के दिन, महीने और समय बताना सीखेंगे। पहले एक से पाँच।"
+            },
+            {
+              "voice": "en",
+              "say": "one, two, three, four, five.",
+              "show": "1–5: one two three four five"
+            },
+            {
+              "voice": "hi",
+              "say": "अब छह से दस।"
+            },
+            {
+              "voice": "en",
+              "say": "six, seven, eight, nine, ten.",
+              "show": "6–10: six seven eight nine ten"
+            },
+            {
+              "voice": "hi",
+              "say": "अब एक ज़रूरी फ़र्क। थर्टीन में ज़ोर आख़िर में है, और थर्टी में शुरू में। मेरे बाद दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "thirteen, thirty.",
+              "show": "thirTEEN 13 · THIRty 30",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "fourteen, forty.",
+              "show": "fourTEEN 14 · FORty 40",
+              "sub": "forty की spelling में u नहीं",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "fifteen, fifty.",
+              "show": "fifTEEN 15 · FIFty 50",
+              "pause": 2.5
+            }
+          ]
+        },
+        {
+          "title": "लाख और करोड़ · Lakh and crore",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "भारत में लाख और करोड़ चलते हैं, पर अंतरराष्ट्रीय अंग्रेज़ी में हज़ार और मिलियन। एक लाख को कहते हैं:"
+            },
+            {
+              "voice": "en",
+              "say": "one hundred thousand.",
+              "show": "1,00,000 = one hundred thousand",
+              "sub": "एक लाख"
+            },
+            {
+              "voice": "hi",
+              "say": "दस लाख को:"
+            },
+            {
+              "voice": "en",
+              "say": "one million.",
+              "show": "10,00,000 = one million",
+              "sub": "दस लाख"
+            },
+            {
+              "voice": "hi",
+              "say": "और एक करोड़ को:"
+            },
+            {
+              "voice": "en",
+              "say": "ten million.",
+              "show": "1,00,00,000 = ten million",
+              "sub": "एक करोड़"
+            },
+            {
+              "voice": "hi",
+              "say": "अंतरराष्ट्रीय तरीके में हर तीन अंकों के बाद अल्पविराम लगता है।",
+              "show": "100,000 · 1,000,000",
+              "sub": "हर तीन अंकों पर अल्पविराम"
+            }
+          ]
+        },
+        {
+          "title": "दिन और महीने · Days and months",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "अब हफ़्ते के दिन। ये हमेशा कैपिटल लेटर से लिखे जाते हैं। मेरे बाद दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "Monday, Tuesday, Wednesday.",
+              "show": "Monday · Tuesday · Wednesday",
+              "pause": 3
+            },
+            {
+              "voice": "en",
+              "say": "Thursday, Friday, Saturday, Sunday.",
+              "show": "Thursday · Friday · Saturday · Sunday",
+              "pause": 3
+            },
+            {
+              "voice": "hi",
+              "say": "वेन्ज़डे में पहला डी नहीं बोला जाता।",
+              "show": "Wednesday = वेन्ज़डे",
+              "sub": "पहला d साइलेंट"
+            },
+            {
+              "voice": "hi",
+              "say": "अब बारह महीने सुनिए।"
+            },
+            {
+              "voice": "en",
+              "say": "January, February, March, April, May, June.",
+              "show": "January – June"
+            },
+            {
+              "voice": "en",
+              "say": "July, August, September, October, November, December.",
+              "show": "July – December"
+            }
+          ]
+        },
+        {
+          "title": "समय · Time",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "समय पूछने के लिए कहते हैं:"
+            },
+            {
+              "voice": "en",
+              "say": "What time is it?",
+              "show": "What time is it?",
+              "sub": "कितने बजे हैं?"
+            },
+            {
+              "voice": "hi",
+              "say": "और जवाब:"
+            },
+            {
+              "voice": "en2",
+              "say": "It's seven o'clock.",
+              "show": "It's seven o'clock.",
+              "sub": "सात बजे हैं"
+            },
+            {
+              "voice": "hi",
+              "say": "सवा, साढ़े और पौने के लिए दो तरीके हैं। सवा सात:"
+            },
+            {
+              "voice": "en",
+              "say": "seven fifteen, or quarter past seven.",
+              "show": "7:15 = quarter past seven",
+              "sub": "सवा सात"
+            },
+            {
+              "voice": "hi",
+              "say": "साढ़े सात:"
+            },
+            {
+              "voice": "en",
+              "say": "seven thirty, or half past seven.",
+              "show": "7:30 = half past seven",
+              "sub": "साढ़े सात"
+            },
+            {
+              "voice": "hi",
+              "say": "और पौने सात:"
+            },
+            {
+              "voice": "en",
+              "say": "six forty-five, or quarter to seven.",
+              "show": "6:45 = quarter to seven",
+              "sub": "पौने सात"
+            },
+            {
+              "voice": "hi",
+              "say": "ए एम मतलब रात बारह बजे से दोपहर बारह बजे तक, और पी एम मतलब दोपहर बारह से रात बारह तक। नोट्स नीचे हैं।",
+              "show": "9 a.m. = सुबह 9 · 9 p.m. = रात 9"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 122
+    },
+    {
+      "id": "eng_v_2_3",
+      "lesson_element_id": "el_eng_2_3",
+      "title": "रोज़ के शब्द · Everyday Words",
+      "skill_id": "skill_english_vocabulary",
+      "scenes": [
+        {
+          "title": "कुछ आप जानते हैं · You already know some",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "आप जितना सोचते हैं, उससे ज़्यादा अंग्रेज़ी पहले से जानते हैं। सुनिए।"
+            },
+            {
+              "voice": "en",
+              "say": "bus, ticket, station, phone, doctor.",
+              "show": "bus · ticket · station · phone · doctor"
+            },
+            {
+              "voice": "hi",
+              "say": "ये शब्द हम रोज़ हिंदी में भी बोलते हैं। इस वीडियो में परिवार, घर, खाने और काम के और शब्द सीखेंगे। सुनिए और मेरे बाद दोहराइए।"
+            }
+          ]
+        },
+        {
+          "title": "परिवार · Family",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "पहले परिवार। माँ और पिता।"
+            },
+            {
+              "voice": "en",
+              "say": "mother, father.",
+              "show": "mother · father",
+              "sub": "माँ · पिता",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "भाई और बहन।"
+            },
+            {
+              "voice": "en",
+              "say": "brother, sister.",
+              "show": "brother · sister",
+              "sub": "भाई · बहन",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "बेटा और बेटी।"
+            },
+            {
+              "voice": "en",
+              "say": "son, daughter.",
+              "show": "son · daughter",
+              "sub": "बेटा · बेटी",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "पति और पत्नी।"
+            },
+            {
+              "voice": "en",
+              "say": "husband, wife.",
+              "show": "husband · wife",
+              "sub": "पति · पत्नी",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "अंग्रेज़ी में चाचा, मामा, मौसा और फूफा, सब अंकल हैं। चाची, मामी, मौसी और बुआ, सब आंट। और चचेरे, ममेरे, फुफेरे भाई-बहन, सब कज़िन।"
+            },
+            {
+              "voice": "en",
+              "say": "uncle, aunt, cousin.",
+              "show": "uncle · aunt · cousin",
+              "sub": "चाचा-मामा… · चाची-बुआ… · चचेरे भाई-बहन",
+              "pause": 2.5
+            }
+          ]
+        },
+        {
+          "title": "घर और खाना · Home and food",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "अब घर की चीज़ें। रसोई, दरवाज़ा, खिड़की, कुर्सी।"
+            },
+            {
+              "voice": "en",
+              "say": "kitchen, door, window, chair.",
+              "show": "kitchen · door · window · chair",
+              "sub": "रसोई · दरवाज़ा · खिड़की · कुर्सी",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "खाने-पीने की चीज़ें। पानी, चावल, दूध, फल।"
+            },
+            {
+              "voice": "en",
+              "say": "water, rice, milk, fruit.",
+              "show": "water · rice · milk · fruit",
+              "sub": "पानी · चावल · दूध · फल",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "सब्ज़ियाँ, नमक, चीनी।"
+            },
+            {
+              "voice": "en",
+              "say": "vegetables, salt, sugar.",
+              "show": "vegetables · salt · sugar",
+              "sub": "सब्ज़ियाँ · नमक · चीनी",
+              "pause": 2.5
+            }
+          ]
+        },
+        {
+          "title": "काम और सफ़र · Work and travel",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "दफ़्तर, नौकरी, सहकर्मी और तनख़्वाह।"
+            },
+            {
+              "voice": "en",
+              "say": "office, job, colleague, salary.",
+              "show": "office · job · colleague · salary",
+              "sub": "दफ़्तर · नौकरी · सहकर्मी · तनख़्वाह",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "रास्ता बताने के लिए: बायाँ, दायाँ, सीधा।"
+            },
+            {
+              "voice": "en",
+              "say": "left, right, straight.",
+              "show": "left · right · straight",
+              "sub": "बायाँ · दायाँ · सीधा",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "पास और दूर।"
+            },
+            {
+              "voice": "en",
+              "say": "near, far.",
+              "show": "near · far",
+              "sub": "पास · दूर",
+              "pause": 2
+            }
+          ]
+        },
+        {
+          "title": "बहुवचन · Plural",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "एक से ज़्यादा चीज़ों के लिए ज़्यादातर शब्दों में एस जोड़ते हैं।"
+            },
+            {
+              "voice": "en",
+              "say": "one book, two books.",
+              "show": "one book → two books"
+            },
+            {
+              "voice": "hi",
+              "say": "कुछ शब्द अलग तरह से बदलते हैं। आदमी और औरत:"
+            },
+            {
+              "voice": "en",
+              "say": "man, men. woman, women.",
+              "show": "man → men · woman → women"
+            },
+            {
+              "voice": "hi",
+              "say": "बच्चा और बच्चे:"
+            },
+            {
+              "voice": "en",
+              "say": "child, children.",
+              "show": "child → children"
+            },
+            {
+              "voice": "hi",
+              "say": "रोज़ दस शब्द याद कीजिए, और घर की चीज़ों पर उनके अंग्रेज़ी नाम की पर्ची चिपकाइए। नोट्स नीचे हैं।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 132
+    },
+    {
+      "id": "eng_v_2_4",
+      "lesson_element_id": "el_eng_2_4",
+      "title": "पढ़ने का अभ्यास · Reading Practice",
+      "skill_id": "skill_english_reading",
+      "scenes": [
+        {
+          "title": "सूचना-पट · Signs",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इस वीडियो में हम सूचना-पट, एक फ़ॉर्म, एक मैसेज और एक छोटी कहानी पढ़ेंगे। पहले दुकानों और दफ़्तरों के बोर्ड। अंदर जाने और बाहर निकलने के लिए:"
+            },
+            {
+              "voice": "en",
+              "say": "Entry. Exit.",
+              "show": "ENTRY / EXIT",
+              "sub": "प्रवेश / निकास"
+            },
+            {
+              "voice": "hi",
+              "say": "दरवाज़े पर, धकेलें और खींचें:"
+            },
+            {
+              "voice": "en",
+              "say": "Push. Pull.",
+              "show": "PUSH / PULL",
+              "sub": "धकेलें / खींचें"
+            },
+            {
+              "voice": "hi",
+              "say": "खुला और बंद:"
+            },
+            {
+              "voice": "en",
+              "say": "Open. Closed.",
+              "show": "OPEN / CLOSED",
+              "sub": "खुला / बंद"
+            },
+            {
+              "voice": "hi",
+              "say": "ख़तरे की चेतावनी, और यहाँ गाड़ी खड़ी न करें:"
+            },
+            {
+              "voice": "en",
+              "say": "Danger. No parking.",
+              "show": "DANGER · NO PARKING",
+              "sub": "ख़तरा · यहाँ गाड़ी खड़ी न करें"
+            }
+          ]
+        },
+        {
+          "title": "फ़ॉर्म · A form",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "फ़ॉर्म में ये शब्द बार-बार दिखते हैं। पहला नाम और उपनाम:"
+            },
+            {
+              "voice": "en",
+              "say": "First name. Surname.",
+              "show": "First name · Surname",
+              "sub": "पहला नाम · उपनाम"
+            },
+            {
+              "voice": "hi",
+              "say": "जन्म तिथि। भारत में पहले दिन, फिर महीना, फिर साल लिखते हैं।"
+            },
+            {
+              "voice": "en",
+              "say": "Date of birth.",
+              "show": "Date of birth: DD/MM/YYYY",
+              "sub": "जन्म तिथि — दिन/महीना/साल"
+            },
+            {
+              "voice": "hi",
+              "say": "पता, मोबाइल नंबर और हस्ताक्षर:"
+            },
+            {
+              "voice": "en",
+              "say": "Address. Mobile number. Signature.",
+              "show": "Address · Mobile number · Signature",
+              "sub": "पता · मोबाइल नंबर · हस्ताक्षर"
+            }
+          ]
+        },
+        {
+          "title": "मैसेज · A message",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "अब अमित का एक मैसेज सुनिए, और साथ में पढ़िए।"
+            },
+            {
+              "voice": "en",
+              "say": "Hi Priya, I am running late.",
+              "show": "Hi Priya, I am running late.",
+              "sub": "running late = देर हो रही है"
+            },
+            {
+              "voice": "en",
+              "say": "The bus is very slow today.",
+              "show": "The bus is very slow today.",
+              "sub": "आज बस बहुत धीमी है"
+            },
+            {
+              "voice": "en",
+              "say": "I will reach the office at ten fifteen. Sorry! Amit.",
+              "show": "I will reach the office at 10:15. Sorry!",
+              "sub": "सवा दस बजे पहुँचूँगा। माफ़ करना! — अमित"
+            },
+            {
+              "voice": "hi",
+              "say": "अमित को देर क्यों हो रही है? क्योंकि आज बस धीमी चल रही है। वह सवा दस बजे पहुँचेगा। रनिंग लेट का मतलब दौड़ना नहीं, देर होना है।"
+            }
+          ]
+        },
+        {
+          "title": "कहानी, पहला भाग · A short story, part 1",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "अब मीना की एक छोटी कहानी। सुनिए, और नए शब्दों पर ध्यान दीजिए।"
+            },
+            {
+              "voice": "en",
+              "say": "Meena lives in Lucknow with her parents.",
+              "show": "Meena lives in Lucknow with her parents.",
+              "sub": "मीना माता-पिता के साथ लखनऊ में रहती है।"
+            },
+            {
+              "voice": "en",
+              "say": "Every morning she wakes up at six o'clock.",
+              "show": "Every morning she wakes up at six.",
+              "sub": "वह रोज़ सुबह छह बजे जागती है।"
+            },
+            {
+              "voice": "en",
+              "say": "She drinks a cup of tea and reads the newspaper.",
+              "show": "She drinks a cup of tea and reads…",
+              "sub": "एक कप चाय पीती है और अख़बार पढ़ती है।"
+            },
+            {
+              "voice": "hi",
+              "say": "वेक्स अप मतलब जागना, और न्यूज़पेपर मतलब अख़बार। अब आगे सुनिए।"
+            }
+          ]
+        },
+        {
+          "title": "कहानी, दूसरा भाग · A short story, part 2",
+          "steps": [
+            {
+              "voice": "en",
+              "say": "Then she takes a bus to her office.",
+              "show": "Then she takes a bus to her office.",
+              "sub": "फिर वह बस से दफ़्तर जाती है।"
+            },
+            {
+              "voice": "en",
+              "say": "She works at a bank near the railway station.",
+              "show": "She works at a bank near the station…",
+              "sub": "वह स्टेशन के पास एक बैंक में काम करती है।"
+            },
+            {
+              "voice": "en",
+              "say": "In the evening, she walks in the park with her mother.",
+              "show": "In the evening, she walks in the park…",
+              "sub": "शाम को वह माँ के साथ पार्क में टहलती है।"
+            },
+            {
+              "voice": "en",
+              "say": "On Sundays, she cooks lunch for the whole family.",
+              "show": "On Sundays, she cooks lunch for everyone…",
+              "sub": "रविवार को वह पूरे परिवार के लिए खाना बनाती है।"
+            },
+            {
+              "voice": "hi",
+              "say": "ऑन संडेज़ मतलब हर रविवार, और होल फ़ैमिली मतलब पूरा परिवार।"
+            }
+          ]
+        },
+        {
+          "title": "प्रश्न · Questions",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "अब सवाल। हर सवाल के बाद रुककर जवाब सोचिए। पहला सवाल: मीना कहाँ रहती है?"
+            },
+            {
+              "voice": "en",
+              "say": "Where does Meena live?",
+              "show": "Where does Meena live?",
+              "pause": 3
+            },
+            {
+              "voice": "en2",
+              "say": "In Lucknow.",
+              "show": "→ In Lucknow."
+            },
+            {
+              "voice": "hi",
+              "say": "दूसरा सवाल: वह कहाँ काम करती है?"
+            },
+            {
+              "voice": "en",
+              "say": "Where does she work?",
+              "show": "Where does she work?",
+              "pause": 3
+            },
+            {
+              "voice": "en2",
+              "say": "At a bank near the railway station.",
+              "show": "→ At a bank near the railway station."
+            },
+            {
+              "voice": "hi",
+              "say": "ध्यान दीजिए: शी लिव्ज़, शी वेक्स अप। शी और ही के साथ क्रिया में एस लगता है। इसे अध्याय चार में सीखेंगे। नोट्स और क्विज़ नीचे हैं।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 138
+    },
+    {
+      "id": "eng_v_3_1",
+      "lesson_element_id": "el_eng_3_1",
+      "title": "शब्दों का क्रम · Word Order",
+      "skill_id": "skill_english_sentence_structure",
+      "scenes": [
+        {
+          "title": "क्रिया कहाँ आती है? · Where the verb goes",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इस वीडियो में सीखेंगे कि अंग्रेज़ी वाक्य में शब्दों का क्रम हिंदी से कैसे अलग है।"
+            },
+            {
+              "voice": "hi",
+              "say": "हिंदी में क्रिया आम तौर पर अंत में आती है: मैं चाय पीता हूँ। पहले कर्ता, फिर कर्म, फिर क्रिया।",
+              "show": "मैं  चाय  पीता हूँ",
+              "sub": "कर्ता + कर्म + क्रिया"
+            },
+            {
+              "voice": "hi",
+              "say": "अंग्रेज़ी में क्रिया कर्ता के ठीक बाद आती है। सुनिए।"
+            },
+            {
+              "voice": "en",
+              "say": "I drink tea.",
+              "show": "I  drink  tea.",
+              "sub": "कर्ता + क्रिया + कर्म"
+            },
+            {
+              "voice": "hi",
+              "say": "आई टी ड्रिंक गलत है। क्रिया, यानी ड्रिंक, कर्ता आई के ठीक बाद आती है।",
+              "show": "✗ I tea drink.   ✓ I drink tea."
+            }
+          ]
+        },
+        {
+          "title": "और उदाहरण · More examples",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "अब हिंदी वाक्य को अंग्रेज़ी में बदलते हैं। मेरे बाद दोहराइए। राम किताब पढ़ता है।"
+            },
+            {
+              "voice": "en",
+              "say": "Ram reads a book.",
+              "show": "Ram reads a book.",
+              "sub": "राम किताब पढ़ता है।",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "हम हिंदी बोलते हैं।"
+            },
+            {
+              "voice": "en",
+              "say": "We speak Hindi.",
+              "show": "We speak Hindi.",
+              "sub": "हम हिंदी बोलते हैं।",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "वह खाना बनाती है।"
+            },
+            {
+              "voice": "en",
+              "say": "She cooks food.",
+              "show": "She cooks food.",
+              "sub": "वह खाना बनाती है।",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "हर बार क्रिया दूसरे नंबर पर आई: रीड्स, स्पीक, कुक्स।"
+            }
+          ]
+        },
+        {
+          "title": "ऐम, इज़, आर · am, is, are",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "हूँ, है और हैं के लिए अंग्रेज़ी में ऐम, इज़ और आर हैं। ये भी कर्ता के ठीक बाद आते हैं। मैं के साथ ऐम।"
+            },
+            {
+              "voice": "en",
+              "say": "I am.",
+              "show": "I am",
+              "sub": "मैं … हूँ"
+            },
+            {
+              "voice": "hi",
+              "say": "वह और यह के साथ इज़।"
+            },
+            {
+              "voice": "en",
+              "say": "He is. She is. It is.",
+              "show": "He / She / It is",
+              "sub": "वह / यह … है"
+            },
+            {
+              "voice": "hi",
+              "say": "आप, हम और वे के साथ आर।"
+            },
+            {
+              "voice": "en",
+              "say": "You are. We are. They are.",
+              "show": "You / We / They are",
+              "sub": "आप / हम / वे … हैं"
+            },
+            {
+              "voice": "hi",
+              "say": "मैं शिक्षक हूँ।"
+            },
+            {
+              "voice": "en",
+              "say": "I am a teacher.",
+              "show": "I am a teacher.",
+              "sub": "मैं शिक्षक हूँ।",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "वह बीमार है।"
+            },
+            {
+              "voice": "en",
+              "say": "She is ill.",
+              "show": "She is ill.",
+              "sub": "वह बीमार है।",
+              "pause": 2.5
+            }
+          ]
+        },
+        {
+          "title": "इज़ मत छोड़िए · Don't drop is",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "हिंदी में है अंत में आता है, इसलिए अंग्रेज़ी में इज़ अक्सर छूट जाता है। शी इल अधूरा है।",
+              "show": "✗ She ill.   ✓ She is ill."
+            },
+            {
+              "voice": "hi",
+              "say": "बोलचाल में छोटे रूप आम हैं: आई ऐम बनता है आइम, और ही इज़ बनता है हीज़। सुनिए।"
+            },
+            {
+              "voice": "en",
+              "say": "I'm ready. He's at home. They're here.",
+              "show": "I'm ready. He's at home. They're here.",
+              "sub": "मैं तैयार हूँ। वह घर पर है। वे यहाँ हैं।"
+            },
+            {
+              "voice": "hi",
+              "say": "याद रखिए: पहले कर्ता, फिर क्रिया, फिर बाकी। नोट्स में अभ्यास है।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 100
+    },
+    {
+      "id": "eng_v_3_2",
+      "lesson_element_id": "el_eng_3_2",
+      "title": "प्रश्न और नहीं · Questions and Negatives",
+      "skill_id": "skill_english_sentence_structure",
+      "scenes": [
+        {
+          "title": "ऐम, इज़, आर वाले सवाल · Questions with be",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इस वीडियो में अंग्रेज़ी में सवाल और नहीं वाले वाक्य बनाना सीखेंगे।"
+            },
+            {
+              "voice": "hi",
+              "say": "हिंदी में सवाल के लिए क्या जोड़ते हैं, या आवाज़ ऊपर उठाते हैं। अंग्रेज़ी में शब्दों का क्रम बदलता है।"
+            },
+            {
+              "voice": "hi",
+              "say": "ऐम, इज़ या आर वाले वाक्य में इन्हें कर्ता से पहले ले आइए। आप तैयार हैं, क्या आप तैयार हैं?"
+            },
+            {
+              "voice": "en",
+              "say": "You are ready. Are you ready?",
+              "show": "You are ready. → Are you ready?"
+            },
+            {
+              "voice": "hi",
+              "say": "वह डॉक्टर है, क्या वह डॉक्टर है?"
+            },
+            {
+              "voice": "en",
+              "say": "She is a doctor. Is she a doctor?",
+              "show": "She is a doctor. → Is she a doctor?"
+            }
+          ]
+        },
+        {
+          "title": "डू और डज़ · Questions with do / does",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "बाकी क्रियाओं के साथ सवाल की शुरुआत में डू लगाइए। मेरे बाद दोहराइए। क्या आप चाय पीते हैं?"
+            },
+            {
+              "voice": "en",
+              "say": "Do you drink tea?",
+              "show": "Do you drink tea?",
+              "sub": "क्या आप चाय पीते हैं?",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "ही, शी और इट के साथ डू की जगह डज़। क्या वह यहाँ रहती है?"
+            },
+            {
+              "voice": "en",
+              "say": "Does she live here?",
+              "show": "Does she live here?",
+              "sub": "क्या वह यहाँ रहती है?",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "डज़ के बाद क्रिया में एस नहीं लगता। डज़ शी लिव्ज़ गलत है।",
+              "show": "✗ Does she lives here?",
+              "sub": "डज़ के बाद क्रिया का मूल रूप"
+            }
+          ]
+        },
+        {
+          "title": "नहीं वाले वाक्य · Negatives",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "नहीं वाले वाक्य में नॉट क्रिया से पहले आता है। मैं तैयार नहीं हूँ।"
+            },
+            {
+              "voice": "en",
+              "say": "I am not ready.",
+              "show": "I am not ready.",
+              "sub": "मैं तैयार नहीं हूँ।"
+            },
+            {
+              "voice": "hi",
+              "say": "वह घर पर नहीं है। इज़ नॉट का छोटा रूप है इज़न्ट।"
+            },
+            {
+              "voice": "en",
+              "say": "He isn't at home.",
+              "show": "He isn't at home.",
+              "sub": "वह घर पर नहीं है।"
+            },
+            {
+              "voice": "hi",
+              "say": "बाकी क्रियाओं के साथ डोंट या डज़न्ट लगता है।"
+            },
+            {
+              "voice": "en",
+              "say": "I don't eat meat.",
+              "show": "I don't eat meat.",
+              "sub": "मैं मांस नहीं खाता / खाती।"
+            },
+            {
+              "voice": "en",
+              "say": "She doesn't speak English.",
+              "show": "She doesn't speak English.",
+              "sub": "वह अंग्रेज़ी नहीं बोलती।"
+            },
+            {
+              "voice": "hi",
+              "say": "आई नॉट ईट मीट गलत है। नॉट से पहले डोंट या डज़न्ट चाहिए।",
+              "show": "✗ I not eat meat.  ✓ I don't eat meat."
+            }
+          ]
+        },
+        {
+          "title": "प्रश्नवाचक शब्द · Question words",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "क्या, कौन, कहाँ, कब, क्यों और कैसे के लिए ये छह शब्द हैं। सुनिए।"
+            },
+            {
+              "voice": "en",
+              "say": "What, who, where, when, why, how.",
+              "show": "What · Who · Where · When · Why · How",
+              "sub": "क्या · कौन · कहाँ · कब · क्यों · कैसे"
+            },
+            {
+              "voice": "hi",
+              "say": "ये शब्द वाक्य के शुरू में आते हैं। मेरे बाद दोहराइए। आप कहाँ रहते हैं?"
+            },
+            {
+              "voice": "en",
+              "say": "Where do you live?",
+              "show": "Where do you live?",
+              "sub": "आप कहाँ रहते हैं?",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "आपका नाम क्या है?"
+            },
+            {
+              "voice": "en",
+              "say": "What is your name?",
+              "show": "What is your name?",
+              "sub": "आपका नाम क्या है?",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "ट्रेन कब छूटती है?"
+            },
+            {
+              "voice": "en",
+              "say": "When does the train leave?",
+              "show": "When does the train leave?",
+              "sub": "ट्रेन कब छूटती है?",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "याद रखिए: प्रश्नवाचक शब्द, फिर डू या इज़, फिर कर्ता। नोट्स नीचे हैं।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 111
+    },
+    {
+      "id": "eng_v_3_3",
+      "lesson_element_id": "el_eng_3_3",
+      "title": "आर्टिकल · A, An, The",
+      "skill_id": "skill_english_articles",
+      "scenes": [
+        {
+          "title": "हिंदी में आर्टिकल नहीं · No articles in Hindi",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "हिंदी में ए, ऐन और द जैसे शब्द नहीं होते। इसलिए हम अंग्रेज़ी में इन्हें अक्सर छोड़ देते हैं। इस वीडियो में सीखेंगे कि आर्टिकल कब लगाना है।",
+              "show": "a · an · the",
+              "sub": "हिंदी में ऐसे शब्द नहीं"
+            },
+            {
+              "voice": "hi",
+              "say": "गिनी जा सकने वाली किसी एक चीज़ से पहले, अंग्रेज़ी में लगभग हमेशा कोई शब्द चाहिए। आई ऐम टीचर अधूरा है।",
+              "show": "✗ I am teacher."
+            },
+            {
+              "voice": "en",
+              "say": "I am a teacher.",
+              "show": "✓ I am a teacher.",
+              "sub": "मैं शिक्षक हूँ।"
+            },
+            {
+              "voice": "hi",
+              "say": "पेशा बताते समय हमेशा ए या ऐन लगता है।"
+            },
+            {
+              "voice": "en",
+              "say": "He is a doctor. She is an engineer.",
+              "show": "He is a doctor. She is an engineer.",
+              "sub": "पेशे के साथ a / an"
+            }
+          ]
+        },
+        {
+          "title": "ए या ऐन? · A or an?",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "ए लगेगा या ऐन, यह अगले शब्द की ध्वनि से तय होता है, अक्षर से नहीं। स्वर ध्वनि से पहले ऐन।"
+            },
+            {
+              "voice": "en",
+              "say": "an apple, an egg.",
+              "show": "an apple · an egg",
+              "sub": "स्वर ध्वनि → an",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "व्यंजन ध्वनि से पहले ए।"
+            },
+            {
+              "voice": "en",
+              "say": "a book, a car.",
+              "show": "a book · a car",
+              "sub": "व्यंजन ध्वनि → a",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "आवर में एच नहीं बोलते, इसलिए ऐन आवर। और यूनिवर्सिटी य की ध्वनि से शुरू होता है, इसलिए ए यूनिवर्सिटी।"
+            },
+            {
+              "voice": "en",
+              "say": "an hour, a university.",
+              "show": "an hour · a university",
+              "sub": "h साइलेंट · यू = य की ध्वनि",
+              "pause": 2.5
+            }
+          ]
+        },
+        {
+          "title": "द · The",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "द तब लगाते हैं जब बात किसी ख़ास चीज़ की हो, जिसे बोलने वाला और सुनने वाला दोनों जानते हैं। पहली बार ए, दूसरी बार द।"
+            },
+            {
+              "voice": "en",
+              "say": "I bought a book. The book is very good.",
+              "show": "I bought a book. The book is very good.",
+              "sub": "पहली बार a, दूसरी बार the"
+            },
+            {
+              "voice": "hi",
+              "say": "इस कमरे का दरवाज़ा, यानी वही दरवाज़ा जिसे हम दोनों जानते हैं।"
+            },
+            {
+              "voice": "en",
+              "say": "Please close the door.",
+              "show": "Please close the door.",
+              "sub": "इसी कमरे का दरवाज़ा"
+            },
+            {
+              "voice": "hi",
+              "say": "जो चीज़ एक ही है, उसके साथ भी द।"
+            },
+            {
+              "voice": "en",
+              "say": "the sun, the moon.",
+              "show": "the sun · the moon",
+              "sub": "सूरज · चाँद"
+            },
+            {
+              "voice": "hi",
+              "say": "और सबसे अच्छा या सबसे बड़ा के साथ भी।"
+            },
+            {
+              "voice": "en",
+              "say": "She is the best student.",
+              "show": "She is the best student.",
+              "sub": "वह सबसे अच्छी छात्रा है।"
+            }
+          ]
+        },
+        {
+          "title": "कोई आर्टिकल नहीं · No article",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "शहर, देश, लोगों के नाम और भाषाओं के साथ कोई आर्टिकल नहीं लगता।"
+            },
+            {
+              "voice": "en",
+              "say": "I went to Mumbai. I speak Hindi.",
+              "show": "I went to Mumbai. I speak Hindi.",
+              "sub": "नाम और भाषा — कोई आर्टिकल नहीं"
+            },
+            {
+              "voice": "hi",
+              "say": "आम बात करते समय बहुवचन के साथ भी नहीं। मुझे कुत्ते पसंद हैं।"
+            },
+            {
+              "voice": "en",
+              "say": "I like dogs.",
+              "show": "I like dogs.",
+              "sub": "आम बात, बहुवचन — कोई आर्टिकल नहीं"
+            },
+            {
+              "voice": "hi",
+              "say": "और खाने के समय के साथ भी नहीं। मैंने दोपहर का खाना खाया।"
+            },
+            {
+              "voice": "en",
+              "say": "I had lunch.",
+              "show": "I had lunch.",
+              "sub": "खाने का समय — कोई आर्टिकल नहीं"
+            },
+            {
+              "voice": "hi",
+              "say": "नोट्स में और उदाहरण हैं, और क्विज़ अध्याय के अंत में।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 108
+    },
+    {
+      "id": "eng_v_3_4",
+      "lesson_element_id": "el_eng_3_4",
+      "title": "प्रीपोज़िशन · In, On, At",
+      "skill_id": "skill_english_prepositions",
+      "scenes": [
+        {
+          "title": "संज्ञा से पहले · Before the noun",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "हिंदी में में, पर और से जैसे शब्द संज्ञा के बाद आते हैं। अंग्रेज़ी में ऐसे शब्द संज्ञा से पहले आते हैं। मेरे बाद दोहराइए। मेज़ पर।"
+            },
+            {
+              "voice": "en",
+              "say": "on the table.",
+              "show": "on the table",
+              "sub": "मेज़ पर",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "घर में।"
+            },
+            {
+              "voice": "en",
+              "say": "in the house.",
+              "show": "in the house",
+              "sub": "घर में",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "दिल्ली से।"
+            },
+            {
+              "voice": "en",
+              "say": "from Delhi.",
+              "show": "from Delhi",
+              "sub": "दिल्ली से",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "देखा? हिंदी में पहले संज्ञा, फिर में या पर। अंग्रेज़ी में उल्टा।"
+            }
+          ]
+        },
+        {
+          "title": "जगह · Place",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "जगह के लिए तीन शब्द। इन, यानी किसी चीज़ के अंदर, या किसी शहर या देश में।"
+            },
+            {
+              "voice": "en",
+              "say": "in the box, in Mumbai, in India.",
+              "show": "in the box · in Mumbai · in India",
+              "sub": "अंदर · शहर · देश"
+            },
+            {
+              "voice": "hi",
+              "say": "ऑन, यानी किसी सतह पर।"
+            },
+            {
+              "voice": "en",
+              "say": "on the wall, on the floor.",
+              "show": "on the wall · on the floor",
+              "sub": "दीवार पर · फ़र्श पर"
+            },
+            {
+              "voice": "hi",
+              "say": "ऐट, यानी किसी ख़ास जगह या बिंदु पर।"
+            },
+            {
+              "voice": "en",
+              "say": "at the door, at the bus stop, at home.",
+              "show": "at the door · at the bus stop · at home",
+              "sub": "ख़ास जगह पर"
+            }
+          ]
+        },
+        {
+          "title": "समय · Time",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "समय के लिए भी यही तीन शब्द हैं। घड़ी के समय के साथ ऐट।"
+            },
+            {
+              "voice": "en",
+              "say": "at seven o'clock, at night.",
+              "show": "at 7 o'clock · at night",
+              "sub": "सात बजे · रात को"
+            },
+            {
+              "voice": "hi",
+              "say": "दिन और तारीख़ के साथ ऑन।"
+            },
+            {
+              "voice": "en",
+              "say": "on Monday, on my birthday.",
+              "show": "on Monday · on my birthday",
+              "sub": "सोमवार को · मेरे जन्मदिन पर"
+            },
+            {
+              "voice": "hi",
+              "say": "महीने, साल और दिन के हिस्से के साथ इन।"
+            },
+            {
+              "voice": "en",
+              "say": "in May, in the morning.",
+              "show": "in May · in the morning",
+              "sub": "मई में · सुबह"
+            },
+            {
+              "voice": "hi",
+              "say": "ध्यान दीजिए: रात के लिए ऐट नाइट, पर सुबह के लिए इन द मॉर्निंग।"
+            }
+          ]
+        },
+        {
+          "title": "आम गलतियाँ · Common mistakes",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "हिंदी से आने वाली कुछ आम गलतियाँ। घर जाने के लिए होम से पहले टू नहीं लगता।",
+              "show": "✗ go to home"
+            },
+            {
+              "voice": "en",
+              "say": "I will go home.",
+              "show": "✓ I will go home.",
+              "sub": "मैं घर जाऊँगा / जाऊँगी।"
+            },
+            {
+              "voice": "hi",
+              "say": "मुझ पर गुस्सा के लिए ऑन नहीं, विद।"
+            },
+            {
+              "voice": "en",
+              "say": "He is angry with me.",
+              "show": "He is angry with me.",
+              "sub": "वह मुझ पर गुस्सा है।"
+            },
+            {
+              "voice": "hi",
+              "say": "और किसी से शादी के लिए विद नहीं, टू।"
+            },
+            {
+              "voice": "en",
+              "say": "She is married to Raj.",
+              "show": "She is married to Raj.",
+              "sub": "उसकी शादी राज से हुई है।"
+            },
+            {
+              "voice": "hi",
+              "say": "नोट्स और क्विज़ नीचे हैं।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 88
+    },
+    {
+      "id": "eng_v_4_1",
+      "lesson_element_id": "el_eng_4_1",
+      "title": "वर्तमान काल · Present Simple and Continuous",
+      "skill_id": "skill_english_tenses",
+      "scenes": [
+        {
+          "title": "प्रेज़ेंट सिंपल · Present simple",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इस वीडियो में वर्तमान काल के दो रूप सीखेंगे: प्रेज़ेंट सिंपल और प्रेज़ेंट कंटिन्युअस।"
+            },
+            {
+              "voice": "hi",
+              "say": "प्रेज़ेंट सिंपल आदतों और सामान्य सच के लिए है, जैसे हिंदी में करता हूँ, करती है।",
+              "show": "Present simple = आदत, सामान्य सच"
+            },
+            {
+              "voice": "hi",
+              "say": "मैं बैंक में काम करता हूँ।"
+            },
+            {
+              "voice": "en",
+              "say": "I work in a bank.",
+              "show": "I work in a bank.",
+              "sub": "मैं बैंक में काम करता / करती हूँ।"
+            },
+            {
+              "voice": "hi",
+              "say": "वह रोज़ सुबह चाय पीती है।"
+            },
+            {
+              "voice": "en",
+              "say": "She drinks tea every morning.",
+              "show": "She drinks tea every morning.",
+              "sub": "वह रोज़ सुबह चाय पीती है।"
+            },
+            {
+              "voice": "hi",
+              "say": "ही, शी, इट, या किसी एक व्यक्ति के नाम के साथ क्रिया में एस या ई एस जोड़िए। सुनिए।"
+            },
+            {
+              "voice": "en",
+              "say": "I work, she works. I go, he goes.",
+              "show": "I work → she works · I go → he goes"
+            },
+            {
+              "voice": "hi",
+              "say": "और हैव बदलकर हैज़ हो जाता है।"
+            },
+            {
+              "voice": "en",
+              "say": "I have, he has.",
+              "show": "I have → he has"
+            }
+          ]
+        },
+        {
+          "title": "प्रेज़ेंट कंटिन्युअस · Present continuous",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "प्रेज़ेंट कंटिन्युअस उस काम के लिए है जो अभी हो रहा है। ऐम, इज़ या आर, फिर क्रिया के साथ आई एन जी।",
+              "show": "am / is / are + verb-ing",
+              "sub": "अभी हो रहा है"
+            },
+            {
+              "voice": "hi",
+              "say": "हिंदी का रहा है, रही है, लगभग इसी जैसा है। मैं अभी काम कर रहा हूँ।"
+            },
+            {
+              "voice": "en",
+              "say": "I am working now.",
+              "show": "I am working now.",
+              "sub": "मैं अभी काम कर रहा / रही हूँ।"
+            },
+            {
+              "voice": "hi",
+              "say": "वह खाना बना रही है।"
+            },
+            {
+              "voice": "en",
+              "say": "She is cooking.",
+              "show": "She is cooking.",
+              "sub": "वह खाना बना रही है।"
+            },
+            {
+              "voice": "hi",
+              "say": "अब फ़र्क देखिए। मैं रोज़ बस से जाता हूँ। यह आदत है।"
+            },
+            {
+              "voice": "en",
+              "say": "I go by bus every day.",
+              "show": "I go by bus every day.",
+              "sub": "आदत"
+            },
+            {
+              "voice": "hi",
+              "say": "मैं अभी बस से जा रहा हूँ। यह अभी हो रहा है।"
+            },
+            {
+              "voice": "en",
+              "say": "I am going by bus right now.",
+              "show": "I am going by bus right now.",
+              "sub": "अभी"
+            }
+          ]
+        },
+        {
+          "title": "स्थिति वाली क्रियाएँ · State verbs",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "कुछ क्रियाएँ काम नहीं, स्थिति बताती हैं: जानना, पसंद करना, चाहना, ज़रूरत होना, और किसी चीज़ का मालिक होना। इनके साथ आई एन जी आम तौर पर नहीं लगता।",
+              "show": "know · like · want · need · have",
+              "sub": "जानना · पसंद · चाहना · ज़रूरत · होना"
+            },
+            {
+              "voice": "hi",
+              "say": "हिंदी में मैं उसे जानता हूँ कहते हैं, इसलिए आई ऐम नोइंग हिम बोल देते हैं। सही है:",
+              "show": "✗ I am knowing him."
+            },
+            {
+              "voice": "en",
+              "say": "I know him.",
+              "show": "✓ I know him."
+            },
+            {
+              "voice": "hi",
+              "say": "उसके पास गाड़ी है:"
+            },
+            {
+              "voice": "en",
+              "say": "He has a car.",
+              "show": "✓ He has a car.",
+              "sub": "✗ He is having a car."
+            },
+            {
+              "voice": "hi",
+              "say": "पर खाने या किसी काम के लिए हैव के साथ आई एन जी चल सकता है।"
+            },
+            {
+              "voice": "en",
+              "say": "I am having lunch.",
+              "show": "✓ I am having lunch.",
+              "sub": "खाना खा रहा / रही हूँ — यह ठीक है"
+            },
+            {
+              "voice": "hi",
+              "say": "याद रखिए: आदत के लिए प्रेज़ेंट सिंपल, अभी के लिए कंटिन्युअस। नोट्स नीचे हैं।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 100
+    },
+    {
+      "id": "eng_v_4_2",
+      "lesson_element_id": "el_eng_4_2",
+      "title": "बीता हुआ समय · Past Simple",
+      "skill_id": "skill_english_tenses",
+      "scenes": [
+        {
+          "title": "पास्ट सिंपल · Past simple",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इस वीडियो में बीते हुए समय की बात करना सीखेंगे। जो काम ख़त्म हो चुका, जैसे कल, पिछले हफ़्ते, या दो दिन पहले, उसके लिए पास्ट सिंपल।",
+              "show": "yesterday · last week · two days ago",
+              "sub": "कल · पिछले हफ़्ते · दो दिन पहले"
+            },
+            {
+              "voice": "hi",
+              "say": "ज़्यादातर क्रियाओं में ई डी जोड़ते हैं। सुनिए।"
+            },
+            {
+              "voice": "en",
+              "say": "work, worked. play, played.",
+              "show": "work → worked · play → played"
+            },
+            {
+              "voice": "hi",
+              "say": "आख़िर में ई हो, तो सिर्फ़ डी जोड़िए। और व्यंजन के बाद वाई हो, तो वाई हटाकर आई ई डी।"
+            },
+            {
+              "voice": "en",
+              "say": "live, lived. study, studied.",
+              "show": "live → lived · study → studied"
+            }
+          ]
+        },
+        {
+          "title": "ई डी कैसे बोलें · Saying -ed",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "ई डी को हमेशा एड नहीं बोलते। इसकी तीन ध्वनियाँ हैं। मेरे बाद दोहराइए। पहली, ट की ध्वनि।"
+            },
+            {
+              "voice": "en",
+              "say": "worked.",
+              "show": "worked = t",
+              "sub": "वर्क्ट",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "दूसरी, ड की ध्वनि।"
+            },
+            {
+              "voice": "en",
+              "say": "played.",
+              "show": "played = d",
+              "sub": "प्लेड",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "और सिर्फ़ ट या ड की ध्वनि के बाद, इड।"
+            },
+            {
+              "voice": "en",
+              "say": "wanted. needed.",
+              "show": "wanted · needed = id",
+              "sub": "वॉन्टिड · नीडिड",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "इसलिए वर्क-एड मत बोलिए, बस वर्क्ट।",
+              "show": "✗ work-ed   ✓ worked"
+            }
+          ]
+        },
+        {
+          "title": "अनियमित क्रियाएँ · Irregular verbs",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "कुछ क्रियाएँ नियम नहीं मानतीं। इन्हें याद करना होगा। मेरे बाद दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "go, went. come, came.",
+              "show": "go → went · come → came",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "eat, ate. drink, drank.",
+              "show": "eat → ate · drink → drank",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "see, saw. buy, bought.",
+              "show": "see → saw · buy → bought",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "do, did. have, had.",
+              "show": "do → did · have → had",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "write, wrote. think, thought.",
+              "show": "write → wrote · think → thought",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "पास्ट रूप हर कर्ता के लिए एक जैसा है: आई वेंट, शी वेंट, दे वेंट।",
+              "show": "I went · she went · they went"
+            }
+          ]
+        },
+        {
+          "title": "डिड वाले वाक्य · did + base verb",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "सवाल और नहीं वाले वाक्यों में डिड लगता है, और डिड के बाद क्रिया का मूल रूप आता है। क्या आप बाज़ार गए?",
+              "show": "did + क्रिया का मूल रूप"
+            },
+            {
+              "voice": "en",
+              "say": "Did you go to the market?",
+              "show": "✓ Did you go to the market?",
+              "sub": "✗ Did you went?"
+            },
+            {
+              "voice": "hi",
+              "say": "मैंने उसे नहीं देखा।"
+            },
+            {
+              "voice": "en",
+              "say": "I didn't see him.",
+              "show": "✓ I didn't see him.",
+              "sub": "✗ I didn't saw him."
+            },
+            {
+              "voice": "hi",
+              "say": "था और थी के लिए वॉज़, और थे के लिए वर।"
+            },
+            {
+              "voice": "en",
+              "say": "I was tired. They were at home.",
+              "show": "I was tired. They were at home.",
+              "sub": "मैं थका / थकी था। वे घर पर थे।"
+            },
+            {
+              "voice": "hi",
+              "say": "अब अपने कल के दिन के बारे में तीन वाक्य बोलिए। नोट्स नीचे हैं।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 109
+    },
+    {
+      "id": "eng_v_4_3",
+      "lesson_element_id": "el_eng_4_3",
+      "title": "भविष्य और प्रेज़ेंट परफ़ेक्ट · Future and Present Perfect",
+      "skill_id": "skill_english_tenses",
+      "scenes": [
+        {
+          "title": "भविष्य · Future",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इस वीडियो में भविष्य काल और प्रेज़ेंट परफ़ेक्ट सीखेंगे। फ़ैसले, वादे और अनुमान के लिए विल लगाइए।",
+              "show": "will + क्रिया",
+              "sub": "फ़ैसला · वादा · अनुमान"
+            },
+            {
+              "voice": "hi",
+              "say": "मैं कल आपको फ़ोन करूँगी।"
+            },
+            {
+              "voice": "en",
+              "say": "I will call you tomorrow.",
+              "show": "I will call you tomorrow.",
+              "sub": "मैं कल आपको फ़ोन करूँगा / करूँगी।"
+            },
+            {
+              "voice": "hi",
+              "say": "विल नॉट का छोटा रूप वोन्ट है। मुझे देर नहीं होगी।"
+            },
+            {
+              "voice": "en",
+              "say": "I won't be late.",
+              "show": "I won't be late.",
+              "sub": "won't = will not"
+            },
+            {
+              "voice": "hi",
+              "say": "जो योजना पहले से बन चुकी है, उसके लिए गोइंग टू। हिंदी का जाने वाला हूँ, इसके बहुत पास है।",
+              "show": "going to + क्रिया",
+              "sub": "पहले से बनी योजना"
+            },
+            {
+              "voice": "en",
+              "say": "I'm going to visit my village next month.",
+              "show": "I'm going to visit my village…",
+              "sub": "अगले महीने गाँव जाने वाला / वाली हूँ"
+            }
+          ]
+        },
+        {
+          "title": "प्रेज़ेंट परफ़ेक्ट · Present perfect",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "प्रेज़ेंट परफ़ेक्ट में हैव या हैज़, फिर क्रिया का तीसरा रूप आता है।",
+              "show": "have / has + तीसरा रूप",
+              "sub": "eaten · gone · seen · done"
+            },
+            {
+              "voice": "hi",
+              "say": "इसे तब लगाते हैं जब बीते काम का असर अभी भी हो। मेरी चाबियाँ खो गई हैं, और अब भी नहीं मिलीं।"
+            },
+            {
+              "voice": "en",
+              "say": "I have lost my keys.",
+              "show": "I have lost my keys.",
+              "sub": "चाबियाँ खो गई हैं — अब भी नहीं मिलीं"
+            },
+            {
+              "voice": "hi",
+              "say": "उसने अपना काम ख़त्म कर लिया है।"
+            },
+            {
+              "voice": "en",
+              "say": "She has finished her work.",
+              "show": "She has finished her work.",
+              "sub": "उसने काम ख़त्म कर लिया है।"
+            },
+            {
+              "voice": "hi",
+              "say": "क्या आप कभी गोवा गए हैं?"
+            },
+            {
+              "voice": "en",
+              "say": "Have you ever been to Goa?",
+              "show": "Have you ever been to Goa?",
+              "sub": "क्या आप कभी गोवा गए हैं?"
+            },
+            {
+              "voice": "hi",
+              "say": "मैंने अभी तक नहीं खाया।"
+            },
+            {
+              "voice": "en",
+              "say": "I haven't eaten yet.",
+              "show": "I haven't eaten yet.",
+              "sub": "मैंने अभी तक नहीं खाया।"
+            }
+          ]
+        },
+        {
+          "title": "कौन-सा काल? · Perfect or past?",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "सबसे ज़रूरी नियम: अगर बताया कि काम कब हुआ, जैसे कल या पिछले हफ़्ते, तो पास्ट सिंपल। आई हैव ईटन यस्टरडे गलत है।",
+              "show": "✗ I have eaten yesterday."
+            },
+            {
+              "voice": "en",
+              "say": "I ate yesterday.",
+              "show": "✓ I ate yesterday.",
+              "sub": "समय बताया → past simple"
+            },
+            {
+              "voice": "hi",
+              "say": "समय नहीं बताया, तो प्रेज़ेंट परफ़ेक्ट।"
+            },
+            {
+              "voice": "en",
+              "say": "I have already eaten.",
+              "show": "✓ I have already eaten.",
+              "sub": "समय नहीं बताया → present perfect"
+            },
+            {
+              "voice": "hi",
+              "say": "हिंदी में दोनों वाक्यों में खाया आता है, इसलिए यह गलती बहुत आम है।"
+            }
+          ]
+        },
+        {
+          "title": "फ़ॉर और सिन्स · for and since",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "हिंदी के से के लिए अंग्रेज़ी में दो शब्द हैं। कितने समय से, यानी अवधि के साथ फ़ॉर।"
+            },
+            {
+              "voice": "en",
+              "say": "I have lived here for five years.",
+              "show": "I have lived here for five years.",
+              "sub": "पाँच साल से — अवधि"
+            },
+            {
+              "voice": "hi",
+              "say": "कब से, यानी शुरुआत के समय के साथ सिन्स।"
+            },
+            {
+              "voice": "en",
+              "say": "I have lived here since twenty twenty.",
+              "show": "I have lived here since 2020.",
+              "sub": "दो हज़ार बीस से — शुरुआत"
+            },
+            {
+              "voice": "hi",
+              "say": "अब आप पाँच काल जानते हैं। पूरा सारांश नोट्स में है, और क्विज़ नीचे।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 93
+    },
+    {
+      "id": "eng_v_5_1",
+      "lesson_element_id": "el_eng_5_1",
+      "title": "विराम-चिह्न · Capitals and Punctuation",
+      "skill_id": "skill_english_writing",
+      "scenes": [
+        {
+          "title": "पूर्ण विराम नहीं · Full stop, not ।",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इस वीडियो में कैपिटल लेटर और विराम-चिह्न सीखेंगे। हिंदी में वाक्य पूर्ण विराम से ख़त्म होता है। अंग्रेज़ी में एक छोटी बिंदी से, जिसे फ़ुल स्टॉप कहते हैं।",
+              "show": "।  →  .",
+              "sub": "पूर्ण विराम → फ़ुल स्टॉप"
+            },
+            {
+              "voice": "hi",
+              "say": "अंग्रेज़ी लिखते समय पूर्ण विराम कभी मत लगाइए।"
+            }
+          ]
+        },
+        {
+          "title": "विराम-चिह्न · Punctuation marks",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "फ़ुल स्टॉप बात ख़त्म करता है।"
+            },
+            {
+              "voice": "en",
+              "say": "I live in Patna.",
+              "show": ".   I live in Patna.",
+              "sub": "फ़ुल स्टॉप — बात ख़त्म"
+            },
+            {
+              "voice": "hi",
+              "say": "सवाल के अंत में प्रश्नचिह्न।"
+            },
+            {
+              "voice": "en",
+              "say": "Where do you live?",
+              "show": "?   Where do you live?",
+              "sub": "प्रश्नचिह्न — सवाल"
+            },
+            {
+              "voice": "hi",
+              "say": "अल्पविराम छोटा ठहराव है, और सूची में भी लगता है।"
+            },
+            {
+              "voice": "en",
+              "say": "I bought rice, dal and sugar.",
+              "show": ",   I bought rice, dal and sugar.",
+              "sub": "अल्पविराम — छोटा ठहराव, सूची"
+            },
+            {
+              "voice": "hi",
+              "say": "ऊपर लगने वाला छोटा निशान, यानी अपॉस्ट्रफ़ी, छोटा रूप और किसका, दोनों बताता है।"
+            },
+            {
+              "voice": "en",
+              "say": "don't, it's, Ravi's bag.",
+              "show": "'   don't · it's · Ravi's bag",
+              "sub": "छोटा रूप · किसका"
+            },
+            {
+              "voice": "hi",
+              "say": "विस्मयादिबोधक चिह्न बहुत कम लगाइए।"
+            },
+            {
+              "voice": "en",
+              "say": "What a surprise!",
+              "show": "!   What a surprise!",
+              "sub": "कम इस्तेमाल करें"
+            }
+          ]
+        },
+        {
+          "title": "कैपिटल लेटर · Capital letters",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "कैपिटल लेटर वाक्य के पहले शब्द, आई, और नामों के लिए।"
+            },
+            {
+              "voice": "en",
+              "say": "My name is Anil. I live in Jaipur.",
+              "show": "My name is Anil. I live in Jaipur.",
+              "sub": "वाक्य का पहला शब्द · I · नाम"
+            },
+            {
+              "voice": "hi",
+              "say": "अंग्रेज़ी में दिनों, महीनों, भाषाओं और राष्ट्रीयताओं के नाम भी कैपिटल से लिखते हैं।"
+            },
+            {
+              "voice": "en",
+              "say": "Monday, March, Hindi, Indian.",
+              "show": "Monday · March · Hindi · Indian",
+              "sub": "दिन · महीना · भाषा · राष्ट्रीयता"
+            }
+          ]
+        },
+        {
+          "title": "इट्स और इट्स · it's or its",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "ये दो शब्द एक जैसे सुनाई देते हैं, पर लिखने में अलग हैं। अपॉस्ट्रफ़ी वाला इट्स मतलब इट इज़।"
+            },
+            {
+              "voice": "en",
+              "say": "It's raining.",
+              "show": "It's raining. = It is raining.",
+              "sub": "बारिश हो रही है।"
+            },
+            {
+              "voice": "hi",
+              "say": "बिना अपॉस्ट्रफ़ी वाला इट्स मतलब उसका।"
+            },
+            {
+              "voice": "en",
+              "say": "The dog wagged its tail.",
+              "show": "The dog wagged its tail.",
+              "sub": "its = उसका — कुत्ते ने अपनी पूँछ हिलाई"
+            },
+            {
+              "voice": "hi",
+              "say": "और बहुवचन में कभी अपॉस्ट्रफ़ी नहीं लगता।",
+              "show": "✗ two book's   ✓ two books"
+            }
+          ]
+        },
+        {
+          "title": "स्पेस · Spaces",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "फ़ुल स्टॉप और अल्पविराम से पहले स्पेस नहीं, बाद में एक स्पेस। हिंदी टाइप करते समय कई लोग पहले स्पेस दे देते हैं।",
+              "show": "✗ Hello ,how are you ?"
+            },
+            {
+              "voice": "en",
+              "say": "Hello, how are you?",
+              "show": "✓ Hello, how are you?"
+            },
+            {
+              "voice": "hi",
+              "say": "पूरा वाक्य कैपिटल में मत लिखिए, और बहुत सारे विस्मयादिबोधक चिह्न भी नहीं। यह चिल्लाने जैसा लगता है।",
+              "show": "ALL CAPS !!! = चिल्लाना"
+            },
+            {
+              "voice": "hi",
+              "say": "नोट्स में एक छोटा अभ्यास है। उसे ज़रूर कीजिए।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 98
+    },
+    {
+      "id": "eng_v_5_2",
+      "lesson_element_id": "el_eng_5_2",
+      "title": "मैसेज और ईमेल · Messages and Emails",
+      "skill_id": "skill_english_writing",
+      "scenes": [
+        {
+          "title": "चार हिस्से · Four parts",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इस वीडियो में छोटा ईमेल और मैसेज लिखना सीखेंगे। एक छोटे ईमेल के चार हिस्से होते हैं।"
+            },
+            {
+              "voice": "hi",
+              "say": "पहला, विषय। छोटा और साफ़, ताकि पढ़ने वाला तुरंत समझ जाए।",
+              "show": "1. Subject — विषय",
+              "sub": "छोटा और साफ़"
+            },
+            {
+              "voice": "hi",
+              "say": "दूसरा, अभिवादन। जान-पहचान कम हो, तो डियर और उपनाम। दोस्तों और सहकर्मियों को हाय और पहला नाम।",
+              "show": "2. Greeting — अभिवादन",
+              "sub": "Dear Mr Verma, · Hi Neha,"
+            },
+            {
+              "voice": "hi",
+              "say": "तीसरा, मुख्य बात। दो से चार छोटे वाक्य: वजह, ज़रूरी जानकारी, और आपको क्या चाहिए।",
+              "show": "3. Body — मुख्य बात",
+              "sub": "दो से चार छोटे वाक्य"
+            },
+            {
+              "voice": "hi",
+              "say": "चौथा, अंत। थैंक यू या रिगार्ड्स, और फिर आपका नाम।",
+              "show": "4. Closing — अंत",
+              "sub": "Thank you, / Regards, + नाम"
+            }
+          ]
+        },
+        {
+          "title": "छुट्टी के लिए ईमेल · Asking for leave",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "अब छुट्टी माँगने वाला एक ईमेल सुनिए। राकेश अपने मैनेजर को लिख रहे हैं।"
+            },
+            {
+              "voice": "en",
+              "say": "Subject: Leave request for twelve March.",
+              "show": "Subject: Leave request for 12 March"
+            },
+            {
+              "voice": "en",
+              "say": "Dear Mr Verma,",
+              "show": "Dear Mr Verma,"
+            },
+            {
+              "voice": "en",
+              "say": "I would like to take one day of leave on Thursday, twelve March, to attend my sister's wedding.",
+              "show": "I would like to take one day of leave…",
+              "sub": "बहन की शादी के लिए एक दिन की छुट्टी"
+            },
+            {
+              "voice": "en",
+              "say": "I have finished the monthly report.",
+              "show": "I have finished the monthly report.",
+              "sub": "महीने की रिपोर्ट पूरी हो चुकी है।"
+            },
+            {
+              "voice": "en",
+              "say": "Please let me know if this is all right.",
+              "show": "Please let me know if this is all right.",
+              "sub": "बताइए, क्या यह ठीक है।"
+            },
+            {
+              "voice": "en",
+              "say": "Thank you, Rakesh.",
+              "show": "Thank you, Rakesh"
+            },
+            {
+              "voice": "hi",
+              "say": "देखिए: पहले वजह, फिर ज़रूरी जानकारी कि रिपोर्ट पूरी है, और आख़िर में विनम्र अनुरोध।"
+            }
+          ]
+        },
+        {
+          "title": "विनम्र वाक्य · Polite phrases",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "अब कुछ विनम्र वाक्य, जो हर ईमेल में काम आते हैं। मेरे बाद दोहराइए। कुछ माँगना हो, तो कुड यू प्लीज़।"
+            },
+            {
+              "voice": "en",
+              "say": "Could you please send the report?",
+              "show": "Could you please send the report?",
+              "sub": "क्या आप रिपोर्ट भेज देंगे?",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "अपनी इच्छा बतानी हो, तो आई वुड लाइक टू।"
+            },
+            {
+              "voice": "en",
+              "say": "I would like to join the weekend batch.",
+              "show": "I would like to join the weekend batch.",
+              "sub": "मैं वीकेंड बैच में जुड़ना चाहता / चाहती हूँ।",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "जवाब माँगना हो, तो:"
+            },
+            {
+              "voice": "en",
+              "say": "Please let me know.",
+              "show": "Please let me know.",
+              "sub": "मुझे बता दीजिए।",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "और देर से जवाब देने पर:"
+            },
+            {
+              "voice": "en",
+              "say": "Sorry for the late reply.",
+              "show": "Sorry for the late reply.",
+              "sub": "देर से जवाब देने के लिए माफ़ कीजिए।",
+              "pause": 2
+            }
+          ]
+        },
+        {
+          "title": "सबके लिए साफ़ · Clear for every reader",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "डू द नीडफ़ुल, रिवर्ट और प्रीपोन भारत के दफ़्तरों में आम हैं और अच्छी तरह समझे जाते हैं। पर भारत के बाहर कई लोग इन्हें नहीं समझते। इनकी जगह साफ़ बताइए कि क्या चाहिए।",
+              "show": "do the needful · revert · prepone",
+              "sub": "भारत में आम, बाहर अक्सर अस्पष्ट"
+            },
+            {
+              "voice": "hi",
+              "say": "डू द नीडफ़ुल की जगह, ठीक-ठीक काम और समय बताइए।"
+            },
+            {
+              "voice": "en",
+              "say": "Could you please send the signed form by Friday?",
+              "show": "Could you please send the signed form…",
+              "sub": "शुक्रवार तक साइन किया हुआ फ़ॉर्म भेज दीजिए"
+            },
+            {
+              "voice": "hi",
+              "say": "रिवर्ट की जगह:"
+            },
+            {
+              "voice": "en",
+              "say": "Please reply when you can.",
+              "show": "Please reply when you can.",
+              "sub": "जब हो सके, जवाब दीजिए।"
+            },
+            {
+              "voice": "hi",
+              "say": "और प्रीपोन की जगह:"
+            },
+            {
+              "voice": "en",
+              "say": "Can we move the meeting earlier?",
+              "show": "Can we move the meeting earlier?",
+              "sub": "क्या मीटिंग पहले कर सकते हैं?"
+            },
+            {
+              "voice": "hi",
+              "say": "ये शब्द गलत नहीं हैं, बस हर जगह समझे नहीं जाते। नोट्स में तीन टेम्पलेट हैं।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 127
+    },
+    {
+      "id": "eng_v_5_3",
+      "lesson_element_id": "el_eng_5_3",
+      "title": "आम गलतियाँ · Common Mistakes",
+      "skill_id": "skill_english_writing",
+      "scenes": [
+        {
+          "title": "शब्द-दर-शब्द · Word by word",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "ये गलतियाँ हिंदी से शब्द-दर-शब्द अनुवाद करने से होती हैं। एक बार पहचान लें, तो सुधारना आसान है।"
+            },
+            {
+              "voice": "hi",
+              "say": "भारतीय अंग्रेज़ी अपने आप में एक असली और सम्मानित रूप है। हमारा मक़सद बस इतना है कि हर जगह आसानी से समझा जाए।",
+              "show": "मक़सद: हर जगह आसानी से समझा जाए"
+            }
+          ]
+        },
+        {
+          "title": "क्रियाएँ · Verbs",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "मेरे पास गाड़ी है, के लिए आई ऐम हैविंग अ कार नहीं कहते।"
+            },
+            {
+              "voice": "en",
+              "say": "I have a car.",
+              "show": "✓ I have a car.",
+              "sub": "✗ I am having a car."
+            },
+            {
+              "voice": "hi",
+              "say": "वह अंग्रेज़ी जानता है। जानना स्थिति है, इसलिए आई एन जी नहीं लगता।"
+            },
+            {
+              "voice": "en",
+              "say": "He knows English.",
+              "show": "✓ He knows English.",
+              "sub": "✗ He is knowing English."
+            },
+            {
+              "voice": "hi",
+              "say": "डिस्कस में अबाउट पहले से शामिल है।"
+            },
+            {
+              "voice": "en",
+              "say": "We discussed the plan.",
+              "show": "✓ We discussed the plan.",
+              "sub": "✗ We discussed about the plan."
+            },
+            {
+              "voice": "hi",
+              "say": "और रिटर्न में बैक पहले से शामिल है।"
+            },
+            {
+              "voice": "en",
+              "say": "Please return the book.",
+              "show": "✓ Please return the book.",
+              "sub": "✗ Please return back the book."
+            }
+          ]
+        },
+        {
+          "title": "शब्द और वाक्यांश · Words and phrases",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "कज़िन में भाई या बहन पहले से शामिल है।"
+            },
+            {
+              "voice": "en",
+              "say": "He is my cousin.",
+              "show": "✓ He is my cousin.",
+              "sub": "✗ He is my cousin brother."
+            },
+            {
+              "voice": "hi",
+              "say": "अपना परिचय देते समय माइसेल्फ़ नहीं, आइम या माय नेम इज़ कहिए।"
+            },
+            {
+              "voice": "en",
+              "say": "I'm Ravi. My name is Ravi.",
+              "show": "✓ I'm Ravi. · My name is Ravi.",
+              "sub": "✗ Myself Ravi."
+            },
+            {
+              "voice": "hi",
+              "say": "गुड नेम, शुभ नाम का अनुवाद है। अंग्रेज़ी में सिर्फ़ योर नेम कहते हैं।"
+            },
+            {
+              "voice": "en",
+              "say": "What is your name?",
+              "show": "✓ What is your name?",
+              "sub": "✗ What is your good name?"
+            },
+            {
+              "voice": "hi",
+              "say": "और पेशे के साथ ए या ऐन।"
+            },
+            {
+              "voice": "en",
+              "say": "I am an engineer.",
+              "show": "✓ I am an engineer.",
+              "sub": "✗ I am engineer."
+            }
+          ]
+        },
+        {
+          "title": "क्रम और समय · Order and time",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "सवाल में आर या इज़ कर्ता से पहले आता है।"
+            },
+            {
+              "voice": "en",
+              "say": "Where are you going?",
+              "show": "✓ Where are you going?",
+              "sub": "✗ Where you are going?"
+            },
+            {
+              "voice": "hi",
+              "say": "कल बताया, तो पास्ट सिंपल।"
+            },
+            {
+              "voice": "en",
+              "say": "I saw this film yesterday.",
+              "show": "✓ I saw this film yesterday.",
+              "sub": "✗ I have seen this film yesterday."
+            },
+            {
+              "voice": "hi",
+              "say": "कल ही आया, के लिए येस्टरडे ओनली नहीं, ओनली येस्टरडे कहिए।"
+            },
+            {
+              "voice": "en",
+              "say": "I arrived only yesterday.",
+              "show": "✓ I arrived only yesterday.",
+              "sub": "✗ I came yesterday only."
+            }
+          ]
+        },
+        {
+          "title": "भेजने से पहले · Check before you send",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "कुछ भी भेजने से पहले पाँच चीज़ें जाँचिए। पहली, पहले कर्ता और फिर क्रिया।",
+              "show": "1. कर्ता, फिर क्रिया",
+              "sub": "Subject + verb"
+            },
+            {
+              "voice": "hi",
+              "say": "दूसरी, पेशे और चीज़ों से पहले ए, ऐन या द।",
+              "show": "2. a / an / the"
+            },
+            {
+              "voice": "hi",
+              "say": "तीसरी, कल और पहले जैसे शब्दों के साथ पास्ट सिंपल।",
+              "show": "3. yesterday, ago → past simple"
+            },
+            {
+              "voice": "hi",
+              "say": "चौथी, कैपिटल लेटर और फ़ुल स्टॉप।",
+              "show": "4. कैपिटल और फ़ुल स्टॉप"
+            },
+            {
+              "voice": "hi",
+              "say": "और पाँचवीं, एक बार ज़ोर से पढ़कर देखिए।",
+              "show": "5. ज़ोर से पढ़कर देखिए"
+            },
+            {
+              "voice": "hi",
+              "say": "अगर वाक्य अंग्रेज़ी शब्दों में हिंदी वाक्य जैसा लगे, तो दोबारा लिखिए। नोट्स और क्विज़ नीचे हैं।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 103
+    },
+    {
+      "id": "eng_v_6_1",
+      "lesson_element_id": "el_eng_6_1",
+      "title": "शब्दों पर ज़ोर · Word Stress and the Schwa",
+      "skill_id": "skill_english_pronunciation",
+      "scenes": [
+        {
+          "title": "शब्द पर ज़ोर · Word stress",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इस वीडियो में दो चीज़ें सीखेंगे: शब्द के किस हिस्से पर ज़ोर देना है, और एक कमज़ोर स्वर, जिसे श्वा कहते हैं।"
+            },
+            {
+              "voice": "hi",
+              "say": "अंग्रेज़ी शब्द के एक हिस्से पर ज़ोर होता है। वह हिस्सा थोड़ा ऊँचा, लंबा और साफ़ बोला जाता है। हिंदी में सभी हिस्सों पर लगभग बराबर ज़ोर होता है।",
+              "show": "एक हिस्से पर ज़ोर",
+              "sub": "ऊँचा · लंबा · साफ़"
+            },
+            {
+              "voice": "hi",
+              "say": "बड़े अक्षरों वाले हिस्से पर ज़ोर दीजिए। मेरे बाद दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "photo.",
+              "show": "PHO-to",
+              "pause": 2
+            },
+            {
+              "voice": "en",
+              "say": "photography.",
+              "show": "pho-TO-gra-phy",
+              "pause": 2
+            },
+            {
+              "voice": "en",
+              "say": "computer.",
+              "show": "com-PU-ter",
+              "pause": 2
+            },
+            {
+              "voice": "en",
+              "say": "hotel.",
+              "show": "ho-TEL",
+              "pause": 2
+            }
+          ]
+        },
+        {
+          "title": "ज़ोर से मतलब बदलता है · Stress changes meaning",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "कुछ शब्दों में ज़ोर बदलने से मतलब बदल जाता है। संज्ञा में ज़ोर पहले हिस्से पर होता है, और क्रिया में दूसरे पर।"
+            },
+            {
+              "voice": "en",
+              "say": "a record. to record.",
+              "show": "REcord · reCORD",
+              "sub": "रिकॉर्ड (संज्ञा) · रिकॉर्ड करना",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "a present. to present.",
+              "show": "PREsent · preSENT",
+              "sub": "तोहफ़ा · पेश करना",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "एक ही परिवार के शब्दों में भी ज़ोर खिसक सकता है।"
+            },
+            {
+              "voice": "en",
+              "say": "economy. economic.",
+              "show": "e-CON-o-my · e-co-NOM-ic",
+              "sub": "अर्थव्यवस्था · आर्थिक",
+              "pause": 2.5
+            }
+          ]
+        },
+        {
+          "title": "श्वा · The schwa /ə/",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "अब श्वा। यह एक छोटी, ढीली ध्वनि है, हिंदी के छोटे अ के बहुत पास, जैसे अब में। यह सिर्फ़ बिना ज़ोर वाले हिस्सों में आती है।",
+              "show": "schwa /ə/ = छोटा, ढीला अ",
+              "sub": "जैसे 'अब' का अ"
+            },
+            {
+              "voice": "hi",
+              "say": "मेरे बाद दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "banana.",
+              "show": "banana = buh-NAA-nuh",
+              "pause": 2
+            },
+            {
+              "voice": "en",
+              "say": "about.",
+              "show": "about = uh-BOUT",
+              "pause": 2
+            },
+            {
+              "voice": "en",
+              "say": "today.",
+              "show": "today = tuh-DAY",
+              "pause": 2
+            },
+            {
+              "voice": "en",
+              "say": "doctor.",
+              "show": "doctor = DOK-tuh",
+              "pause": 2
+            },
+            {
+              "voice": "hi",
+              "say": "देवनागरी में बनाना लिखने पर तीनों आ बराबर लगते हैं। अंग्रेज़ी में सिर्फ़ बीच वाला आ पूरा है।"
+            }
+          ]
+        },
+        {
+          "title": "कमज़ोर शब्द · Weak words",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "वाक्य में छोटे शब्द, जैसे ए, द, टू और ऑफ़, कमज़ोर और जल्दी बोले जाते हैं। ज़ोर काम के शब्दों पर होता है।",
+              "show": "a · the · to · of · and · can",
+              "sub": "छोटे शब्द — कमज़ोर और जल्दी"
+            },
+            {
+              "voice": "hi",
+              "say": "बड़े अक्षरों वाले हिस्सों पर ज़ोर दीजिए, और बाकी हल्का। मेरे बाद दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "I want to go to the market.",
+              "show": "I WANT to GO to the MARket.",
+              "pause": 3
+            },
+            {
+              "voice": "en",
+              "say": "a cup of tea.",
+              "show": "a CUP of TEA",
+              "sub": "uh CUP uh TEA",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "बोलते समय ज़ोर वाले हिस्से पर ताली बजाइए। इससे लय पकड़ में आती है।",
+              "show": "ज़ोर वाले हिस्से पर ताली"
+            },
+            {
+              "voice": "hi",
+              "say": "शब्दकोश में एक छोटा खड़ा निशान ज़ोर वाले हिस्से से ठीक पहले आता है। नोट्स नीचे हैं।",
+              "show": "ˈ = ज़ोर वाले हिस्से से पहले",
+              "sub": "/fəˈtɒɡrəfi/ — photography"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 125
+    },
+    {
+      "id": "eng_v_6_2",
+      "lesson_element_id": "el_eng_6_2",
+      "title": "रोज़ की बातचीत · Everyday Conversations",
+      "skill_id": "skill_english_conversation",
+      "scenes": [
+        {
+          "title": "अपना परिचय · Introducing yourself",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "इस वीडियो में चार रोज़ की बातचीत सुनेंगे। हर बातचीत के बाद उसे अपने नाम और अपनी जानकारी के साथ दोहराइए। पहली बातचीत: दफ़्तर में नेहा और समीर पहली बार मिलते हैं।"
+            },
+            {
+              "voice": "en",
+              "say": "Hi, I'm Neha. Nice to meet you.",
+              "show": "A: Hi, I'm Neha. Nice to meet you."
+            },
+            {
+              "voice": "en2",
+              "say": "Nice to meet you too. I'm Sameer.",
+              "show": "B: Nice to meet you too. I'm Sameer."
+            },
+            {
+              "voice": "hi",
+              "say": "ध्यान दीजिए: नाइस टू मीट यू, और जवाब में आख़िर में टू जोड़ दीजिए। परिचय में आइम नेहा कहिए, माइसेल्फ़ नेहा नहीं। अब नेहा पूछती है कि समीर कहाँ से हैं।"
+            },
+            {
+              "voice": "en",
+              "say": "Where are you from, Sameer?",
+              "show": "A: Where are you from, Sameer?"
+            },
+            {
+              "voice": "en2",
+              "say": "I'm from Indore. Now I live in Pune.",
+              "show": "B: I'm from Indore. Now I live in Pune."
+            },
+            {
+              "voice": "en",
+              "say": "What do you do?",
+              "show": "A: What do you do?"
+            },
+            {
+              "voice": "en2",
+              "say": "I work for a software company.",
+              "show": "B: I work for a software company."
+            },
+            {
+              "voice": "hi",
+              "say": "व्हाट डू यू डू का मतलब है, आप क्या काम करते हैं।"
+            }
+          ]
+        },
+        {
+          "title": "रास्ता पूछना · Asking for directions",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "दूसरी बातचीत: स्टेशन का रास्ता पूछना। शुरुआत एक्सक्यूज़ मी से कीजिए।"
+            },
+            {
+              "voice": "en",
+              "say": "Excuse me, I'm looking for the station.",
+              "show": "A: Excuse me, I'm looking for the station."
+            },
+            {
+              "voice": "en2",
+              "say": "Go straight, then take the second left.",
+              "show": "B: Go straight, take the second left…"
+            },
+            {
+              "voice": "en",
+              "say": "Is it far?",
+              "show": "A: Is it far?"
+            },
+            {
+              "voice": "en2",
+              "say": "No, it's about five minutes on foot.",
+              "show": "B: No, it's about five minutes on foot."
+            },
+            {
+              "voice": "en",
+              "say": "Thank you so much!",
+              "show": "A: Thank you so much!"
+            },
+            {
+              "voice": "en2",
+              "say": "You're welcome.",
+              "show": "B: You're welcome."
+            },
+            {
+              "voice": "hi",
+              "say": "सेकंड लेफ़्ट मतलब बाएँ वाला दूसरा मोड़, और ऑन फ़ुट मतलब पैदल।"
+            }
+          ]
+        },
+        {
+          "title": "समझ न आए तो · When you don't understand",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "समझ न आए तो दोबारा पूछना बिल्कुल ठीक है। मेरे बाद दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "Sorry, could you say that again, please?",
+              "show": "Sorry, could you say that again, please?",
+              "sub": "माफ़ कीजिए, क्या आप दोबारा कहेंगे?",
+              "pause": 3
+            },
+            {
+              "voice": "hi",
+              "say": "और अगर कोई बहुत तेज़ बोले:"
+            },
+            {
+              "voice": "en",
+              "say": "Could you speak a little more slowly?",
+              "show": "Could you speak a little more slowly?",
+              "sub": "क्या आप थोड़ा धीरे बोलेंगे?",
+              "pause": 3
+            }
+          ]
+        },
+        {
+          "title": "फ़ोन पर · A phone call",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "तीसरी बातचीत: फ़ोन पर। राकेश, मिज़ अय्यर से बात करना चाहते हैं।"
+            },
+            {
+              "voice": "en",
+              "say": "Hello, this is Rakesh.",
+              "show": "A: Hello, this is Rakesh."
+            },
+            {
+              "voice": "en",
+              "say": "May I speak to Ms Iyer, please?",
+              "show": "A: May I speak to Ms Iyer, please?"
+            },
+            {
+              "voice": "en2",
+              "say": "Sorry, she's in a meeting.",
+              "show": "B: Sorry, she's in a meeting."
+            },
+            {
+              "voice": "en2",
+              "say": "Can I take a message?",
+              "show": "B: Can I take a message?",
+              "sub": "कोई संदेश देना है?"
+            },
+            {
+              "voice": "en",
+              "say": "Yes, please ask her to call me back.",
+              "show": "A: Please ask her to call me back."
+            },
+            {
+              "voice": "en2",
+              "say": "Sure, I'll tell her.",
+              "show": "B: Sure, I'll tell her."
+            },
+            {
+              "voice": "hi",
+              "say": "फ़ोन पर दिस इज़ राकेश, या राकेश स्पीकिंग कहिए, आई ऐम राकेश नहीं। और फ़ोन नंबर एक-एक अंक करके बोलिए।"
+            }
+          ]
+        },
+        {
+          "title": "दुकान पर · At a shop",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "चौथी बातचीत: दुकान पर कमीज़ ख़रीदना।"
+            },
+            {
+              "voice": "en",
+              "say": "How much is this shirt?",
+              "show": "A: How much is this shirt?"
+            },
+            {
+              "voice": "en2",
+              "say": "It's seven hundred and ninety-nine rupees.",
+              "show": "B: It's 799 rupees."
+            },
+            {
+              "voice": "en",
+              "say": "Do you have it in a bigger size?",
+              "show": "A: Do you have it in a bigger size?"
+            },
+            {
+              "voice": "en2",
+              "say": "Yes, here you are.",
+              "show": "B: Yes, here you are."
+            },
+            {
+              "voice": "en",
+              "say": "Great, I'll take it.",
+              "show": "A: Great, I'll take it."
+            },
+            {
+              "voice": "hi",
+              "say": "हिंदी में पानी दीजिए विनम्र है। पर अंग्रेज़ी में गिव मी वॉटर रूखा लग सकता है। ऐसे कहिए:"
+            },
+            {
+              "voice": "en",
+              "say": "Could I have some water, please?",
+              "show": "Could I have some water, please?",
+              "sub": "✗ Give me water. — रूखा लग सकता है",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "नोट्स में चारों बातचीत लिखी हैं।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 145
+    },
+    {
+      "id": "eng_v_6_3",
+      "lesson_element_id": "el_eng_6_3",
+      "title": "ज़ोर से अभ्यास · Practise Out Loud",
+      "skill_id": "skill_english_pronunciation",
+      "scenes": [
+        {
+          "title": "हर दिन · Every day",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "बोलना एक शारीरिक हुनर है, जैसे साइकिल चलाना। मुँह और जीभ को अभ्यास चाहिए।"
+            },
+            {
+              "voice": "hi",
+              "say": "रोज़ पंद्रह मिनट का अभ्यास, हफ़्ते में एक बार दो घंटे से बेहतर है। इस वीडियो में चार तरीके हैं।",
+              "show": "रोज़ 15 मिनट",
+              "sub": "हफ़्ते में एक बार दो घंटे से बेहतर"
+            }
+          ]
+        },
+        {
+          "title": "पहला तरीका: शैडोइंग · Shadowing",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "पहला तरीका, शैडोइंग। एक मिनट की साफ़ अंग्रेज़ी चलाइए, और बोलने वाले के साथ-साथ, ज़रा-सा पीछे रहकर बोलिए।",
+              "show": "1. शैडोइंग",
+              "sub": "सुनिए, और साथ-साथ बोलिए"
+            },
+            {
+              "voice": "hi",
+              "say": "बोलने वाले के ज़ोर, उतार-चढ़ाव और रुकने की जगह की नकल कीजिए। तीन से पाँच बार दोहराइए। चलिए, कोशिश करते हैं। मेरे बाद दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "I usually walk to work.",
+              "show": "I usually walk to work.",
+              "sub": "मैं आम तौर पर पैदल काम पर जाता / जाती हूँ।",
+              "pause": 3
+            },
+            {
+              "voice": "en",
+              "say": "But today, I'm taking the bus.",
+              "show": "But today, I'm taking the bus.",
+              "sub": "पर आज मैं बस से जा रहा / रही हूँ।",
+              "pause": 3
+            }
+          ]
+        },
+        {
+          "title": "दूसरा तरीका: मिनिमल पेयर्स · Minimal pairs",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "दूसरा तरीका, मिनिमल पेयर्स। ऐसे जोड़े, जिनमें सिर्फ़ एक ध्वनि का फ़र्क है। मेरे बाद दोहराइए।"
+            },
+            {
+              "voice": "en",
+              "say": "vet, wet.",
+              "show": "vet / wet",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "thin, tin.",
+              "show": "thin / tin",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "then, den.",
+              "show": "then / den",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "ship, sheep.",
+              "show": "ship / sheep",
+              "pause": 2.5
+            },
+            {
+              "voice": "en",
+              "say": "sip, zip.",
+              "show": "sip / zip",
+              "pause": 2.5
+            },
+            {
+              "voice": "hi",
+              "say": "फिर किसी साथी से कहिए: आप कोई एक शब्द बोलें, और साथी बताए कि कौन-सा सुना।"
+            }
+          ]
+        },
+        {
+          "title": "तीसरा तरीका: रिकॉर्ड कीजिए · Record and compare",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "तीसरा तरीका, रिकॉर्ड करके सुनना। एक छोटा अनुच्छेद पढ़कर अपनी आवाज़ रिकॉर्ड कीजिए।",
+              "show": "3. रिकॉर्ड कीजिए और सुनिए"
+            },
+            {
+              "voice": "hi",
+              "say": "सुनकर सिर्फ़ दो चीज़ें चुनिए जिन्हें सुधारना है, फिर दोबारा रिकॉर्ड कीजिए।",
+              "show": "सिर्फ़ दो चीज़ें सुधारिए"
+            },
+            {
+              "voice": "hi",
+              "say": "अपनी आवाज़ सुनना पहले अजीब लगता है। यह बिल्कुल सामान्य है। हर हफ़्ते एक रिकॉर्डिंग संभालकर रखिए, ताकि अपनी तरक्की सुन सकें।",
+              "show": "हर हफ़्ते एक रिकॉर्डिंग"
+            }
+          ]
+        },
+        {
+          "title": "चौथा तरीका: साथी · Partner and fluency",
+          "steps": [
+            {
+              "voice": "hi",
+              "say": "चौथा तरीका, एक साथी ढूँढिए, और रोज़ दस मिनट सिर्फ़ अंग्रेज़ी में बात कीजिए। आसान विषय चुनिए: आपका दिन, खाना, कोई फ़िल्म, या छुट्टी की योजना।",
+              "show": "4. साथी के साथ रोज़ 10 मिनट",
+              "sub": "your day · food · a film · weekend"
+            },
+            {
+              "voice": "hi",
+              "say": "हर गलती पर रुकिए मत। पहले बहाव, फिर सुधार।",
+              "show": "पहले बहाव, फिर सुधार",
+              "sub": "Fluency before perfection"
+            },
+            {
+              "voice": "hi",
+              "say": "कोई शब्द भूल जाएँ, तो उसे समझाइए। जैसे चाकू भूल गए, तो कहिए:"
+            },
+            {
+              "voice": "en",
+              "say": "The thing you use to cut vegetables.",
+              "show": "The thing you use to cut vegetables.",
+              "sub": "= knife · चाकू"
+            },
+            {
+              "voice": "hi",
+              "say": "अब दो बोलने वाले काम हैं। अपनी रिकॉर्डिंग भेजिए, और रिव्यूअर आपको सुझाव देंगे। नोट्स और क्विज़ नीचे हैं।"
+            }
+          ]
+        }
+      ],
+      "duration_seconds": 127
+    }
+  ]
+}

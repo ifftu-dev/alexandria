@@ -98,5 +98,42 @@
     "loadFailed": "无法加载该插件：{error}",
     "graderUnavailable": "评分在桌面应用中运行。你仍可以在这里运行测试，但此设备无法提交评分。",
     "loading": "正在加载插件…"
+  },
+  "settingsPage": {
+    "back": "所有插件",
+    "openDocs": "阅读指南",
+    "openSetting": "{plugin}中的{setting}",
+    "builtinProtected": "内置插件无法卸载。",
+    "settingsHeading": "插件设置",
+    "authorNote": "这些设置由插件作者提供。",
+    "noSettings": "此插件没有可更改的设置。",
+    "resetDefaults": "恢复默认值",
+    "saved": "已保存",
+    "saveFailed": "无法保存该设置：{error}",
+    "resetFailed": "无法恢复默认值：{error}",
+    "loadFailed": "无法加载此插件：{error}",
+    "notInstalled": "此设备上未安装该插件。",
+    "permissionsHeading": "权限",
+    "permissionsIntro": "此插件可能请求使用的内容。关闭某项权限后，插件下次需要时会再次询问。",
+    "permissionsEmpty": "此插件不请求任何权限。",
+    "notGranted": "未允许",
+    "scope": {
+      "always": "始终允许",
+      "session": "本次会话允许",
+      "once": "仅允许一次"
+    },
+    "capability": {
+      "microphone": "麦克风",
+      "camera": "摄像头",
+      "midi": "MIDI 设备",
+      "fullscreen": "全屏",
+      "clipboard": "剪贴板",
+      "storage": "本设备存储",
+      "mlInference": "设备端 AI",
+      "instructorReview": "讲师审阅收件箱"
+    },
+    "dependenciesHeading": "依赖关系",
+    "dependenciesEmpty": "此插件不依赖其他插件，也没有插件依赖它。",
+    "requiredByHint": "请先卸载这些插件，才能移除此插件。"
   }
 }

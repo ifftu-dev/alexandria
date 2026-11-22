@@ -19,6 +19,7 @@ use crate::domain::plugin::{
     InstalledPlugin, IrlSubmission, PluginCapability, PluginCatalogEntry, PluginManifest,
     PluginPermissionRecord,
 };
+use crate::plugins::settings as plugin_settings;
 #[cfg(grader)]
 use crate::plugins::wasm_runtime::{GraderBudgets, ScoreRecord};
 use crate::plugins::{builtins, catalog, irl_review, manifest, registry, verifier};
@@ -422,6 +423,83 @@ pub async fn plugin_get_manifest(
         DatabaseWorkload::Learner,
         "plugin.get-manifest",
         move |db| registry::get_manifest(db, &plugin_cid),
+    )
+    .await
+}
+
+/// Current values of a plugin's manifest-declared settings, defaults filled
+/// in. Host widgets and unknown setting types are left out. The plugin host
+/// passes this map to the plugin as `init.settings`.
+#[tauri::command]
+pub async fn plugin_get_settings(
+    state: State<'_, AppState>,
+    plugin_cid: String,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.get-settings",
+        move |db| {
+            let manifest = registry::get_manifest(db, &plugin_cid)?;
+            Ok(plugin_settings::get_settings(db.conn(), &manifest))
+        },
+    )
+    .await
+}
+
+/// Store one plugin setting. Validated against the manifest: unknown keys,
+/// host widgets and out-of-spec values are refused. Stored per manifest id,
+/// so the value survives plugin upgrades.
+#[tauri::command]
+pub async fn plugin_set_setting(
+    state: State<'_, AppState>,
+    plugin_cid: String,
+    key: String,
+    value: serde_json::Value,
+) -> Result<(), String> {
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.set-setting",
+        move |db| {
+            let manifest = registry::get_manifest(db, &plugin_cid)?;
+            plugin_settings::set_setting(db.conn(), &manifest, &key, &value)
+        },
+    )
+    .await
+}
+
+/// Restore every setting of a plugin to its default. Returns the resulting
+/// values (the defaults).
+#[tauri::command]
+pub async fn plugin_reset_settings(
+    state: State<'_, AppState>,
+    plugin_cid: String,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.reset-settings",
+        move |db| {
+            let manifest = registry::get_manifest(db, &plugin_cid)?;
+            plugin_settings::reset_settings(db.conn(), &manifest)?;
+            Ok(plugin_settings::get_settings(db.conn(), &manifest))
+        },
+    )
+    .await
+}
+
+/// Every installed plugin with its renderable settings, for the global
+/// Settings search.
+#[tauri::command]
+pub async fn plugin_settings_index(
+    state: State<'_, AppState>,
+) -> Result<Vec<plugin_settings::PluginSettingsIndexEntry>, String> {
+    plugin_db(
+        &state,
+        DatabaseWorkload::Learner,
+        "plugin.settings-index",
+        plugin_settings::settings_index,
     )
     .await
 }

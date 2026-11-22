@@ -1,7 +1,7 @@
 # Demo course corpus
 
 Non-authoritative source material. Profile creation, mnemonic restore, and
-unlock import the eight full courses as profile-owned drafts using inline
+unlock import the nine full courses as profile-owned drafts using inline
 text and quizzes, plus Plugins Showcase and the bundled plugins.
 Existing course edits are preserved. The seven video tutorials and external
 placeholder media are excluded. **Instructor → My courses → Load example
@@ -9,7 +9,7 @@ courses** remains available to restore missing example drafts.
 Nothing in this source corpus is authoritative: there are no signed rows, identities,
 credentials, enrolments, opinions or governance records.
 
-- `courses.json` — 16 example courses and tutorials with their chapters,
+- `courses.json` — 17 example courses and tutorials with their chapters,
   elements, inline lesson content, skill tags and video chapters. It was
   exported from the retired startup seed with its fabricated authorship,
   publication, chain and content-address fields removed. Courses marked
@@ -65,3 +65,14 @@ classrooms owned only by the current profile, and adds the two video courses
 as editable drafts. Videos are copied into the local content store and pinned
 for offline use. Existing course/classroom edits survive repeat setup. The
 retired seed's fake people, proofs, messages, and activity history are excluded.
+
+## English for Hindi Speakers videos
+
+`english-videos.json` holds the scripts for the 21 narrated lessons in
+`course_english_hindi_101`, and `videos/eng_v_*.mp4` holds the rendered clips.
+Hindi carries the explanation; English voices speak only the English being
+taught. They are AI-generated with macOS synthetic voices (Lekha, Samantha,
+Rishi), and the Hindi still needs a native speaker's review. Profile setup
+copies and pins them like the other bundled videos. Regenerate on macOS with
+`node scripts/generate-english-videos.mjs [video-id ...]` (needs FFmpeg and the
+Playwright Chromium build); it records each duration back into the JSON.

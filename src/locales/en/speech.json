@@ -1,0 +1,22 @@
+{
+  "packs": {
+    "title": "Pronunciation checks",
+    "intro": "Download a language to check how clearly each word you read aloud comes across. Language packs are shared by everyone who uses this device.",
+    "honesty": "Checks run on this device with open-source Whisper models, so recordings never leave it. They estimate how clearly each word came across, not your accent.",
+    "loadError": "Couldn't load language packs.",
+    "error": "Something went wrong: {error}",
+    "installed": "Installed",
+    "download": "Download",
+    "add": "Add",
+    "remove": "Remove",
+    "downloading": "Downloading, {percent}%",
+    "megabytes": "{value} MB",
+    "enhancedName": "Enhanced English",
+    "enhancedHint": "More accurate English checks, larger download",
+    "sharedTitle": "Other languages",
+    "sharedMissing": "These languages share one model. Downloading the first takes {size}; adding more after that is instant.",
+    "sharedPresent": "The shared model ({size}) is on this device. Adding a language is instant, and removing one keeps the model while another language still uses it.",
+    "sharedWith": "{size}, shared with {languages}",
+    "limited": "Often wrong for now"
+  }
+}

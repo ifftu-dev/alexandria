@@ -154,6 +154,49 @@ const IRL_REVIEW_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
     ],
 };
 
+/// Language Lab — language-practice activities (dictation, reading with a
+/// glossary, writing, sentence builder, read aloud). The first four are
+/// graded by `language-lab-grader.wasm`; read-aloud recordings go to the
+/// instructor inbox and the host's on-device pronunciation check. Requests
+/// microphone + ml_inference. UI copy is bilingual Hindi/English.
+const LANGUAGE_LAB_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
+    slug: "language-lab",
+    manifest_json: include_bytes!("../../../plugins/builtin/language-lab/manifest.json"),
+    grader_wasm: Some(include_bytes!(
+        "../../../plugins/builtin/language-lab-grader/dist/language_lab_grader.wasm"
+    )),
+    ui_files: &[
+        (
+            "ui/index.html",
+            include_bytes!("../../../plugins/builtin/language-lab/ui/index.html"),
+        ),
+        (
+            "ui/style.css",
+            include_bytes!("../../../plugins/builtin/language-lab/ui/style.css"),
+        ),
+        (
+            "ui/app.js",
+            include_bytes!("../../../plugins/builtin/language-lab/ui/app.js"),
+        ),
+        (
+            "ui/lang.js",
+            include_bytes!("../../../plugins/builtin/language-lab/ui/lang.js"),
+        ),
+        (
+            "ui/i18n.js",
+            include_bytes!("../../../plugins/builtin/language-lab/ui/i18n.js"),
+        ),
+        (
+            "icon.svg",
+            include_bytes!("../../../plugins/builtin/language-lab/icon.svg"),
+        ),
+        (
+            "README.md",
+            include_bytes!("../../../plugins/builtin/language-lab/README.md"),
+        ),
+    ],
+};
+
 /// Code Editor: JavaScript — graded coding element (v0.1.1: lazy wasm load, main
 /// thread, instant-eval toggle). The learner writes JS in a
 /// CodeMirror 6 editor; the same Boa wasm engine powers both in-browser live
@@ -385,6 +428,7 @@ pub const BUILTIN_PLUGINS: &[BuiltinBundle<'static>] = &[
     MUSIC_REVIEWS_BUNDLE,
     WORKOUT_ASSIST_BUNDLE,
     IRL_REVIEW_BUNDLE,
+    LANGUAGE_LAB_BUNDLE,
     EDITOR_JS_BUNDLE,
     EDITOR_TS_BUNDLE,
     EDITOR_CPP_BUNDLE,
@@ -538,7 +582,8 @@ mod tests {
         assert_eq!(stats.failed, 0, "no builtin should fail to install");
         // Startup installs only global-scoped builtins; the course-scoped
         // editor plugins + `editors` collection are
-        // deferred to first enrollment. mcq/music×2/irl are the globals.
+        // deferred to first enrollment. mcq/music×2/irl/language-lab are the
+        // globals.
         let global_count = BUILTIN_PLUGINS
             .iter()
             .filter(|b| {
@@ -683,5 +728,131 @@ mod tests {
         );
         // A wrong solution scores below the credential threshold (0.7).
         assert!(grade("const n = Number(readLine()); console.log(n + 1);") < 0.7);
+    }
+
+    /// Grades every Language Lab activity through the installed bundle's
+    /// grader in the real Wasmtime sandbox: right answers score 1.0, wrong
+    /// ones score lower, and read-aloud (instructor-reviewed) is refused.
+    #[cfg(grader)]
+    #[test]
+    fn language_lab_grades_each_activity_through_the_runtime() {
+        use crate::plugins::wasm_runtime::{GraderBudgets, GraderRuntime};
+        use serde_json::json;
+
+        let db = test_db();
+        let dir = TempDir::new().unwrap();
+        registry::install_builtin(&db, dir.path(), &LANGUAGE_LAB_BUNDLE)
+            .expect("install language lab");
+        let cid = verifier::compute_plugin_cid(LANGUAGE_LAB_BUNDLE.manifest_json);
+        let installed = registry::get_installed(&db, &cid)
+            .unwrap()
+            .expect("installed record");
+        let grader_cid = registry::get_manifest(&db, &cid)
+            .unwrap()
+            .grader
+            .expect("language lab has a grader")
+            .cid;
+        let wasm =
+            std::fs::read(Path::new(&installed.install_path).join(registry::GRADER_FILENAME))
+                .expect("grader.wasm on disk");
+        assert_eq!(blake3::hash(&wasm).to_hex().to_string(), grader_cid);
+
+        let runtime = GraderRuntime::new().expect("runtime");
+        let grade = |content: &serde_json::Value, submission: serde_json::Value| {
+            let input = serde_json::to_vec(&json!({
+                "version": "1",
+                "content": content,
+                "submission": submission,
+            }))
+            .unwrap();
+            runtime
+                .grade(&grader_cid, &wasm, None, &input, GraderBudgets::default())
+                .expect("grade")
+        };
+
+        let dictation = json!({
+            "activity": "dictation",
+            "items": [{ "text": "Good morning." }, { "text": "I drink tea every day." }],
+        });
+        assert_eq!(
+            grade(
+                &dictation,
+                json!({ "answers": ["good morning", "I drink tea every day"] })
+            )
+            .score,
+            1.0
+        );
+        let partial = grade(
+            &dictation,
+            json!({ "answers": ["Good morning", "I drinks tea"] }),
+        );
+        assert!(partial.score < 1.0 && partial.score > 0.0);
+
+        let reading = json!({
+            "activity": "reading",
+            "passage": "My name is Priya. I live in Pune.",
+            "glossary": { "live": "रहना" },
+            "questions": [
+                { "prompt": "Where does Priya live?", "options": ["Delhi", "Pune"] },
+                { "prompt": "What is her name?", "options": ["Priya", "Asha"] },
+            ],
+            "grader_private": { "answers": [1, 0] },
+        });
+        assert_eq!(grade(&reading, json!({ "selected": [1, 0] })).score, 1.0);
+        assert_eq!(grade(&reading, json!({ "selected": [0, 0] })).score, 0.5);
+
+        let writing = json!({
+            "activity": "writing",
+            "items": [{ "prompt_hi": "मेरे पास एक छाता है।" }],
+            "grader_private": { "items": [{ "accept": ["I have an umbrella."], "require": ["umbrella"] }] },
+        });
+        assert_eq!(
+            grade(&writing, json!({ "answers": ["I have an umbrella."] })).score,
+            1.0
+        );
+        let wrong = grade(&writing, json!({ "answers": ["i have a umbrella"] }));
+        assert!(
+            wrong.score < 0.7,
+            "a/an + capital + full stop errors: {}",
+            wrong.score
+        );
+
+        let builder = json!({
+            "activity": "builder",
+            "items": [{ "tiles": ["rice.", "I", "eat"] }],
+            "grader_private": { "items": [{ "answer": "I eat rice." }] },
+        });
+        assert_eq!(grade(&builder, json!({ "orders": [[1, 2, 0]] })).score, 1.0);
+        assert_eq!(grade(&builder, json!({ "orders": [[0, 2, 1]] })).score, 0.0);
+
+        let read_aloud = json!({ "activity": "read_aloud", "items": [{ "text": "Hello." }] });
+        let refused = grade(&read_aloud, json!({}));
+        assert_eq!(refused.score, 0.0);
+        assert!(refused.details["error"].is_string());
+    }
+
+    /// Every file under `plugins/builtin/language-lab/ui/` (except tests) is
+    /// embedded, so a new UI module cannot ship missing from the bundle.
+    #[test]
+    fn language_lab_bundles_every_ui_file() {
+        let ui_dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../plugins/builtin/language-lab/ui");
+        let mut on_disk: Vec<String> = std::fs::read_dir(ui_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| !n.contains(".test."))
+            .map(|n| format!("ui/{n}"))
+            .collect();
+        on_disk.sort();
+        let mut bundled: Vec<String> = LANGUAGE_LAB_BUNDLE
+            .ui_files
+            .iter()
+            .map(|(p, _)| p.to_string())
+            .filter(|p| p.starts_with("ui/"))
+            .collect();
+        bundled.sort();
+        assert_eq!(bundled, on_disk);
+        let manifest = manifest::parse_and_validate(LANGUAGE_LAB_BUNDLE.manifest_json).unwrap();
+        assert!(manifest.kinds.len() == 2 && manifest.grader.is_some());
     }
 }

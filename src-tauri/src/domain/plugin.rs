@@ -169,6 +169,97 @@ pub struct PluginManifest {
     /// Additive/optional — empty for plugins with no dependencies.
     #[serde(default)]
     pub dependencies: Vec<String>,
+    /// Author-declared user settings, rendered as a form on the plugin's
+    /// settings page and delivered to the plugin in its `init` payload.
+    /// Additive/optional — empty for plugins with no settings. See
+    /// `plugins::settings` for the validation rules.
+    #[serde(default)]
+    pub settings: Vec<PluginSettingSpec>,
+}
+
+/// One setting a plugin declares in its manifest `settings` array.
+///
+/// `type` is kept as a string so a manifest naming a type this host does not
+/// know still parses (forward compatibility): unknown types are skipped by the
+/// settings page and never reach the plugin. Known types are listed in
+/// [`PluginSettingType`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginSettingSpec {
+    /// Stable storage key, `[a-z0-9_]{1,40}`, unique within the manifest.
+    pub key: String,
+    /// `toggle`, `select`, `number`, `text`, or a host widget such as
+    /// `speech_packs`.
+    #[serde(rename = "type")]
+    pub setting_type: String,
+    /// Author-supplied label (plain text, not translated by the host).
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Default value; type depends on `type`. Optional: toggles default to
+    /// `false`, selects to their first option, text to `""`, numbers to 0
+    /// clamped into `min..=max`.
+    #[serde(default)]
+    pub default: Option<serde_json::Value>,
+    /// `select` choices.
+    #[serde(default)]
+    pub options: Vec<PluginSettingOption>,
+    /// `number` bounds and step.
+    #[serde(default)]
+    pub min: Option<f64>,
+    #[serde(default)]
+    pub max: Option<f64>,
+    #[serde(default)]
+    pub step: Option<f64>,
+    /// `text` maximum length in characters (default 200).
+    #[serde(default)]
+    pub max_length: Option<u32>,
+    /// Extra search terms for the global Settings search.
+    #[serde(default)]
+    pub keywords: Vec<String>,
+}
+
+/// One choice of a `select` setting.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginSettingOption {
+    pub value: String,
+    pub label: String,
+}
+
+/// The setting types this host understands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginSettingType {
+    Toggle,
+    Select,
+    Number,
+    Text,
+    /// Host widget: the pronunciation language-pack manager. Stores no value.
+    SpeechPacks,
+}
+
+impl PluginSettingType {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "toggle" => Some(Self::Toggle),
+            "select" => Some(Self::Select),
+            "number" => Some(Self::Number),
+            "text" => Some(Self::Text),
+            "speech_packs" => Some(Self::SpeechPacks),
+            _ => None,
+        }
+    }
+
+    /// Whether settings of this type store a value the plugin receives.
+    /// Host widgets render host UI and store nothing.
+    pub fn has_value(self) -> bool {
+        !matches!(self, Self::SpeechPacks)
+    }
+}
+
+impl PluginSettingSpec {
+    /// The known type, or `None` for a type this host does not understand.
+    pub fn known_type(&self) -> Option<PluginSettingType> {
+        PluginSettingType::parse(&self.setting_type)
+    }
 }
 
 fn default_entry() -> String {

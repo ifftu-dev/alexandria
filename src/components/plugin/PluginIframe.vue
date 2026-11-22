@@ -71,6 +71,9 @@ const props = defineProps<{
   content: unknown
   /** Opaque persisted state (JSON-serializable). */
   state: unknown
+  /** Current values of the plugin's manifest-declared settings (defaults
+   *  filled in, host widgets excluded). Sent as `init.settings`. */
+  settings?: Record<string, unknown>
   /** `learn` | `author` | `review`. Passed through in init. */
   mode: 'learn' | 'author' | 'review'
   locale?: string
@@ -293,6 +296,7 @@ function onPluginMessage(ev: MessageEvent) {
         payload: {
           content: props.content,
           state: props.state,
+          settings: props.settings ?? {},
           mode: props.mode,
           granted_capabilities: props.grantedCapabilities,
           locale: props.locale ?? 'en',

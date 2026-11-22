@@ -126,6 +126,10 @@ pub fn validate(manifest: &PluginManifest) -> Result<(), String> {
         }
     }
 
+    // Settings: bounded, uniquely keyed, defaults within their own rules.
+    // Unknown setting types parse (forward compatibility) and are skipped.
+    crate::plugins::settings::validate_specs(&manifest.settings)?;
+
     // Entry path must be relative, no traversal. This is re-checked
     // at the asset-protocol layer too, but fail early on install.
     validate_relative_path(&manifest.entry, "entry")?;

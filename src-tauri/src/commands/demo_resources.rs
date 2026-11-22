@@ -8,6 +8,7 @@ use crate::profile::scope::ProfileState as State;
 use crate::AppState;
 
 const RESOURCES: &str = include_str!("../../../demo-world/content/resources.json");
+const LESSON_VIDEOS: &str = include_str!("../../../demo-world/content/english-videos.json");
 
 macro_rules! media {
     ($($id:literal),+ $(,)?) => {
@@ -29,7 +30,28 @@ media!(
     "op_cyber_01",
     "op_design_01",
     "op_design_02",
-    "op_civics_01"
+    "op_civics_01",
+    "eng_v_1_1",
+    "eng_v_1_2",
+    "eng_v_1_3",
+    "eng_v_1_4",
+    "eng_v_2_1",
+    "eng_v_2_2",
+    "eng_v_2_3",
+    "eng_v_2_4",
+    "eng_v_3_1",
+    "eng_v_3_2",
+    "eng_v_3_3",
+    "eng_v_3_4",
+    "eng_v_4_1",
+    "eng_v_4_2",
+    "eng_v_4_3",
+    "eng_v_5_1",
+    "eng_v_5_2",
+    "eng_v_5_3",
+    "eng_v_6_1",
+    "eng_v_6_2",
+    "eng_v_6_3",
 );
 
 const THUMBNAILS: &[(&str, &[u8])] = &[
@@ -77,6 +99,27 @@ struct Media {
     duration_seconds: i64,
     scenes: Vec<Scene>,
 }
+#[derive(Deserialize)]
+struct LessonVideoSpec {
+    videos: Vec<LessonVideo>,
+}
+
+/// A narrated lesson video that an example course places in front of one of
+/// its lessons (`media_id` on a corpus `video` element). Its bytes are in
+/// `MEDIA` and its script is in `english-videos.json`.
+#[derive(Deserialize)]
+pub(super) struct LessonVideo {
+    pub(super) id: String,
+    pub(super) title: String,
+    pub(super) duration_seconds: i64,
+}
+
+pub(super) fn lesson_videos() -> Result<Vec<LessonVideo>, String> {
+    serde_json::from_str::<LessonVideoSpec>(LESSON_VIDEOS)
+        .map(|spec| spec.videos)
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Deserialize)]
 struct Scene {
     title: String,
@@ -141,7 +184,7 @@ pub(crate) async fn install_for_profile(state: &AppState) -> Result<(), String> 
         let guard = database.lock().map_err(|e| e.to_string())?;
         let db = guard.as_ref().ok_or("database not initialized")?;
         install_rows(db.conn())?;
-        log::info!("profile resources ready: 3 classrooms, 2 video courses, 15 local videos; retired viewpoints removed");
+        log::info!("profile resources ready: 3 classrooms, 2 video courses, {} local videos; retired viewpoints removed", MEDIA.len());
         Ok::<_, String>(())
     }).await.map_err(|e| format!("resource install task failed: {e}"))?
 }
@@ -174,6 +217,20 @@ pub(super) fn install_selected_rows(
                 &cid,
                 "course",
                 media_bytes(&item.id)?.len() as u64,
+                false,
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        for video in lesson_videos()?
+            .iter()
+            .filter(|v| selected.is_none_or(|s| s == format!("media:{}", v.id)))
+        {
+            let cid = media_cid(&video.id)?;
+            crate::content_store::storage::upsert_pin(
+                conn,
+                &cid,
+                "course",
+                media_bytes(&video.id)?.len() as u64,
                 false,
             )
             .map_err(|e| e.to_string())?;
@@ -324,7 +381,7 @@ mod tests {
             assert_eq!(count("classroom_channels"), 7);
             assert_eq!(count("courses"), 2);
             assert_eq!(count("course_elements"), 16);
-            assert_eq!(count("pins"), 22);
+            assert_eq!(count("pins"), 22 + lesson_videos().unwrap().len() as i64);
             for table in [
                 "opinions",
                 "credentials",
@@ -394,7 +451,7 @@ mod tests {
             let remaining = list_examples(db.conn()).unwrap();
             assert_eq!(remaining.len(), 1);
             assert_eq!(remaining[0].id, "custom-example");
-            assert_eq!(count("pins"), 22);
+            assert_eq!(count("pins"), 22 + lesson_videos().unwrap().len() as i64);
         }
     }
 }
