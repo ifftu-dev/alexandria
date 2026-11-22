@@ -697,8 +697,9 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
   /**
    * A click that ends a drag or a pan selects nothing. Keyboard clicks
    * (detail 0) always pass. A real click is resolved by position: if it
-   * landed on a button not yet moved after a zoom, the dot under the
-   * pointer is chosen instead (or nothing, over the background).
+   * landed on a button not yet moved after a zoom, or on the background
+   * over a drawn dot whose button has not arrived, the dot under the
+   * pointer is chosen (or nothing, over the background).
    */
   function clickCapture(event: MouseEvent): void {
     if (event.detail === 0) return
@@ -710,7 +711,8 @@ export function useWebGraph(source: () => WebGraphInput, events: WebGraphEvents,
     }
     if (!event.isTrusted) return
     const target = skillOf(event.target), at = dotAt(local(event))
-    if (target === null || target === at) return
+    // On the right button, or on the background away from any dot: as usual.
+    if (target === at) return
     event.stopPropagation()
     event.preventDefault()
     if (at) events.select(at)
