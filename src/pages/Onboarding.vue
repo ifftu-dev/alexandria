@@ -1156,7 +1156,8 @@ function enterApp() {
 }
 .onb-rail {
   padding: 1.875rem 1.75rem;
-  background: linear-gradient(180deg, rgb(20, 27, 42), rgb(15, 21, 34));
+  /* A panel in the theme's card colour, beside the page background. */
+  background: var(--app-card);
   border-inline-end: 1px solid var(--app-border);
 }
 /* Keep the step rail in place while a long step scrolls; otherwise its
@@ -1190,20 +1191,18 @@ function enterApp() {
   box-shadow: 0 6px 18px -6px var(--app-primary);
   margin-bottom: 1.625rem;
 }
-/* The rail is a fixed dark navy panel (matching the study) in both themes, so
-   its text is pinned light rather than following the theme foreground token. */
 .onb-lead {
   font-size: 1.1875rem;
   font-weight: 650;
   line-height: 1.32;
   letter-spacing: -0.015em;
-  color: rgb(249, 250, 251);
+  color: var(--app-card-foreground);
   margin: 0;
   text-wrap: balance;
 }
 .onb-lead-sub {
   font-size: 0.8125rem;
-  color: rgb(156, 163, 175);
+  color: var(--app-muted-foreground);
   margin: 0.375rem 0 1.875rem;
   line-height: 1.5;
 }
@@ -1221,7 +1220,7 @@ function enterApp() {
   gap: 0.75rem;
   padding: 0.5625rem 0;
   font-size: 0.8125rem;
-  color: rgb(156, 163, 175);
+  color: var(--app-muted-foreground);
 }
 .onb-step__n {
   width: 1.5rem;
@@ -1232,7 +1231,7 @@ function enterApp() {
   place-items: center;
   font-size: 0.6875rem;
   font-weight: 700;
-  border: 1.5px solid rgb(55, 65, 81);
+  border: 1.5px solid var(--app-border);
   background: transparent;
   transition: border-color var(--duration-fast), background-color var(--duration-fast), box-shadow var(--duration-fast);
 }
@@ -1240,7 +1239,7 @@ function enterApp() {
   font-weight: 500;
 }
 .onb-step--done {
-  color: rgb(249, 250, 251);
+  color: var(--app-card-foreground);
 }
 .onb-step--done .onb-step__n {
   background: var(--app-primary);
@@ -1248,7 +1247,7 @@ function enterApp() {
   border-color: var(--app-primary);
 }
 .onb-step--now {
-  color: rgb(249, 250, 251);
+  color: var(--app-card-foreground);
   font-weight: 600;
 }
 .onb-step--now .onb-step__n {
