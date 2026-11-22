@@ -3,14 +3,14 @@ import { expect, test, type Page } from '@playwright/test'
 for (const theme of ['light', 'dark']) {
   test(`${theme} atlas presents the whole taxonomy and restores explicit exploration`, async ({ page }, testInfo) => {
     await page.goto(`/tests/desktop-ui/?screen=skill-atlas&view=detailed&theme=${theme}`)
-    await expect(page.getByRole('heading', { name: '35 earned · 68 Ready · 103 loaded skills' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '38 earned · 75 Ready · 113 loaded skills' })).toBeVisible()
     const rows = page.getByRole('list', { name: 'Full-label skill list' }).getByRole('button')
-    await expect(page.locator('.atlas-list summary')).toContainText('103 matching skills')
+    await expect(page.locator('.atlas-list summary')).toContainText('113 matching skills')
     await expect(rows).toHaveCount(50)
     await page.getByRole('button', { name: 'Show 50 more skills', exact: true }).click()
     await expect(rows.nth(50)).toBeFocused()
-    await page.getByRole('button', { name: 'Show 3 more skills', exact: true }).click()
-    await expect(rows).toHaveCount(103)
+    await page.getByRole('button', { name: 'Show 13 more skills', exact: true }).click()
+    await expect(rows).toHaveCount(113)
     await page.screenshot({ path: testInfo.outputPath('overview.png'), fullPage: true })
     await page.getByRole('button', { name: 'Explore Computer Science', exact: true }).click()
     await page.getByRole('searchbox', { name: 'Search all skills' }).fill('Big-O')
@@ -156,10 +156,10 @@ for (const theme of ['light', 'dark']) {
       await expect(atlas.getByRole('searchbox')).toHaveCount(0)
       await expect(atlas.getByRole('button', { name: 'Zoom in', exact: true })).toHaveCount(0)
       const map = atlas.getByRole('group', { name: 'Skill map' })
-      await expect(map.getByRole('button')).toHaveCount(103)
+      await expect(map.getByRole('button')).toHaveCount(113)
       await expect(atlas.getByText('Ringed: Ready next', { exact: true })).toBeVisible()
       const points = await discs(page)
-      expect(points).toHaveLength(103)
+      expect(points).toHaveLength(113)
       expect(overlaps(points)).toBe(0)
       for (const point of points) {
         expect(point.left).toBeGreaterThanOrEqual(0)
@@ -208,7 +208,7 @@ for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 })
     await page.goto('/tests/desktop-ui/?screen=skill-atlas&view=simple&theme=dark&scenario=stress')
     const map = page.getByRole('group', { name: 'Skill map' })
-    await expect(map.getByRole('button')).toHaveCount(104)
+    await expect(map.getByRole('button')).toHaveCount(114)
     expect(overlaps(await discs(page))).toBe(0)
     const mapBox = (await map.boundingBox())!
     const label = (await map.getByRole('button', { name: /A very long skill label/ }).locator('.node-label').boundingBox())!
@@ -235,7 +235,7 @@ for (const theme of ['light', 'dark']) {
       await expect(page.getByRole('group', { name: 'Graph view' }).getByRole('button')).toHaveText(['Web', 'Simple', 'Detailed'])
       await expect(page.getByRole('button', { name: 'Web', exact: true })).toHaveAttribute('aria-pressed', 'true')
       const map = page.getByRole('group', { name: 'Skill map' })
-      await expect(map.getByRole('button')).toHaveCount(103)
+      await expect(map.getByRole('button')).toHaveCount(113)
       // Every dot sits inside the map: the whole taxonomy on one screen.
       const bounds = (await map.boundingBox())!
       expect(await map.locator('.web-dot').evaluateAll((dots, box) => dots.filter(dot => {
@@ -255,11 +255,11 @@ for (const theme of ['light', 'dark']) {
       await page.locator('.web-tools select').selectOption('2')
       const shown = await map.getByRole('button').count()
       expect(shown).toBeGreaterThan(1)
-      expect(shown).toBeLessThan(103)
+      expect(shown).toBeLessThan(113)
       await expect(map.locator('.web-name')).toHaveCount(shown)
       await shootMap(page, testInfo.outputPath(`web-narrowed-${theme}-${width}.png`))
       await page.getByRole('button', { name: 'Whole graph', exact: true }).click()
-      await expect(map.getByRole('button')).toHaveCount(103)
+      await expect(map.getByRole('button')).toHaveCount(113)
       expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false)
       expect(errors).toEqual([])
     })
