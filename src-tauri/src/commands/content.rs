@@ -202,7 +202,21 @@ pub async fn content_resolve_bytes(
 pub async fn content_resolve_text(
     state: State<'_, AppState>,
     identifier: String,
+    max_bytes: Option<usize>,
 ) -> Result<String, String> {
+    if let Some(limit) = max_bytes {
+        let resolver = state
+            .resolver
+            .lock()
+            .await
+            .clone()
+            .ok_or("content resolver not initialized")?;
+        let result = resolver
+            .resolve_preview_bounded(&identifier, limit)
+            .await
+            .map_err(|e| e.to_string())?;
+        return decode_utf8(result.bytes);
+    }
     decode_utf8(resolve_and_track(&state, &identifier).await?.bytes)
 }
 

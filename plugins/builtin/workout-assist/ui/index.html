@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Workout Assist</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Workout Assist</h1>
+        <p id="instruction"></p>
+      </header>
+      <section class="views">
+        <figure>
+          <figcaption id="target-label">Coach’s demonstration</figcaption>
+          <div class="stage">
+            <video id="clip" playsinline muted hidden></video
+            ><canvas id="target" width="400" height="400"></canvas>
+          </div>
+        </figure>
+        <figure>
+          <figcaption>Your movement</figcaption>
+          <div class="stage">
+            <video id="camera" playsinline muted></video
+            ><canvas id="live" width="400" height="400"></canvas>
+          </div>
+        </figure>
+      </section>
+      <p role="status" id="status">Opening lesson…</p>
+      <output id="feedback"></output>
+      <div class="actions">
+        <button id="preview" hidden>Replay demonstration</button>
+        <button id="start" disabled>Enable camera</button>
+        <button id="record" hidden>Record movement</button>
+        <button id="stop" hidden>Stop camera</button>
+        <button id="finish" hidden>Finish practice</button>
+      </div>
+    </main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

@@ -186,18 +186,7 @@ mod tests {
         assert_eq!(entries.len(), 3);
     }
 
-    #[test]
-    fn hydrate_course_rolls_back_when_an_element_fails() {
-        let db = test_db();
-        db.conn()
-            .execute_batch(
-                "CREATE TRIGGER reject_hydrated_element
-                 BEFORE INSERT ON course_elements
-                 BEGIN
-                     SELECT RAISE(ABORT, 'injected element failure');
-                 END;",
-            )
-            .unwrap();
+    fn hydrate_fixture() -> (CatalogHydrateRow, SignedCourseDocument) {
         let row = CatalogHydrateRow {
             course_id: "course-hydrate".into(),
             author_address: "author-hydrate".into(),
@@ -226,6 +215,7 @@ mod tests {
                     element_type: "text".into(),
                     content_hash: Some("element-cid".into()),
                     duration_seconds: None,
+                    plugin_cid: None,
                     video_chapters: vec![],
                 }],
             }],
@@ -238,6 +228,62 @@ mod tests {
             public_key: "verified-before-persistence".into(),
         };
 
+        (row, document)
+    }
+
+    #[test]
+    fn hydrated_workout_keeps_its_reference_and_only_interactive_authoring_binds() {
+        let db = test_db();
+        let (row, mut doc) = hydrate_fixture();
+        let element = &mut doc.chapters[0].elements[0];
+        element.element_type = "plugin".into();
+        let cid = |slug| {
+            let bundle = crate::plugins::builtins::BUILTIN_PLUGINS
+                .iter()
+                .find(|b| b.slug == slug)
+                .unwrap();
+            crate::plugins::verifier::compute_plugin_cid(bundle.manifest_json)
+        };
+        let workout = cid("workout-assist");
+        element.plugin_cid = Some(workout.clone());
+        let mut graded = element.clone();
+        graded.id = "graded".into();
+        graded.plugin_cid = Some(cid("editor-javascript"));
+        doc.chapters[0].elements.push(graded);
+        hydrate_catalog_course_db(db.conn(), &row, &doc).unwrap();
+        let saved: (String, String) = db
+            .conn()
+            .query_row(
+                "SELECT plugin_cid,content_cid FROM course_elements WHERE id='element-hydrate'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(saved, (workout, "element-cid".into()));
+        let graded: Option<String> = db
+            .conn()
+            .query_row(
+                "SELECT plugin_cid FROM course_elements WHERE id='graded'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(graded.is_none());
+    }
+
+    #[test]
+    fn hydrate_course_rolls_back_when_an_element_fails() {
+        let db = test_db();
+        db.conn()
+            .execute_batch(
+                "CREATE TRIGGER reject_hydrated_element
+                 BEFORE INSERT ON course_elements
+                 BEGIN
+                     SELECT RAISE(ABORT, 'injected element failure');
+                 END;",
+            )
+            .unwrap();
+        let (row, document) = hydrate_fixture();
         let error = hydrate_catalog_course_db(db.conn(), &row, &document).unwrap_err();
         assert!(error.contains("injected element failure"), "got: {error}");
         for table in ["courses", "course_chapters", "course_elements"] {
@@ -533,8 +579,31 @@ fn hydrate_catalog_course_db(
             .map_err(|e| format!("insert chapter failed: {e}"))?;
 
             for element in &chapter.elements {
+                // A signed public configuration may bind only to a plugin whose
+                // locally trusted manifest supports interactive authoring.
+                let public_plugin = element
+                    .plugin_cid
+                    .as_deref()
+                    .filter(|_| element.element_type == "plugin");
+                let mut binding = None;
+                if let Some(cid) = public_plugin {
+                    let supported = if let Some(bundle) =
+                        crate::plugins::builtins::find_bundle_by_cid(cid)
+                    {
+                        crate::plugins::manifest::parse_and_validate(bundle.manifest_json)?
+                            .authoring
+                    } else {
+                        conn.query_row(
+                            "SELECT EXISTS(SELECT 1 FROM plugin_installed WHERE plugin_cid=?1 AND json_extract(manifest_json, '$.authoring')=1)",
+                            [cid], |row| row.get(0),
+                        ).map_err(|e| e.to_string())?
+                    };
+                    if supported {
+                        binding = Some(cid);
+                    }
+                }
                 conn.execute(
-                    "INSERT INTO course_elements (id, chapter_id, title, element_type, content_cid, position, duration_seconds) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    "INSERT INTO course_elements (id, chapter_id, title, element_type, content_cid, position, duration_seconds, plugin_cid) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                     params![
                         element.id,
                         chapter.id,
@@ -543,6 +612,7 @@ fn hydrate_catalog_course_db(
                         element.content_hash,
                         element.position,
                         element.duration_seconds,
+                        binding,
                     ],
                 )
                 .map_err(|e| format!("insert element failed: {e}"))?;

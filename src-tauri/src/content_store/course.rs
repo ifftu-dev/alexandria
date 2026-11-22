@@ -157,21 +157,32 @@ fn validate_payload(payload: &CourseDocumentPayload) -> Result<(), CourseDocErro
     Ok(())
 }
 
-pub async fn materialize_text_lessons(
+pub struct InlineLesson {
+    pub id: String,
+    pub body: String,
+    pub plugin_cid: Option<String>,
+}
+
+pub async fn materialize_public_lessons(
     node: &ContentNode,
     payload: &mut CourseDocumentPayload,
-    inline_text: &[(String, String)],
+    lessons: &[InlineLesson],
 ) -> Result<(), CourseDocError> {
-    for (id, text) in inline_text {
+    for lesson in lessons {
         let element = payload
             .chapters
             .iter_mut()
             .flat_map(|chapter| &mut chapter.elements)
-            .find(|element| element.id == *id && element.element_type == "text")
+            .find(|element| {
+                element.id == lesson.id
+                    && element.plugin_cid == lesson.plugin_cid
+                    && (element.element_type == "text"
+                        || (element.element_type == "plugin" && element.plugin_cid.is_some()))
+            })
             .ok_or_else(|| {
-                CourseDocError::Store("text lesson no longer exists in release".into())
+                CourseDocError::Store("public lesson no longer exists in release".into())
             })?;
-        let added = content::add_bytes_unencrypted(node, text.as_bytes())
+        let added = content::add_bytes_unencrypted(node, lesson.body.as_bytes())
             .await
             .map_err(|error| CourseDocError::Store(error.to_string()))?;
         element.content_hash = Some(added.hash);
@@ -287,6 +298,7 @@ mod tests {
                         element_type: "video".to_string(),
                         content_hash: Some("a".repeat(64)),
                         duration_seconds: Some(1200),
+                        plugin_cid: None,
                         video_chapters: vec![],
                     },
                     DocumentElement {
@@ -296,6 +308,7 @@ mod tests {
                         element_type: "quiz".to_string(),
                         content_hash: None,
                         duration_seconds: None,
+                        plugin_cid: None,
                         video_chapters: vec![],
                     },
                 ],
@@ -345,6 +358,7 @@ mod tests {
             element_type: crate::domain::course_document::PACKAGE_ELEMENT_TYPE.to_string(),
             content_hash: Some("b".repeat(64)),
             duration_seconds: None,
+            plugin_cid: None,
             video_chapters: vec![],
         });
 
@@ -575,10 +589,14 @@ mod tests {
         let key = make_signing_key();
         let mut payload = make_payload(&key);
         payload.chapters[0].elements[0].element_type = "text".into();
-        materialize_text_lessons(
+        materialize_public_lessons(
             &node,
             &mut payload,
-            &[("el_001".into(), "Approved lesson text".into())],
+            &[InlineLesson {
+                id: "el_001".into(),
+                body: "Approved lesson text".into(),
+                plugin_cid: None,
+            }],
         )
         .await
         .unwrap();
@@ -600,10 +618,14 @@ mod tests {
             content::get_bytes(&node, &text_hash).await.unwrap(),
             b"Approved lesson text"
         );
-        assert!(materialize_text_lessons(
+        assert!(materialize_public_lessons(
             &node,
             &mut payload,
-            &[("el_002".into(), "Assessment answers".into())]
+            &[InlineLesson {
+                id: "el_002".into(),
+                body: "Assessment answers".into(),
+                plugin_cid: None
+            }]
         )
         .await
         .is_err());

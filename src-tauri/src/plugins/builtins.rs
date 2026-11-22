@@ -56,6 +56,42 @@ const MUSIC_TRAINER_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
     ],
 };
 
+const WORKOUT_ASSIST_BUNDLE: BuiltinBundle<'static> = BuiltinBundle {
+    slug: "workout-assist",
+    manifest_json: include_bytes!("../../../plugins/builtin/workout-assist/manifest.json"),
+    grader_wasm: None,
+    ui_files: &[
+        (
+            "ui/index.html",
+            include_bytes!("../../../plugins/builtin/workout-assist/ui/index.html"),
+        ),
+        (
+            "ui/style.css",
+            include_bytes!("../../../plugins/builtin/workout-assist/ui/style.css"),
+        ),
+        (
+            "ui/motion.js",
+            include_bytes!("../../../plugins/builtin/workout-assist/ui/motion.js"),
+        ),
+        (
+            "ui/app.js",
+            include_bytes!("../../../plugins/builtin/workout-assist/ui/app.js"),
+        ),
+        (
+            "ui/vendor/movenet.js",
+            include_bytes!("../../../plugins/builtin/workout-assist/ui/vendor/movenet.js"),
+        ),
+        (
+            "ui/vendor/LICENSE-APACHE",
+            include_bytes!("../../../plugins/builtin/workout-assist/ui/vendor/LICENSE-APACHE"),
+        ),
+        (
+            "ui/vendor/NOTICE.txt",
+            include_bytes!("../../../plugins/builtin/workout-assist/ui/vendor/NOTICE.txt"),
+        ),
+    ],
+};
+
 /// Music Reviews — listens to a learner's instrument and marks each note
 /// in a target sequence correct or wrong using live autocorrelation
 /// pitch detection. Interactive (no grader). Requests microphone.
@@ -347,6 +383,7 @@ pub const BUILTIN_PLUGINS: &[BuiltinBundle<'static>] = &[
     MCQ_BUNDLE,
     MUSIC_TRAINER_BUNDLE,
     MUSIC_REVIEWS_BUNDLE,
+    WORKOUT_ASSIST_BUNDLE,
     IRL_REVIEW_BUNDLE,
     EDITOR_JS_BUNDLE,
     EDITOR_TS_BUNDLE,

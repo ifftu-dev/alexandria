@@ -137,6 +137,7 @@ fn plugin_metadata(element: &ExampleElement) -> Result<Option<(String, String)>,
         return Ok(None);
     }
     let slug = match element.id.as_str() {
+        "el_plugin_demo_workout" => "workout-assist",
         "el_plugin_demo_music_reviews" => "music-reviews",
         "el_plugin_demo_irl_review" => "irl-review",
         "el_plugin_demo_editor_js_double" => "editor-javascript",
@@ -361,7 +362,7 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(elements.len(), 6);
+        assert_eq!(elements.len(), 7);
         let mut editors = 0;
         for (kind, cid, version, content) in elements {
             assert_eq!(kind, "plugin");

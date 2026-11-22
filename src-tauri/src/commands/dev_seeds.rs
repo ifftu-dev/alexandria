@@ -146,6 +146,7 @@ pub(super) fn catalog(db: &Database) -> Result<Vec<SeedResource>, String> {
         let dependencies = if id == "course_plugin_demo" {
             vec![
                 "plugin:music-reviews",
+                "plugin:workout-assist",
                 "plugin:irl-review",
                 "plugin:editors",
             ]
@@ -788,7 +789,10 @@ mod tests {
         }
         assert_eq!(count(&db, "courses"), 11);
         assert_eq!(count(&db, "classrooms"), 3);
-        assert_eq!(count(&db, "plugin_installed"), 9);
+        assert_eq!(
+            count(&db, "plugin_installed"),
+            crate::plugins::builtins::BUILTIN_PLUGINS.len() as i64
+        );
         assert_eq!(count(&db, "question_banks"), 15);
         assert_eq!(count(&db, "developer_discussion_drafts"), 14);
         assert_eq!(count(&db, "discussion_events"), 0);

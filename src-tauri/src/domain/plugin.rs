@@ -115,6 +115,9 @@ pub struct PluginManifest {
     pub author_did: String,
     /// Which element kinds the plugin provides.
     pub kinds: Vec<PluginKind>,
+    /// Offers a visual editor for public lesson content in author mode.
+    #[serde(default)]
+    pub authoring: bool,
     /// When the plugin is installed on a learner's machine. `Global` installs at
     /// startup for everyone; `Course` installs on first enrollment in a course
     /// that requires it. Author-declared, covered by the DAO manifest attestation.

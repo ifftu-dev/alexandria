@@ -192,16 +192,16 @@ fn update_element_db(
     element_id: &str,
     req: UpdateElementRequest,
 ) -> Result<Element, String> {
-    let current_type: Option<String> = db
+    let current: Option<(String, Option<String>)> = db
         .conn()
         .query_row(
-            "SELECT element_type FROM course_elements WHERE id = ?1",
+            "SELECT element_type, plugin_cid FROM course_elements WHERE id = ?1",
             params![element_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?;
-    let Some(current_type) = current_type else {
+    let Some((current_type, previous_plugin)) = current else {
         return Err("element not found".into());
     };
     if let Some(next_type) = req.element_type.as_deref() {
@@ -228,6 +228,20 @@ fn update_element_db(
 
     let mut set_clauses = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+
+    // Config and media belong to their original plugin. Rebinding the
+    // element must not disclose the old lesson to its replacement.
+    if req.plugin_cid.is_some() && req.plugin_cid != previous_plugin {
+        if req.content_inline.is_none() {
+            set_clauses.push("content_inline = NULL");
+        }
+        if req.content_hash.is_none() {
+            set_clauses.push("content_cid = NULL");
+        }
+        if req.plugin_config_cid.is_none() {
+            set_clauses.push("plugin_config_cid = NULL");
+        }
+    }
 
     if let Some(ref title) = req.title {
         set_clauses.push("title = ?");

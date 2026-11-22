@@ -70,6 +70,7 @@ const emit = defineEmits<{
   (e: 'complete'): void
   (e: 'scored-complete', score: number): void
   (e: 'submission', submission: unknown): void
+  (e: 'author-config', json: string): void
 }>()
 
 const { t } = useI18n()
@@ -125,8 +126,9 @@ const pluginCid = computed(() => props.element.plugin_cid ?? '')
  *  hidden test expectations there; the learner can read anything the iframe
  *  receives, but the deterministic grader still gets the full content because
  *  `submitElement` passes the raw `content_inline` to `plugin_submit_and_grade`. */
+const publishedConfig = ref<string | null>(null)
 const elementContent = computed<unknown>(() => {
-  const raw = props.element.content_inline
+  const raw = props.element.content_inline ?? publishedConfig.value
   if (!raw) return null
   let parsed: unknown
   try {
@@ -167,7 +169,7 @@ onMounted(async () => {
       invoke<InstalledPlugin[]>('plugin_list'),
       invoke<PluginManifest>('plugin_get_manifest', { pluginCid: pluginCid.value }),
       invoke<PluginPermissionRecord[]>('plugin_list_permissions', { pluginCid: pluginCid.value }),
-      props.hosted
+      props.hosted || props.mode === 'author'
         ? Promise.resolve(null)
         : invoke<string | null>('plugin_load_element_state', { elementId: props.element.id }).catch(
           () => null,
@@ -186,6 +188,11 @@ onMounted(async () => {
       manifest.value = m
       permissions.value = perms
       return
+    }
+    if (m.authoring && !props.element.content_inline && props.element.content_cid) {
+      const hash = props.element.content_cid
+      if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error('Invalid lesson content hash')
+      publishedConfig.value = await invoke<string>('content_resolve_text', { identifier: hash, maxBytes: 2_000_000 })
     }
     manifest.value = m
     permissions.value = perms
@@ -356,6 +363,7 @@ function onPersistState(blob: unknown) {
   // (e.g. a code editor's source) survives navigating away and restarting
   // the app. Best-effort + fire-and-forget: a failed save must not disrupt the
   // plugin. Reloaded into the plugin's `init` payload on next mount.
+  if (props.mode === 'author') return
   elementState.value = blob
   // A hosted item's work stays in memory: nothing about it is stored here.
   if (props.hosted) return
@@ -367,6 +375,20 @@ function onPersistState(blob: unknown) {
 }
 
 async function onEmitEvent(requestId: number, type: string, payload: unknown) {
+  if (type === 'author_config') {
+    if (props.mode !== 'author' || !manifest.value?.authoring || !payload || typeof payload !== 'object') {
+      iframeRef.value?.resolveEvent(requestId, null, 'Author configuration unavailable')
+      return
+    }
+    const json = JSON.stringify(payload)
+    if (new TextEncoder().encode(json).length > 2_000_000) {
+      iframeRef.value?.resolveEvent(requestId, null, 'Lesson configuration is too large')
+      return
+    }
+    emit('author-config', json)
+    iframeRef.value?.resolveEvent(requestId, null)
+    return
+  }
   if (type === 'debug_log') {
     const msg = (payload as { msg?: string } | null)?.msg ?? ''
     void invoke('frontend_log', { message: `[plugin:${manifest.value?.name}] ${msg}` })
@@ -396,6 +418,11 @@ async function onSubmit(requestId: number, submission: unknown, metadata: unknow
   const m = manifest.value
   if (!m) {
     iframeRef.value?.resolveSubmit(requestId, null, 'manifest unavailable')
+    return
+  }
+
+  if (props.mode === 'author') {
+    iframeRef.value?.resolveSubmit(requestId, null, 'Submissions are unavailable in author mode')
     return
   }
 

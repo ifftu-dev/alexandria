@@ -2998,6 +2998,7 @@ export interface PluginManifest {
   description: string | null
   author_did: string
   kinds: PluginKind[]
+  authoring?: boolean
   capabilities: PluginCapability[]
   grader: PluginGraderRef | null
   content_schema_cid: string | null
