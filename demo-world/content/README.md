@@ -30,9 +30,17 @@ attribution, before redistributing or embedding any of these files.
 ## Plugins Showcase
 
 Open **Instructor → My courses → Load plugin showcase** to open or create the
-showcase draft. A fresh import includes seven lessons and resolves each to its
+showcase draft. A fresh import includes eight lessons and resolves each to its
 current bundled plugin. If an existing draft predates Workout Assist, add a
 plugin element and select **Workout Assist** in its editor.
+
+### Language Lab
+
+Open **Language Lab → Practise English pronunciation**. Listen to the two
+phrases, record yourself reading each one aloud, and play back your take.
+For optional word-by-word feedback, download the English speech pack in
+Language Lab settings and choose **Check pronunciation** after recording.
+The check runs on your device.
 
 ### Workout Assist
 
