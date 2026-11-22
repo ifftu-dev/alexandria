@@ -143,7 +143,8 @@ fn plugin_metadata(element: &ExampleElement) -> Result<Option<(String, String)>,
         "el_plugin_demo_workout" => "workout-assist",
         "el_plugin_demo_music_reviews" => "music-reviews",
         "el_plugin_demo_irl_review" | "el_eng_6_4" | "el_eng_6_5" => "irl-review",
-        "el_eng_lab_dictation"
+        "el_plugin_demo_pronunciation"
+        | "el_eng_lab_dictation"
         | "el_eng_lab_reading"
         | "el_eng_lab_builder"
         | "el_eng_lab_writing"
@@ -678,7 +679,8 @@ mod tests {
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
             .unwrap();
-        assert_eq!(elements.len(), 7);
+        assert_eq!(elements.len(), 8);
+        let mut read_aloud = 0;
         let mut editors = 0;
         for (kind, cid, version, content) in elements {
             assert_eq!(kind, "plugin");
@@ -688,6 +690,16 @@ mod tests {
                 crate::plugins::manifest::parse_and_validate(bundle.manifest_json).unwrap();
             assert_eq!(version, manifest.version);
             let config: serde_json::Value = serde_json::from_str(&content).unwrap();
+            if bundle.slug == "language-lab" {
+                assert_eq!(config["activity"], "read_aloud");
+                assert_eq!(config["lang"], "en");
+                let items = config["items"].as_array().unwrap();
+                assert!(!items.is_empty());
+                assert!(items
+                    .iter()
+                    .all(|item| item["text"].as_str().is_some_and(|s| !s.trim().is_empty())));
+                read_aloud += 1;
+            }
             if let Some(code) = config["starter_code"].as_str() {
                 editors += 1;
                 assert!(code.contains('\n'));
@@ -699,8 +711,21 @@ mod tests {
                 assert!(bundle.grader_wasm.is_some());
             }
         }
+        assert_eq!(read_aloud, 1);
         assert_eq!(editors, 4);
         let id = entity_id(&["example-course-v1", "plugin-owner", "course_plugin_demo"]);
+        // An earlier showcase has no pronunciation chapter or recorded snapshot.
+        let chapter_id = entity_id(&[&id, "ch_plugin_demo_language_lab"]);
+        let imported = db_snapshot(db.conn(), &id).unwrap();
+        db.conn()
+            .execute("DELETE FROM course_chapters WHERE id=?1", [&chapter_id])
+            .unwrap();
+        db.conn()
+            .execute("DELETE FROM app_settings WHERE key=?1", [snapshot_key(&id)])
+            .unwrap();
+        assert_ne!(db_snapshot(db.conn(), &id).unwrap(), imported);
+        assert_eq!(import_examples(db.conn(), true).unwrap(), 0);
+        assert_eq!(db_snapshot(db.conn(), &id).unwrap(), imported);
         db.conn()
             .execute("UPDATE courses SET title='My showcase' WHERE id=?1", [&id])
             .unwrap();
