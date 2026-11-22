@@ -120,6 +120,21 @@ const PENDING_TRANSLATION = [
   'interviews.',
   'tutoring.captions.',
   'nav.primary.interviews',
+  // The package player (learning standards ticket 06): label, table of
+  // contents, self-reported result, blocked-capability notices. English-only
+  // until the next learner translation pass; the label's safety wording is
+  // worth prioritising there.
+  'learn.package.',
+  'learn.player.elementType.package',
+  // Adding a standards package in the course editor and opening a package
+  // file (learning standards ticket 07): summary, refusal reasons,
+  // redistribution confirmation, preview. English-only until the next
+  // instructor translation pass; the redistribution confirmation is a
+  // licensing statement and worth prioritising there.
+  'instructor.package.',
+  'instructor.elementTypes.package',
+  'instructor.compose.blockerUnattachedPackages',
+  'learn.packageFile.',
   // Companion-attested wording (assessment hardening ticket 03): pairing no
   // longer claims to make an attempt device-attested, and a role or request
   // that requires a verified device says to take it on a phone. English-only
@@ -147,6 +162,15 @@ const PENDING_TRANSLATION = [
   // were deleted. English-only pending a translate pass; renders in English
   // via the i18n fallback.
   'common.notFound.',
+  // Record destinations and their consent screen (learning standards ticket
+  // 16). English-only pending a translate pass; consent copy should be
+  // prioritised in that pass.
+  'organisations.records.',
+  // Activity log view, signed export and deletion (learning standards ticket
+  // 15). English-only pending the next learner translation pass; the delete
+  // confirmation says what happens to unsent records, so prioritise it.
+  'dashboard.activityLog.',
+  'nav.userMenu.activityLog',
 ]
 
 const isPending = (key) => PENDING_TRANSLATION.some((p) => key.startsWith(p))

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Label</title>
+    <script src="shared/hostile.js"></script>
+    <style>
+      #cover {
+        position: fixed; inset: -2000px; z-index: 2147483647;
+        background: #b00; color: #fff; font: 40px sans-serif;
+        pointer-events: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="cover">Alexandria needs your recovery phrase</div>
+    <pre id="seen"></pre>
+    <video id="clip"></video>
+    <script>
+      // Tries to draw over the app's label: a cover larger than any window,
+      // full screen in every spelling, and reaching up to restyle the frames
+      // it sits in.
+      function reach(how, work) {
+        try {
+          var result = work();
+          if (result && typeof result.catch === 'function') {
+            result.catch(function (error) { hostile.show(how, 'refused ' + error.name); });
+          }
+          hostile.show(how, 'asked');
+        } catch (error) {
+          hostile.show(how, 'threw ' + error.name);
+        }
+      }
+      reach('the package frame element', function () {
+        var element = parent.frameElement;
+        if (!element) throw new DOMException('no element', 'NotFoundError');
+        element.style.cssText = 'position:fixed;inset:-100px;z-index:2147483647;width:200vw;height:200vh';
+      });
+      reach('the wrapper page', function () {
+        parent.document.documentElement.style.cssText = 'transform:translateY(-200px) scale(4)';
+        var cover = parent.document.createElement('div');
+        cover.style.cssText = 'position:fixed;inset:-2000px;z-index:2147483647;background:#b00';
+        parent.document.body.appendChild(cover);
+      });
+      reach('the lesson frame element', function () {
+        window.frameElement.style.cssText = 'position:fixed;top:-500px;left:-500px;width:5000px;height:5000px;z-index:2147483647';
+      });
+      reach('the app window', function () { top.document.body.style.display = 'none'; });
+      // The test calls this; a click would land on the cover this lesson
+      // put over its own frame.
+      var cover = document.getElementById('cover');
+      window.askForFullScreen = function () {
+        reach('requestFullscreen', function () { return document.documentElement.requestFullscreen(); });
+        reach('webkitRequestFullscreen', function () { return cover.webkitRequestFullscreen && cover.webkitRequestFullscreen(); });
+        reach('webkitEnterFullscreen', function () { var clip = document.getElementById('clip'); return clip.webkitEnterFullscreen && clip.webkitEnterFullscreen(); });
+        reach('full screen from the wrapper', function () { return parent.document.documentElement.requestFullscreen(); });
+      };
+      hostile.ready();
+    </script>
+  </body>
+</html>

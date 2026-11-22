@@ -6,6 +6,10 @@ Review fixes to the unreleased 0.8.0 (never published; read its notes below
 as part of this release): `issuer` answer custody is no longer taken on the
 assertion's word.
 
+It also carries learning records: a learner can share their learning
+records with an organisation under an access grant, and can export their
+activity log with a signature anyone can check.
+
 ### Breaking changes
 
 - **`issuer` custody counts only on a credential from a hosted attempt.**
@@ -26,6 +30,17 @@ assertion's word.
   set with `with_score`): the fraction of drawn items the issuer graded
   correct. A score outside [0,1] makes the entry `hosted_attempt_invalid`.
   `HostedAttemptEvidence` no longer derives `Eq`.
+- **Access requests and grants may carry a record scope.**
+  `AccessRequest::records` and `GrantStatement::records` are
+  `Option<access::RecordScope>` (`course_ids`, `kinds` of `completion` and
+  `interaction`, and an optional `account`). Both structs reject unknown
+  fields, so a verifier older than this version refuses a statement that
+  carries the field. It is omitted from the JSON when absent, so statements
+  made without it keep their canonical bytes and their signatures. A struct
+  literal of either must set it.
+- **A grant may name no skills when it names records.** `access::verify`
+  refused any non-revoke statement with empty `skill_ids`; it now refuses one
+  with neither skills nor a record scope.
 
 ### Added
 
@@ -34,6 +49,18 @@ assertion's word.
   an assessed credential) and 53 (a hosted entry that does not say what a
   hosted attempt is). The independent JavaScript verifier checks both new
   rules.
+- `access::RecordScope`, `RecordKind`, `RecordAccount`, `validate_request`
+  and the limits `MAX_COURSES`, `MAX_ACCOUNT_NAME_LEN` and
+  `MAX_ACCOUNT_HOME_PAGE_LEN`. A grant's scope must be within the request's
+  (`check_answers`) and must name the account its records carry; an update
+  may narrow the scope but neither widen it nor change the account
+  (`check_follows`). Completion records are always part of a scope.
+- Shared access vectors under `tests/vectors/access/`, checked by
+  `tests/access_vectors.rs` here and by the hosted service from its vendored
+  copy.
+- `record_export`: the detached signature of an activity log export
+  (`alexandria-record-export/1`), with vectors under
+  `tests/vectors/record-export/`.
 
 ## 0.8.0 (unreleased, superseded by 0.9.0)
 

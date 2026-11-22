@@ -16,7 +16,7 @@
 //! the same code without holding the database across the network.
 
 use alexandria_verify::access::{
-    self, AccessRequest, GrantAction, GrantStatement, SignedGrantStatement, GRANT_FORMAT,
+    self, AccessRequest, GrantAction, GrantStatement, SignedGrantStatement,
 };
 use alexandria_verify::org::OrgProof;
 use ed25519_dalek::SigningKey;
@@ -30,9 +30,11 @@ use crate::commands::exchange::{directory, response_json};
 use crate::commands::holder_pull::{Problem, PullResult};
 use crate::credentials::Issuer;
 use crate::db::executor::DatabaseWorkload;
+use crate::domain::record_sending::{GrantRecords, RecordShareDecision, RecordShareOffer};
 use crate::domain::talent_index::{sign_record, SignedTalentIndexRecord, TalentIndexRecord};
 use crate::org_trust::{self, OrgCheck};
 use crate::profile::scope::ProfileState as State;
+use crate::record_sending::{self, shares};
 use crate::AppState;
 
 /// A synced record is resent at least this often even when nothing changed,
@@ -67,6 +69,8 @@ pub struct AccessRequestItem {
     pub org_proof: Option<OrgProof>,
     pub org: OrgCheck,
     pub skills: Vec<SkillChoice>,
+    /// The records part of the request, as the consent screen shows it.
+    pub records: Option<RecordShareOffer>,
 }
 
 /// A grant as the learner sees it.
@@ -86,6 +90,8 @@ pub struct GrantView {
     /// When the organisation last looked, as Cloud reports it.
     pub last_viewed_at: Option<String>,
     pub view_count: Option<i64>,
+    /// The learning records this grant shares, if any.
+    pub records: Option<GrantRecords>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -275,7 +281,8 @@ pub fn plan_sync(
     let mut unchanged = 0;
     for row in grants(conn)?
         .into_iter()
-        .filter(|g| g.sync && g.revoked_at.is_none())
+        // A record-only share has no snapshot to keep current.
+        .filter(|g| g.sync && g.revoked_at.is_none() && !g.skill_ids.is_empty())
     {
         let Some(record) =
             super::talent_index::grant_snapshot_record(conn, did, &row.skill_ids, now)?
@@ -536,11 +543,10 @@ async fn post(cloud_url: &str, path: &str, body: &impl Serialize) -> Result<Valu
 pub async fn org_access_requests(
     state: State<'_, AppState>,
 ) -> Result<PullResult<AccessRequestItem>, String> {
-    let did = Issuer::from_keystore(&state.keystore)
+    let (key, did) = Issuer::from_keystore(&state.keystore)
         .await
         .map_err(|e| e.to_string())?
-        .did()
-        .clone();
+        .into_parts();
     let path = format!("/api/access-requests/for/{}", did.as_str());
     let mut items = Vec::new();
     let mut problems = Vec::new();
@@ -568,15 +574,21 @@ pub async fn org_access_requests(
             }
             let org =
                 org_trust::check_item(&state, &envelope.request, envelope.org_proof.as_ref()).await;
-            let ids = envelope.request.skill_ids.clone();
+            let request = envelope.request.clone();
             let subject = did.as_str().to_string();
-            let skills = state
+            let secret = zeroize::Zeroizing::new(key.to_bytes());
+            let (skills, records) = state
                 .db_executor
                 .execute(
                     DatabaseWorkload::Learner,
                     state.profile_lease(),
                     "organisations.request.skills",
-                    move |db| skill_choices(db.conn(), &subject, &ids),
+                    move |db| {
+                        let skills = skill_choices(db.conn(), &subject, &request.skill_ids)?;
+                        let records = shares::offer(db.conn(), &request, &secret, &subject)
+                            .map_err(|e| e.to_string())?;
+                        Ok((skills, records))
+                    },
                 )
                 .await?;
             items.push(AccessRequestItem {
@@ -585,13 +597,17 @@ pub async fn org_access_requests(
                 org_proof: envelope.org_proof,
                 org,
                 skills,
+                records,
             });
         }
     }
     Ok(PullResult { items, problems })
 }
 
-/// Share some of the requested skills with the organisation that asked.
+/// Share some of the requested skills, learning records, or both, with the
+/// organisation that asked. `records` is the learner's answer to the
+/// request's records part: a scope no wider than asked, and the identifier
+/// the records carry. Nothing is sent before this.
 #[tauri::command]
 pub async fn org_grant(
     state: State<'_, AppState>,
@@ -600,6 +616,7 @@ pub async fn org_grant(
     org_proof: Option<OrgProof>,
     skill_ids: Vec<String>,
     sync: bool,
+    records: Option<RecordShareDecision>,
 ) -> Result<GrantView, String> {
     let cloud = directory(&state, &directory_url).await?;
     let org = org_trust::check_item(&state, &request, org_proof.as_ref()).await;
@@ -609,48 +626,63 @@ pub async fn org_grant(
         .await
         .map_err(|e| e.to_string())?
         .into_parts();
-    let now_unix = chrono::Utc::now().timestamp();
+    let at = chrono::Utc::now();
+    let now_unix = at.timestamp();
     let now = now_rfc3339();
+    let grant_id = uuid::Uuid::new_v4().to_string();
 
-    let statement = GrantStatement {
-        format: GRANT_FORMAT.into(),
-        action: GrantAction::Grant,
-        grant_id: uuid::Uuid::new_v4().to_string(),
-        request_id: request.id.clone(),
-        audience: request.audience.clone(),
-        nonce: request.nonce.clone(),
-        subject_did: did.as_str().to_string(),
-        skill_ids: skill_ids.clone(),
-        sync,
-        created: now_unix,
+    let approval = match &records {
+        Some(decision) => {
+            let secret = zeroize::Zeroizing::new(key.to_bytes());
+            Some(
+                shares::approval(&request, decision, &grant_id, &secret, did.as_str(), at)
+                    .map_err(|e| e.to_string())?,
+            )
+        }
+        None => None,
     };
+    let statement = shares::grant_statement(
+        &request,
+        &grant_id,
+        skill_ids.clone(),
+        sync,
+        approval.as_ref().map(|a| a.records.clone()),
+        now_unix,
+    );
     access::check_answers(&request, &statement, now_unix).map_err(|e| e.to_string())?;
     let signed = access::sign(&statement, &key).map_err(|e| e.to_string())?;
 
-    let (subject, ids, at) = (did.as_str().to_string(), skill_ids.clone(), now.clone());
-    let record = state
-        .db_executor
-        .execute(
-            DatabaseWorkload::Learner,
-            state.profile_lease(),
-            "organisations.grant.snapshot",
-            move |db| super::talent_index::grant_snapshot_record(db.conn(), &subject, &ids, &at),
-        )
-        .await?
-        .ok_or("none of these skills has evidence to share yet")?;
-    let digest = snapshot_digest(&record)?;
-    let snapshot = sign_record(&record, &key, &now)?;
-    access::check_snapshot(&statement, &snapshot, &now).map_err(|e| e.to_string())?;
+    // A snapshot only for skills: a record-only share shows no profile.
+    let snapshot = if skill_ids.is_empty() {
+        None
+    } else {
+        let (subject, ids, at) = (did.as_str().to_string(), skill_ids.clone(), now.clone());
+        let record = state
+            .db_executor
+            .execute(
+                DatabaseWorkload::Learner,
+                state.profile_lease(),
+                "organisations.grant.snapshot",
+                move |db| {
+                    super::talent_index::grant_snapshot_record(db.conn(), &subject, &ids, &at)
+                },
+            )
+            .await?
+            .ok_or("none of these skills has evidence to share yet")?;
+        let digest = snapshot_digest(&record)?;
+        let snapshot = sign_record(&record, &key, &now)?;
+        access::check_snapshot(&statement, &snapshot, &now).map_err(|e| e.to_string())?;
+        Some((digest, snapshot))
+    };
 
     if !state.profile_lease().is_current() {
         return Err("profile changed".into());
     }
-    post(
-        &cloud.url,
-        "/api/grants",
-        &json!({ "statement": signed, "snapshot": snapshot }),
-    )
-    .await?;
+    let mut body = json!({ "statement": signed });
+    if let Some((_, snapshot)) = &snapshot {
+        body["snapshot"] = json!(snapshot);
+    }
+    post(&cloud.url, "/api/grants", &body).await?;
 
     let row = GrantRow {
         grant_id: statement.grant_id.clone(),
@@ -663,23 +695,35 @@ pub async fn org_grant(
         statement,
         granted_at: now_unix,
         revoked_at: None,
-        snapshot_digest: Some(digest),
-        synced_at: Some(now_unix),
+        synced_at: snapshot.as_ref().map(|_| now_unix),
+        snapshot_digest: snapshot.map(|(digest, _)| digest),
         sync_error: None,
     };
     let subject = did.as_str().to_string();
-    state
+    let share = approval.map(|a| a.entry);
+    let view = state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "organisations.grant.store",
             move |db| {
-                insert_grant(db.conn(), &row)?;
-                view(db.conn(), &subject, row, None)
+                let conn = db.conn();
+                crate::db::with_transaction(conn, || {
+                    insert_grant(conn, &row)?;
+                    if let Some(entry) = &share {
+                        shares::approve(conn, entry, at).map_err(|e| e.to_string())?;
+                    }
+                    Ok(())
+                })?;
+                view(conn, &subject, row, None)
             },
         )
-        .await
+        .await?;
+    if view.records.is_some() {
+        record_sending::destinations::wake();
+    }
+    Ok(view)
 }
 
 fn view(
@@ -689,6 +733,8 @@ fn view(
     remote: Option<&Value>,
 ) -> Result<GrantView, String> {
     let skills = skill_choices(conn, did, &row.skill_ids)?;
+    let records = shares::view(conn, &row.grant_id, row.statement.records.as_ref())
+        .map_err(|e| e.to_string())?;
     let field = |name: &str| remote.and_then(|r| r.get(name));
     Ok(GrantView {
         grant_id: row.grant_id,
@@ -705,6 +751,7 @@ fn view(
             .and_then(Value::as_str)
             .map(str::to_string),
         view_count: field("viewCount").and_then(Value::as_i64),
+        records,
     })
 }
 
@@ -756,67 +803,134 @@ pub async fn org_grants(state: State<'_, AppState>) -> Result<GrantsView, String
     Ok(GrantsView { grants, problems })
 }
 
-async fn follow_up(
+async fn read_grant(
     state: &State<'_, AppState>,
     grant_id: String,
-    action: GrantAction,
-    sync: bool,
-) -> Result<GrantView, String> {
+) -> Result<(SigningKey, String, GrantRow), String> {
     let (key, did) = Issuer::from_keystore(&state.keystore)
         .await
         .map_err(|e| e.to_string())?
         .into_parts();
-    let id = grant_id.clone();
     let current = state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "organisations.grant.read",
-            move |db| grant(db.conn(), &id),
+            move |db| grant(db.conn(), &grant_id),
         )
         .await?;
     if current.revoked_at.is_some() {
         return Err("you already stopped sharing with this organisation".into());
     }
-    let next = GrantStatement {
-        action,
-        sync,
-        skill_ids: if action == GrantAction::Revoke {
-            Vec::new()
-        } else {
-            current.skill_ids.clone()
-        },
-        created: chrono::Utc::now()
-            .timestamp()
-            .max(current.statement.created),
-        ..current.statement.clone()
-    };
+    Ok((key, did.as_str().to_string(), current))
+}
+
+/// Sign `next`, send it to the grant's Cloud, and record it here. A narrowed
+/// record scope is applied to the share once Cloud has accepted it.
+async fn send_statement(
+    state: &State<'_, AppState>,
+    key: &SigningKey,
+    subject: String,
+    current: &GrantRow,
+    next: GrantStatement,
+    narrowed: Option<record_sending::Scope>,
+) -> Result<GrantView, String> {
     access::check_follows(&current.statement, &next).map_err(|e| e.to_string())?;
-    let signed: SignedGrantStatement = access::sign(&next, &key).map_err(|e| e.to_string())?;
+    let signed: SignedGrantStatement = access::sign(&next, key).map_err(|e| e.to_string())?;
     post(
         &current.cloud_url,
         &format!("/api/grants/{}/statement", current.grant_id),
         &signed,
     )
     .await?;
-    let subject = did.as_str().to_string();
-    let view = state
+    state
         .db_executor
         .execute(
             DatabaseWorkload::Learner,
             state.profile_lease(),
             "organisations.grant.update",
             move |db| {
-                record_statement(db.conn(), &next)?;
-                view(db.conn(), &subject, grant(db.conn(), &next.grant_id)?, None)
+                let conn = db.conn();
+                crate::db::with_transaction(conn, || {
+                    record_statement(conn, &next)?;
+                    if let Some(scope) = &narrowed {
+                        shares::narrow(conn, &next.grant_id, scope).map_err(|e| e.to_string())?;
+                    }
+                    Ok(())
+                })?;
+                view(conn, &subject, grant(conn, &next.grant_id)?, None)
             },
         )
-        .await?;
+        .await
+}
+
+async fn follow_up(
+    state: &State<'_, AppState>,
+    grant_id: String,
+    action: GrantAction,
+    sync: bool,
+) -> Result<GrantView, String> {
+    let (key, subject, current) = read_grant(state, grant_id).await?;
+    let revoke = action == GrantAction::Revoke;
+    let next = GrantStatement {
+        action,
+        sync,
+        skill_ids: if revoke {
+            Vec::new()
+        } else {
+            current.skill_ids.clone()
+        },
+        records: if revoke {
+            None
+        } else {
+            current.statement.records.clone()
+        },
+        created: chrono::Utc::now()
+            .timestamp()
+            .max(current.statement.created),
+        ..current.statement.clone()
+    };
+    if revoke {
+        // Revoking stops record sends here first, whether or not Cloud can
+        // be reached to hear about it.
+        let id = current.grant_id.clone();
+        state
+            .db_executor
+            .execute(
+                DatabaseWorkload::Learner,
+                state.profile_lease(),
+                "organisations.grant.stop-records",
+                move |db| shares::stop(db.conn(), &id).map_err(|e| e.to_string()),
+            )
+            .await?;
+    }
+    let view = send_statement(state, &key, subject, &current, next, None).await?;
     if action == GrantAction::Update && sync {
         sync_quietly(state).await;
     }
     Ok(view)
+}
+
+/// Share learning records from fewer courses, or stop sharing per-answer
+/// records, under an existing grant. A record scope can only narrow; the
+/// identifier records carry stays the same.
+#[tauri::command]
+pub async fn org_grant_narrow_records(
+    state: State<'_, AppState>,
+    grant_id: String,
+    course_ids: Vec<String>,
+    include_interactions: bool,
+) -> Result<GrantView, String> {
+    let (key, subject, current) = read_grant(&state, grant_id).await?;
+    let (next, scope) = shares::narrowed(
+        &current.statement,
+        course_ids,
+        include_interactions,
+        chrono::Utc::now().timestamp(),
+    )
+    .map_err(|e| e.to_string())?;
+    send_statement(&state, &key, subject, &current, next, Some(scope)).await
 }
 
 /// Turn keeping a grant in sync on or off.
@@ -861,6 +975,7 @@ pub async fn org_cloud(state: State<'_, AppState>) -> Result<Option<String>, Str
 mod tests {
     use super::*;
     use crate::db::Database;
+    use alexandria_verify::access::GRANT_FORMAT;
 
     fn key() -> SigningKey {
         SigningKey::from_bytes(&[11; 32])
@@ -892,6 +1007,7 @@ mod tests {
                 skill_ids: vec!["skill_big_o".into()],
                 sync,
                 created: 100,
+                records: None,
             },
             granted_at: 100,
             revoked_at: None,

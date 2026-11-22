@@ -64,6 +64,13 @@ pub struct ProfilePaths {
     pub iroh_dir: PathBuf,
     pub plugins_dir: PathBuf,
     pub video_cache_dir: PathBuf,
+    /// Draft package archives, kept outside the content store the node
+    /// serves from. See `crate::packages`.
+    pub packages_dir: PathBuf,
+    /// Extracted package files, a cache keyed by package hash and rebuilt
+    /// from the archive on demand. Not the video cache: that one is wiped on
+    /// every lock and reachable through the asset protocol.
+    pub package_cache_dir: PathBuf,
 }
 
 impl ProfilePaths {
@@ -76,6 +83,8 @@ impl ProfilePaths {
             iroh_dir: root.join("iroh"),
             plugins_dir: root.join("plugins"),
             video_cache_dir: root.join("videocache"),
+            packages_dir: root.join("packages"),
+            package_cache_dir: root.join("packagecache"),
             root,
         }
     }
@@ -86,6 +95,8 @@ impl ProfilePaths {
         std::fs::create_dir_all(&self.iroh_dir)?;
         std::fs::create_dir_all(&self.plugins_dir)?;
         std::fs::create_dir_all(&self.video_cache_dir)?;
+        std::fs::create_dir_all(&self.packages_dir)?;
+        std::fs::create_dir_all(&self.package_cache_dir)?;
         Ok(())
     }
 

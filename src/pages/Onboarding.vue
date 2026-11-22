@@ -149,6 +149,11 @@ const importMnemonic = ref('')
 const password = ref('')
 const confirmPassword = ref('')
 const error = ref('')
+// A submit-time summary goes stale as soon as the learner edits the fields it
+// describes (it kept saying the passwords differ after they matched).
+watch([username, displayName, password, confirmPassword], () => {
+  if (step.value === 'password') error.value = ''
+})
 const biometricHint = ref('')
 const biometricAvailable = ref(false)
 const enableBiometricOnSetup = ref(false)
@@ -579,7 +584,7 @@ function enterApp() {
         <button
           v-if="vaultExists"
           class="w-full mt-3 py-2 text-sm text-primary hover:underline transition-colors"
-          @click="router.replace('/unlock')"
+          @click="router.replace('/profiles')"
         >
           {{ $t('onboarding.welcome.signIn') }}
         </button>
@@ -1153,6 +1158,16 @@ function enterApp() {
   padding: 1.875rem 1.75rem;
   background: linear-gradient(180deg, rgb(20, 27, 42), rgb(15, 21, 34));
   border-inline-end: 1px solid var(--app-border);
+}
+/* Keep the step rail in place while a long step scrolls; otherwise its
+   heading slides up under the macOS traffic lights. */
+@media (min-width: 1024px) {
+  .onb-rail {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    min-height: 100vh;
+  }
 }
 /* macOS: the window uses an Overlay title bar with traffic-light controls at
    top-left (see tauri.conf trafficLightPosition). This page is full-bleed with

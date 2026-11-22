@@ -1,12 +1,16 @@
 :root {
-  --bg: var(--app-bg, #1e1e2e);
-  --panel: var(--app-surface, #252536);
-  --fg: var(--app-fg, #e4e4ef);
-  --muted: #9aa0b4;
-  --border: #363650;
+  /* Host theme tokens (applied by the plugin bootstrap) with the original
+     dark palette as the standalone fallback. */
+  --bg: var(--theme-background, #1e1e2e);
+  --panel: var(--theme-card, #252536);
+  --fg: var(--theme-foreground, #e4e4ef);
+  --muted: var(--theme-muted-foreground, #9aa0b4);
+  --border: var(--theme-border, #363650);
   --ok: #4ac97e;
   --bad: #e5678a;
-  --accent: var(--app-accent, #7aa2f7);
+  --accent: var(--theme-primary, #7aa2f7);
+  --accent-fg: var(--theme-primary-foreground, #0b1020);
+  --well: var(--panel);
 }
 
 * { box-sizing: border-box; }
@@ -25,10 +29,6 @@ html, body {
   gap: 12px;
   height: 100vh;
   padding: 12px;
-}
-
-@media (max-width: 720px) {
-  #app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; overflow: auto; }
 }
 
 #problem, #workbench { min-width: 0; }
@@ -91,7 +91,7 @@ html, body {
 .tests-head { margin-top: 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
 button {
   background: var(--accent);
-  color: #0b1020;
+  color: var(--accent-fg);
   border: 0;
   border-radius: 8px;
   padding: 6px 12px;
@@ -108,7 +108,7 @@ button#run, button#test { background: transparent; color: var(--fg); border: 1px
   margin: 0;
   overflow: auto;
   white-space: pre-wrap;
-  background: #14141f;
+  background: var(--well);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px;
@@ -126,3 +126,14 @@ button#run, button#test { background: transparent; color: var(--fg); border: 1px
 .case .detail { color: var(--muted); white-space: pre-wrap; }
 .muted { color: var(--muted); }
 .bad { color: var(--bad); }
+
+/* Narrow frames (phones): stack and let the page scroll as one column, so
+   the output and test results stay reachable instead of being squeezed into
+   a fixed-height grid row. */
+@media (max-width: 720px) {
+  #app { grid-template-columns: 1fr; grid-template-rows: auto auto; height: auto; min-height: 100%; }
+  #problem { overflow: visible; }
+  #editor-wrap { flex: none; height: 45vh; min-height: 200px; }
+  #io { flex: none; }
+  #console { flex: none; min-height: 80px; max-height: 40vh; }
+}

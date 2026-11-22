@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Clearing package storage</title>
+<script>
+// Clears what package content can leave behind at the package origin:
+// local and session storage, IndexedDB databases, cache storage, service
+// worker registrations, cookies and the frame's name. The player loads this
+// page in the package frame before a launch's wrapper and again before it
+// closes the launch, and waits for the `storage-cleared` message, which
+// echoes the nonce the player put in this page's fragment (`clear.html#<nonce>`)
+// so the document this page replaced cannot answer in its place. `ok` is true
+// only when every step worked; the player refuses to start a launch otherwise.
+// The response also carries a Clear-Site-Data header for the engines that
+// honour it.
+(function () {
+  'use strict';
+  var failures = [];
+  var nonce = window.location.hash.slice(1);
+
+  function attempt(name, work) {
+    try {
+      return Promise.resolve(work()).catch(function () {
+        failures.push(name);
+      });
+    } catch (_) {
+      failures.push(name);
+      return Promise.resolve();
+    }
+  }
+
+  function all(list) {
+    return Promise.all(list || []);
+  }
+
+  var steps = [
+    attempt('name', function () { window.name = ''; }),
+    attempt('localStorage', function () { window.localStorage.clear(); }),
+    attempt('sessionStorage', function () { window.sessionStorage.clear(); }),
+    attempt('indexedDB', function () {
+      if (!window.indexedDB || !window.indexedDB.databases) return;
+      return window.indexedDB.databases().then(function (databases) {
+        return all(databases.map(function (database) {
+          return new Promise(function (resolve, reject) {
+            var request = window.indexedDB.deleteDatabase(database.name);
+            request.onsuccess = resolve;
+            request.onerror = reject;
+            request.onblocked = resolve;
+          });
+        }));
+      });
+    }),
+    attempt('caches', function () {
+      if (!window.caches) return;
+      return window.caches.keys().then(function (keys) {
+        return all(keys.map(function (key) { return window.caches.delete(key); }));
+      });
+    }),
+    attempt('serviceWorkers', function () {
+      if (!navigator.serviceWorker || !navigator.serviceWorker.getRegistrations) return;
+      return navigator.serviceWorker.getRegistrations().then(function (registrations) {
+        return all(registrations.map(function (registration) { return registration.unregister(); }));
+      });
+    }),
+    attempt('cookies', function () {
+      document.cookie.split(';').forEach(function (cookie) {
+        var name = cookie.split('=')[0].trim();
+        if (name) document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+      });
+    }),
+  ];
+
+  Promise.all(steps).then(function () {
+    try {
+      window.top.postMessage(
+        { source: 'alexandria-package', type: 'storage-cleared', nonce: nonce, ok: failures.length === 0, failed: failures },
+        '*'
+      );
+    } catch (_) {}
+  });
+})();
+</script>
+</head>
+<body></body>
+</html>

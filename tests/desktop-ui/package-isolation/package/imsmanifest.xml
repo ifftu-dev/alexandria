@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A hostile SCORM 1.2 package for the player's isolation checks. Each lesson
+     tries one kind of escape; the browser checks assert that none succeeds. -->
+<manifest identifier="dev.alexandria.fixture.hostile" version="1.0"
+    xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2"
+    xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_rootv1p2">
+  <metadata>
+    <schema>ADL SCORM</schema>
+    <schemaversion>1.2</schemaversion>
+  </metadata>
+  <organizations default="hostile">
+    <organization identifier="hostile">
+      <title>Hostile package</title>
+      <item identifier="network" identifierref="res-network"><title>Requests elsewhere</title></item>
+      <item identifier="peer" identifierref="res-peer"><title>Peer connection</title></item>
+      <item identifier="navigation" identifierref="res-navigation"><title>Leaving the frame</title></item>
+      <item identifier="popup" identifierref="res-popup"><title>New windows</title></item>
+      <item identifier="storage" identifierref="res-storage"><title>Left behind</title></item>
+      <item identifier="bridge" identifierref="res-bridge"><title>Command bridge</title></item>
+      <item identifier="label" identifierref="res-label"><title>Covering the label</title></item>
+    </organization>
+  </organizations>
+  <resources>
+    <resource identifier="res-network" type="webcontent" adlcp:scormtype="sco" href="network.html">
+      <file href="network.html"/>
+      <dependency identifierref="res-shared"/>
+    </resource>
+    <resource identifier="res-peer" type="webcontent" adlcp:scormtype="sco" href="peer.html">
+      <file href="peer.html"/>
+      <dependency identifierref="res-shared"/>
+    </resource>
+    <resource identifier="res-navigation" type="webcontent" adlcp:scormtype="sco" href="navigation.html">
+      <file href="navigation.html"/>
+      <dependency identifierref="res-shared"/>
+    </resource>
+    <resource identifier="res-popup" type="webcontent" adlcp:scormtype="sco" href="popup.html">
+      <file href="popup.html"/>
+      <dependency identifierref="res-shared"/>
+    </resource>
+    <resource identifier="res-storage" type="webcontent" adlcp:scormtype="sco" href="storage.html">
+      <file href="storage.html"/>
+      <dependency identifierref="res-shared"/>
+    </resource>
+    <resource identifier="res-bridge" type="webcontent" adlcp:scormtype="sco" href="bridge.html">
+      <file href="bridge.html"/>
+      <dependency identifierref="res-shared"/>
+    </resource>
+    <resource identifier="res-label" type="webcontent" adlcp:scormtype="sco" href="label.html">
+      <file href="label.html"/>
+      <dependency identifierref="res-shared"/>
+    </resource>
+    <resource identifier="res-shared" type="webcontent" adlcp:scormtype="asset">
+      <file href="shared/hostile.js"/>
+      <file href="shared/self-replacing.html"/>
+      <file href="shared/worker.js"/>
+      <file href="shared/opened.html"/>
+    </resource>
+  </resources>
+</manifest>

@@ -805,6 +805,23 @@ onMounted(async () => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Phones: stack the call to action under the title so the course name gets
+   the full width instead of truncating to a few characters. */
+@media (max-width: 639px) {
+  .home-hero {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .home-hero-title {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .home-hero-cta {
+    justify-content: center;
+  }
+}
 .home-hero-cta {
   display: inline-flex;
   align-items: center;
@@ -818,9 +835,13 @@ onMounted(async () => {
 }
 
 /* Reputation stat band */
+/* Fill the grid row and pin the value to the bottom, so a card whose label
+   wraps (narrow windows) doesn't stand taller than its neighbours. */
 .stat-card {
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
   gap: 0.4rem;
   padding: 0.75rem 0.9rem;
   border-radius: 0.75rem;

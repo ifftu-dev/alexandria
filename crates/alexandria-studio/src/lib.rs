@@ -8,9 +8,11 @@ pub mod integrity;
 pub mod jd_parser;
 pub mod learning;
 pub mod model;
+pub mod package;
 pub mod provider;
 pub mod skills;
 pub mod store;
+pub mod xapi;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

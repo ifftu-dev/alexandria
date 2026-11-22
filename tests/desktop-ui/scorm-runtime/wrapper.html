@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Minimal wrapper for the SCORM runtime check</title>
+    <script src="runtime/scorm12.min.js"></script>
+  </head>
+  <body>
+    <iframe id="lesson" title="Lesson"></iframe>
+    <script>
+      // The smallest page that proves the wrapper design against the vendored
+      // runtime. It is a test fixture, not the player's wrapper.
+      //
+      // The API object lives on this window. The lesson frame is given its
+      // address only after the host's launch data has been loaded, because the
+      // runtime accepts prior state only before LMSInitialize.
+      var host = window.parent
+      var launched = false
+      window.addEventListener('message', function (event) {
+        if (launched || event.source !== host || !event.data || event.data.type !== 'launch') return
+        launched = true
+        var hostOrigin = event.origin
+        var api = new Scorm12API({
+          // Any string here routes each commit to `httpService`. Nothing is fetched.
+          lmsCommitUrl: 'host:',
+          httpService: {
+            // Called synchronously inside LMSCommit and LMSFinish. The lesson
+            // gets its answer at once; the host hears about it afterwards.
+            processHttpRequest: function (_url, state, _immediate, _log, _notify, commit) {
+              var reason = commit.isTerminateCommit ? 'terminate' : 'commit'
+              host.postMessage({ type: 'state', reason: reason, cmi: state.cmi }, hostOrigin)
+              return { result: 'true', errorCode: 0 }
+            },
+            updateSettings: function () {},
+          },
+        })
+        api.loadFromJSON(event.data.cmi)
+        window.API = api
+        document.getElementById('lesson').src = event.data.entry
+      })
+      host.postMessage({ type: 'ready' }, '*')
+    </script>
+  </body>
+</html>

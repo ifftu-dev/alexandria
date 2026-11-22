@@ -38,6 +38,7 @@
         android:icon="@mipmap/ic_launcher"
         android:label="${appLabel}"
         android:theme="@style/Theme.alexandria_node"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:usesCleartextTraffic="${usesCleartextTraffic}">
         <!-- Push notifications. FCM hands messages and token rotations to the
              vendored mobile-push plugin's service; a message that arrives

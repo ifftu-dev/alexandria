@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<courseStructure xmlns="https://w3id.org/xapi/profiles/cmi5/v1/CourseStructure.xsd">
+  <course id="https://example.org/cmi5/forklift">
+    <title><langstring lang="en-US">Forklift basics</langstring></title>
+    <description><langstring lang="en-US">A two-unit cmi5 course for the player checks.</langstring></description>
+  </course>
+  <block id="https://example.org/cmi5/forklift/before-you-drive">
+    <title><langstring lang="en-US">Before you drive</langstring></title>
+    <description><langstring lang="en-US">Walk around the truck, then pass the check.</langstring></description>
+    <au id="https://example.org/cmi5/forklift/walkaround" moveOn="Completed" launchMethod="AnyWindow">
+      <title><langstring lang="en-US">Walkaround</langstring></title>
+      <description><langstring lang="en-US">The pre-use inspection.</langstring></description>
+      <url>au/walkaround.html?paramA=1</url>
+    </au>
+    <au id="https://example.org/cmi5/forklift/check" moveOn="Passed" masteryScore="0.8" launchMethod="AnyWindow">
+      <title><langstring lang="en-US">Safety check</langstring></title>
+      <description><langstring lang="en-US">A judged check with a mastery score.</langstring></description>
+      <url>au/check.html</url>
+      <launchParameters>route=b</launchParameters>
+    </au>
+  </block>
+  <au id="https://example.org/cmi5/forklift/handbook" moveOn="NotApplicable" launchMethod="OwnWindow">
+    <title><langstring lang="en-US">Handbook</langstring></title>
+    <description><langstring lang="en-US">Reference reading that asks for its own window.</langstring></description>
+    <url>handbook/index.html</url>
+  </au>
+</courseStructure>

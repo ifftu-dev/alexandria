@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Storage</title>
+    <script src="shared/hostile.js"></script>
+  </head>
+  <body>
+    <h1>Hostile: what an earlier launch left behind</h1>
+    <pre id="seen"></pre>
+    <script>
+      // First reads everything a launch could have left for a later one,
+      // including anything that names the address it ran at, then leaves its
+      // own address and a marker everywhere it can for the next launch.
+      var found = {};
+      function note(where, value) {
+        if (value === undefined || value === null || value === '' || value === 0) return;
+        if (Array.isArray(value) && value.length === 0) return;
+        if (typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0) return;
+        found[where] = value;
+      }
+      function safely(where, work) {
+        try { note(where, work()); } catch (error) { note(where + ' (error)', error && error.name); }
+      }
+      function entries(win) {
+        return win.navigation && win.navigation.entries ? win.navigation.entries().map(function (entry) { return entry.url; }) : [];
+      }
+      function storageOf(store) {
+        var out = {};
+        for (var i = 0; i < store.length; i++) out[store.key(i)] = store.getItem(store.key(i));
+        return out;
+      }
+
+      function read() {
+        safely('localStorage', function () { return storageOf(localStorage); });
+        safely('sessionStorage', function () { return storageOf(sessionStorage); });
+        safely('cookies', function () { return document.cookie; });
+        safely('this frame name', function () { return window.name; });
+        safely('package frame name', function () { return parent.name; });
+        safely('this frame history', function () { return entries(window); });
+        safely('package frame history', function () { return entries(parent); });
+        safely('referrer', function () { return document.referrer; });
+        safely('package frame referrer', function () { return parent.document.referrer; });
+        safely('resources loaded', function () {
+          return performance.getEntries().map(function (entry) { return entry.name; })
+            .concat(parent.performance.getEntries().map(function (entry) { return entry.name; }));
+        });
+        var slow = [];
+        if (window.indexedDB && indexedDB.databases) {
+          slow.push(indexedDB.databases().then(function (databases) {
+            note('indexedDB', databases.map(function (database) { return database.name; }));
+          }).catch(function () {}));
+        }
+        if (window.caches) {
+          slow.push(caches.keys().then(function (keys) {
+            return Promise.all(keys.map(function (key) {
+              return caches.open(key).then(function (cache) { return cache.match('marker'); })
+                .then(function (response) { return response ? response.text() : ''; });
+            })).then(function (texts) { note('caches', keys.concat(texts)); });
+          }).catch(function () {}));
+        }
+        return Promise.all(slow);
+      }
+
+      function leave() {
+        var marker = 'left by ' + location.href;
+        localStorage.setItem('marker', marker);
+        sessionStorage.setItem('marker', marker);
+        document.cookie = 'marker=' + encodeURIComponent(marker) + '; path=/';
+        try { window.name = marker; } catch (_) {}
+        try { parent.name = marker; } catch (_) {}
+        var writes = [];
+        writes.push(new Promise(function (resolve) {
+          var request = indexedDB.open('hostile-marker', 1);
+          request.onupgradeneeded = function () { request.result.createObjectStore('marks'); };
+          request.onsuccess = function () {
+            var transaction = request.result.transaction('marks', 'readwrite');
+            transaction.objectStore('marks').put(marker, 'marker');
+            transaction.oncomplete = function () { request.result.close(); resolve(); };
+            transaction.onerror = resolve;
+          };
+          request.onerror = resolve;
+        }));
+        if (window.caches) {
+          writes.push(caches.open('hostile-marker').then(function (cache) {
+            return cache.put('marker', new Response(marker));
+          }).catch(function () {}));
+        }
+        // Service workers exist only in a secure context, which the browser
+        // checks' made-up origin is not.
+        if (!navigator.serviceWorker) hostile.show('service worker', 'unavailable');
+        else {
+          writes.push(navigator.serviceWorker.register('shared/worker.js').then(function () {
+            hostile.show('service worker', 'registered');
+          }, function (error) {
+            hostile.show('service worker', 'refused ' + error.name);
+          }));
+        }
+        return Promise.all(writes);
+      }
+
+      read().then(function () {
+        hostile.show('found', found);
+        hostile.ready();
+        return leave();
+      }).then(function () {
+        hostile.show('left', location.href);
+        hostile.done();
+      });
+    </script>
+  </body>
+</html>

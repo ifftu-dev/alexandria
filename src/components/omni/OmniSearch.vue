@@ -119,7 +119,7 @@ watch(isOpen, async (val) => {
     <Transition name="motion-fade">
       <div
         v-if="isOpen"
-        class="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm px-4 pt-[15vh]"
+        class="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm px-4 pt-[6vh] sm:pt-[15vh]"
         @click.self="close"
       >
         <Transition name="motion-pop" appear>
@@ -171,7 +171,7 @@ watch(isOpen, async (val) => {
             <div
               v-else-if="visibleItems.length > 0"
               ref="listRef"
-              class="max-h-[60vh] overflow-y-auto py-2"
+              class="max-h-[38vh] sm:max-h-[60vh] overflow-y-auto py-2"
             >
               <!-- Recents header when showing empty-query recents -->
               <p
@@ -234,7 +234,7 @@ watch(isOpen, async (val) => {
 
             <!-- Footer: keyboard hints -->
             <div class="flex items-center justify-between px-4 h-9 border-t border-border text-[11px] text-muted-foreground">
-              <div class="flex items-center gap-3">
+              <div class="flex items-center gap-3 pointer-coarse:invisible">
                 <span class="flex items-center gap-1">
                   <kbd class="inline-flex items-center px-1 h-4 font-mono text-[10px] bg-muted/50 border border-border rounded">↑</kbd>
                   <kbd class="inline-flex items-center px-1 h-4 font-mono text-[10px] bg-muted/50 border border-border rounded">↓</kbd>
