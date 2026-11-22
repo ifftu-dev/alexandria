@@ -1312,7 +1312,7 @@ mod tests {
             let lesson = &release.chapters[0].elements[0];
             assert_eq!(lesson.plugin_cid.as_ref(), Some(&cid));
             let hash = lesson.content_hash.as_ref().unwrap();
-            assert_eq!(prepared.public_plugin_lessons, [hash.clone()]);
+            assert_eq!(prepared.public_plugin_lessons, std::slice::from_ref(hash));
             assert_eq!(
                 content::get_bytes(&author.node, hash).await.unwrap(),
                 config.as_bytes()
