@@ -429,7 +429,8 @@ function dimmed(node: AtlasNode): boolean {
     (bloomEmphasis.value !== null && node.earnedBloom?.rank !== bloomEmphasis.value) ||
     (neighborhoodIds.value.size > 0 && !neighborhoodIds.value.has(node.skill.id))
 }
-function zoom(delta: number): void { update({ camera: { ...camera.value, zoom: Math.min(1.8, Math.max(1, camera.value.zoom + delta)) } }) }
+function clampZoom(value: number): number { return Math.min(1.8, Math.max(1, value)) }
+function zoom(delta: number): void { update({ camera: { ...camera.value, zoom: clampZoom(camera.value.zoom + delta) } }) }
 const worldBounds = computed(() => ({
   x: Math.max(REGION_WIDTH, ...layout.value.regions.map(region => region.x + region.width)),
   y: Math.max(MAP_HEIGHT, ...layout.value.regions.map(region => region.y + region.height)),
@@ -442,7 +443,7 @@ function movedCamera(origin: AtlasCamera, x: number, y: number): AtlasCamera {
 function pan(x: number, y: number): void { update({ camera: movedCamera(camera.value, x, y) }) }
 // A drag moves only the canvas, so the shared view (and everything derived
 // from it, such as the match list) stays put until the drag ends.
-let drag: { id: number; x: number; y: number; camera: AtlasCamera; moved: boolean; touch: boolean; target: AtlasCamera | null } | null = null
+let drag: { id: number; x: number; y: number; camera: AtlasCamera; moved: boolean; target: AtlasCamera | null } | null = null
 let suppressMapClick = false
 /** Shows the grabbing cursor over the map without restyling what is drawn on it. */
 const grabCover = ref<HTMLElement>()
@@ -452,32 +453,64 @@ function stopDrag(): void {
   if (grabCover.value) grabCover.value.hidden = true
   if (wasMoving) void nextTick(() => placeCanvas(camera.value))
 }
+// Touch events supply both active contacts together. Keep the point beneath
+// their initial midpoint anchored as the fingers spread or move together.
+let pinch: { distance: number; zoom: number; anchor: WebPoint } | null = null
+function detailedPinch(event: TouchEvent): void {
+  if (!detailedMode.value) return
+  if (event.touches.length !== 2) {
+    pinch = null
+    return
+  }
+  const map = event.currentTarget as HTMLElement
+  const contacts = Array.from(event.touches).filter(touch => touch.target instanceof Node && map.contains(touch.target))
+  const [first, second] = contacts
+  if (!first || !second) {
+    pinch = null
+    return
+  }
+  const rect = map.getBoundingClientRect()
+  const x = (first.clientX + second.clientX) / 2 - rect.left - rect.width / 2
+  const y = (first.clientY + second.clientY) / 2 - rect.top - rect.height / 2
+  const distance = Math.max(1, Math.hypot(first.clientX - second.clientX, first.clientY - second.clientY))
+  if (!pinch) {
+    const at = drag?.target ?? camera.value
+    stopDrag()
+    suppressMapClick = true
+    pinch = { distance, zoom: at.zoom, anchor: { x: at.x + x / at.zoom, y: at.y + y / at.zoom } }
+    if (at !== camera.value) update({ camera: at })
+    return
+  }
+  const zoom = clampZoom(pinch.zoom * distance / pinch.distance)
+  update({ camera: movedCamera({ ...pinch.anchor, zoom }, -x, -y) })
+}
 function pointerDown(event: PointerEvent): void {
   if (web.pointerDown(event)) return
   if (simple.value) return
-  // Native vertical scrolling and browser pinch zoom stay available on touch.
-  if (event.isPrimary === false) { stopDrag(); return }
+  if (event.isPrimary === false) return
   if (event.button !== 0) return
   suppressMapClick = false
-  drag = { id: event.pointerId, x: event.clientX, y: event.clientY, camera: { ...camera.value }, moved: false, touch: event.pointerType === 'touch', target: null }
+  drag = { id: event.pointerId, x: event.clientX, y: event.clientY, camera: { ...camera.value }, moved: false, target: null }
 }
 function pointerMove(event: PointerEvent): void {
   if (web.pointerMove(event)) return
   if (!drag || event.pointerId !== drag.id) return
   const dx = event.clientX - drag.x, dy = event.clientY - drag.y
   if (!drag.moved && Math.hypot(dx, dy) < 6) return
-  if (drag.touch && !drag.moved && Math.abs(dy) > Math.abs(dx)) { drag = null; return }
   if (!drag.moved) {
     drag.moved = true
     suppressMapClick = true
     if (grabCover.value) grabCover.value.hidden = false
     ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
   }
-  drag.target = movedCamera(drag.camera, -dx, drag.touch ? 0 : -dy)
+  drag.target = movedCamera(drag.camera, -dx, -dy)
   placeCanvas(drag.target)
   followDrag()
 }
 function pointerEnd(event: PointerEvent): void {
+  // Moving implicit capture from a touched card to the map also fires a
+  // bubbling lostpointercapture on the card. The map still owns that drag.
+  if (event.type === 'lostpointercapture' && event.target !== event.currentTarget) return
   if (web.pointerEnd(event)) return
   if (drag?.id !== event.pointerId) return
   const moved = drag.target
@@ -579,6 +612,8 @@ const VIEW_ANNOUNCEMENTS = {
   detailed: 'skills.atlas.viewChangedDetailed',
 } as const satisfies Record<SkillGraphView, string>
 watch(() => props.viewMode, mode => {
+  pinch = null
+  stopDrag()
   finishSwitch()
   const requested = switchRequested
   switchRequested = false
@@ -726,7 +761,7 @@ function setBloom(event: Event): void {
             </div>
             <!-- One canvas and one element per node in every view: a switch re-skins and moves them. -->
             <div class="atlas-stage">
-            <div ref="mapElement" class="atlas-map" :class="{ 'is-simple': simple, 'is-web': webMode, 'is-switching': switching }" :style="{ height: webMode ? undefined : `${simple ? simpleGeometry.height : height}px`, '--disc-size': `${SIMPLE_DISC_SIZE}px` }" :data-camera="detailedMode ? cameraLabel : undefined" :tabindex="detailedMode ? 0 : undefined" role="group" :aria-label="t('skills.atlas.map')" :aria-describedby="simple ? undefined : `${id}-map-help`" @keydown="keyPan" @keyup="web.keyUp" @focusin="web.focusIn" @focusout="web.focusOut" @wheel="web.wheel" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerEnd" @pointercancel="pointerEnd" @lostpointercapture="pointerEnd" @pointerleave="web.pointerLeave" @click.capture="mapClick">
+            <div ref="mapElement" class="atlas-map" :class="{ 'is-simple': simple, 'is-web': webMode, 'is-switching': switching }" :style="{ height: webMode ? undefined : `${simple ? simpleGeometry.height : height}px`, '--disc-size': `${SIMPLE_DISC_SIZE}px` }" :data-camera="detailedMode ? cameraLabel : undefined" :tabindex="detailedMode ? 0 : undefined" role="group" :aria-label="t('skills.atlas.map')" :aria-describedby="simple ? undefined : `${id}-map-help`" @keydown="keyPan" @keyup="web.keyUp" @focusin="web.focusIn" @focusout="web.focusOut" @wheel="web.wheel" @touchstart.passive="detailedPinch" @touchmove.passive="detailedPinch" @touchend.passive="detailedPinch" @touchcancel.passive="detailedPinch" @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerEnd" @pointercancel="pointerEnd" @lostpointercapture="pointerEnd" @pointerleave="web.pointerLeave" @click.capture="mapClick">
               <svg ref="canvas" class="atlas-canvas" :viewBox="canvasBox.viewBox" :width="canvasBox.width" :height="canvasBox.height">
                 <template v-if="detailedMode">
                   <g v-for="region in layout.regions" :key="region.field.id === null ? 'unassigned' : `field:${region.field.id}`" :style="{ '--field': color(region.field.id) }">
@@ -879,7 +914,7 @@ function setBloom(event: Event): void {
 .map-focus.is-active { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 6px 14px; border-block-end: 1px solid var(--app-border); border-inline-start: 3px solid var(--app-primary); background: var(--app-muted); font-size: 13px; }
 .map-focus p { min-width: 0; overflow-wrap: anywhere; }
 .map-focus button { font-size: 12px; }
-.atlas-map { position: relative; touch-action: pan-y pinch-zoom; cursor: grab; user-select: none; overflow: clip; background-image: radial-gradient(var(--app-border) .7px, transparent .7px); background-size: 18px 18px; }
+.atlas-map { position: relative; touch-action: none; cursor: grab; user-select: none; overflow: clip; background-image: radial-gradient(var(--app-border) .7px, transparent .7px); background-size: 18px 18px; }
 .map-region { fill: color-mix(in srgb, var(--field) 5%, var(--app-background)); stroke: color-mix(in srgb, var(--field) 40%, var(--app-border)); stroke-width: 1; }
 .region-heading { display: flex; flex-direction: column; gap: 4px; color: var(--field); }
 .region-heading strong { font-size: 22px; font-weight: 650; }

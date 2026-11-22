@@ -183,7 +183,7 @@
     "noResults": "No hay coincidencias. Prueba otra búsqueda.",
     "showMoreSkills": "Mostrar {count} habilidades más",
     "map": "Mapa de habilidades",
-    "mapHelp": "Las flechas muestran requisitos → dependientes. Arrastra para mover el mapa; en pantalla táctil, desliza horizontalmente. Los gestos verticales desplazan la página. También puedes usar los controles y las teclas de flecha.",
+    "mapHelp": "Las flechas van de los requisitos previos a las habilidades que dependen de ellos. Arrastra para mover el mapa. En pantallas táctiles, pellizca para ajustar el zoom y desliza fuera del mapa para desplazar la página.",
     "zoomIn": "Acercar",
     "zoomOut": "Alejar",
     "panLeft": "Mover mapa a la izquierda",

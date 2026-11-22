@@ -125,32 +125,74 @@ test('mouse drag changes camera without opening a skill and ordinary wheel scrol
 
 test.describe('native touch navigation', () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
-  test('horizontal swipe pans while vertical swipe scrolls the page', async ({ page, browserName }) => {
-    test.skip(browserName !== 'chromium', 'Native touch synthesis uses Chromium CDP; WebKit covers taps, controls and responsive layout.')
-    await page.goto('/tests/desktop-ui/?screen=personal-atlas&view=detailed&expanded=detailed')
-    await page.getByRole('tab', { name: 'My Graph', exact: true }).tap()
-    await page.getByRole('button', { name: 'Explore Computer Science', exact: true }).tap()
-    const map = page.locator('.atlas-map')
-    await map.scrollIntoViewIfNeeded()
-    const box = (await map.boundingBox())!
-    const cdp = await page.context().newCDPSession(page)
-    const swipe = async (fromX: number, fromY: number, dx: number, dy: number) => {
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: fromX, y: fromY }] })
-      for (let i = 1; i <= 8; i++) {
-        await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: fromX + dx * i / 8, y: fromY + dy * i / 8 }] })
-      }
-      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-    }
-    const camera = await map.getAttribute('data-camera')
-    await swipe(box.x + 220, box.y + 240, -110, 0)
-    await expect(map).not.toHaveAttribute('data-camera', camera!)
-    const afterPan = await map.getAttribute('data-camera')
-    const beforeScroll = await page.locator('.personal-fixture').evaluate(el => el.scrollTop)
-    await swipe(box.x + 180, box.y + 260, 0, -160)
-    await expect.poll(() => page.locator('.personal-fixture').evaluate(el => el.scrollTop)).toBeGreaterThan(beforeScroll)
-    await expect(map).toHaveAttribute('data-camera', afterPan!)
-    await cdp.detach()
+  test('the expanded phone graph gives the canvas the screen and keeps display controls reachable', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 640 })
+    await page.goto('/tests/desktop-ui/?screen=personal-atlas')
+    await page.getByRole('button', { name: /Expand skill map/ }).click()
+    const dialog = page.getByRole('dialog')
+    const map = dialog.getByRole('group', { name: 'Skill map' })
+    await expect(map).toBeVisible()
+    await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeFocused()
+    // Two 12px gutters, the map border and WebKit's 8px scrollbar.
+    await expect.poll(() => map.evaluate(el => el.clientWidth)).toBeGreaterThanOrEqual(286)
+    await expect(map).toBeInViewport({ ratio: 0.75 })
+    await expect(dialog.getByRole('complementary')).toHaveCount(0)
+    await expect(dialog.locator('.map-tools')).toBeHidden()
+    const display = dialog.getByRole('button', { name: 'Display', exact: true })
+    await display.click()
+    const names = dialog.getByRole('button', { name: 'Names', exact: true })
+    await names.click()
+    await display.click()
+    await expect(names).toBeHidden()
+    await display.click()
+    await expect(names).toHaveAttribute('aria-pressed', 'true')
   })
+
+  for (const view of ['detailed', 'web']) {
+    test(`dragging pans in both directions and a two-finger pinch zooms the ${view} map`, async ({ page, browserName }) => {
+      test.skip(browserName !== 'chromium', 'Native touch synthesis uses Chromium CDP; WebKit covers taps, controls and responsive layout.')
+      await page.goto(`/tests/desktop-ui/?screen=personal-atlas&view=${view}`)
+      await page.getByRole('tab', { name: 'My Graph', exact: true }).tap()
+      if (view === 'detailed') await page.getByRole('button', { name: 'Explore Computer Science', exact: true }).tap()
+      const map = page.locator('.atlas-map')
+      await map.scrollIntoViewIfNeeded()
+      const box = (await map.boundingBox())!
+      const cdp = await page.context().newCDPSession(page)
+      const swipe = async (fromX: number, fromY: number, dx: number, dy: number) => {
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: fromX, y: fromY }] })
+        for (let i = 1; i <= 8; i++) {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: fromX + dx * i / 8, y: fromY + dy * i / 8 }] })
+        }
+        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      }
+      const camera = await map.getAttribute('data-camera')
+      await swipe(box.x + box.width - 8, box.y + 18, -110, 0)
+      await expect(map).not.toHaveAttribute('data-camera', camera!)
+      const afterPan = await map.getAttribute('data-camera')
+      const beforeScroll = await page.locator('.personal-fixture').evaluate(el => el.scrollTop)
+      await swipe(box.x + 8, box.y + 260, 0, -160)
+      await expect(map).not.toHaveAttribute('data-camera', afterPan!)
+      expect(await page.locator('.personal-fixture').evaluate(el => el.scrollTop)).toBe(beforeScroll)
+      await expect(page.getByRole('button', { name: 'Zoom in' })).toHaveCount(0)
+      const beforeZoom = Number((await map.getAttribute('data-camera'))?.split(' ')[2])
+      const contacts = (radius: number) => [1, -1].map((side, id) => ({
+        x: box.x + box.width / 2 + side * radius, y: box.y + 240, id,
+      }))
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: contacts(30) })
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: contacts(50) })
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      await expect.poll(async () => Number((await map.getAttribute('data-camera'))?.split(' ')[2])).toBeGreaterThan(beforeZoom * 1.5)
+      await expect(page.locator('.atlas-inspector h2')).toHaveCount(0)
+      const help = page.locator('.map-help')
+      await help.scrollIntoViewIfNeeded()
+      const outside = (await help.boundingBox())!
+      const scrollContainer = page.locator('.personal-fixture')
+      const scrollTop = await scrollContainer.evaluate(el => el.scrollTop)
+      await swipe(outside.x + outside.width / 2, outside.y + outside.height / 2, 0, -140)
+      await expect.poll(() => scrollContainer.evaluate(el => el.scrollTop)).toBeGreaterThan(scrollTop)
+      await cdp.detach()
+    })
+  }
 })
 
 for (const theme of ['light', 'dark']) {
@@ -310,29 +352,4 @@ test('review: Browse Goal saves a goal instead of opening course discovery', asy
   await goal.click()
   await expect(page.locator('output')).toHaveText('/goals')
   await expect(page.locator('.fixture-page')).toContainText('Big-O')
-})
-
-test('the expanded phone graph gives the canvas the screen and keeps display controls reachable', async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 640 })
-  await page.goto('/tests/desktop-ui/?screen=personal-atlas')
-  await page.getByRole('button', { name: /Expand skill map/ }).click()
-  const dialog = page.getByRole('dialog')
-  const map = dialog.getByRole('group', { name: 'Skill map' })
-  await expect(map).toBeVisible()
-  await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeFocused()
-  // Two 12px gutters, the map border and WebKit's 8px scrollbar.
-  await expect.poll(() => map.evaluate(el => el.clientWidth)).toBeGreaterThanOrEqual(286)
-  const bounds = (await map.boundingBox())!
-  await expect(map).toBeInViewport({ ratio: 0.75 })
-  await expect(dialog.getByRole('complementary')).toHaveCount(0)
-  const tools = dialog.locator('.map-tools')
-  expect((await tools.boundingBox())!.y).toBeGreaterThanOrEqual(bounds.y + bounds.height - 1)
-  const display = dialog.getByRole('button', { name: 'Display', exact: true })
-  await display.click()
-  const names = dialog.getByRole('button', { name: 'Names', exact: true })
-  await names.click()
-  await display.click()
-  await expect(names).toBeHidden()
-  await display.click()
-  await expect(names).toHaveAttribute('aria-pressed', 'true')
 })

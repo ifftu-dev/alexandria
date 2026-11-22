@@ -38,10 +38,7 @@ const PANS = [
 .map-tools.is-overlay { position: absolute; inset-block-end: 10px; inset-inline-end: 10px; z-index: 1; display: grid; grid-template-columns: repeat(4, auto); gap: 3px; padding: 4px; border: 1px solid var(--app-border); border-radius: 10px; background: color-mix(in srgb, var(--app-card) 92%, transparent); box-shadow: 0 2px 10px color-mix(in srgb, var(--app-foreground) 8%, transparent); }
 .map-tools.is-overlay span { margin: 0; min-width: 0; font-size: 11px; text-align: center; color: var(--app-muted-foreground); }
 .map-tools.is-overlay button { min-width: 32px; min-height: 32px; padding: 2px 6px; border-radius: 7px; font-size: 13px; line-height: 1; }
-@media (pointer: coarse) { .map-tools.is-overlay button { min-width: 40px; min-height: 40px; } }
-@media (max-width: 700px), (pointer: coarse) and (max-height: 500px) and (max-width: 950px) {
-  .map-tools.is-overlay { position: static; grid-template-columns: repeat(4, minmax(44px, 1fr)); align-items: stretch; gap: 8px; padding: 8px; border: 0; border-block-start: 1px solid var(--app-border); border-radius: 0; box-shadow: none; background: var(--app-card); }
-  .map-tools.is-overlay span { align-self: center; }
-  .map-tools.is-overlay button { min-width: 44px; min-height: 44px; }
+@media (pointer: coarse) {
+  .map-tools, .map-tools.is-overlay { display: none; }
 }
 </style>

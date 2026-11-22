@@ -183,7 +183,7 @@
     "noResults": "No matching skills. Try another search.",
     "showMoreSkills": "Show {count} more skills",
     "map": "Skill map",
-    "mapHelp": "Arrows show prerequisites → dependents. Drag to move the map; on touch, swipe sideways. Vertical swipes scroll the page. Controls and arrow keys also move the map.",
+    "mapHelp": "Arrows lead from prerequisites to dependent skills. Drag to pan. On touchscreens, pinch to zoom and swipe outside the map to scroll the page.",
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
     "panLeft": "Move map left",
