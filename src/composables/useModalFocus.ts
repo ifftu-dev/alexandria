@@ -1,8 +1,9 @@
-import { nextTick, onMounted, onUnmounted, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
 
 interface ModalEntry {
   element: Ref<HTMLElement | null>
+  layer: Ref<number>
   previousFocus: HTMLElement | null
 }
 
@@ -15,7 +16,7 @@ export function useModalFocus(
   element: Ref<HTMLElement | null>,
   close: () => void,
 ) {
-  const entry: ModalEntry = { element, previousFocus: null }
+  const entry: ModalEntry = { element, layer: ref(0), previousFocus: null }
 
   function focusableElements(): HTMLElement[] {
     return Array.from(element.value?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])
@@ -42,11 +43,12 @@ export function useModalFocus(
       previousOverflow = document.body.style.overflow
       document.body.style.overflow = 'hidden'
     }
+    entry.layer.value = (modalStack[modalStack.length - 1]?.layer.value ?? 0) + 1
     modalStack.push(entry)
     await nextTick()
     if (!isOpen() || modalStack[modalStack.length - 1] !== entry) return
     const targets = focusableElements()
-    const initial = targets.find((target) => target.hasAttribute('autofocus'))
+    const initial = targets.find((target) => target.matches('[autofocus], [data-modal-initial-focus]'))
       ?? targets.find((target) => target.matches('input, select, textarea'))
       ?? targets[0]
       ?? element.value
@@ -57,7 +59,8 @@ export function useModalFocus(
     if (!isOpen() || modalStack[modalStack.length - 1] !== entry) return
     if (event.key === 'Escape') {
       event.preventDefault()
-      event.stopPropagation()
+      // Every mounted dialog listens on document. Consume this Escape before focus returns to the parent.
+      event.stopImmediatePropagation()
       close()
     } else if (event.key === 'Tab') {
       const targets = focusableElements()
@@ -81,4 +84,6 @@ export function useModalFocus(
     document.removeEventListener('keydown', onKeydown)
     release()
   })
+
+  return entry.layer
 }

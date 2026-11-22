@@ -24,6 +24,10 @@ const nestedOpen = ref(false)
       <progress value="50" max="100" aria-label="Sample download" class="w-full" />
       <AppButton @click="open = true">Open long dialog</AppButton>
     </section>
+    <!-- The later-opened dialog is mounted first, so DOM order cannot determine which one receives taps. -->
+    <AppModal :open="nestedOpen" title="Nested dialog" @close="nestedOpen = false">
+      <AppButton @click="nestedOpen = false">Close nested dialog</AppButton>
+    </AppModal>
     <AppModal :open="open" title="Long settings dialog" @close="open = false">
       <AppInput v-model="name" label="Dialog display name" />
       <AppButton @click="nestedOpen = true">Open nested dialog</AppButton>
@@ -31,9 +35,6 @@ const nestedOpen = ref(false)
       <template #footer>
         <AppButton @click="open = false">Save settings</AppButton>
       </template>
-    </AppModal>
-    <AppModal :open="nestedOpen" title="Nested dialog" @close="nestedOpen = false">
-      <AppButton @click="nestedOpen = false">Close nested dialog</AppButton>
     </AppModal>
     <MobileTabBar />
   </main>

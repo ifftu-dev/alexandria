@@ -7,7 +7,9 @@ const tooltip = ref(false)
 const position = ref({ top: 0, left: 0 })
 const tooltipId = useId()
 let trigger: HTMLElement | null = null
+const portal = ref<HTMLElement | string>('body')
 function show() {
+  portal.value = trigger?.closest<HTMLElement>('[data-modal-layer]') ?? 'body'
   if (!trigger) return
   tooltip.value = true
   const rect = trigger.getBoundingClientRect()
@@ -40,7 +42,7 @@ watch(() => props.text, hide)
   <span v-bind="$attrs" ref="wrapEl" class="ticker-wrap">
     <span class="ticker-track">{{ text }}</span>
   </span>
-  <Teleport to="body"><span v-if="tooltip" :id="tooltipId" role="tooltip" class="ticker-tooltip" :style="{ top: `${position.top}px`, left: `${position.left}px` }">{{ text }}</span></Teleport>
+  <Teleport :to="portal"><span v-if="tooltip" :id="tooltipId" role="tooltip" class="ticker-tooltip" :style="{ top: `${position.top}px`, left: `${position.left}px` }">{{ text }}</span></Teleport>
 </template>
 <style scoped>
 .ticker-wrap { display:block; overflow:hidden; max-width:100%; min-width:0; white-space:nowrap; }

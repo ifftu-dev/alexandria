@@ -5,6 +5,7 @@ import { useModalFocus } from '@/composables/useModalFocus'
 interface Props {
   open: boolean
   title?: string
+  mobileFullscreen?: boolean
   maxWidth?: string
 }
 
@@ -17,7 +18,7 @@ const emit = defineEmits<{ close: [] }>()
 
 const dialog = ref<HTMLElement | null>(null)
 const titleId = useId()
-useModalFocus(() => props.open, dialog, () => emit('close'))
+const layer = useModalFocus(() => props.open, dialog, () => emit('close'))
 
 function onBackdropClick(e: MouseEvent) {
   if (e.target === e.currentTarget) {
@@ -35,7 +36,10 @@ function onBackdropClick(e: MouseEvent) {
       <div
         v-if="open"
         data-backdrop
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+        data-modal-layer
+        :style="{ '--modal-depth': layer }"
+        :class="{ 'modal-fullscreen': mobileFullscreen }"
+        class="modal-backdrop fixed inset-0 flex items-center justify-center p-4"
         @click="onBackdropClick"
       >
           <div
@@ -55,7 +59,8 @@ function onBackdropClick(e: MouseEvent) {
                 </slot>
               </div>
               <button
-                class="pressable shrink-0 p-2 rounded-md text-muted-foreground hover:bg-muted/50 *:pointer-events-none"
+                :data-modal-initial-focus="mobileFullscreen || undefined"
+                class="modal-close pressable shrink-0 p-2 rounded-md text-muted-foreground hover:bg-muted/50 *:pointer-events-none"
                 @click="emit('close')"
                 :aria-label="$t('common.actions.close')"
               >
@@ -79,6 +84,19 @@ function onBackdropClick(e: MouseEvent) {
 </template>
 
 <style scoped>
+.modal-backdrop { background: rgb(8 12 22 / 58%); }
+.modal-surface-card { box-shadow: var(--shadow-lg); }
+.modal-close { min-width: 44px; min-height: 44px; display: grid; place-items: center; }
+@media (max-width: 700px), (pointer: coarse) and (max-height: 500px) and (max-width: 950px) {
+  .modal-fullscreen { padding: 0; }
+  .modal-fullscreen .modal-surface-card {
+    height: min(100dvh, var(--app-height, 100dvh));
+    max-height: 100%;
+    padding: max(6px, var(--sat, env(safe-area-inset-top))) max(12px, var(--sar, env(safe-area-inset-right))) max(8px, var(--sab, env(safe-area-inset-bottom))) max(12px, var(--sal, env(safe-area-inset-left)));
+    border: 0;
+    border-radius: 0;
+  }
+}
 .modal-surface-enter-active { transition: opacity var(--transition-base); }
 .modal-surface-leave-active { transition: opacity var(--transition-fast); pointer-events: none; }
 .modal-surface-enter-active .modal-surface-card,

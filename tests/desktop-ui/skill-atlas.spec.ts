@@ -251,6 +251,7 @@ for (const theme of ['light', 'dark']) {
       await page.getByRole('searchbox', { name: 'Search all skills' }).fill('')
       await expect(map.locator('.web-name')).not.toHaveCount(0)
       await shootMap(page, testInfo.outputPath(`web-selected-${theme}-${width}.png`))
+      if (width === 390) await page.getByRole('button', { name: 'Display', exact: true }).click()
       await page.getByRole('button', { name: 'Around selection', exact: true }).click()
       await page.locator('.web-tools select').selectOption('2')
       const shown = await map.getByRole('button').count()

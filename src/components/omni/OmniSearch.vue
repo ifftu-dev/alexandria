@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import { useModalFocus } from '@/composables/useModalFocus'
 import { useRouter } from 'vue-router'
 import { useOmniSearch } from '@/composables/useOmniSearch'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
@@ -21,6 +22,8 @@ const {
   selectAt,
 } = useOmniSearch()
 
+const dialog = ref<HTMLElement | null>(null)
+const layer = useModalFocus(() => isOpen.value, dialog, close)
 const inputRef = ref<HTMLInputElement | null>(null)
 const listRef = ref<HTMLElement | null>(null)
 
@@ -55,9 +58,6 @@ function onKeydown(e: KeyboardEvent) {
     e.preventDefault()
     const route = select()
     if (route) void router.push(route)
-  } else if (e.key === 'Escape') {
-    e.preventDefault()
-    close()
   }
 }
 
@@ -119,12 +119,15 @@ watch(isOpen, async (val) => {
     <Transition name="motion-fade">
       <div
         v-if="isOpen"
-        class="fixed inset-0 z-50 flex items-start justify-center bg-black/40 backdrop-blur-sm px-4 pt-[6vh] sm:pt-[15vh]"
+        data-modal-layer
+        :style="{ '--modal-depth': layer }"
+        class="fixed inset-0 flex items-start justify-center bg-black/40 backdrop-blur-sm px-4 pt-[6vh] sm:pt-[15vh]"
         @click.self="close"
       >
         <Transition name="motion-pop" appear>
           <div
             v-if="isOpen"
+            ref="dialog"
             class="card overflow-hidden w-full max-w-[40rem] shadow-lg"
             role="dialog"
             aria-modal="true"

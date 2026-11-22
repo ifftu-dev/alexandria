@@ -91,6 +91,7 @@ const focusedFieldId = computed(() => props.view.focusedFieldId)
 const selected = computed(() => nodesById.value.get(selectedId.value ?? ''))
 const fieldFocused = computed(() => focusedFieldId.value !== null || props.view.unassignedFocused)
 const overview = computed(() => !fieldFocused.value && props.view.camera === null)
+const displayOpen = ref(false)
 const viewport = ref<HTMLElement>()
 /**
  * A zero-height strip across the viewport. Watching it rather than the
@@ -660,29 +661,36 @@ function setBloom(event: Event): void {
           <button type="button" :aria-pressed="viewMode === 'simple'" @click="chooseView('simple')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="3.5" cy="8" r="2.2" /><circle cx="12.5" cy="3.5" r="2.2" /><circle cx="12.5" cy="12.5" r="2.2" /><path d="M5.5 7l5-2.5M5.5 9l5 2.5" /></svg>{{ t('skills.atlas.viewSimple') }}</button>
           <button type="button" :aria-pressed="viewMode === 'detailed'" @click="chooseView('detailed')"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="1.5" y="2" width="6" height="5" rx="1.2" /><rect x="8.5" y="2" width="6" height="5" rx="1.2" /><rect x="1.5" y="9" width="6" height="5" rx="1.2" /><rect x="8.5" y="9" width="6" height="5" rx="1.2" /></svg>{{ t('skills.atlas.viewDetailed') }}</button>
         </div>
-        <button type="button" @click="reset">{{ t('skills.atlas.reset') }}</button>
+        <button class="atlas-reset" type="button" :aria-label="t('skills.atlas.reset')" :title="t('skills.atlas.reset')" @click="reset">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 10a8 8 0 1 1 1 7M4 4v6h6" /></svg>
+          <span>{{ t('skills.atlas.reset') }}</span>
+        </button>
       </div>
     </header>
-    <div v-if="!simple" class="atlas-toolbar" :class="{ 'is-web': webMode }">
-      <!-- In Web the graph comes first: the search, the Web tools and the field chips each take one compact row. -->
+    <div v-if="!simple" class="atlas-toolbar" :class="{ 'is-web': webMode, 'display-open': displayOpen }">
       <label class="atlas-search"><span :class="{ 'sr-only': webMode }">{{ t('skills.atlas.search') }}</span><input type="search" :value="view.query" :placeholder="webMode ? t('skills.atlas.search') : undefined" @input="update({ query: ($event.target as HTMLInputElement).value })"></label>
       <button v-if="view.query" type="button" @click="update({ query: '' })">{{ t('skills.atlas.clearSearch') }}</button>
-      <label v-if="detailedMode"><span>{{ t('skills.atlas.bloomLegend') }}</span><select :value="view.bloomEmphasis ?? ''" @change="setBloom"><option value="">{{ t('skills.atlas.allBloom') }}</option><option v-for="option in bloomOptions" :key="option.rank" :value="option.rank">{{ option.label }}</option></select></label>
-      <!-- Web: what the graph shows, and how. -->
-      <div v-if="webMode" class="web-tools">
-        <div class="web-tool-group" role="group" :aria-label="t('skills.atlas.webShow')">
-          <button type="button" :aria-pressed="!web.narrowed.value" @click="web.narrow(false)">{{ t('skills.atlas.webWhole') }}</button>
-          <button type="button" :aria-pressed="web.narrowed.value" :disabled="!selected" @click="web.narrow(true)">{{ t('skills.atlas.webAround') }}</button>
-          <label class="web-depth"><span class="sr-only">{{ t('skills.atlas.depth') }}</span><select :value="view.neighborhoodDepth" :disabled="!web.narrowed.value" @change="setDepth"><option v-for="depth in ATLAS_DEPTHS" :key="depth" :value="depth">{{ t(DEPTH_KEYS[depth]) }}</option></select></label>
-        </div>
-        <div class="web-tool-group" role="group" :aria-label="t('skills.atlas.webDisplay')">
-          <button type="button" :aria-pressed="view.webNames" @click="update({ webNames: !view.webNames })">{{ t('skills.atlas.webNames') }}</button>
-          <button type="button" :aria-pressed="view.webArrows" @click="update({ webArrows: !view.webArrows })">{{ t('skills.atlas.webArrows') }}</button>
-          <button type="button" :aria-pressed="view.webRelated" @click="update({ webRelated: !view.webRelated })">{{ t('skills.atlas.webRelated') }}</button>
+      <button class="display-toggle" type="button" :aria-expanded="displayOpen" :aria-controls="`${id}-display`" @click="displayOpen = !displayOpen">
+        {{ t('skills.atlas.webDisplay') }} <span aria-hidden="true">{{ displayOpen ? '▴' : '▾' }}</span>
+      </button>
+      <div :id="`${id}-display`" class="display-options">
+        <label v-if="detailedMode"><span>{{ t('skills.atlas.bloomLegend') }}</span><select :value="view.bloomEmphasis ?? ''" @change="setBloom"><option value="">{{ t('skills.atlas.allBloom') }}</option><option v-for="option in bloomOptions" :key="option.rank" :value="option.rank">{{ option.label }}</option></select></label>
+        <!-- Web: what the graph shows, and how. -->
+        <div v-if="webMode" class="web-tools">
+          <div class="web-tool-group" role="group" :aria-label="t('skills.atlas.webShow')">
+            <button type="button" :aria-pressed="!web.narrowed.value" @click="web.narrow(false)">{{ t('skills.atlas.webWhole') }}</button>
+            <button type="button" :aria-pressed="web.narrowed.value" :disabled="!selected" @click="web.narrow(true)">{{ t('skills.atlas.webAround') }}</button>
+            <label class="web-depth"><span class="sr-only">{{ t('skills.atlas.depth') }}</span><select :value="view.neighborhoodDepth" :disabled="!web.narrowed.value" @change="setDepth"><option v-for="depth in ATLAS_DEPTHS" :key="depth" :value="depth">{{ t(DEPTH_KEYS[depth]) }}</option></select></label>
+          </div>
+          <div class="web-tool-group" role="group" :aria-label="t('skills.atlas.webDisplay')">
+            <button type="button" :aria-pressed="view.webNames" @click="update({ webNames: !view.webNames })">{{ t('skills.atlas.webNames') }}</button>
+            <button type="button" :aria-pressed="view.webArrows" @click="update({ webArrows: !view.webArrows })">{{ t('skills.atlas.webArrows') }}</button>
+            <button type="button" :aria-pressed="view.webRelated" @click="update({ webRelated: !view.webRelated })">{{ t('skills.atlas.webRelated') }}</button>
+          </div>
         </div>
       </div>
     </div>
-    <p v-if="detailedMode" class="atlas-legend">{{ t('skills.atlas.legend') }}</p>
+    <p v-if="detailedMode" class="atlas-legend" :class="{ 'display-open': displayOpen }">{{ t('skills.atlas.legend') }}</p>
     <p role="status" class="atlas-feedback" :class="{ 'has-feedback': highlightedIds.length }" aria-live="polite"><template v-if="highlightedIds.length">{{ t('skills.atlas.updated') }}: {{ highlightedIds.slice(0, 3).map(skillId => nodesById.get(skillId)?.skill.name).filter(Boolean).join(', ') }}{{ highlightedIds.length > 3 ? '…' : '' }}</template><span v-else-if="viewAnnouncement" class="sr-only">{{ viewAnnouncement }}</span></p>
     <div class="atlas-workspace">
       <div class="atlas-main">
@@ -752,7 +760,7 @@ function setBloom(event: Event): void {
               <div v-if="webMode" ref="webNames" class="atlas-web-names"><AtlasNodeLayer v-slot="{ items }" :source="web.nameLayer"><WebGraphNames v-for="names in items" :key="0" :names="names" /></AtlasNodeLayer></div>
               <div ref="grabCover" class="atlas-grab-cover" hidden />
             </div>
-            <!-- Web zoom follows every gesture, so its tools are a layer of their own, over the canvas corner. -->
+            <!-- Keep the tools outside the interactive map so their taps never start a pan. -->
             <AtlasNodeLayer v-if="webMode" v-slot="{ items }" :source="web.zoomLayer">
               <AtlasMapTools v-for="tools in items" :key="0" overlay fit :percent="tools.percent" :can-zoom-in="tools.canZoomIn" :can-zoom-out="tools.canZoomOut" @zoom="web.zoom" @fit="web.fit()" @pan="webPan" />
             </AtlasNodeLayer>
@@ -783,7 +791,7 @@ function setBloom(event: Event): void {
           <p v-if="!matches.length">{{ t('skills.atlas.noResults') }}</p>
         </details>
       </div>
-      <aside class="atlas-inspector" :class="{ 'is-collapsed': view.inspectorCollapsed }" :aria-label="t('skills.atlas.inspector')">
+      <aside class="atlas-inspector" :class="{ 'is-collapsed': view.inspectorCollapsed, 'has-selection': selected }" :aria-label="t('skills.atlas.inspector')">
         <header><span>{{ t('skills.atlas.inspector') }}</span><button type="button" :aria-expanded="!view.inspectorCollapsed" :aria-controls="`${id}-inspector`" @click="update({ inspectorCollapsed: !view.inspectorCollapsed })">{{ t(view.inspectorCollapsed ? 'skills.atlas.expand' : 'skills.atlas.collapse') }}</button></header>
         <div :id="`${id}-inspector`" v-show="!view.inspectorCollapsed" class="inspector-content">
           <template v-if="selected">
@@ -838,6 +846,8 @@ function setBloom(event: Event): void {
 .atlas-view-switch svg { width: 16px; height: 16px; flex-shrink: 0; }
 .atlas-eyebrow { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--app-muted-foreground); margin-block-end: 4px; }
 .atlas-heading h2 { font-size: 22px; font-weight: 650; letter-spacing: -.025em; }
+.atlas-reset svg, .atlas .display-toggle { display: none; }
+.display-options { display: contents; }
 .atlas-toolbar { display: flex; flex-wrap: wrap; gap: 14px; }
 .atlas label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--app-muted-foreground); }
 .atlas input, .atlas select { min-height: 44px; border: 1px solid var(--app-input); background: var(--app-card); border-radius: 9px; padding: 8px 12px; font-size: 14px; color: var(--app-foreground); min-width: 0; }
@@ -1002,28 +1012,33 @@ function setBloom(event: Event): void {
 .inspector-relations small, .atlas-muted, .inspector-prompt { color: var(--app-muted-foreground); font-size: 12px; }
 .inspector-relations p { font-size: 12px; margin-block-start: 8px; }
 @media (max-width: 1000px) { .atlas-workspace { grid-template-columns: minmax(0, 1fr) 270px; gap: 12px; } .atlas-overview { grid-template-columns: 1fr; padding: 14px; } }
-@media (max-width: 700px) {
+@media (max-width: 700px), (pointer: coarse) and (max-height: 500px) and (max-width: 950px) {
   .atlas-workspace { display: flex; flex-direction: column; }
   .atlas-main, .atlas-inspector { width: 100%; }
-  .atlas-heading { align-items: start; }
-  .atlas-heading h2 { font-size: 18px; }
-  .atlas-heading { flex-direction: column; align-items: stretch; }
-  .atlas-heading-actions { justify-content: stretch; }
-  .atlas-heading-actions > button { font-size: 12px; }
-  /* Full width, with thumb-sized halves. */
-  .atlas-view-switch { width: 100%; }
-  .atlas .atlas-view-switch button { flex: 1; }
-  .atlas-toolbar > label { width: 100%; }
-  .atlas-fields { flex-wrap: nowrap; overflow-x: auto; padding-block-end: 4px; }
-  /* Thumb-sized Web tools, wrapping onto a second row. */
-  .web-tools { flex-wrap: wrap; }
-  .atlas .web-tool-group button, .atlas .web-depth select, .atlas-toolbar.is-web input { min-height: 44px; }
-  .atlas-fields button { flex-shrink: 0; max-width: 230px; }
-  .atlas-overview { max-height: 560px; }
-  /* The whole web is wider than tall: a shorter map wastes less of a phone screen. */
-  .atlas-map.is-web { height: min(440px, 56vh); }
-  .atlas-inspector { position: sticky; top: auto; bottom: 0; z-index: 2; border-radius: 18px 18px 0 0; box-shadow: 0 -4px 22px color-mix(in srgb, var(--app-foreground) 10%, transparent); }
-  .inspector-content { max-height: 45vh; padding: 16px; }
-  .atlas-inspector.is-collapsed { margin-block-start: 0; }
+  .atlas-heading { flex-direction: column; align-items: stretch; gap: 12px; margin-block-end: 16px; }
+  .atlas-heading h2 { font-size: 17px; }
+  .atlas-heading-actions { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 8px; }
+  .atlas-view-switch { min-width: 0; }
+  .atlas .atlas-view-switch button { flex: 1; min-width: 0; padding-inline: 4px; gap: 4px; }
+  .atlas .atlas-reset { display: grid; place-items: center; padding: 0; }
+  .atlas-reset svg { display: block; width: 18px; height: 18px; }
+  .atlas-reset span { display: none; }
+  .atlas .atlas-toolbar { display: flex; gap: 8px; align-items: end; margin-block-end: 14px; }
+  .atlas-toolbar .atlas-search, .atlas-toolbar.is-web .atlas-search { flex: 1 1 10rem; min-width: 0; }
+  .atlas .display-toggle { display: inline-flex; align-items: center; gap: 6px; }
+  .atlas-toolbar .display-options, .atlas-legend { display: none; }
+  .atlas-toolbar.display-open .display-options { display: grid; width: 100%; gap: 12px; padding: 12px; background: var(--app-muted); border-radius: 12px; }
+  .atlas-legend.display-open { display: block; }
+  .web-tools, .web-tool-group { flex-wrap: wrap; gap: 8px; }
+  .atlas .web-tool-group button, .atlas .web-depth select, .atlas .atlas-toolbar.is-web input, .atlas .atlas-fields.is-web button { min-height: 44px; }
+  .atlas-fields { flex-wrap: nowrap; overflow-x: auto; padding-block: 3px 6px; gap: 8px; }
+  .atlas-fields button, .field-chip { flex-shrink: 0; }
+  .atlas-fields button { max-width: 230px; }
+  .atlas-overview { padding: 16px; gap: 18px; max-height: none; }
+  .atlas-map.is-web { height: clamp(280px, 55dvh, 540px); }
+  .atlas-inspector:not(.has-selection) { display: none; }
+  .atlas-inspector { position: sticky; top: auto; bottom: 0; z-index: 2; border-radius: 16px; box-shadow: 0 -4px 22px color-mix(in srgb, var(--app-foreground) 16%, transparent); }
+  .atlas-inspector > header { padding-block: 4px; }
+  .inspector-content { max-height: 32dvh; padding: 16px; }
 }
 </style>

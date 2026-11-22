@@ -43,7 +43,9 @@ function place() {
   pos.value = { top, left }
 }
 
+const portal = ref<HTMLElement | string>('body')
 function show() {
+  portal.value = triggerRef.value?.closest<HTMLElement>('[data-modal-layer]') ?? 'body'
   place()
   open.value = true
   void nextTick(place)
@@ -87,7 +89,7 @@ onUnmounted(() => {
       </svg>
     </button>
 
-    <Teleport to="body">
+    <Teleport :to="portal">
       <Transition
         enter-active-class="transition duration-(--duration-fast) ease-out"
         enter-from-class="opacity-0 scale-95"

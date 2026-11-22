@@ -39,4 +39,9 @@ const PANS = [
 .map-tools.is-overlay span { margin: 0; min-width: 0; font-size: 11px; text-align: center; color: var(--app-muted-foreground); }
 .map-tools.is-overlay button { min-width: 32px; min-height: 32px; padding: 2px 6px; border-radius: 7px; font-size: 13px; line-height: 1; }
 @media (pointer: coarse) { .map-tools.is-overlay button { min-width: 40px; min-height: 40px; } }
+@media (max-width: 700px), (pointer: coarse) and (max-height: 500px) and (max-width: 950px) {
+  .map-tools.is-overlay { position: static; grid-template-columns: repeat(4, minmax(44px, 1fr)); align-items: stretch; gap: 8px; padding: 8px; border: 0; border-block-start: 1px solid var(--app-border); border-radius: 0; box-shadow: none; background: var(--app-card); }
+  .map-tools.is-overlay span { align-self: center; }
+  .map-tools.is-overlay button { min-width: 44px; min-height: 44px; }
+}
 </style>

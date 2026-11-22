@@ -98,7 +98,12 @@ test('Escape closes only the top dialog and preserves the outer scroll lock', as
   await page.getByRole('button', { name: 'Open long dialog' }).click()
   await page.getByRole('button', { name: 'Open nested dialog' }).focus()
   await page.keyboard.press('Enter')
-  await expect(page.getByRole('dialog', { name: 'Nested dialog', exact: true })).toBeVisible()
+  const nested = page.getByRole('dialog', { name: 'Nested dialog', exact: true })
+  await expect(nested).toBeVisible()
+  await expect.poll(() => nested.evaluate(dialog => {
+    const { x, y, width, height } = dialog.getBoundingClientRect()
+    return dialog.contains(document.elementFromPoint(x + width / 2, y + height / 2))
+  })).toBe(true)
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog', { name: 'Nested dialog', exact: true })).not.toBeVisible()
   await expect(page.getByRole('dialog', { name: 'Long settings dialog' })).toBeVisible()

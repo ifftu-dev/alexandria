@@ -146,11 +146,11 @@ function isEdgeHighlighted(e: LayoutEdge): boolean {
 
 <template>
   <div class="card overflow-hidden">
-    <div class="p-3 border-b border-border flex items-center justify-between">
+    <div class="p-4 border-b border-border flex flex-wrap items-center justify-between gap-3">
       <div class="text-xs text-muted-foreground">
         {{ $t('skills.graph.summary', { skills: layout.nodes.length, edges: layout.edges.length }) }}
       </div>
-      <div class="flex items-center gap-3">
+      <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div v-for="(color, level) in BLOOM_FILLS" :key="level" class="flex items-center gap-1">
           <span class="w-2.5 h-2.5 rounded-full" :style="{ backgroundColor: color }" />
           <span class="text-[0.6rem] text-muted-foreground">{{ level }}</span>

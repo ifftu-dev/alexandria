@@ -311,3 +311,28 @@ test('review: Browse Goal saves a goal instead of opening course discovery', asy
   await expect(page.locator('output')).toHaveText('/goals')
   await expect(page.locator('.fixture-page')).toContainText('Big-O')
 })
+
+test('the expanded phone graph gives the canvas the screen and keeps display controls reachable', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 })
+  await page.goto('/tests/desktop-ui/?screen=personal-atlas')
+  await page.getByRole('button', { name: /Expand skill map/ }).click()
+  const dialog = page.getByRole('dialog')
+  const map = dialog.getByRole('group', { name: 'Skill map' })
+  await expect(map).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeFocused()
+  // Two 12px gutters, the map border and WebKit's 8px scrollbar.
+  await expect.poll(() => map.evaluate(el => el.clientWidth)).toBeGreaterThanOrEqual(286)
+  const bounds = (await map.boundingBox())!
+  await expect(map).toBeInViewport({ ratio: 0.75 })
+  await expect(dialog.getByRole('complementary')).toHaveCount(0)
+  const tools = dialog.locator('.map-tools')
+  expect((await tools.boundingBox())!.y).toBeGreaterThanOrEqual(bounds.y + bounds.height - 1)
+  const display = dialog.getByRole('button', { name: 'Display', exact: true })
+  await display.click()
+  const names = dialog.getByRole('button', { name: 'Names', exact: true })
+  await names.click()
+  await display.click()
+  await expect(names).toBeHidden()
+  await display.click()
+  await expect(names).toHaveAttribute('aria-pressed', 'true')
+})

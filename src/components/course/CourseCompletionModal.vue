@@ -28,7 +28,7 @@ const {
 
 const dialog = ref<HTMLElement | null>(null)
 const titleId = useId()
-useModalFocus(() => isOpen.value, dialog, close)
+const layer = useModalFocus(() => isOpen.value, dialog, close)
 
 const endorsementImportJson = ref('')
 const endorsementUiMessage = ref('')
@@ -228,7 +228,7 @@ function continueToDashboard() {
 <template>
   <Teleport to="body">
     <Transition name="celebrate" @before-leave="(el: Element) => el.setAttribute('inert', '')" @before-enter="(el: Element) => el.removeAttribute('inert')">
-      <div v-if="isOpen" class="celebrate-root" @click.self="close">
+      <div v-if="isOpen" class="celebrate-root" data-modal-layer :style="{ '--modal-depth': layer }" @click.self="close">
         <div class="celebrate-backdrop" aria-hidden="true" @click="close" />
 
         <!-- Confetti layer -->
@@ -456,7 +456,6 @@ function continueToDashboard() {
 .celebrate-root {
   position: fixed;
   inset: 0;
-  z-index: 70;
   display: flex;
   align-items: center;
   justify-content: center;

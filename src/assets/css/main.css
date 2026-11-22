@@ -13,6 +13,7 @@
 /* CSS Custom Properties — Light Mode (real color values for Tailwind v4) */
 :root {
   color-scheme: light;
+  --modal-layer-base: 300;
   --app-background: rgb(247, 246, 243);
   --app-foreground: rgb(23, 25, 35);
   --app-muted: rgb(233, 231, 226);
@@ -695,6 +696,11 @@ select optgroup {
   font-weight: 500;
   color: var(--app-foreground);
   margin-bottom: 0.375rem;
+}
+
+/* Body portals sit above app chrome. Dialogs share the order of their focus stack. */
+[data-modal-layer] {
+  z-index: calc(var(--modal-layer-base) + var(--modal-depth));
 }
 
 /* Cards */

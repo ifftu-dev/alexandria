@@ -41,7 +41,7 @@ watch(() => props.visible, (visible, _old, onCleanup) => {
 </script>
 
 <template>
-  <AppModal :open="visible" :title="$t('skills.graph.modalTitle')" max-width="90rem" @close="emit('close')">
+  <AppModal :open="visible" :title="$t('skills.graph.modalTitle')" max-width="90rem" mobile-fullscreen @close="emit('close')">
     <p v-if="actionError" role="alert">{{ actionError }}</p>
     <div v-if="shownError" role="alert"><p>{{ shownError }}</p><button type="button" @click="retry">{{ $t('common.actions.retry') }}</button></div>
     <SkillAtlasExplorer v-if="visible && model" v-model:view-mode="viewMode" :model="model" :view="modalView" :feedback="atlas.feedbackFor('modal')"
