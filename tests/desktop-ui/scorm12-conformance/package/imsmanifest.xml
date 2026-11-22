@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A SCORM 1.2 package for the conformance checks: a probe lesson the tests
+     drive call by call (with every value a manifest can give a lesson), the
+     same probe with none of them, and a page with long media. -->
+<manifest identifier="dev.alexandria.fixture.scorm12-conformance" version="1.0"
+    xmlns="http://www.imsproject.org/xsd/imscp_rootv1p1p2"
+    xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_rootv1p2">
+  <metadata>
+    <schema>ADL SCORM</schema>
+    <schemaversion>1.2</schemaversion>
+  </metadata>
+  <organizations default="conformance">
+    <organization identifier="conformance">
+      <title>SCORM 1.2 conformance</title>
+      <item identifier="probe" identifierref="res-probe">
+        <title>Probe with manifest values</title>
+        <adlcp:datafromlms>chapter=3&amp;mode=practice</adlcp:datafromlms>
+        <adlcp:masteryscore>75</adlcp:masteryscore>
+        <adlcp:maxtimeallowed>0000:30:00</adlcp:maxtimeallowed>
+        <adlcp:timelimitaction>exit,message</adlcp:timelimitaction>
+      </item>
+      <item identifier="plain" identifierref="res-plain">
+        <title>Probe without manifest values</title>
+      </item>
+      <item identifier="media" identifierref="res-media">
+        <title>Long media</title>
+      </item>
+    </organization>
+  </organizations>
+  <resources>
+    <resource identifier="res-probe" type="webcontent" adlcp:scormtype="sco" href="probe.html">
+      <file href="probe.html"/>
+    </resource>
+    <resource identifier="res-plain" type="webcontent" adlcp:scormtype="sco" href="probe.html?plain">
+      <file href="probe.html"/>
+    </resource>
+    <resource identifier="res-media" type="webcontent" adlcp:scormtype="asset" href="media.html">
+      <file href="media.html"/>
+    </resource>
+  </resources>
+</manifest>

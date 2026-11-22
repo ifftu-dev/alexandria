@@ -351,6 +351,12 @@ const router = createRouter({
       meta: { layout: 'app' },
     },
     {
+      path: '/activity-log',
+      name: 'activity-log',
+      component: () => import('@/pages/dashboard/ActivityLog.vue'),
+      meta: { layout: 'app' },
+    },
+    {
       path: '/reputation',
       name: 'reputation',
       component: () => import('@/pages/dashboard/Reputation.vue'),

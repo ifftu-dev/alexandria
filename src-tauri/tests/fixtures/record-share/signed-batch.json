@@ -1,0 +1,43 @@
+{
+  "batch": {
+    "format": "alexandria-record-batch/1",
+    "grant_id": "0d5b8f3e-1c2a-4b6d-8e9f-7a1b2c3d4e5f",
+    "subject_did": "did:key:z6Mkon3Necd6NkkyfoGoHxid2znGc59LU3K7mubaRcFbLfLX",
+    "batch_id": "9b2f6c1e-4d3a-4e8b-a7c5-1f0e2d3c4b5a",
+    "created": 1795165200,
+    "statements": [
+      {
+        "id": "c59dae73-b88a-864c-a537-93576a7cec4f",
+        "actor": {
+          "objectType": "Agent",
+          "account": {
+            "homePage": "urn:uuid:044eac38-2871-47c7-a8d8-5c25a8a9479c",
+            "name": "z6MkoquPNS2WfBYe3vsxhoQGa121YVBZpvoRwuncUYJoibCT"
+          }
+        },
+        "verb": {
+          "id": "http://adlnet.gov/expapi/verbs/registered",
+          "display": {
+            "en-US": "registered"
+          }
+        },
+        "object": {
+          "objectType": "Activity",
+          "id": "did:key:z6MkwVDfCg9LbbY6xjH3EZk8YSFQZujV5Y4y1ZWeER9tDiN3/courses/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "definition": {
+            "type": "http://adlnet.gov/expapi/activities/course",
+            "name": {
+              "en-US": "Warehouse safety"
+            }
+          }
+        },
+        "timestamp": "2026-11-20T09:00:00.000Z",
+        "context": {
+          "registration": "304ef15f-73e4-8447-b9cb-33548af888bc",
+          "platform": "Alexandria"
+        }
+      }
+    ]
+  },
+  "signature": "1aVSWIMdAKabPcxsrLa0Z_ntdWZDHyhS4QYAH4weT8iG_YhkOqoS__B_WJ37BqH4h7XCV_wSC0wx9-pqTNXiBw"
+}

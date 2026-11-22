@@ -44,10 +44,16 @@ pub mod instructor;
 pub mod integrity;
 pub mod integrity_companion;
 pub mod interview;
+pub mod learning_records;
 #[cfg(test)]
 mod live_demo;
 pub mod notifications;
 pub mod opinions;
+pub mod package_attempts;
+pub mod package_cmi5;
+pub mod package_launches;
+pub mod package_previews;
+pub mod packages;
 pub mod personhood_lab;
 pub mod personhood_receipts;
 pub mod pinning;
@@ -55,6 +61,7 @@ pub mod plugins;
 pub mod presentation;
 pub mod probes;
 pub mod profile;
+pub mod record_destinations;
 pub mod reputation;
 pub mod role_assessment;
 pub mod sentinel_display;
@@ -98,6 +105,20 @@ pub mod interview_panel;
 pub mod organisations;
 
 pub mod discussions;
+
+/// The active profile's database as the standards modules take it
+/// ([`crate::packages::PackageDb`]): work of `workload`, under the command's
+/// profile lease.
+pub(crate) fn executor_db<'a>(
+    state: &'a State<'_, AppState>,
+    workload: DatabaseWorkload,
+) -> crate::packages::ExecutorDb<'a> {
+    crate::packages::ExecutorDb {
+        executor: &state.db_executor,
+        lease: state.profile_lease(),
+        workload,
+    }
+}
 
 /// Runs `f` on the active profile's database as learner work, under the
 /// command's profile lease, so it is refused once the profile it started

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- A SCORM 2004 2nd Edition package (CAM 1.3): two lessons in flow, the
+     second disabled until the first is satisfied. It shows a 2nd Edition
+     package running on the same runtime as a 4th Edition one. -->
+<manifest identifier="dev.alexandria.fixture.scorm2004-edition2" version="1.0"
+    xmlns="http://www.imsglobal.org/xsd/imscp_v1p1"
+    xmlns:adlcp="http://www.adlnet.org/xsd/adlcp_v1p3"
+    xmlns:adlseq="http://www.adlnet.org/xsd/adlseq_v1p3"
+    xmlns:imsss="http://www.imsglobal.org/xsd/imsss">
+  <metadata>
+    <schema>ADL SCORM</schema>
+    <schemaversion>CAM 1.3</schemaversion>
+  </metadata>
+  <organizations default="edition2">
+    <organization identifier="edition2">
+      <title>SCORM 2004 2nd Edition</title>
+      <item identifier="first" identifierref="res-first">
+        <title>First lesson</title>
+        <adlcp:dataFromLMS>edition=2</adlcp:dataFromLMS>
+        <imsss:sequencing>
+          <imsss:objectives>
+            <imsss:primaryObjective objectiveID="first-pass" satisfiedByMeasure="true">
+              <imsss:minNormalizedMeasure>0.8</imsss:minNormalizedMeasure>
+              <imsss:mapInfo targetObjectiveID="g-first" writeSatisfiedStatus="true"/>
+            </imsss:primaryObjective>
+          </imsss:objectives>
+        </imsss:sequencing>
+      </item>
+      <item identifier="second" identifierref="res-second">
+        <title>Second lesson</title>
+        <imsss:sequencing>
+          <imsss:sequencingRules>
+            <imsss:preConditionRule>
+              <imsss:ruleConditions conditionCombination="any">
+                <imsss:ruleCondition referencedObjective="second-gate" operator="not" condition="satisfied"/>
+                <imsss:ruleCondition referencedObjective="second-gate" operator="not" condition="objectiveStatusKnown"/>
+              </imsss:ruleConditions>
+              <imsss:ruleAction action="disabled"/>
+            </imsss:preConditionRule>
+          </imsss:sequencingRules>
+          <imsss:objectives>
+            <imsss:primaryObjective objectiveID="second-pass"/>
+            <imsss:objective objectiveID="second-gate">
+              <imsss:mapInfo targetObjectiveID="g-first" readSatisfiedStatus="true"/>
+            </imsss:objective>
+          </imsss:objectives>
+        </imsss:sequencing>
+      </item>
+      <imsss:sequencing>
+        <imsss:controlMode choice="true" flow="true"/>
+      </imsss:sequencing>
+    </organization>
+  </organizations>
+  <resources>
+    <resource identifier="res-first" type="webcontent" adlcp:scormType="sco" href="probe.html?first">
+      <file href="probe.html"/>
+    </resource>
+    <resource identifier="res-second" type="webcontent" adlcp:scormType="sco" href="probe.html?second">
+      <file href="probe.html"/>
+    </resource>
+  </resources>
+</manifest>

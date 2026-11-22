@@ -1,0 +1,60 @@
+{
+  "description": "A record-only share of everything asked for, under the account the app derived for this organisation.",
+  "now": 1791000000,
+  "request": {
+    "id": "6f1d0c52-3a8e-4f7b-9d2a-0c1e5b7a9f10",
+    "audience": "urn:alexandria:org:hr.example.org",
+    "nonce": "2b7e1516-28ae-4d2a-abf7-158809cf4f3c",
+    "organization": "Example Org",
+    "subject_did": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+    "skill_ids": [],
+    "purpose": "Mandatory safety training reporting",
+    "network_id": "preprod",
+    "created_at": 1790999940,
+    "expires_at": 1792209600,
+    "records": {
+      "course_ids": [
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      ],
+      "kinds": [
+        "completion",
+        "interaction"
+      ],
+      "account": {
+        "home_page": "https://hr.example.org",
+        "name": "E-1042"
+      }
+    }
+  },
+  "signed": {
+    "statement": {
+      "format": "alexandria-grant/1",
+      "action": "grant",
+      "grant_id": "0d5b8f3e-1c2a-4b6d-8e9f-7a1b2c3d4e5f",
+      "request_id": "6f1d0c52-3a8e-4f7b-9d2a-0c1e5b7a9f10",
+      "audience": "urn:alexandria:org:hr.example.org",
+      "nonce": "2b7e1516-28ae-4d2a-abf7-158809cf4f3c",
+      "subject_did": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z",
+      "skill_ids": [],
+      "sync": false,
+      "created": 1791000000,
+      "records": {
+        "course_ids": [
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ],
+        "kinds": [
+          "completion",
+          "interaction"
+        ],
+        "account": {
+          "home_page": "urn:uuid:044eac38-2871-47c7-a8d8-5c25a8a9479c",
+          "name": "z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
+        }
+      }
+    },
+    "signature": "ZD62yA4eFAYi7ztiWbkpTfoJP5G8mPRa9RTNFYba26hBW0_6sa3jcRTwnAcwAejZ9GuD8C0QaurNO0Y7AhPKBA"
+  },
+  "expect": "accept"
+}

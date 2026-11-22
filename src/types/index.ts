@@ -253,6 +253,497 @@ export interface PublishCourseResult {
   size: number
 }
 
+// ---- Standards packages (src-tauri/src/domain/package.rs) ----
+// A package element has `element_type === 'package'` and its `content_cid`
+// is the archive hash.
+
+export type PackageStandard = 'scorm12' | 'scorm2004' | 'cmi5'
+export type PackageEdition = '2nd' | '3rd' | '4th'
+
+export interface PackageLaunch {
+  /** Archive path, '/'-separated, percent-decoded. */
+  path: string
+  /** Starts with '?' or '#'; appended verbatim after the path. */
+  parameters?: string
+  kind: 'sco' | 'asset' | 'assignable_unit'
+  launch_data?: string
+  /** On the scale of the package's own standard. */
+  mastery_score?: number
+  max_time_allowed?: string
+  time_limit_action?: string
+}
+
+export interface PackageActivity {
+  id: string
+  title: string
+  visible: boolean
+  /** Absent for a heading. */
+  launch?: PackageLaunch
+  prerequisites?: string
+  /** SCORM 2004 `imsss:sequencing`, any sequencing collection already applied. */
+  sequencing?: PackageSequencing
+  /** SCORM 2004 `adlcp:completionThreshold`. */
+  completion_threshold?: PackageCompletionThreshold
+  /** SCORM 2004 `adlnav:hideLMSUI`: player controls hidden while this activity is delivered. */
+  hide_lms_ui?: PackageNavigationControl[]
+  /** SCORM 2004 `adlcp:data`. */
+  shared_data?: PackageSharedDataMap[]
+  children?: PackageActivity[]
+  /** cmi5 blocks and assignable units only (`Cmi5Activity` in the studio crate). */
+  cmi5?: PackageCmi5Activity
+}
+
+/** What a cmi5 course structure says about a block or unit beyond the tree. */
+export interface PackageCmi5Activity {
+  /** Units only: when the unit counts as satisfied. */
+  move_on?: 'passed' | 'completed' | 'completed_and_passed' | 'completed_or_passed' | 'not_applicable'
+  /** Units only: whether the unit asks for a window of its own. */
+  launch_method?: 'any_window' | 'own_window'
+  entitlement_key?: string
+  activity_type?: string
+  objectives?: string[]
+}
+
+// SCORM 2004 sequencing, as `alexandria_studio::package::sequencing` describes
+// it: snake_case keys, enumerated values spelled as the manifest spells them.
+// An element present in the manifest has every attribute filled in.
+
+export type PackageNavigationControl = 'previous' | 'continue' | 'exit' | 'exitAll' | 'abandon' | 'abandonAll' | 'suspendAll'
+export type PackageConditionCombination = 'all' | 'any'
+export type PackageConditionOperator = 'noOp' | 'not'
+export type PackageRequiredFor = 'always' | 'ifAttempted' | 'ifNotSkipped' | 'ifNotSuspended'
+export type PackageTiming = 'never' | 'once' | 'onEachNewAttempt'
+
+export interface PackageSequencing {
+  /** Provenance only: the collection is already merged in. */
+  collection?: string
+  control_mode?: {
+    choice: boolean
+    choice_exit: boolean
+    flow: boolean
+    forward_only: boolean
+    use_current_attempt_objective_info: boolean
+    use_current_attempt_progress_info: boolean
+  }
+  sequencing_rules?: {
+    pre_condition_rules?: PackageSequencingRule[]
+    exit_condition_rules?: PackageSequencingRule[]
+    post_condition_rules?: PackageSequencingRule[]
+  }
+  limit_conditions?: { attempt_limit?: number, attempt_absolute_duration_limit?: string }
+  rollup_rules?: {
+    rollup_objective_satisfied: boolean
+    rollup_progress_completion: boolean
+    objective_measure_weight: number
+    rules?: PackageRollupRule[]
+  }
+  objectives?: { primary: PackageObjective, others?: PackageObjective[] }
+  adl_objectives?: { id: string, map_info: PackageAdlMapInfo[] }[]
+  randomization_controls?: {
+    randomization_timing: PackageTiming
+    select_count?: number
+    reorder_children: boolean
+    selection_timing: PackageTiming
+  }
+  delivery_controls?: { tracked: boolean, completion_set_by_content: boolean, objective_set_by_content: boolean }
+  constrained_choice_considerations?: { prevent_activation: boolean, constrain_choice: boolean }
+  rollup_considerations?: {
+    required_for_satisfied: PackageRequiredFor
+    required_for_not_satisfied: PackageRequiredFor
+    required_for_completed: PackageRequiredFor
+    required_for_incomplete: PackageRequiredFor
+    measure_satisfaction_if_active: boolean
+  }
+}
+
+export interface PackageSequencingRule {
+  condition_combination: PackageConditionCombination
+  conditions: {
+    condition: string
+    operator: PackageConditionOperator
+    referenced_objective?: string
+    measure_threshold?: number
+  }[]
+  action: string
+}
+
+export interface PackageRollupRule {
+  child_activity_set: 'all' | 'any' | 'none' | 'atLeastCount' | 'atLeastPercent'
+  minimum_count: number
+  minimum_percent: number
+  condition_combination: PackageConditionCombination
+  conditions: { condition: string, operator: PackageConditionOperator }[]
+  action: 'satisfied' | 'notSatisfied' | 'completed' | 'incomplete'
+}
+
+export interface PackageObjective {
+  id?: string
+  satisfied_by_measure: boolean
+  min_normalized_measure: number
+  map_info?: PackageMapInfo[]
+}
+
+export interface PackageMapInfo {
+  target_objective_id: string
+  read_satisfied_status: boolean
+  read_normalized_measure: boolean
+  write_satisfied_status: boolean
+  write_normalized_measure: boolean
+}
+
+export interface PackageAdlMapInfo {
+  target_objective_id: string
+  read_raw_score: boolean
+  read_min_score: boolean
+  read_max_score: boolean
+  read_completion_status: boolean
+  read_progress_measure: boolean
+  write_raw_score: boolean
+  write_min_score: boolean
+  write_max_score: boolean
+  write_completion_status: boolean
+  write_progress_measure: boolean
+}
+
+export interface PackageCompletionThreshold {
+  completed_by_measure: boolean
+  min_progress_measure: number
+  progress_weight: number
+}
+
+export interface PackageSharedDataMap {
+  target_id: string
+  read_shared_data: boolean
+  write_shared_data: boolean
+}
+
+export interface PackageDescription {
+  standard: PackageStandard
+  edition?: PackageEdition
+  identifier: string
+  title: string
+  /** Root is the default organization and is never launchable. */
+  tree: PackageActivity
+  files: number
+  uncompressed_bytes: number
+}
+
+/** `draft`: kept on this device only, never served. `store`: in the served content store. */
+export type PackageArchiveLocation = 'draft' | 'store'
+
+export interface Package {
+  hash: string
+  standard: PackageStandard
+  edition?: PackageEdition
+  title: string
+  description: PackageDescription
+  archive_bytes: number
+  location: PackageArchiveLocation
+  imported_at: string
+  last_opened_at: string | null
+}
+
+export interface OpenedPackageFile {
+  package: Package
+  course_id: string
+  chapter_id: string
+  element_id: string
+}
+
+/** A package file opened to learn from, with the learner's local enrolment in its draft course. */
+export interface OpenedPackageCourse extends OpenedPackageFile {
+  enrollment_id: string
+}
+
+export interface PackageExtractProgress {
+  hash: string
+  files_done: number
+  files_total: number
+  bytes_done: number
+  bytes_total: number
+}
+
+/**
+ * An open launch (src-tauri/src/domain/package_launch.rs): the package's
+ * files are served under `base_url` until `package_launch_close(prefix)`.
+ * `base_url` is `package://localhost/<prefix>/` on macOS, iOS and Linux and
+ * `http://package.localhost/<prefix>/` on Windows and Android.
+ */
+export interface OpenedPackageLaunch {
+  prefix: string
+  package_hash: string
+  base_url: string
+}
+
+export type PackageAttemptStatus = 'in_progress' | 'completed' | 'closed'
+
+export interface PackageAttempt {
+  id: string
+  enrollment_id: string
+  element_id: string
+  package_hash: string
+  attempt_number: number
+  status: PackageAttemptStatus
+  started_at: string
+  ended_at: string | null
+  updated_at: string
+}
+
+/** What the player's wrapper loads before one lesson of a package starts. */
+export interface PackageLaunchInit {
+  attempt_id: string
+  activity_id: string
+  standard: PackageStandard
+  /** Pseudonymous: per learner and package, never the learner's DID. */
+  learner_id: string
+  learner_name: string
+  /** `ab-initio`, `resume` or empty. */
+  entry: string
+  launch_data: string | null
+  mastery_score: number | null
+  max_time_allowed: string | null
+  time_limit_action: string | null
+  /** Hand to the run-time library's `loadFromJSON` before the lesson loads. */
+  runtime: { cmi: Record<string, unknown> }
+  /** Set when the launch itself completed the activity (shown-only content). */
+  progress: PackageAttemptProgress | null
+}
+
+/** One coalesced commit: the whole run-time state of one activity. */
+export interface PackageCommit {
+  attempt_id: string
+  activity_id: string
+  /** True for the commit the content's own finish call produced. */
+  session_ended: boolean
+  runtime: { cmi: Record<string, unknown> }
+}
+
+/**
+ * What the wrapper hands the host after the SCORM 2004 sequencing engine
+ * navigates: its opaque snapshot, kept per attempt, and its rollup of the
+ * root activity (the package is complete when that is `completed`).
+ */
+export interface PackageSequencingState {
+  attempt_id: string
+  snapshot: string
+  root: { completion_status: string }
+}
+
+/** What one lesson of an attempt has reported: a table-of-contents row. */
+export interface PackageActivityResult {
+  activity_id: string
+  /** Launched in this attempt. */
+  started: boolean
+  complete: boolean
+  /** 0..1, self-reported by the content. */
+  score: number | null
+}
+
+export interface PackageAttemptProgress {
+  attempt: PackageAttempt
+  element_progress: ElementProgress
+  package_completed: boolean
+  cache_dropped: boolean
+}
+
+/**
+ * One launch of a cmi5 assignable unit (src-tauri/src/domain/package_attempt.rs),
+ * from `package_cmi5_launch`. `url` already carries the cmi5 launch parameters.
+ */
+export interface Cmi5Launch {
+  session_id: string
+  attempt_id: string
+  activity_id: string
+  url: string
+  /** Desktop: the unit opened in a window of its own. */
+  own_window: boolean
+  /** Mobile: the unit asked for its own window; it plays framed in forced focus mode. */
+  focus_forced: boolean
+}
+
+/**
+ * The activity log's size against its visible limit
+ * (src-tauri/src/domain/learning_record.rs), from `learning_records_usage`.
+ */
+export interface LearningRecordUsage {
+  bytes: number
+  limit_bytes: number
+  records: number
+  interaction_records: number
+}
+
+// Sending learning records (mirrors src-tauri/src/domain/record_sending.rs).
+
+/** What a recipient receives: these courses' records, completion-level always, interaction-level only when chosen. */
+export interface RecordScope {
+  course_ids: string[]
+  include_interactions: boolean
+}
+
+export type RecipientKind = 'destination' | 'share'
+
+/**
+ * The identifier a recipient sees: one made only for it, the learner's own
+ * DID, or (record shares only) the account the organisation proposed.
+ */
+export type IdentifierChoice = 'pairwise' | 'real_did' | 'proposed'
+
+export interface CourseChoice {
+  id: string
+  title: string
+}
+
+/** What the consent screen shows for a store before approval. Producing it sends nothing. */
+export interface DestinationPreview {
+  endpoint: string
+  location: 'device' | 'private_network' | 'remote'
+  needs_confirmation: boolean
+  pairwise_actor: string
+  real_did_actor: string
+  courses: CourseChoice[]
+}
+
+/** What the learner approved on the record consent screen. */
+export interface RecordConsentDecision {
+  course_ids: string[]
+  include_interactions: boolean
+  identifier: IdentifierChoice
+  confirm_private: boolean
+}
+
+export interface NewDestinationRequest {
+  address: string
+  username: string
+  secret: string
+  course_ids: string[]
+  include_interactions: boolean
+  identifier: IdentifierChoice
+  confirm_private: boolean
+}
+
+export interface OutboxStatus {
+  queued: number
+  failed: number
+  sent: number
+  last_error: string | null
+  next_attempt_at: string | null
+  last_sent_at: string | null
+}
+
+/** A record destination; never carries the store's secret. */
+export interface RecordDestination {
+  id: string
+  endpoint: string
+  location: 'device' | 'private_network' | 'remote'
+  username: string
+  identifier: 'pairwise' | 'real_did' | 'proposed'
+  actor_name: string
+  scope: RecordScope
+  xapi_version: string
+  created_at: string
+  status: OutboxStatus
+}
+
+export interface RemovalReport {
+  voided: number
+  void_error: string | null
+}
+
+/** An xAPI account (`homePage`, `name`) records name the learner by. */
+export interface RecordAccount {
+  home_page: string
+  name: string
+}
+
+/** What a record share request offers the learner to decide on. */
+export interface RecordShareOffer {
+  courses: CourseChoice[]
+  interactions_requested: boolean
+  pairwise_actor: string
+  real_did_actor: string
+  proposed_account: RecordAccount | null
+}
+
+/** The learner's answer to the records part of an access request. */
+export interface RecordShareDecision {
+  course_ids: string[]
+  include_interactions: boolean
+  identifier: IdentifierChoice
+}
+
+/** A grant's record share as the learner sees it. */
+export interface GrantRecords {
+  courses: CourseChoice[]
+  include_interactions: boolean
+  identifier: '' | 'pairwise' | 'real_did' | 'proposed'
+  actor_name: string
+  /** Absent once the share has stopped sending. */
+  status: OutboxStatus | null
+}
+
+/** What an access log row records (`AccessAction` in src-tauri/src/domain/record_sending.rs). */
+export type AccessAction = 'send' | 'void'
+
+/** One send in the learner-readable access log. */
+export interface RecordAccessEntry {
+  seq: number
+  at: string
+  recipient_id: string
+  recipient_kind: RecipientKind
+  recipient_name: string
+  action: AccessAction
+  scope: RecordScope
+  record_count: number
+  identifier: string
+  accepted: boolean
+  detail: string | null
+}
+
+/**
+ * A record a recipient refused at its last try
+ * (src-tauri/src/record_sending/outbox.rs), from `record_send_failures`,
+ * shown in the activity log beside the record.
+ */
+export interface SendFailure {
+  recipient_id: string
+  record_id: string
+  attempts: number
+  last_error: string
+  next_attempt_at: string | null
+}
+
+/**
+ * One row of the activity log view (src-tauri/src/domain/learning_record.rs),
+ * from `learning_records_list`, newest first.
+ */
+export interface LearningRecordEntry {
+  id: string
+  kind: 'completion' | 'interaction'
+  /** xAPI verb short name: registered, launched, progressed, completed, passed, failed, scored, responded, voided, satisfied, abandoned (cmi5). */
+  verb: string
+  course_id: string
+  course_title: string | null
+  element_id: string | null
+  element_title: string | null
+  /** The activity's identifier, a DID URL. */
+  activity_id: string
+  summary: boolean
+  bytes: number
+  recorded_at: string
+  percent: number | null
+  /** Scaled score, -1 to 1. */
+  score: number | null
+}
+
+/**
+ * A signed activity log export, from `learning_records_export`: write both
+ * strings to disk unchanged; the signature covers the statement file's exact bytes.
+ */
+export interface LearningRecordExport {
+  statements: string
+  signature: string
+}
+
 export interface AuthorizedCourseAttestor {
   did: string
   public_key_hex: string
@@ -3353,6 +3844,15 @@ export interface AccessRequest {
   network_id: string
   created_at: number
   expires_at: number
+  /** Learning records asked for, beside or instead of skills. */
+  records?: AccessRecordScope
+}
+
+/** The records part of an access request or grant (alexandria_verify::access::RecordScope). */
+export interface AccessRecordScope {
+  course_ids: string[]
+  kinds: ('completion' | 'interaction')[]
+  account?: RecordAccount
 }
 
 /** One requested skill, as the learner can answer it. */
@@ -3373,6 +3873,8 @@ export interface AccessRequestItem {
   orgProof: OrgProof | null
   org: OrgCheck
   skills: SkillChoice[]
+  /** The records part of the request, as the consent screen shows it. */
+  records: RecordShareOffer | null
 }
 
 /** Access the learner has given an organisation. Times are unix seconds unless noted. */
@@ -3390,6 +3892,8 @@ export interface GrantView {
   /** RFC 3339, as Alexandria Cloud reports it. */
   lastViewedAt: string | null
   viewCount: number | null
+  /** The learning records this grant shares, if any. */
+  records: GrantRecords | null
 }
 
 export interface GrantsView {

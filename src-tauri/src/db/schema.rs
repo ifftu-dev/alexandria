@@ -157,6 +157,28 @@ pub const MIGRATIONS: &[(i64, &str, &str)] = &[
     // policy on an attempt started from one, so its floor and probe policy
     // apply the way a sponsor role's do. See `crate::commands::exchange`.
     (43, "exchange_requests", include_str!("exchange_requests.sql")),
+    // Standards packages: each archive's hash, standard and parsed activity
+    // tree, and whether the archive is a draft kept outside the served store
+    // or has moved into it. See `crate::packages`.
+    (44, "packages", include_str!("packages.sql")),
+    // Package attempts and their run-time state, device-local, plus the
+    // triggers that keep a package element from ever being graded,
+    // skill-tagged or given grading configuration. See
+    // `crate::packages::attempts`.
+    (45, "package_attempts", include_str!("package_attempts.sql")),
+    // Learning records the app writes about the learner's own activity, the
+    // per-recipient outbox the sending code fills, and the creator DID their
+    // activity identifiers are anchored to. See `crate::learning_records`.
+    (46, "learning_records", include_str!("learning_records.sql")),
+    // Record sending: the recipients the learner approved and each one's
+    // scope and identifier, the stores the learner named with the
+    // credentials they issued, and the learner-readable access log of every
+    // send. See `crate::record_sending`.
+    (47, "record_sending", include_str!("record_sending.sql")),
+    // cmi5 sessions: each launch of an assignable unit, the statements its
+    // on-device endpoint accepted or the launching system wrote, and the
+    // xAPI documents cmi5 needs. See `crate::packages::attempts::cmi5`.
+    (48, "cmi5_sessions", include_str!("cmi5_sessions.sql")),
 ];
 
 pub(crate) const MIGRATION_018_CALL_KINDS: &str = r#"

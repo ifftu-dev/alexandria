@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>SCORM 2004 probe</title>
+  </head>
+  <body>
+    <h1>SCORM 2004 probe</h1>
+    <pre id="seen"></pre>
+    <script>
+      // Finds the API with the discovery algorithm the SCORM 2004 test suite's
+      // lessons use (parents, then the opener's parents) and does nothing
+      // else: the conformance checks drive it call by call through
+      // `window.probe`, before Initialize too. The same page stands in for
+      // every lesson page of the test suite's packages.
+      function findAPI(win) {
+        var tries = 0;
+        while (win.API_1484_11 == null && win.parent != null && win.parent != win) {
+          if (++tries > 500) return null;
+          win = win.parent;
+        }
+        return win.API_1484_11;
+      }
+      var api = findAPI(window);
+      if (api == null && window.opener != null) api = findAPI(window.opener);
+      window.probe = {
+        api: api,
+        // Runs [name, ...args] calls in order; each result carries the
+        // return value and the error code the API reported after it.
+        run: function (calls) {
+          return calls.map(function (call) {
+            var value = api[call[0]].apply(null, call.slice(1));
+            return { call: call, value: String(value), error: String(api.GetLastError()) };
+          });
+        },
+      };
+      var query = {};
+      location.search.replace(/^\?/, '').split('&').forEach(function (pair) {
+        if (pair) query[decodeURIComponent(pair.split('=')[0])] = decodeURIComponent(pair.split('=').slice(1).join('='));
+      });
+      var seen = document.getElementById('seen');
+      // `load` tells one delivery from the next, also of the same lesson.
+      seen.setAttribute('data-values', JSON.stringify({
+        found: api != null,
+        load: String(Math.random()).slice(2),
+        tc: query.tc || null,
+        act: query.act || null,
+      }));
+      seen.setAttribute('data-ready', '');
+    </script>
+  </body>
+</html>

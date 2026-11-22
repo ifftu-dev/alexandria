@@ -1,0 +1,48 @@
+{
+  "format": "alexandria-record-export/1",
+  "cases": [
+    {
+      "statements": "statements.json",
+      "signature": "statements.json.sig",
+      "description": "The file and the signature the learner made over it.",
+      "expect": "accept",
+      "signer": "did:key:z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z"
+    },
+    {
+      "statements": "statements-tampered.json",
+      "signature": "statements.json.sig",
+      "description": "One verb changed after signing: the digest no longer matches.",
+      "expect": "wrong_file"
+    },
+    {
+      "statements": "statements-tampered.json",
+      "signature": "forged-digest.sig",
+      "description": "The digest edited to match the changed file: the signature no longer verifies.",
+      "expect": "bad_signature"
+    },
+    {
+      "statements": "statements.json",
+      "signature": "other-signer.sig",
+      "description": "The signer changed to another learner's DID.",
+      "expect": "bad_signature"
+    },
+    {
+      "statements": "statements.json",
+      "signature": "unknown-format.sig",
+      "description": "A format tag this version does not know.",
+      "expect": "unknown_format"
+    },
+    {
+      "statements": "statements.json",
+      "signature": "unknown-field.sig",
+      "description": "An extra member in the signature file.",
+      "expect": "malformed"
+    },
+    {
+      "statements": "statements.json",
+      "signature": "not-a-did-key.sig",
+      "description": "A signer that is not a did:key.",
+      "expect": "invalid_signer"
+    }
+  ]
+}

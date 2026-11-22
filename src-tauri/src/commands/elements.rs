@@ -4,12 +4,37 @@
 //! text lessons, quizzes, assessments, etc. Ordered by `position`.
 
 use crate::profile::scope::ProfileState as State;
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 
 use crate::crypto::hash::entity_id;
 use crate::db::executor::DatabaseWorkload;
 use crate::domain::course::{CreateElementRequest, Element, UpdateElementRequest};
+use crate::domain::course_document::PACKAGE_ELEMENT_TYPE;
 use crate::AppState;
+
+/// The refusal code for anything that would grade a package element; the
+/// database triggers use the same one.
+const SELF_REPORTED: &str = "package_result_self_reported";
+
+/// A package element names its archive by hash; only a package this profile
+/// has imported (and so checked) can be attached.
+fn require_imported_package(db: &crate::db::Database, hash: &str) -> Result<(), String> {
+    let known: bool = db
+        .conn()
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM packages WHERE hash = ?1)",
+            params![hash],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if known {
+        Ok(())
+    } else {
+        Err(format!(
+            "not_a_package: no imported package has the hash {hash}"
+        ))
+    }
+}
 
 /// List all elements for a chapter, ordered by position.
 #[tauri::command]
@@ -86,6 +111,12 @@ fn create_element_db(
     chapter_id: String,
     req: CreateElementRequest,
 ) -> Result<Element, String> {
+    if req.element_type == PACKAGE_ELEMENT_TYPE {
+        if let Some(hash) = req.content_hash.as_deref() {
+            require_imported_package(db, hash)?;
+        }
+    }
+
     // Get the next position
     let next_pos: i64 = db
         .conn()
@@ -161,6 +192,40 @@ fn update_element_db(
     element_id: &str,
     req: UpdateElementRequest,
 ) -> Result<Element, String> {
+    let current_type: Option<String> = db
+        .conn()
+        .query_row(
+            "SELECT element_type FROM course_elements WHERE id = ?1",
+            params![element_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some(current_type) = current_type else {
+        return Err("element not found".into());
+    };
+    if let Some(next_type) = req.element_type.as_deref() {
+        if next_type != current_type
+            && (current_type == PACKAGE_ELEMENT_TYPE || next_type == PACKAGE_ELEMENT_TYPE)
+        {
+            return Err(format!(
+                "{SELF_REPORTED}: a package element keeps its type; its result is self-reported \
+                 and can never become an assessed element"
+            ));
+        }
+    }
+    let element_type = req.element_type.as_deref().unwrap_or(&current_type);
+    if element_type == PACKAGE_ELEMENT_TYPE {
+        if req.plugin_cid.is_some() || req.plugin_config_cid.is_some() {
+            return Err(format!(
+                "{SELF_REPORTED}: a package element carries no grading configuration"
+            ));
+        }
+        if let Some(hash) = req.content_hash.as_deref() {
+            require_imported_package(db, hash)?;
+        }
+    }
+
     let mut set_clauses = Vec::new();
     let mut values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
@@ -252,6 +317,7 @@ fn update_element_db(
 mod tests {
     use super::*;
     use crate::db::Database;
+    use crate::domain::course_document::ASSESSED_ELEMENT_TYPES;
 
     fn test_db() -> Database {
         let db = Database::open_in_memory().expect("in-memory db");
@@ -486,6 +552,120 @@ mod tests {
             .unwrap();
         assert!(cid.is_none());
         assert!(dur.is_none());
+    }
+
+    const PACKAGE: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    /// A chapter holding one package element over an imported package.
+    fn package_element(db: &Database) -> Element {
+        setup_chapter(db);
+        db.conn()
+            .execute(
+                "INSERT INTO packages (hash, standard, title, description_json, archive_bytes, location, imported_at) \
+                 VALUES (?1, 'scorm12', 'Induction', '{}', 10, 'draft', '2026-11-20T00:00:00Z')",
+                [PACKAGE],
+            )
+            .unwrap();
+        create_element_db(
+            db,
+            "ch1".into(),
+            CreateElementRequest {
+                title: "Induction".into(),
+                element_type: "package".into(),
+                content_hash: Some(PACKAGE.into()),
+                duration_seconds: None,
+                content_inline: None,
+                plugin_cid: None,
+                plugin_version: None,
+                plugin_config_cid: None,
+            },
+        )
+        .expect("a package element over an imported package")
+    }
+
+    fn change(element_type: Option<&str>, plugin_cid: Option<&str>) -> UpdateElementRequest {
+        UpdateElementRequest {
+            title: None,
+            element_type: element_type.map(str::to_string),
+            content_hash: None,
+            position: None,
+            duration_seconds: None,
+            content_inline: None,
+            plugin_cid: plugin_cid.map(str::to_string),
+            plugin_version: None,
+            plugin_config_cid: None,
+        }
+    }
+
+    fn element_type(db: &Database, id: &str) -> String {
+        db.conn()
+            .query_row(
+                "SELECT element_type FROM course_elements WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn a_package_element_cannot_be_made_an_assessed_element() {
+        let db = test_db();
+        let element = package_element(&db);
+
+        for assessed in ASSESSED_ELEMENT_TYPES {
+            let error = update_element_db(&db, &element.id, change(Some(assessed), None))
+                .expect_err("refused");
+            assert!(error.starts_with("package_result_self_reported"), "{error}");
+        }
+        let error = update_element_db(&db, &element.id, change(None, Some("plugin-grader")))
+            .expect_err("no grading plugin on a package element");
+        assert!(error.starts_with("package_result_self_reported"), "{error}");
+        assert_eq!(element_type(&db, &element.id), "package");
+
+        // Saving it as what it is stays allowed.
+        update_element_db(&db, &element.id, change(Some("package"), None)).expect("same type");
+    }
+
+    #[test]
+    fn an_existing_element_cannot_be_turned_into_a_package() {
+        let db = test_db();
+        setup_chapter(&db);
+        insert_el(&db, "lesson-1", "ch1", 0);
+
+        let error =
+            update_element_db(&db, "lesson-1", change(Some("package"), None)).expect_err("refused");
+
+        assert!(error.starts_with("package_result_self_reported"), "{error}");
+        assert_ne!(element_type(&db, "lesson-1"), "package");
+    }
+
+    #[test]
+    fn a_package_element_names_only_a_package_this_profile_imported() {
+        let db = test_db();
+        let element = package_element(&db);
+        let unknown = "f".repeat(64);
+
+        let mut attach = change(None, None);
+        attach.content_hash = Some(unknown.clone());
+        let error = update_element_db(&db, &element.id, attach).expect_err("unknown package");
+        assert!(error.starts_with("not_a_package"), "{error}");
+
+        let error = create_element_db(
+            &db,
+            "ch1".into(),
+            CreateElementRequest {
+                title: "Other".into(),
+                element_type: "package".into(),
+                content_hash: Some(unknown),
+                duration_seconds: None,
+                content_inline: None,
+                plugin_cid: None,
+                plugin_version: None,
+                plugin_config_cid: None,
+            },
+        )
+        .expect_err("unknown package");
+        assert!(error.starts_with("not_a_package"), "{error}");
     }
 }
 

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>One-file SCORM 1.2 lesson</title>
+  </head>
+  <body>
+    <pre id="transcript"></pre>
+    <script>
+      // A whole SCORM 1.2 lesson in one file. It finds the API the way the
+      // standard's published wrapper does (up the parent chain, then the
+      // opener's), runs one session, and writes down every call and its
+      // synchronous return value.
+      var climbed = 0
+      function findAPI(win) {
+        while (win.API == null && win.parent != null && win.parent != win) {
+          climbed++
+          if (climbed > 7) return null
+          win = win.parent
+        }
+        return win.API
+      }
+      function getAPI() {
+        var found = findAPI(window)
+        if (found == null && window.opener != null && typeof window.opener != 'undefined') {
+          found = findAPI(window.opener)
+        }
+        return found
+      }
+
+      var API = getAPI()
+      var calls = [['frames climbed to the API', String(climbed)]]
+      function record(name, args, result) {
+        calls.push([name + '(' + args.join(', ') + ')', result])
+      }
+      function get(element) { record('LMSGetValue', [element], API.LMSGetValue(element)) }
+      function set(element, value) { record('LMSSetValue', [element, value], API.LMSSetValue(element, value)) }
+
+      record('LMSInitialize', [], API.LMSInitialize(''))
+      get('cmi.core.student_id')
+      get('cmi.core.student_name')
+      get('cmi.core.entry')
+      get('cmi.core.lesson_location')
+      get('cmi.suspend_data')
+      set('cmi.core.lesson_location', 'page-2')
+      set('cmi.suspend_data', 'seen=1,2')
+      set('cmi.core.lesson_status', 'completed')
+      get('cmi.core.lesson_status')
+      record('LMSCommit', [], API.LMSCommit(''))
+      record('LMSGetLastError', [], API.LMSGetLastError())
+      record('LMSFinish', [], API.LMSFinish(''))
+      record('LMSGetLastError', [], API.LMSGetLastError())
+
+      var transcript = document.getElementById('transcript')
+      transcript.textContent = JSON.stringify(calls)
+      transcript.setAttribute('data-done', '')
+    </script>
+  </body>
+</html>
